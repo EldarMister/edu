@@ -1,12 +1,12 @@
 import { ActivityIndicator, ScrollView, View } from '@/components/themed';
 import React, { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, type View as NativeView } from 'react-native';
+import { StyleSheet, useWindowDimensions, type View as NativeView } from 'react-native';
 import { useDeletionParticles } from '@/components/DeletionParticles';
 import { Alert, Text, TextInput } from '@/components/typography';
 import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
-import { Select } from '@/components/Select';
+import { AnchoredSelectScope, Select } from '@/components/Select';
 import { DateField } from '@/components/DateField';
 import { Button, Toggle } from '@/components/ui';
 import { colors, fontSize, radius, spacing } from '@/theme';
@@ -15,6 +15,7 @@ import { useNotifications } from '@/store/notifications';
 import { usePrepStations } from '@/services/api/prepStations';
 import { displayOrderNumber, money, timeHM } from '@/utils/format';
 import {
+  useReportEmployees,
   useSetCashHanded,
   useShiftHistory,
   useShiftHistoryActions,
@@ -33,7 +34,8 @@ import type { Role } from '@/types';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useAuth } from '@/store/auth';
 import { EmployeePermissionsSheet } from './EmployeePermissionsSheet';
-import { PositionsPanel } from './PositionsPanel';
+import { AdminLoadingSkeleton } from './AdminLoadingSkeleton';
+import { WarehouseDirectorySearch } from './WarehouseDirectoryTable';
 import { useAssignableStaffPositions } from '@/services/api/positions';
 import { WaiterOrdersReport } from './WaiterOrdersReport';
 import { shareCsv } from './print';
@@ -46,6 +48,15 @@ const ROLE_LABEL: Record<Role, string> = {
   ADMIN: 'Администратор',
   OWNER: 'Владелец',
 };
+
+type StaffTab = 'current' | 'history' | 'waiter';
+type StaffStatus = '' | 'active' | 'inactive';
+const STATUS_OPTIONS: { value: StaffStatus; label: string }[] = [
+  { value: '', label: 'Все статусы' },
+  { value: 'active', label: 'Активные' },
+  { value: 'inactive', label: 'Неактивные' },
+];
+const positionKey = (member: StaffMember) => member.positionId ?? member.role;
 
 const HISTORY_PERIOD_OPTIONS: { value: ShiftHistoryPeriod; label: string }[] = [
   { value: 'today', label: 'Сегодня' },
@@ -102,11 +113,17 @@ function fromDateTimeLocal(value: string) {
 }
 
 /** Персонал и текущая смена (порт PWA StaffPage — вкладка «Текущая смена» + CRUD). */
-export function StaffScreen() {
+export function StaffScreen({ initialTab = 'current' }: { initialTab?: StaffTab } = {}) {
+  const { width } = useWindowDimensions();
   const { stations } = usePrepStations();
   const stationNames = useMemo(() => new Map(stations.map(({ id, name }) => [id, name])), [stations]);
   const [date, setDate] = useState(todayYmd());
-  const [tab, setTab] = useState<'current' | 'history' | 'waiter' | 'positions'>('current');
+  const [tab, setTab] = useState<StaffTab>(initialTab);
+  const [search, setSearch] = useState('');
+  const [position, setPosition] = useState('');
+  const [status, setStatus] = useState<StaffStatus>('');
+  const [deleting, setDeleting] = useState<{ id: string; name: string; play?: () => void } | null>(null);
+  const [deleteName, setDeleteName] = useState('');
   const [historyFilters, setHistoryFilters] = useState<ShiftHistoryFilters>({ period: 'today' });
   const [expanded, setExpanded] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState<string | null>(null);
@@ -115,22 +132,46 @@ export function StaffScreen() {
   const [permissionsFor, setPermissionsFor] = useState<StaffMember | null>(null);
   const [exporting, setExporting] = useState(false);
   const particles = useDeletionParticles();
+  const currentUserId = useAuth((state) => state.user?.id);
   const { isOwner, canAction, canEditSection } = usePermissions();
   const mayManageStaff = canEditSection('staff') && canAction('manageStaff');
+  const mayCloseShift = canEditSection('staff') && canAction('closeShift');
 
-  const reportQ = useShiftReport(date);
-  const historyQ = useShiftHistory(historyFilters);
+  const reportQ = useShiftReport(date, tab === 'current');
+  const historyQ = useShiftHistory(historyFilters, tab === 'history');
   const shiftActions = useShiftHistoryActions();
   const staffQ = useStaff('', '');
+  const reportEmployees = useReportEmployees(tab !== 'current');
   const { remove } = useStaffMutations();
   const push = useNotifications((s) => s.push);
-  const rows = reportQ.data ?? [];
+  const memberById = useMemo(() => new Map((staffQ.data ?? []).map((member) => [member.id, member])), [staffQ.data]);
+  const positions = useMemo(() => {
+    const options = new Map((staffQ.data ?? []).map((member) => [
+      positionKey(member), member.positionName ?? ROLE_LABEL[member.role],
+    ]));
+    return [{ value: '', label: 'Все должности' }, ...Array.from(options, ([value, label]) => ({
+      value, label, translate: false,
+    })).sort((a, b) => a.label.localeCompare(b.label, 'ru'))];
+  }, [staffQ.data]);
+  const query = search.trim().toLocaleLowerCase('ru');
+  const phoneQuery = query.replace(/[^\d]/g, '');
+  const looksLikePhone = phoneQuery && /^[+\d ()-]+$/.test(query);
+  const rows = (reportQ.data ?? []).filter((row) => {
+    const member = memberById.get(row.waiterId);
+    return (!position || !!member && positionKey(member) === position)
+      && (!status || member?.isActive === (status === 'active'))
+      && (!query || row.name.toLocaleLowerCase('ru').includes(query)
+        || !!looksLikePhone && !!member?.phone.replace(/[^\d]/g, '').includes(phoneQuery));
+  }).sort((a, b) => Number(b.role === 'WAITER') - Number(a.role === 'WAITER') || a.name.localeCompare(b.name, 'ru'));
+  const positionName = (member: StaffMember | undefined, role: Role) => member?.positionName
+    ?? stationNames.get(member?.prepStation ?? (role === 'KITCHEN' ? 'kitchen' : role === 'BAR' ? 'bar' : ''))
+    ?? ROLE_LABEL[role];
   const exportReport = async () => {
     setExporting(true);
     try {
       if (tab === 'current') await shareCsv(`shift-report-${date}`, [
-        ['Сотрудник', 'Роль', 'Смена', 'Оборот', 'Касса (должен)', 'Касса (сдал)', 'Разница'],
-        ...rows.map((row) => [row.name, ROLE_LABEL[row.role], ...(row.isWaiter ? [shiftLabel(row), row.turnover, row.cashDue, row.cashHanded, row.difference] : ['—', '—', '—', '—', '—'])]),
+        ['Сотрудник', 'Должность', 'Смена', 'Оборот', 'Касса (должен)', 'Касса (сдал)', 'Разница'],
+        ...rows.map((row) => [row.name, positionName(memberById.get(row.waiterId), row.role), ...(row.isWaiter ? [shiftLabel(row), row.turnover, row.cashDue, row.cashHanded, row.difference] : ['—', '—', '—', '—', '—'])]),
       ]);
       else await shareCsv(`shift-history-${historyFilters.period}-${todayYmd()}`, [
         ['Сотрудник', 'Роль', 'Дата', 'Пришел', 'Ушел', 'Отработал', 'Статус'],
@@ -139,30 +180,30 @@ export function StaffScreen() {
     } catch (error) { push({ message: apiError(error), type: 'error', at: new Date().toISOString() }); }
     finally { setExporting(false); }
   };
-  const memberById = useMemo(() => new Map((staffQ.data ?? []).map((m) => [m.id, m])), [staffQ.data]);
   const staffOptions = useMemo(
     () => [
       { value: '', label: 'Все сотрудники' },
-      ...(staffQ.data ?? []).map((m) => ({ value: m.id, label: m.name })),
+      ...(reportEmployees.data ?? staffQ.data ?? []).map((m) => ({ value: m.id, label: m.name })),
     ],
-    [staffQ.data],
+    [reportEmployees.data, staffQ.data],
   );
 
   const delMember = (id: string, name: string) => {
-    const play = particles.capture(id);
-    Alert.alert('Удалить сотрудника?', `«${name}» будет удалён.`, [
-      { text: 'Отмена', style: 'cancel' },
-      {
-        text: 'Удалить',
-        style: 'destructive',
-        onPress: () =>
-          remove
-            .mutateAsync(id)
-            .then(() => { play?.(); push({ message: 'Сотрудник удалён', at: new Date().toISOString() }); })
-            .catch((err) => push({ message: apiError(err), type: 'error', at: new Date().toISOString() })),
-      },
-    ]);
+    setDeleteName('');
+    setDeleting({ id, name, play: particles.capture(id) });
   };
+
+  async function confirmDelete() {
+    if (!deleting || !mayManageStaff || remove.isPending || deleteName.trim() !== deleting.name.trim()) return;
+    try {
+      await remove.mutateAsync(deleting.id);
+      deleting.play?.();
+      setDeleting(null);
+      push({ message: 'Сотрудник удалён', at: new Date().toISOString() });
+    } catch (error) {
+      push({ message: apiError(error), type: 'error', at: new Date().toISOString() });
+    }
+  }
 
   const closeShift = (row: ShiftHistoryRow) =>
     Alert.alert('Закрыть смену?', `Смена сотрудника «${row.employeeName}» будет закрыта текущим временем.`, [
@@ -186,10 +227,10 @@ export function StaffScreen() {
             {tab === 'current' ? <>
               <Text style={styles.toolbarLabel} translate>Дата смены:</Text>
               <View style={{ width: 152 }}><DateField style={{ height: 36 }} value={date} onChangeText={setDate} maximumDate={new Date()} accessibilityLabel="Дата смены" /></View>
-              <Button title="Обновить" size="md" style={styles.toolbarButton} variant="secondary" loading={reportQ.isFetching} onPress={() => void reportQ.refetch()} />
+              <Button title="Обновить" size="md" style={styles.toolbarButton} variant="secondary" loading={reportQ.isFetching || staffQ.isFetching} onPress={() => { void reportQ.refetch(); void staffQ.refetch(); }} />
               {canAction('exportReports') ? <Button title="Экспорт" size="md" style={styles.toolbarButton} variant="secondary" disabled={!rows.length} loading={exporting} onPress={() => void exportReport()} /> : null}
             </> : null}
-            {mayManageStaff ?             <FastPressable style={styles.addStaff} onPress={() => setEditing('new')}><PwaIcon name="plus" size={16} color={colors.white} /><Text style={styles.addStaffText} translate>Добавить сотрудника</Text></FastPressable> : null}
+            {mayManageStaff ? <FastPressable style={styles.addStaff} onPress={() => setEditing('new')}><PwaIcon name="plus" size={16} color={colors.white} /><Text style={styles.addStaffText} translate>Добавить сотрудника</Text></FastPressable> : null}
           </View>
         </View> : null}
 
@@ -197,38 +238,45 @@ export function StaffScreen() {
           <TabBtn active={tab === 'current'} label="Текущая смена" onPress={() => setTab('current')} />
           <TabBtn active={tab === 'history'} label="История смен" onPress={() => setTab('history')} />
           <TabBtn active={tab === 'waiter'} label="Отчёт официанта" onPress={() => setTab('waiter')} />
-          {isOwner ? <TabBtn active={tab === 'positions'} label="Должности" onPress={() => setTab('positions')} /> : null}
         </SheetScrollView>
 
         {tab === 'current' ? (
           <>
-            {reportQ.isLoading ? (
-              <View style={styles.center}>
-                <ActivityIndicator size="large" color={colors.primary} />
+            <AnchoredSelectScope>
+              <View style={styles.staffFilters}>
+                <WarehouseDirectorySearch label="Поиск сотрудника" value={search} onChange={setSearch} />
+                <Select value={position} options={positions} onChange={setPosition} title="Должность" searchable style={styles.filterField} />
+                <Select value={status} options={STATUS_OPTIONS} onChange={setStatus} title="Статус" style={styles.filterField} />
               </View>
-            ) : reportQ.isError ? (
-              <Text style={{ color: colors.danger }}>{apiError(reportQ.error)}</Text>
+            </AnchoredSelectScope>
+            {reportQ.isLoading || staffQ.isLoading ? (
+              <AdminLoadingSkeleton />
+            ) : reportQ.isError || staffQ.isError ? (
+              <Text style={styles.error} accessibilityRole="alert">{apiError(reportQ.error ?? staffQ.error)}</Text>
             ) : rows.length === 0 ? (
-              <Text style={styles.empty} translate>Нет данных за выбранную дату</Text>
+              <Text style={styles.empty} translate>{query || position || status ? 'Сотрудники не найдены' : 'Нет данных за выбранную дату'}</Text>
             ) : (
               <View style={styles.staffTableCard}><SheetScrollView horizontal showsHorizontalScrollIndicator><View style={{ width: STAFF_TABLE_WIDTH }}>
               <View style={styles.staffTableHead}>{STAFF_COLUMNS.map((column, index) => <Text key={index} style={[styles.staffTableHeading, { width: column.width, textAlign: column.right ? 'right' : 'left' }]} translate>{column.label}</Text>)}</View>
-              {rows.map((row) => (
-                <ShiftRow
+              {rows.map((row) => {
+                const member = memberById.get(row.waiterId);
+                const canManage = mayManageStaff && member && (member.canManage ?? isOwner);
+                return <ShiftRow
                   key={row.waiterId}
                   rowRef={(view) => particles.register(row.waiterId, view)}
                   row={row}
-                  stationName={memberById.get(row.waiterId)?.positionName ?? stationNames.get(memberById.get(row.waiterId)?.prepStation ?? (row.role === 'KITCHEN' ? 'kitchen' : row.role === 'BAR' ? 'bar' : ''))}
+                  positionName={positionName(member, row.role)}
+                  inactive={member?.isActive === false}
                   date={date}
                   open={expanded === row.waiterId}
                   onToggle={() => setExpanded((cur) => (cur === row.waiterId ? null : row.waiterId))}
-                  onEdit={mayManageStaff && memberById.has(row.waiterId) ? () => setEditing(memberById.get(row.waiterId) ?? null) : undefined}
-                  onDelete={mayManageStaff && row.role !== 'OWNER' ? () => delMember(row.waiterId, row.name) : undefined}
-                />
-              ))}</View></SheetScrollView></View>
+                  onEdit={canManage ? () => setEditing(member) : undefined}
+                  onDelete={canManage && row.role !== 'OWNER' && row.waiterId !== currentUserId ? () => delMember(row.waiterId, row.name) : undefined}
+                />;
+              })}</View></SheetScrollView></View>
             )}
           </>
-        ) : tab === 'waiter' ? <WaiterOrdersReport staff={staffQ.data ?? []} staffLoading={staffQ.isLoading} /> : tab === 'positions' ? <PositionsPanel enabled={isOwner} /> : (
+        ) : tab === 'waiter' ? <WaiterOrdersReport staff={reportEmployees.data ?? staffQ.data ?? []} staffLoading={reportEmployees.isLoading && staffQ.isLoading} /> : (
           <>
             <HistoryFilters
               filters={historyFilters}
@@ -244,13 +292,30 @@ export function StaffScreen() {
               isLoading={historyQ.isLoading}
               expanded={historyExpanded}
               onToggle={(id) => setHistoryExpanded((current) => (current === id ? null : id))}
-              onEdit={setEditingShift}
-              onClose={closeShift}
+              onEdit={mayManageStaff ? setEditingShift : undefined}
+              onClose={mayCloseShift ? closeShift : undefined}
             />
           </>
         )}
       </SheetScrollView>
 
+      {deleting && (
+        <BottomSheet visible title="Удаление сотрудника" presentation={width >= 768 ? 'dialog' : 'bottom'}
+          dismissible={!remove.isPending} onClose={() => setDeleting(null)}
+          footer={<View style={styles.deleteActions}>
+            <Button title="Отмена" variant="secondary" onPress={() => setDeleting(null)} disabled={remove.isPending} />
+            <Button title="Удалить" variant="danger" onPress={() => void confirmDelete()} loading={remove.isPending}
+              disabled={!mayManageStaff || deleteName.trim() !== deleting.name.trim()} />
+          </View>}
+        >
+          <View style={styles.content}>
+            <Text translate>Введите имя сотрудника для подтверждения удаления.</Text>
+            <Text style={styles.staffName}>{deleting.name}</Text>
+            <TextInput accessibilityLabel="Имя сотрудника для подтверждения" autoCorrect={false}
+              value={deleteName} onChangeText={setDeleteName} editable={!remove.isPending} style={styles.input} />
+          </View>
+        </BottomSheet>
+      )}
       {editing !== null ? (
         <StaffModal member={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onViewPermissions={editing !== 'new' ? () => { setPermissionsFor(editing); setEditing(null); } : undefined} />
       ) : null}
@@ -327,8 +392,8 @@ function ShiftHistoryList({
   isLoading: boolean;
   expanded: string | null;
   onToggle: (id: string) => void;
-  onEdit: (row: ShiftHistoryRow) => void;
-  onClose: (row: ShiftHistoryRow) => void;
+  onEdit?: (row: ShiftHistoryRow) => void;
+  onClose?: (row: ShiftHistoryRow) => void;
 }) {
   const rows = data?.items ?? [];
   if (isLoading) {
@@ -351,8 +416,8 @@ function ShiftHistoryList({
           row={row}
           open={expanded === row.id}
           onToggle={() => onToggle(row.id)}
-          onEdit={() => onEdit(row)}
-          onClose={() => onClose(row)}
+          onEdit={onEdit ? () => onEdit(row) : undefined}
+          onClose={onClose ? () => onClose(row) : undefined}
         />
       ))}
       </View></SheetScrollView><View style={styles.historySummary}>
@@ -377,8 +442,8 @@ function ShiftHistoryCard({
   row: ShiftHistoryRow;
   open: boolean;
   onToggle: () => void;
-  onEdit: () => void;
-  onClose: () => void;
+  onEdit?: () => void;
+  onClose?: () => void;
 }) {
   return (
     <View>
@@ -397,10 +462,10 @@ function ShiftHistoryCard({
         <Text style={[styles.staffCellText, styles.staffCellStrong, { width: 120 }]}>{durationLabel(row.durationMin)}</Text>
         <View style={[styles.staffCell, { width: 130 }]}><ShiftStatusBadge status={row.status} /></View>
       <View style={[styles.actions, { width: 130, justifyContent: 'flex-end', paddingHorizontal: 12 }]}>
-        <FastPressable onPress={onEdit} style={styles.iconBtn} accessibilityLabel="Редактировать время смены">
+        {onEdit && <FastPressable onPress={onEdit} style={styles.iconBtn} accessibilityLabel="Редактировать время смены">
           <PwaIcon name="pencil" size={15} color={colors.textSecondary} strokeWidth={2} />
-        </FastPressable>
-        {row.status !== 'closed' ? (
+        </FastPressable>}
+        {onClose && row.status !== 'closed' ? (
           <FastPressable onPress={onClose} style={[styles.smallAction, styles.warningAction]}>
             <Text style={styles.warningActionText} translate>Закрыть</Text>
           </FastPressable>
@@ -507,7 +572,8 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
 function ShiftRow({
   rowRef,
   row,
-  stationName,
+  positionName,
+  inactive,
   date,
   open,
   onToggle,
@@ -516,7 +582,8 @@ function ShiftRow({
 }: {
   rowRef: (view: NativeView | null) => void;
   row: ShiftReportRow;
-  stationName?: string;
+  positionName: string;
+  inactive: boolean;
   date: string;
   open: boolean;
   onToggle: () => void;
@@ -541,7 +608,8 @@ function ShiftRow({
             <Text style={styles.staffName} numberOfLines={1}>
               {row.name}
             </Text>
-          <Text style={styles.staffRole} numberOfLines={1}>{stationName ?? ROLE_LABEL[row.role]}</Text>
+          <Text style={styles.staffRole} numberOfLines={1}>{positionName}</Text>
+          {inactive && <Text style={styles.staffRole} translate>Неактивен</Text>}
         </View>
         {isWaiter ? <>
           <Text style={[styles.staffCellText, { width: 130 }]}>{shiftLabel(row)}</Text>
@@ -551,10 +619,10 @@ function ShiftRow({
           <Text style={[styles.staffCellText, { width: 110, textAlign: 'right', color: diffColor }]}>{signedMoney(row.difference)}</Text>
         </> : <Text style={[styles.staffCellText, { width: 610, textAlign: 'center', color: colors.textLight }]}>—</Text>}
         <View style={[styles.actions, { width: 90, justifyContent: 'flex-end', paddingHorizontal: 12 }]}>
-          {onEdit ? <FastPressable onPress={onEdit} hitSlop={6} style={styles.iconBtn}>
+          {onEdit ? <FastPressable onPress={onEdit} hitSlop={6} style={styles.iconBtn} accessibilityLabel="Редактировать сотрудника">
             <PwaIcon name="pencil" size={16} color={colors.textMuted} strokeWidth={2} />
           </FastPressable> : null}
-          {onDelete ? <FastPressable onPress={onDelete} hitSlop={6} style={styles.iconBtn}>
+          {onDelete ? <FastPressable onPress={onDelete} hitSlop={6} style={styles.iconBtn} accessibilityLabel="Удалить сотрудника">
             <PwaIcon name="trash" size={16} color={colors.danger} strokeWidth={2} />
           </FastPressable> : null}
         </View>
@@ -574,6 +642,8 @@ function Fin({ label, value, valueColor }: { label: string; value: string; value
 }
 
 function CashHandedCell({ row, date }: { row: ShiftReportRow; date: string }) {
+  const { canEditSection, canAction } = usePermissions();
+  const canSetCash = canEditSection('staff') && canAction('closeShift');
   const setCash = useSetCashHanded();
   const push = useNotifications((s) => s.push);
   const [val, setVal] = useState(row.cashHanded ? String(row.cashHanded) : '');
@@ -582,11 +652,14 @@ function CashHandedCell({ row, date }: { row: ShiftReportRow; date: string }) {
   }, [row.cashHanded]);
 
   const commit = () => {
+    if (!canSetCash) return;
     const num = Number(val.replace(/\s/g, '').replace(',', '.'));
     if (!Number.isFinite(num) || num < 0) { push({ message: 'Сданная сумма должна быть неотрицательным числом', type: 'error', at: new Date().toISOString() }); return; }
     if (num === row.cashHanded) return;
     setCash.mutate({ waiterId: row.waiterId, date, cashHanded: num }, { onError: (error) => push({ message: apiError(error), type: 'error', at: new Date().toISOString() }) });
   };
+
+  if (!canSetCash) return <Text style={styles.staffCellText}>{money(row.cashHanded)}</Text>;
 
   return (
     <TextInput
@@ -796,6 +869,9 @@ const styles = StyleSheet.create({
   particleFrame: { flex: 1 },
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
   staffToolbar: { gap: 12 },
+  staffFilters: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
+  filterField: { minWidth: 140 },
+  deleteActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm },
   staffTitle: { fontSize: 18, fontWeight: '600', color: colors.textPrimary },
   staffToolbarActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center', gap: 8 },
   toolbarLabel: { fontSize: 14, color: colors.textSecondary },

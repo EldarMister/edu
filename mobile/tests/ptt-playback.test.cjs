@@ -117,6 +117,134 @@ test('old playback completion cannot stop or advance the new session queue', asy
   assert.equal(env.sounds[1].unloads, 1);
 });
 
+test('live playout preserves timing through packet bursts and recovers from a stall at normal speed', () => {
+  const voices = [], cues = [];
+  let clock = 0;
+  function source(list) {
+    return {
+      playbackRate: { value: 1 }, frequency: { value: 0 },
+      connect() {}, disconnect() {}, start(at) { this.startAt = at; list.push(this); }, stop() {},
+    };
+  }
+  class AudioContext {
+    get currentTime() { return clock; }
+    createBuffer(_channels, length, rate) {
+      return { duration: length / rate, sampleRate: rate, copyToChannel() {} };
+    }
+    createBufferSource() { return source(voices); }
+    createOscillator() { return source(cues); }
+    createGain() {
+      return { gain: { setValueAtTime() {}, linearRampToValueAtTime() {} }, connect() {}, disconnect() {} };
+    }
+  }
+  const { RadioPlayout } = loadSource('src/features/ptt/nativeAudio.ts', {
+    'react-native': { Platform: { OS: 'android' } },
+    'react-native-audio-api': { AudioContext },
+    './opusAudio': {},
+  });
+  const play = new RadioPlayout();
+  const samples = new Float32Array(480);
+  play.push(samples, true, 24000);
+  assert.ok(voices[0].startAt <= 0.1);
+  assert.equal(cues.length, 1);
+  clock = 0.06;
+  for (let frame = 0; frame < 30; frame++) play.push(samples, false, 24000);
+  assert.ok(voices.every(voice => voice.playbackRate.value === 1));
+  for (let index = 1; index < voices.length; index++) {
+    const previous = voices[index - 1];
+    assert.equal(voices[index].startAt, previous.startAt + previous.buffer.duration);
+  }
+  clock = 0.94;
+  play.push(samples, false, 24000);
+  const resumed = voices.at(-1);
+  assert.ok(resumed.startAt >= clock + 0.06);
+  assert.ok(resumed.startAt <= clock + 0.24);
+  assert.equal(cues.length, 1);
+  play.endCue();
+  assert.equal(cues[1].startAt, resumed.startAt + 0.02);
+  assert.ok(play.remainingMs() > (cues[1].startAt + 0.05 - clock) * 1000);
+});
+
+test('live capture delivers 20 ms buffers and keeps the final short buffer on release', async () => {
+  let onReady;
+  const chunks = [];
+  class AudioRecorder {
+    constructor(options) {
+      assert.equal(options.sampleRate, 24000);
+      assert.equal(options.bufferLengthInSamples, 480);
+    }
+    onAudioReady(callback) { onReady = callback; }
+    start() {}
+    stop() { emit(107); }
+  }
+  function emit(numFrames) {
+    onReady({ buffer: { getChannelData: () => new Float32Array(480) }, numFrames });
+  }
+  const { startRadioCapture } = loadSource('src/features/ptt/nativeAudio.ts', {
+    'react-native': { Platform: { OS: 'android' } },
+    'react-native-audio-api': { AudioRecorder },
+    './opusAudio': { CAPTURE_RATE: 24000, CAPTURE_SAMPLES: 480 },
+  });
+  const capture = startRadioCapture(samples => chunks.push(samples.length));
+  emit(480);
+  assert.equal(await capture.stop(), true);
+  assert.deepEqual(chunks, [480, 107]);
+});
+
+test('live receiver plays high-quality Opus and coalesces legacy Opus packets at their own sample rates', () => {
+  const effects = [], listeners = new Map(), played = [];
+  const opus = loadSource('src/features/ptt/opusAudio.ts', {
+    buffer: require('node:buffer'), opusscript: require('opusscript'),
+  });
+  const { useAudioPttReceiver } = loadSource('src/features/ptt/useAudioPttReceiver.ts', {
+    react: { useState: initial => [initial, () => {}], useEffect: effect => effects.push(effect) },
+    'react-native': { Platform: { OS: 'android' }, AppState: { currentState: 'active' } },
+    '@/services/socket': { getSocket: () => ({ on: (event, callback) => listeners.set(event, callback), off: event => listeners.delete(event) }) },
+    '@/store/auth': { useAuth: selector => selector({ user: { id: 'listener' } }) },
+    './types': { PTT_EVENTS: { AUDIO_MESSAGE: 'audio', AUDIO_PACKET: 'packet', AUDIO_FRAME: 'frame', CHANNEL_BUSY: 'busy', CHANNEL_FREE: 'free' } },
+    './audioPlayback': { PttPlaybackQueue: class { clear() {} } },
+    './backgroundFlag': { isPttBackgroundRuntimeActive: () => false },
+    './nativeAudio': { RadioPlayout: class {
+      push(samples, newTalk, rate) { played.push([samples.length, newTalk, rate]); }
+      remainingMs() { return 0; }
+      endCue() {}
+      stop() {}
+    } },
+    './opusAudio': opus,
+  });
+  useAudioPttReceiver('general', true);
+  const cleanup = effects[0]();
+  try {
+    const sender = { id: 'sender', name: 'Sender' };
+    for (const [codec, talkId] of [
+      ['opus-hq', '00000000-0000-4000-8000-000000000001'],
+      ['opus', '00000000-0000-4000-8000-000000000002'],
+    ]) {
+      listeners.get('busy')({ channel: 'general', speaker: sender, codec, talkId });
+      const packets = [];
+      const encoder = opus.createOpusEncoder(talkId, data => packets.push(Buffer.from(data)), codec);
+      try {
+        encoder.push(new Float32Array(24000 * 0.12));
+        encoder.flush();
+      } finally {
+        encoder.close();
+      }
+      if (codec === 'opus') {
+        // Older talkers source two frames with a single talk ID in the middle of a transmission.
+        packets.splice(1, 2, Buffer.concat([packets[1], packets[2].subarray(16)]));
+      }
+      for (const packet of packets) listeners.get('packet')(packet);
+      listeners.get('free')({ talkId });
+    }
+    assert.deepEqual(played[0], [480, true, 24000]);
+    assert.deepEqual(played.filter(([, , rate]) => rate === 16000), [
+      [640, true, 16000], [1280, false, 16000], [640, false, 16000],
+    ]);
+  } finally {
+    cleanup();
+  }
+});
+
 test('foreground receiver unmount cancels real playback and removes the socket listener', async () => {
   const env = playbackHarness();
   const effects = [], listeners = new Map();
@@ -168,6 +296,7 @@ test('logout cancels a background runtime waiting for native audio initializatio
     '@/lib/sound': { configureAudioPlayback: () => configuring.promise },
     '@/utils/format': { displayOrderNumber: String },
     './types': { PTT_CHANNELS: [{ key: 'general' }], PTT_EVENTS: { AUDIO_MESSAGE: 'audio' } },
+    './opusAudio': { PTT_CODEC_CAPABILITIES: ['opus-hq'] },
     './backgroundFlag': { setPttBackgroundRuntimeActive: value => flags.push(value) },
     './audioPlayback': { PttPlaybackQueue: class { clear() {} } },
   });

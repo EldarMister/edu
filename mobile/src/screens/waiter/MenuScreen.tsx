@@ -14,7 +14,7 @@ import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
 import { useActiveOrders, useAddItems, useCategories, useCreateOrder, useDishes, useEditOrder, useReplaceRejectedItem, type DeliveryDetails } from '@/services/api/waiter';
 import { usePublicSettings } from '@/services/api/settings';
-import { cartTotals, formatWeightedAmount, isDeliveryCart, NEW_DELIVERY_CART, useCart } from '@/store/cart';
+import { cartLineName, cartTotals, isDeliveryCart, NEW_DELIVERY_CART, useCart, type CartModifiers } from '@/store/cart';
 import { useAuth } from '@/store/auth';
 import { useNotifications } from '@/store/notifications';
 import { useReplacement } from '@/store/replacement';
@@ -26,6 +26,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useConnectionStatus } from '@/services/socket';
 import { CartSheet } from './CartSheet';
 import { DeliveryDetailsSheet } from './DeliveryDetailsSheet';
+import { ModifierPickerSheet } from './ModifierPickerSheet';
 import { TablePickerSheet } from './TablePickerSheet';
 import { WeightPickerSheet } from './WeightPickerSheet';
 import { orderLocation } from './orderRules';
@@ -97,6 +98,14 @@ export function MenuScreen() {
   const [weightDish, setWeightDish] = useState<Dish | null>(null);
   const [setPickerOpen, setSetPickerOpen] = useState(false);
   const [configSet, setConfigSet] = useState<Dish | null>(null);
+  const [pendingModifiers, setPendingModifiers] = useState<{
+    line: CartLine;
+    tableId: string;
+    activeOrderId: string | null;
+    editingOrderId: string | null;
+    replacement: typeof replacementTarget;
+  } | null>(null);
+  React.useEffect(() => setPendingModifiers(null), [tableId, activeOrderId, editingOrderId, replacementTarget]);
 
   const sortedCategories = useMemo(
     () => (categories.data ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder),
@@ -151,16 +160,36 @@ export function MenuScreen() {
     });
   }, [clearReplacement, navigation, push, replaceRejected]);
 
-  const onAddSet = useCallback((set: Dish, components: CartSetComponent[]) => {
-    if (tableSubmitting) return;
-    const line = buildSetLine(set, components);
-    if (replacementTarget) {
-      replaceWithLine(line);
+  const addSelectedLine = useCallback((line: CartLine, modifiers?: CartModifiers) => {
+    const draft = useCart.getState();
+    if (!draft.tableId || draft.pendingTables[draft.tableId]) return;
+    const { dish, variant, weightGrams } = line;
+    const quantity = variant ? currentVariantQuantity(variant.id) : currentDishQuantity(dish.id);
+    const stock = variant ? variant.stock : dish.stock;
+    if (!line.set && dish.trackInventory && typeof stock === 'number' && quantity >= stock) {
+      push({ message: `Недостаточно на складе. Остаток: ${stock}`, type: 'error', at: new Date().toISOString() });
       return;
     }
-    addLineToCart(line);
-    push({ message: `${set.name} добавлено`, at: new Date().toISOString(), durationMs: 1800 });
-  }, [addLineToCart, push, replaceWithLine, replacementTarget, tableSubmitting]);
+    const replacement = useReplacement.getState().target;
+    if ((dish.hasModifiers || dish.allowIngredientExclusions) && !modifiers) {
+      setPendingModifiers({
+        line, tableId: draft.tableId, activeOrderId: draft.activeOrderId, editingOrderId: draft.editingOrderId, replacement,
+      });
+      return;
+    }
+    if (replacement) {
+      replaceWithLine({ ...line, ...modifiers });
+      return;
+    }
+    if (line.set) addLineToCart({ ...line, ...modifiers });
+    else addToCart(dish, variant, weightGrams, modifiers);
+    const label = line.set || weightGrams ? cartLineName(line) : `${cartLineName(line)} ×${quantity + 1}`;
+    push({ message: `${label} добавлено`, at: new Date().toISOString(), durationMs: 1800 });
+  }, [addLineToCart, addToCart, push, replaceWithLine]);
+
+  const onAddSet = useCallback((set: Dish, components: CartSetComponent[]) => {
+    addSelectedLine(buildSetLine(set, components));
+  }, [addSelectedLine]);
 
   const onAddDish = useCallback((dish: Dish) => {
     if (tableSubmitting) return;
@@ -176,21 +205,8 @@ export function MenuScreen() {
       setVariantDish(dish);
       return;
     }
-    if (dish.trackInventory) {
-      const currentQty = currentDishQuantity(dish.id);
-      if (typeof dish.stock === 'number' && currentQty >= dish.stock) {
-        push({ message: `Недостаточно на складе. Остаток: ${dish.stock}`, type: 'error', at: new Date().toISOString() });
-        return;
-      }
-    }
-    if (replacementTarget) {
-      replaceWithLine({ dish, quantity: 1 });
-      return;
-    }
-    const nextQty = currentDishQuantity(dish.id) + 1;
-    addToCart(dish);
-    push({ message: `${dish.name} ×${nextQty} добавлено`, at: new Date().toISOString(), durationMs: 1800 });
-  }, [addToCart, onAddSet, push, replaceWithLine, replacementTarget, tableSubmitting]);
+    addSelectedLine({ dish, quantity: 1 });
+  }, [addSelectedLine, onAddSet, tableSubmitting]);
 
   const onDecDish = useCallback((dish: Dish) => {
     const lines = useCart.getState().lines;
@@ -462,29 +478,7 @@ export function MenuScreen() {
         dish={variantDish}
         onClose={() => setVariantDish(null)}
         onAdd={(variant) => {
-          if (tableSubmitting) return;
-          if (variantDish) {
-            if (variantDish.trackInventory && typeof variant.stock === 'number') {
-              const currentQty = currentVariantQuantity(variant.id);
-              if (currentQty >= variant.stock) {
-                push({ message: `Недостаточно на складе. Остаток: ${variant.stock}`, type: 'error', at: new Date().toISOString() });
-                setVariantDish(null);
-                return;
-              }
-            }
-            if (replacementTarget) {
-              replaceWithLine({ dish: variantDish, variant, quantity: 1 });
-              setVariantDish(null);
-              return;
-            }
-            const nextQty = currentVariantQuantity(variant.id) + 1;
-            addToCart(variantDish, variant);
-            push({
-              message: `${variantDish.name} · ${variant.name} ×${nextQty} добавлено`,
-              at: new Date().toISOString(),
-              durationMs: 1800,
-            });
-          }
+          if (variantDish) addSelectedLine({ dish: variantDish, variant, quantity: 1 });
           setVariantDish(null);
         }}
       />
@@ -493,22 +487,7 @@ export function MenuScreen() {
         dish={weightDish}
         onClose={() => setWeightDish(null)}
         onAdd={(weightGrams) => {
-          if (tableSubmitting) return;
-          if (!weightDish) return;
-          if (weightDish.trackInventory && typeof weightDish.stock === 'number' && currentDishQuantity(weightDish.id) >= weightDish.stock) {
-            push({ message: `Недостаточно на складе. Остаток: ${weightDish.stock}`, type: 'error', at: new Date().toISOString() });
-            return;
-          }
-          if (replacementTarget) {
-            replaceWithLine({ dish: weightDish, weightGrams, quantity: 1 });
-          } else {
-            addToCart(weightDish, undefined, weightGrams);
-            push({
-              message: `${weightDish.name} · ${formatWeightedAmount(weightGrams, weightDish.weightedMeasure)} добавлено`,
-              at: new Date().toISOString(),
-              durationMs: 1800,
-            });
-          }
+          if (weightDish) addSelectedLine({ dish: weightDish, weightGrams, quantity: 1 });
           setWeightDish(null);
         }}
       />
@@ -537,7 +516,17 @@ export function MenuScreen() {
       />
       </SetPickerSheet>
 
-
+      {pendingModifiers && pendingModifiers.tableId === tableId && pendingModifiers.activeOrderId === activeOrderId &&
+        pendingModifiers.editingOrderId === editingOrderId && pendingModifiers.replacement === replacementTarget ? (
+        <ModifierPickerSheet line={pendingModifiers.line} onClose={() => setPendingModifiers(null)} onConfirm={(modifiers) => {
+          const current = useCart.getState();
+          if (current.tableId === pendingModifiers.tableId && current.activeOrderId === pendingModifiers.activeOrderId &&
+            current.editingOrderId === pendingModifiers.editingOrderId && useReplacement.getState().target === pendingModifiers.replacement) {
+            addSelectedLine(pendingModifiers.line, modifiers);
+          }
+          setPendingModifiers(null);
+        }} />
+      ) : null}
 
       <TablePickerSheet visible={tablePickerOpen} onClose={() => setTablePickerOpen(false)} />
     </SafeAreaView>
@@ -585,7 +574,7 @@ const DishCard = memo(function DishCard({
     ? dish.variants.every((variant) => typeof variant.stock === 'number' && variant.stock <= 0)
     : typeof dish.stock === 'number' && dish.stock <= 0);
   const isDisabled = disabled || isOutOfStock;
-  const canDecrement = (!hasVariants && !dish.isWeighted) || lineCount === 1;
+  const canDecrement = (!hasVariants && !dish.isWeighted && !dish.hasModifiers && !dish.allowIngredientExclusions) || lineCount === 1;
 
   return (
     <FastPressable

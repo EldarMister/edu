@@ -146,6 +146,7 @@ export interface StaffMember {
   isActive: boolean;
   createdAt: string;
   onShift: boolean;
+  canManage?: boolean;
   permissions?: EmployeePermissions;
 }
 export interface FiscalResult {
@@ -199,6 +200,14 @@ export function useAdminOrderDetails(id: string | null) {
     queryKey: ['admin', 'orders', 'detail', id],
     queryFn: () => get<Order>(`/orders/${id}`),
     enabled: !!id,
+  });
+}
+
+export function useReportEmployees(enabled: boolean) {
+  return useQuery({
+    queryKey: ['admin', 'staff', 'report-employees'],
+    queryFn: () => get<Pick<StaffMember, 'id' | 'name' | 'role'>[]>('/admin/staff/report-employees'),
+    enabled,
   });
 }
 
@@ -275,9 +284,10 @@ export interface ShiftReportRow {
   categories: ShiftReportCategory[];
   cancellations: ShiftReportCancellation[];
 }
-export function useShiftReport(date: string) {
+export function useShiftReport(date: string, enabled = true) {
   return useQuery({
     queryKey: ['admin', 'staff', 'shift-report', date],
+    enabled,
     queryFn: () => get<ShiftReportRow[]>(`/admin/staff/shift-report${date ? `?date=${date}` : ''}`),
   });
 }
@@ -339,10 +349,11 @@ function shiftHistoryQuery(filters: ShiftHistoryFilters): string {
   return parts.join('&');
 }
 
-export function useShiftHistory(filters: ShiftHistoryFilters) {
+export function useShiftHistory(filters: ShiftHistoryFilters, enabled = true) {
   const q = shiftHistoryQuery(filters);
   return useQuery({
     queryKey: ['admin', 'staff', 'shift-history', filters],
+    enabled,
     queryFn: () => get<ShiftHistoryResponse>(`/admin/staff/shift-history?${q}`),
   });
 }

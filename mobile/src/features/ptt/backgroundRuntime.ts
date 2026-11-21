@@ -28,6 +28,7 @@ import {
 } from './types';
 import { setPttBackgroundRuntimeActive } from './backgroundFlag';
 import { PttPlaybackQueue } from './audioPlayback';
+import { PTT_CODEC_CAPABILITIES } from './opusAudio';
 
 const DEFAULT_CHANNEL: PttChannel = 'general';
 const JOIN_INTERVAL_MS = 15_000;
@@ -68,7 +69,7 @@ async function readStoredChannel(): Promise<PttChannel> {
 function emitJoin(channel: PttChannel) {
   const sock = getSocket();
   if (!sock.connected) sock.connect();
-  sock.emit(PTT_EVENTS.JOIN, { channel });
+  sock.emit(PTT_EVENTS.JOIN, { channel, codecs: PTT_CODEC_CAPABILITIES });
 }
 
 function onBackgroundAudio(payload: PttAudioPayload) {

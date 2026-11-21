@@ -37,9 +37,10 @@ import {
   type AdminDishVariant,
 } from '@/services/api/admin';
 import type { PrepStation } from '@/types';
-import { PrepStationsPage } from './PrepStationsPage';
 import { dishVariantPayload, initialDishPrice } from './dishDraft';
 import { DishRecipeFields, dishRecipePayload, hasRemovedVariantAmounts, initialDishRecipe } from './DishRecipeFields';
+import { MenuModifierFields } from './MenuModifierFields';
+import { initialModifiersDraft, modifierDraftPayload } from './menuModifiersDraft';
 import { WarehouseWorkspace } from './WarehouseWorkspace';
 import { AdminLoadingSkeleton } from './AdminLoadingSkeleton';
 import { WarehouseMultiSelect } from './WarehouseMultiSelect';
@@ -69,7 +70,6 @@ export function MenuScreen({ view = 'goods' }: { view?: MenuView } = {}) {
   if (view === 'ingredientCategories') return <IngredientCategoriesPage />;
   if (view === 'preparations') return <MenuPreparations />;
   if (view === 'categories') return <MenuCategoriesPage />;
-  if (view === 'stations') return <PrepStationsPage />;
   return <MenuDishList key={view} view={view} />;
 }
 function MenuPreparations() {
@@ -374,6 +374,7 @@ function DishForm({
   const { canAction } = usePermissions();
   const editable = canAction('editMenu');
   const canEditRecipe = editable && !isGoods && canAction('warehouseRecipes');
+  const canEditModifiers = editable && !isGoods;
   const weightedLocked = !!dish && isGoods && (!!dish.stockIngredientId || dish.variants.some(variant => !!variant.stockIngredientId));
   const requestKey = React.useRef(`native-menu-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const { stations } = usePrepStations();
@@ -392,9 +393,11 @@ function DishForm({
   const [weightedPriceBase, setWeightedPriceBase] = useState(dish?.weightedPriceBase ?? 100);
   const [prepStation, setPrepStation] = useState<PrepStation>(dish?.prepStation ?? '');
   const [variants, setVariants] = useState<VariantDraft[]>(() => dish?.variants.map(variantDraft) ?? []);
-  const [tab, setTab] = useState<'main' | 'recipe'>('main');
+  const [tab, setTab] = useState<'main' | 'recipe' | 'modifiers'>('main');
   const [recipe, setRecipe] = useState(() => initialDishRecipe(snapshot?.recipe.items ?? [], snapshot?.recipe.metadata));
   const [originalRecipe] = useState(recipe);
+  const [initialModifiers] = useState(() => initialModifiersDraft(snapshot?.modifiers));
+  const [modifiers, setModifiers] = useState(initialModifiers);
   const [photoUrl, setPhotoUrl] = useState(dish?.imageUrl?.startsWith('http') ? dish.imageUrl : '');
   const [photoPayload, setPhotoPayload] = useState<string | undefined>(undefined);
   const [photoLoading, setPhotoLoading] = useState(false);
@@ -402,7 +405,8 @@ function DishForm({
   const pending = saveEntry.isPending;
   const saving = React.useRef(false);
   const recipeChanged = recipe !== originalRecipe && JSON.stringify(recipe) !== JSON.stringify(originalRecipe);
-  const signature = JSON.stringify({ name, categoryId, tax, price, unit, description, voiceName, isAvailable, isWeighted, weightedMeasure, weightedPriceBase, prepStation, variants, photoUrl, photoPayload, recipeChanged });
+  const modifiersChanged = modifiers !== initialModifiers && JSON.stringify(modifiers) !== JSON.stringify(initialModifiers);
+  const signature = JSON.stringify({ name, categoryId, tax, price, unit, description, voiceName, isAvailable, isWeighted, weightedMeasure, weightedPriceBase, prepStation, variants, photoUrl, photoPayload, recipeChanged, modifiersChanged });
   const initialSignature = React.useRef(signature);
   const confirmLeave = (leave: () => void) => {
     if (pending || saving.current) return;
@@ -489,6 +493,12 @@ function DishForm({
       }
       recipeInput = result.payload;
     }
+    const changedModifiers = canEditModifiers && modifiersChanged ? modifierDraftPayload(modifiers) : undefined;
+    if (changedModifiers && 'error' in changedModifiers) {
+      setTab('modifiers');
+      setError(changedModifiers.error);
+      return;
+    }
     saving.current = true;
     try {
       const variantsPayload = dishVariantPayload({ unit, variants: filled }).variants;
@@ -508,7 +518,10 @@ function DishForm({
         unit,
         variants: variantsPayload.map((variant, index) => ({ ...variant, clientKey: filled[index].uid })),
       };
-      await saveEntry.mutateAsync({ id: dish?.id, catalogKind: isGoods ? 'goods' : 'recipe', requestKey: requestKey.current, expectedVersion: snapshot?.recipe.version, dish: body, recipe: recipeInput });
+      await saveEntry.mutateAsync({
+        id: dish?.id, catalogKind: isGoods ? 'goods' : 'recipe', requestKey: requestKey.current,
+        expectedVersion: snapshot?.recipe.version, dish: body, recipe: recipeInput, modifiers: changedModifiers?.value,
+      });
       push({ message: isGoods ? 'Товар сохранён' : 'Техкарта сохранена', at: new Date().toISOString() });
       if (createAnother) onSaveAnother();
       else onClose();
@@ -530,12 +543,14 @@ function DishForm({
       </View> : undefined}
     >
       <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: spacing.md, padding: spacing.md }}>
-        {canEditRecipe && <View style={styles.grid2}>
+        {canEditModifiers && <View style={styles.filterRow}>
           <Button title="Основное" size="md" variant={tab === 'main' ? 'primary' : 'secondary'} onPress={() => setTab('main')} />
-          <Button title="Состав" size="md" variant={tab === 'recipe' ? 'primary' : 'secondary'} onPress={() => setTab('recipe')} />
+          {canEditRecipe && <Button title="Состав" size="md" variant={tab === 'recipe' ? 'primary' : 'secondary'} onPress={() => setTab('recipe')} />}
+          <Button title="Модификаторы" size="md" variant={tab === 'modifiers' ? 'primary' : 'secondary'} onPress={() => setTab('modifiers')} />
         </View>}
         {error ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
-        {tab === 'recipe' && canEditRecipe ? <DishRecipeFields draft={recipe} onChange={setRecipe} disabled={pending}
+        {tab === 'modifiers' && canEditModifiers ? <MenuModifierFields draft={modifiers} onChange={setModifiers} disabled={pending} />
+          : tab === 'recipe' && canEditRecipe ? <DishRecipeFields draft={recipe} onChange={setRecipe} disabled={pending}
           variants={variants.filter((variant) => variant.name.trim()).map((variant) => ({ id: variant.id ?? variant.uid, name: variant.name.trim() }))} /> : <>
         <Field label="Название">
           <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Название блюда" placeholderTextColor={colors.textLight} />

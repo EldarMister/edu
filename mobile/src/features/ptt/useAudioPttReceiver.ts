@@ -8,7 +8,10 @@ import {
 import { PttPlaybackQueue } from './audioPlayback';
 import { isPttBackgroundRuntimeActive } from './backgroundFlag';
 import { RadioPlayout } from './nativeAudio';
-import { createOpusDecoder, FRAME_BYTES, opusFrames, opusHeader, packetBytes, pcmFloats, prepareOpus } from './opusAudio';
+import {
+  createOpusDecoder, FRAME_BYTES, getOpusProfile, opusFrames, opusHeader, packetBytes, pcmFloats, prepareOpus,
+  SPEECH_RATE, type OpusMode,
+} from './opusAudio';
 
 export type PttPlayingSpeaker = { id: string; name?: string; role?: string };
 
@@ -26,7 +29,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
       setLegacySpeaker(payload ? { id: payload.senderId, name: payload.senderName, role: payload.senderRole } : null);
     });
     const playback = new RadioPlayout();
-    let stream: { id: string; header: Uint8Array; speaker: PttPlayingSpeaker } | undefined;
+    let stream: { id: string; codec: OpusMode; header: Uint8Array; speaker: PttPlayingSpeaker } | undefined;
     let decoder: ReturnType<typeof createOpusDecoder> | undefined;
     let decoderId: string | undefined;
     let playingId: string | undefined;
@@ -47,10 +50,10 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
       decoder = undefined;
       decoderId = undefined;
     }
-    function play(id: string, speaker: PttPlayingSpeaker, samples: Float32Array) {
+    function play(id: string, speaker: PttPlayingSpeaker, samples: Float32Array, sampleRate: number) {
       if (!appCanPlay()) return;
       const newTalk = playingId !== id;
-      playback.push(samples, newTalk);
+      playback.push(samples, newTalk, sampleRate);
       if (newTalk) {
         clearTimeout(speakerTimer);
         setLiveSpeaker(speaker);
@@ -71,25 +74,36 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
       if (hears(payload.channel, payload.senderId)) legacy.enqueue(payload);
     }
     function onBusy(payload: PttBusyPayload) {
-      if (payload.codec !== 'opus' || !payload.talkId || !payload.speaker || !hears(payload.channel, payload.speaker.id)) return;
+      if (payload.codec !== 'opus' && payload.codec !== 'opus-hq') return;
+      if (!payload.talkId || !payload.speaker || !hears(payload.channel, payload.speaker.id)) return;
       try {
-        stream = { id: payload.talkId, header: opusHeader(payload.talkId), speaker: payload.speaker };
+        stream = { id: payload.talkId, codec: payload.codec, header: opusHeader(payload.talkId), speaker: payload.speaker };
       } catch {
         // An invalid talk identifier cannot be matched to a binary packet.
       }
     }
     function onPacket(packet: unknown) {
       if (!stream || !appCanPlay()) return;
-      const frames = opusFrames(packet, stream.header);
+      const frames = opusFrames(packet, stream.header, stream.codec);
       if (!frames.length) return;
       try {
         if (decoderId !== stream.id) {
           closeDecoder();
-          decoder = createOpusDecoder();
+          decoder = createOpusDecoder(stream.codec);
           decoderId = stream.id;
         }
         if (!decoder) return;
-        for (const frame of frames) play(stream.id, stream.speaker, decoder.decode(frame));
+        const profile = getOpusProfile(stream.codec);
+        let samples = decoder.decode(frames[0]);
+        if (frames.length > 1) {
+          const packetSamples = new Float32Array(profile.frameSamples * frames.length);
+          packetSamples.set(samples);
+          for (let index = 1; index < frames.length; index++) {
+            packetSamples.set(decoder.decode(frames[index]), index * profile.frameSamples);
+          }
+          samples = packetSamples;
+        }
+        play(stream.id, stream.speaker, samples, profile.sampleRate);
       } catch (error) {
         console.warn('[ptt] Не удалось воспроизвести звук рации:', error);
         closeDecoder();
@@ -102,7 +116,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
       const bytes = packetBytes(payload.audio);
       if (bytes?.length !== FRAME_BYTES) return;
       try {
-        play(payload.talkId, { id: payload.senderId, name: payload.senderName, role: payload.senderRole }, pcmFloats(bytes));
+        play(payload.talkId, { id: payload.senderId, name: payload.senderName, role: payload.senderRole }, pcmFloats(bytes), SPEECH_RATE);
       } catch (error) {
         console.warn('[ptt] Не удалось воспроизвести звук рации:', error);
       }

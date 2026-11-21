@@ -128,6 +128,7 @@ function screenHarness(options = {}) {
     '@/utils/format': { displayOrderNumber: String, money: String },
     '@/utils/orderCart': { orderToCartLines: () => [] },
     './useReceiptPrinter': { useReceiptPrinter: () => async () => {} },
+    '@/components/ModifierSummary': { ModifierSummary: 'ModifierSummary' },
     '@/hooks/usePermissions': { usePermissions: () => ({ canAction: () => true }) },
     './PaymentSheet': { PaymentSheet: 'PaymentSheet' },
     './InsufficientPermissionsSheet': { InsufficientPermissionsSheet: 'InsufficientPermissionsSheet' },

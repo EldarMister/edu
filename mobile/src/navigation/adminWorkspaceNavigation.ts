@@ -5,8 +5,10 @@ export type WarehouseView =
   | 'balances' | 'supplies' | 'processing' | 'transfers' | 'writeoffs' | 'movement'
   | 'inventory' | 'suppliers' | 'locations' | 'packages' | 'production';
 
-export type MenuView = 'goods' | 'recipes' | 'preparations' | 'ingredients' | 'categories' | 'ingredientCategories' | 'stations';
+export type MenuView = 'goods' | 'recipes' | 'preparations' | 'ingredients' | 'categories' | 'ingredientCategories';
 export type StatisticsView = 'overview' | 'sales' | 'products' | 'staff' | 'categories' | 'payments' | 'taxes';
+
+export type StaffView = 'employees' | 'positions' | 'stations';
 
 export type FinanceView = 'transactions' | 'cashFlow' | 'cashShifts' | 'payroll' | 'accounts' | 'categories';
 export type SettingsView = 'general' | 'receipt' | 'fiscal' | 'taxes';
@@ -16,7 +18,8 @@ export type WorkspaceEntry =
   | { section: 'settings'; key: SettingsView; label: string }
   | { section: 'warehouse'; key: WarehouseView; label: string }
   | { section: 'menu'; key: MenuView; label: string }
-  | { section: 'stats'; key: StatisticsView; label: string };
+  | { section: 'stats'; key: StatisticsView; label: string }
+  | { section: 'staff'; key: StaffView; label: string };
 
 export const statisticsNavigation: Array<Extract<WorkspaceEntry, { section: 'stats' }>> = [
   { section: 'stats', key: 'overview', label: 'Обзор' },
@@ -63,6 +66,20 @@ export const settingsNavigation: Array<Extract<WorkspaceEntry, { section: 'setti
   { section: 'settings', key: 'taxes', label: 'Налоги' },
 ];
 
+const staffEntries: Array<Extract<WorkspaceEntry, { section: 'staff' }>> = [
+  { section: 'staff', key: 'employees', label: 'Сотрудники' },
+  { section: 'staff', key: 'positions', label: 'Должности' },
+  { section: 'staff', key: 'stations', label: 'Станции' },
+];
+
+export function staffNavigation(isOwner: boolean) {
+  return isOwner ? staffEntries : staffEntries.filter(({ key }) => key !== 'positions');
+}
+
+export function resolveAdminSection(section: AdminSection | undefined, view: string | undefined): AdminSection | undefined {
+  return section === 'menu' && view === 'stations' ? 'staff' : section;
+}
+
 const menuEntries: Array<{ key: MenuView; label: string; requiresWarehouse?: boolean }> = [
   { key: 'goods', label: 'Товары' },
   { key: 'recipes', label: 'Техкарты' },
@@ -70,7 +87,6 @@ const menuEntries: Array<{ key: MenuView; label: string; requiresWarehouse?: boo
   { key: 'ingredients', label: 'Ингредиенты', requiresWarehouse: true },
   { key: 'categories', label: 'Категории товаров и блюд' },
   { key: 'ingredientCategories', label: 'Категории ингредиентов', requiresWarehouse: true },
-  { key: 'stations', label: 'Станции' },
 ];
 
 export function warehouseNavigation(canAction: (action: ActionKey) => boolean, warehouseCount: number, policy?: WarehousePolicy) {

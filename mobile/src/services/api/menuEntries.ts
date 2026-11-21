@@ -34,11 +34,22 @@ type MenuEntryDishInput = Omit<DishInput, 'stock' | 'initialStock' | 'trackInven
 export interface MenuEntry {
   dish: AdminDish;
   recipe: { version: number; items: MenuRecipeItem[]; metadata?: MenuRecipeMetadata | null };
+  modifiers?: MenuEntryModifiers;
 }
+export type MenuEntryModifiers = { allowIngredientExclusions: boolean; groups: MenuModifierGroup[] };
+export type MenuModifierGroup = {
+  id?: string; name: string; minSelections: number; maxSelections: number | null; sortOrder?: number;
+  options: MenuModifierOption[];
+};
+export type MenuModifierOption = {
+  id?: string; name: string; price: number; ingredientId?: string | null; amount?: number; unit?: UnitCode;
+  fromCommonWarehouse?: boolean; warehouseId?: string | null; maxQuantity?: number; isActive?: boolean; sortOrder?: number;
+};
 export type MenuEntryInput = {
   catalogKind: 'goods' | 'recipe';
   dish: MenuEntryDishInput;
   recipe?: MenuRecipeInput;
+  modifiers?: MenuEntryModifiers;
   expectedVersion?: number;
   requestKey: string;
 };

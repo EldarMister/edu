@@ -94,7 +94,6 @@ export function PositionsPanel({ enabled = true }: { enabled?: boolean }) {
   return (
     <View style={styles.group}>
       <View style={styles.header}>
-        <Text style={styles.heading} translate>Должности</Text>
         <Button title="Добавить должность" onPress={() => setEditing('new')} />
       </View>
       <TextInput style={styles.input} value={search} onChangeText={setSearch} placeholder="Поиск по названию" placeholderTextColor={colors.textLight} />
@@ -299,9 +298,9 @@ function DeletePosition({ position, positions, onClose }: { position: StaffPosit
 const styles = StyleSheet.create({
   group: { gap: spacing.md },
   field: { gap: spacing.sm },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm },
-  heading: { color: colors.textPrimary, fontWeight: '700', fontSize: 17 },
+  header: { alignItems: 'flex-end' },
   name: { fontSize: 14, color: colors.textPrimary, fontWeight: '600' },
+  heading: { fontSize: 16, color: colors.textPrimary, fontWeight: '600' },
   hint: { color: colors.textMuted, fontSize: 13 },
   input: { minHeight: 42, paddingHorizontal: spacing.md, borderWidth: 1, borderColor: colors.border, borderRadius: 8, color: colors.textPrimary, backgroundColor: colors.white },
   rate: { width: 108, textAlign: 'right' },

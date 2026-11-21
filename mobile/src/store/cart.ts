@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import type { CartLine, Dish, DishVariant, Order } from '@/types';
-import { dishUnitPrice } from '@/utils/format';
+import { dishUnitPrice, makeIdempotencyKey } from '@/utils/format';
 import { calcSetPrice } from '@/utils/set';
+
+export type CartModifiers = Pick<CartLine, 'modifierSelections' | 'excludedIngredientIds' | 'excludedIngredientNames'>;
 
 /** Цена линии с учётом варианта и количества. */
 export function linePrice(line: CartLine): number {
@@ -9,7 +11,13 @@ export function linePrice(line: CartLine): number {
 }
 
 export function cartLineKey(line: CartLine): string {
-  return line.lineId ?? `${line.dish.id}:${line.variant?.id ?? 'base'}:${line.weightGrams ?? 'fixed'}`;
+  return line.lineId ?? cartLineIdentity(line);
+}
+
+function cartLineIdentity(line: CartLine): string {
+  const selected = (line.modifierSelections ?? []).map(({ optionId, quantity }) => `${optionId}:${quantity}`).sort().join(',');
+  const excluded = (line.excludedIngredientIds ?? []).slice().sort().join(',');
+  return `${line.dish.id}:${line.variant?.id ?? 'base'}:${line.weightGrams ?? 'fixed'}:${selected}:${excluded}`;
 }
 
 export function cartLineName(line: CartLine): string {
@@ -29,10 +37,11 @@ export function formatWeightedAmount(amount: number, measure: Dish['weightedMeas
 
 export function cartLineUnitPrice(line: CartLine): number {
   const weightedBase = line.dish.isWeighted && line.weightGrams
-    ? String(Number(line.dish.price) * line.weightGrams / (line.dish.weightedPriceBase ?? 100))
+    ? Number(line.dish.price) * line.weightGrams / (line.dish.weightedPriceBase ?? 100)
     : undefined;
+  const extra = (line.modifierSelections ?? []).reduce((sum, option) => sum + Number(option.price) * option.quantity, 0);
   const base = dishUnitPrice(
-    weightedBase ?? line.variant?.price ?? line.dish.price,
+    String((weightedBase ?? Number(line.variant?.price ?? line.dish.price)) + extra),
     line.dish.discountType,
     line.dish.discountValue,
   );
@@ -98,10 +107,11 @@ interface CartState {
   setOrderComment: (comment: string) => void;
   /** Показать/скрыть поле комментария (закрытое не уходит с заказом). */
   setCommentOpen: (open: boolean) => void;
-  add: (dish: Dish, variant?: DishVariant, weightGrams?: number) => void;
+  add: (dish: Dish, variant?: DishVariant, weightGrams?: number, modifiers?: CartModifiers) => void;
   addLine: (line: CartLine) => void;
   setQuantity: (index: number, quantity: number) => void;
   setComment: (index: number, comment: string) => void;
+  setLineModifiers: (key: string, modifiers: CartModifiers) => void;
   setTakeaway: (index: number, takeaway: boolean) => void;
   setAllTakeaway: (takeaway: boolean) => void;
   remove: (index: number) => void;
@@ -121,10 +131,6 @@ interface TableCart {
 }
 
 const EMPTY_CART: TableCart = { lines: [], comment: '' };
-
-function sameLine(a: CartLine, dish: Dish, variant?: DishVariant, weightGrams?: number): boolean {
-  return !a.set && !a.orderItemId && a.dish.id === dish.id && a.variant?.id === variant?.id && a.weightGrams === weightGrams;
-}
 
 function syncActiveCart(
   tableId: string | null,
@@ -269,16 +275,18 @@ export const useCart = create<CartState>((set, get) => ({
       ...syncActiveCart(s.tableId, s.carts, s.lines, comment, s),
     })),
   setCommentOpen: (open) => set((s) => s.tableId && s.pendingTables[s.tableId] ? s : ({ commentOpen: open, ...syncActiveCart(s.tableId, s.carts, s.lines, s.comment, { ...s, commentOpen: open }) })),
-  add: (dish, variant, weightGrams) =>
+  add: (dish, variant, weightGrams, modifiers) =>
     set((s) => {
       if (s.tableId && s.pendingTables[s.tableId]) return s;
-      const idx = s.lines.findIndex((l) => sameLine(l, dish, variant, weightGrams));
+      const newLine: CartLine = { dish, variant, weightGrams, quantity: 1, ...modifiers };
+      const key = cartLineIdentity(newLine);
+      const idx = s.lines.findIndex((line) => !line.set && !line.orderItemId && cartLineKey(line) === key);
       let lines: CartLine[];
       if (idx >= 0) {
         lines = [...s.lines];
         lines[idx] = { ...lines[idx], quantity: lines[idx].quantity + 1 };
       } else {
-        lines = [...s.lines, { dish, variant, weightGrams, quantity: 1 }];
+        lines = [...s.lines, newLine];
       }
       return { lines, ...syncActiveCart(s.tableId, s.carts, lines, s.comment, s) };
     }),
@@ -307,6 +315,16 @@ export const useCart = create<CartState>((set, get) => ({
       if (!s.lines[index] || s.lines[index].editAllowed === false) return s;
       const lines = [...s.lines];
       lines[index] = { ...lines[index], comment };
+      return { lines, ...syncActiveCart(s.tableId, s.carts, lines, s.comment, s) };
+    }),
+  setLineModifiers: (key, modifiers) =>
+    set((s) => {
+      if (s.tableId && s.pendingTables[s.tableId]) return s;
+      const index = s.lines.findIndex((line) => cartLineKey(line) === key);
+      const current = s.lines[index];
+      if (!current || current.editAllowed === false || current.cancelAllowed === false) return s;
+      const lines = [...s.lines];
+      lines[index] = { ...current, ...modifiers, lineId: current.lineId ?? makeIdempotencyKey() };
       return { lines, ...syncActiveCart(s.tableId, s.carts, lines, s.comment, s) };
     }),
   setTakeaway: (index, takeaway) =>

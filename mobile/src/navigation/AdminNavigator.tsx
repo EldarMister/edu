@@ -31,6 +31,8 @@ import { OrdersScreen } from '@/screens/admin/OrdersScreen';
 import { TablesScreen } from '@/screens/admin/TablesScreen';
 import { MenuScreen } from '@/screens/admin/MenuScreen';
 import { StaffScreen } from '@/screens/admin/StaffScreen';
+import { PositionsPanel } from '@/screens/admin/PositionsPanel';
+import { PrepStationsPage } from '@/screens/admin/PrepStationsPage';
 import { AuditScreen } from '@/screens/admin/AuditScreen';
 import { SettingsScreen, type SettingsNavigationGuard } from '@/screens/admin/SettingsScreen';
 import { WarehouseScreen } from '@/screens/admin/WarehouseScreen';
@@ -44,8 +46,8 @@ import { useWarehouseLocations, useWarehousePolicy } from '@/services/api/wareho
 import type { ReceiptPrintRequest, SectionKey } from '@/types';
 import type { RootStackParamList } from './types';
 import {
-  financeNavigation, menuNavigation, settingsNavigation, statisticsNavigation, warehouseNavigation, type FinanceView, type SettingsView, type AdminSection as Section, type MenuView,
-  type StatisticsView, type WarehouseView, type WorkspaceEntry,
+  financeNavigation, menuNavigation, resolveAdminSection, settingsNavigation, staffNavigation, statisticsNavigation, warehouseNavigation, type FinanceView, type SettingsView, type AdminSection as Section, type MenuView,
+  type StaffView, type StatisticsView, type WarehouseView, type WorkspaceEntry,
 } from './adminWorkspaceNavigation';
 
 type Group = WorkspaceEntry['section'];
@@ -99,6 +101,7 @@ export function AdminNavigator() {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [collapsedGroup, setCollapsedGroup] = React.useState<Group | null>(null);
   const [statisticsView, setStatisticsView] = React.useState<StatisticsView>('overview');
+  const [staffView, setStaffView] = React.useState<StaffView>('employees');
   const [menuView, setMenuView] = React.useState<MenuView>('goods');
   const settingsGuard = React.useRef<SettingsNavigationGuard | null>(null);
   const [financeView, setFinanceView] = React.useState<FinanceView>('transactions');
@@ -113,26 +116,30 @@ export function AdminNavigator() {
   [canAction, locations.data?.locations.length, policy.data, warehouseAccess]);
   const currentMenu = menuEntries.find((entry) => entry.key === menuView) ?? menuEntries[0];
   const currentWarehouse = warehouseEntries.find((entry) => entry.key === warehouseView) ?? warehouseEntries[0];
+  const staffEntries = React.useMemo(() => canSection('staff') ? staffNavigation(isOwner) : [], [canSection, isOwner]);
+  const currentStaff = staffEntries.find((entry) => entry.key === staffView) ?? staffEntries[0];
   const workspaces = React.useMemo(() => ({
     stats: statisticsNavigation,
     finance: financeEntries,
     settings: canSection('settings') ? settingsNavigation : [],
     menu: menuEntries,
     warehouse: warehouseEntries,
-  }), [canSection, financeEntries, menuEntries, warehouseEntries]);
+    staff: staffEntries,
+  }), [canSection, financeEntries, menuEntries, warehouseEntries, staffEntries]);
   const view = section === 'stats' ? statisticsView : section === 'finance' ? financeView : section === 'settings' ? settingsView
-    : section === 'warehouse' ? currentWarehouse?.key : currentMenu?.key;
+    : section === 'warehouse' ? currentWarehouse?.key : section === 'staff' ? currentStaff?.key : currentMenu?.key;
   const activeWorkspace = workspaces[section as Group]?.find((entry) => entry.key === view);
   const currentFinanceView = financeEntries.find(({ key }) => key === financeView)?.key ?? financeEntries[0]?.key;
 
   const current = sections.find((s) => s.key === section) ?? sections[0];
   React.useEffect(() => {
-    const requested = route.params?.section;
+    const requested = resolveAdminSection(route.params?.section, route.params?.view);
     if (!requested || (requested !== 'profile' && !sections.some((s) => s.key === requested))) return;
     setSection(requested);
     setCollapsedGroup(null);
     const entry = workspaces[requested as Group]?.find(({ key }) => key === route.params?.view);
     if (entry?.section === 'menu') setMenuView(entry.key);
+    if (requested === 'staff') setStaffView(entry?.section === 'staff' ? entry.key : 'employees');
     if (entry?.section === 'warehouse') setWarehouseView(entry.key);
     if (entry?.section === 'settings') setSettingsView(entry.key);
     if (entry?.section === 'finance') setFinanceView(entry.key);
@@ -199,6 +206,7 @@ export function AdminNavigator() {
       navigation.setParams({ section: undefined, view: undefined, orderId: undefined });
       setSection(entry.section);
       if (entry.section === 'menu') setMenuView(entry.key);
+      if (entry.section === 'staff') setStaffView(entry.key);
       if (entry.section === 'stats') setStatisticsView(entry.key);
       if (entry.section === 'warehouse') setWarehouseView(entry.key);
       if (entry.section === 'finance') setFinanceView(entry.key);
@@ -220,6 +228,7 @@ export function AdminNavigator() {
 
   const hasSection = !!current && current.key === section;
   const orderId = route.params?.orderId;
+  const staffTab = route.params?.view === 'waiter-report' ? 'waiter' : 'current';
   const sectionContent = React.useMemo(() => (
     section === 'profile' ? <ProfileScreen /> : !hasSection ? <Text style={{ padding: spacing.lg, color: colors.textMuted }} translate>Нет доступных разделов. Обратитесь к владельцу.</Text> : section === 'stats' ? (
       statisticsView === 'taxes' ? <TaxReportScreen /> : <StatisticsScreen view={statisticsView} />
@@ -234,7 +243,12 @@ export function AdminNavigator() {
     ) : section === 'warehouse' ? (
       <WarehouseScreen view={currentWarehouse?.key ?? 'balances'} />
     ) : section === 'staff' ? (
-      <StaffScreen />
+      currentStaff?.key === 'positions' && isOwner ? (
+        <ScrollView contentContainerStyle={styles.staffPage} keyboardShouldPersistTaps="handled">
+          <PositionsPanel />
+        </ScrollView>
+      ) : currentStaff?.key === 'stations' ? <PrepStationsPage />
+        : <StaffScreen key={staffTab} initialTab={staffTab} />
     ) : section === 'audit' ? (
       <AuditScreen />
     ) : section === 'finance' ? (
@@ -243,7 +257,7 @@ export function AdminNavigator() {
       settingsView === 'taxes' && canSection('settings') ? <TaxesScreen /> :
         <SettingsScreen key={settingsView} view={settingsView} navigationGuard={settingsGuard} />
     ) : null
-  ), [currentMenu?.key, currentWarehouse?.key, hasSection, orderId, section, statisticsView, currentFinanceView, settingsView, canSection]);
+  ), [currentMenu?.key, currentWarehouse?.key, currentStaff?.key, staffTab, isOwner, hasSection, orderId, section, statisticsView, currentFinanceView, settingsView, canSection]);
 
   return (
     <GestureDetector gesture={edgeSwipe}>
@@ -440,6 +454,7 @@ function AdminDrawer({
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
+  staffPage: { padding: spacing.lg, paddingBottom: spacing.xxl },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

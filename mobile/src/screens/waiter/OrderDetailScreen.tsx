@@ -1,4 +1,5 @@
 import { useReceiptPrinter } from './useReceiptPrinter';
+import { ModifierSummary } from '@/components/ModifierSummary';
 import { usePermissions } from '@/hooks/usePermissions';
 import { ActivityIndicator, ScrollView, View, SafeAreaView } from '@/components/themed';
 import React, { useState } from 'react';
@@ -585,7 +586,8 @@ function ItemCard({
   const comment = safeComment(item.comment);
   const setParts = item.setComponents ?? [];
   const clickable = billCorrection && !rejected && !disabled;
-  const hasExtra = setParts.length > 0 || comment || (rejected && item.rejectReason);
+  const hasExtra = setParts.length > 0 || comment || (rejected && item.rejectReason) ||
+    !!item.modifierSelections?.length || !!item.excludedIngredientNames?.length;
   return (
     <FastPressable disabled={!clickable} onPress={onCancel} style={[styles.itemCard, rejected && styles.itemCardRejected]}>
       <View style={styles.itemMainRow}>
@@ -607,6 +609,7 @@ function ItemCard({
       </View>
       {hasExtra ? (
         <View style={styles.itemExtra}>
+          <ModifierSummary details={item} />
           {setParts.length > 0 ? (
             <View style={styles.setParts}>
               {setParts.map((component) => {

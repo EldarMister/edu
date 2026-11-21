@@ -178,6 +178,8 @@ function linesToItems(lines: CartLine[]) {
     variantId: l.variant?.id,
     weightGrams: l.weightGrams,
     quantity: l.quantity,
+    modifierSelections: l.modifierSelections?.map(({ optionId, quantity }) => ({ optionId, quantity })),
+    excludedIngredientIds: l.excludedIngredientIds,
     comment: l.comment?.trim() || undefined,
     takeaway: l.takeaway || undefined,
     setComponents: l.set

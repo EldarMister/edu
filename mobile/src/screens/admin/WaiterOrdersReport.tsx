@@ -54,7 +54,7 @@ function rowValue(row: WaiterOrdersReportItem, key: ColumnKey) {
 const byQuantity = (a: DishTotal, b: DishTotal) => b.quantity - a.quantity || b.amount - a.amount;
 const durationLabel = (seconds: number) => seconds < 60 ? `${seconds} сек` : `${Math.floor(seconds / 60)} мин ${seconds % 60} сек`;
 
-export function WaiterOrdersReport({ staff, staffLoading = false }: { staff: StaffMember[]; staffLoading?: boolean }) {
+export function WaiterOrdersReport({ staff, staffLoading = false }: { staff: Pick<StaffMember, 'id' | 'name' | 'role'>[]; staffLoading?: boolean }) {
   const today = warehouseLocalTime().date;
   const [period, setPeriod] = useState<WarehousePeriod>('today');
   const [customFrom, setCustomFrom] = useState(today);

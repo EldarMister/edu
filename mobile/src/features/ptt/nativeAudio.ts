@@ -1,9 +1,12 @@
 import { Platform } from 'react-native';
 import type { AudioContext, AudioRecorder, AudioScheduledSourceNode } from 'react-native-audio-api';
-import { FRAME_SAMPLES, SPEECH_RATE } from './opusAudio';
+import { CAPTURE_RATE, CAPTURE_SAMPLES } from './opusAudio';
 
 const FLUSH_TIMEOUT_MS = 250;
-const START_BUFFER_SECONDS = 0.14;
+const START_BUFFER_SECONDS = 0.10;
+const MAX_BUFFER_SECONDS = 0.24;
+const RENDER_GUARD_SECONDS = 0.008;
+const OUTPUT_DRAIN_SECONDS = 0.06;
 const CUE_SECONDS = 0.05;
 
 function audioApi(): typeof import('react-native-audio-api') {
@@ -29,14 +32,14 @@ export function startRadioCapture(onSamples: Capture['onSamples']) {
   // One callback for the lifetime of the RN audio engine. This SDK's recorder
   // does not expose removal of an audioReady callback.
   if (!recorder) {
-    recorder = new (audioApi().AudioRecorder)({ sampleRate: SPEECH_RATE, bufferLengthInSamples: FRAME_SAMPLES });
+    recorder = new (audioApi().AudioRecorder)({ sampleRate: CAPTURE_RATE, bufferLengthInSamples: CAPTURE_SAMPLES });
     recorder.onAudioReady(({ buffer, numFrames }) => {
       const current = capture;
       if (!current) return;
       if (numFrames > 0) current.onSamples(buffer.getChannelData(0).slice(0, numFrames));
       // Both native platforms send a final short buffer on stop, including
       // a zero-length buffer when the last full frame was already delivered.
-      if (numFrames < FRAME_SAMPLES) current.finish?.(true);
+      if (numFrames < CAPTURE_SAMPLES) current.finish?.(true);
     });
   }
   const current: Capture = { onSamples };
@@ -68,42 +71,57 @@ export function startRadioCapture(onSamples: Capture['onSamples']) {
 export class RadioPlayout {
   private context?: AudioContext;
   private endAt = 0;
+  private expectedArrival?: number;
+  private jitter = 0;
   private readonly sources = new Map<AudioScheduledSourceNode, () => void>();
 
-  push(samples: Float32Array, newTalk: boolean) {
+  push(samples: Float32Array, newTalk: boolean, sampleRate: number) {
+    if (!samples.length) return;
     if (!this.context) {
       if (!capture) configureRadioAudioSession(false);
       this.context = new (audioApi().AudioContext)();
     }
     const context = this.context;
-    const buffer = context.createBuffer(1, samples.length, SPEECH_RATE);
+    const buffer = context.createBuffer(1, samples.length, sampleRate);
     buffer.copyToChannel(samples, 0);
     const source = context.createBufferSource();
     source.buffer = buffer;
     source.connect(context.destination);
 
-    const ahead = this.endAt - context.currentTime;
-    // Leave room for network jitter and catch up after bursts without dropping words.
-    const rate = ahead > 0.75 ? 1.2 : ahead > 0.36 ? 1.08 : 1;
-    const startAt = ahead > 0
-      ? this.endAt + (newTalk ? CUE_SECONDS : 0)
-      : context.currentTime + START_BUFFER_SECONDS;
+    const now = context.currentTime;
+    if (!newTalk && this.expectedArrival !== undefined) {
+      const deviation = Math.min(MAX_BUFFER_SECONDS, Math.abs(now - this.expectedArrival));
+      this.jitter += (deviation - this.jitter) / 16;
+    }
+    this.expectedArrival = now + buffer.duration;
+
+    let startAt = this.endAt;
+    if (newTalk) {
+      const headroom = Math.min(MAX_BUFFER_SECONDS, START_BUFFER_SECONDS + 4 * this.jitter);
+      startAt = Math.max(startAt + CUE_SECONDS, now + headroom);
+    } else if (startAt < now + RENDER_GUARD_SECONDS) {
+      // Leave enough audio queued after a stall to avoid repeated underruns.
+      // Packets already queued always play back-to-back at their original speed.
+      const headroom = Math.min(MAX_BUFFER_SECONDS, Math.max(0.06, 0.03 + 4 * this.jitter));
+      startAt = now + headroom;
+    }
     if (newTalk) this.cue(context, startAt - CUE_SECONDS, 760);
-    source.playbackRate.value = rate;
     source.start(startAt);
     this.track(source);
-    this.endAt = startAt + buffer.duration / rate;
+    this.endAt = startAt + buffer.duration;
   }
 
   endCue() {
     if (!this.context) return;
-    const startAt = Math.max(this.endAt, this.context.currentTime);
+    const startAt = Math.max(this.endAt, this.context.currentTime + RENDER_GUARD_SECONDS);
     this.cue(this.context, startAt, 510);
     this.endAt = startAt + CUE_SECONDS;
   }
 
   remainingMs() {
-    return this.context ? Math.max(0, (this.endAt - this.context.currentTime) * 1000) : 0;
+    return this.context
+      ? Math.max(0, (this.endAt + OUTPUT_DRAIN_SECONDS - this.context.currentTime) * 1000)
+      : 0;
   }
 
   stop() {
@@ -116,6 +134,7 @@ export class RadioPlayout {
     void this.context?.close().catch(() => undefined);
     this.context = undefined;
     this.endAt = 0;
+    this.expectedArrival = undefined;
   }
 
   private track(source: AudioScheduledSourceNode, after?: () => void) {

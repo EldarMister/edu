@@ -8,10 +8,13 @@ import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { NumberTicker } from '@/components/NumberTicker';
+import { ModifierSummary } from '@/components/ModifierSummary';
 import { colors, fontSize, radius, spacing } from '@/theme';
-import { cartLineName, cartTotals, linePrice, useCart } from '@/store/cart';
+import { cartLineKey, cartLineName, cartTotals, linePrice, useCart } from '@/store/cart';
 import { money } from '@/utils/format';
 import { setChanged } from '@/utils/set';
+import type { CartLine } from '@/types';
+import { ModifierPickerSheet } from './ModifierPickerSheet';
 
 /** Корзина как нижний лист поверх меню — повторяет PWA CartSheet. */
 export function CartSheet({
@@ -34,9 +37,13 @@ export function CartSheet({
   const focused = useIsFocused();
   const {
     lines,
+    tableId,
+    activeOrderId,
+    editingOrderId,
     comment,
     commentOpen,
     setQuantity,
+    setLineModifiers,
     setTakeaway,
     setAllTakeaway,
     setOrderComment,
@@ -45,6 +52,13 @@ export function CartSheet({
   } =
     useCart();
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
+  const [modifierTarget, setModifierTarget] = React.useState<{
+    line: CartLine;
+    tableId: string | null;
+    activeOrderId: string | null;
+    editingOrderId: string | null;
+  } | null>(null);
+  React.useEffect(() => setModifierTarget(null), [focused, visible, tableId, activeOrderId, editingOrderId]);
   const hasLines = lines.length > 0;
   const clearDisabled = submitting || lines.some((line) => line.editAllowed === false || line.cancelAllowed === false);
   const allTakeaway = hasLines && lines.every((l) => l.takeaway);
@@ -98,7 +112,7 @@ export function CartSheet({
   return (
     <BottomSheet
       visible={visible && focused}
-      onClose={onClose}
+      onClose={() => { setModifierTarget(null); onClose(); }}
       inline
       sheet
       animationPreset="cart"
@@ -136,7 +150,7 @@ export function CartSheet({
           </View>
         ) : (
           lines.map((l, i) => {
-            const key = l.lineId ?? `${l.dish.id}-${l.variant?.id ?? ''}-${i}`;
+            const key = cartLineKey(l);
             const isSet = !!l.set;
             const open = !!expanded[key];
             return (
@@ -155,6 +169,13 @@ export function CartSheet({
                     <Text style={styles.setToggle}>{open ? ' ▴' : ' ▾'}</Text>
                   </Text>
                 ) : null}
+                {l.dish.hasModifiers || l.dish.allowIngredientExclusions || !!l.modifierSelections?.length || !!l.excludedIngredientIds?.length ? (
+                  <FastPressable accessibilityRole="button" disabled={submitting || l.editAllowed === false || l.cancelAllowed === false}
+                    onPress={() => setModifierTarget({ line: l, tableId, activeOrderId, editingOrderId })} style={styles.configure}>
+                    <Text style={styles.configureText} translate>Добавки и состав</Text>
+                  </FastPressable>
+                ) : null}
+                <ModifierSummary details={l} />
                 {l.takeaway && !delivery ? (
                   <FastPressable disabled={submitting || l.editAllowed === false} onPress={() => setTakeaway(i, false)} style={styles.takeawayChip} hitSlop={6}>
                     <PwaIcon name="bag" size={12} color={colors.textSecondary} strokeWidth={2} />
@@ -190,6 +211,15 @@ export function CartSheet({
           })
         )}
       </SheetScrollView>
+      {visible && focused && modifierTarget && modifierTarget.tableId === tableId && modifierTarget.activeOrderId === activeOrderId &&
+        modifierTarget.editingOrderId === editingOrderId ? (
+        <ModifierPickerSheet line={modifierTarget.line} editing onClose={() => setModifierTarget(null)} onConfirm={(modifiers) => {
+          const current = useCart.getState();
+          if (current.tableId === modifierTarget.tableId && current.activeOrderId === modifierTarget.activeOrderId &&
+            current.editingOrderId === modifierTarget.editingOrderId) setLineModifiers(cartLineKey(modifierTarget.line), modifiers);
+          setModifierTarget(null);
+        }} />
+      ) : null}
     </BottomSheet>
   );
 }
@@ -224,6 +254,8 @@ function TakeawaySwitch({ on, onChange, disabled = false }: { on: boolean; onCha
 }
 
 const styles = StyleSheet.create({
+  configure: { paddingVertical: 8, alignSelf: 'flex-start' },
+  configureText: { fontSize: 13, fontWeight: '600', color: colors.primary },
   header: { paddingHorizontal: spacing.lg, paddingTop: 10, paddingBottom: spacing.sm },
   handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.slate300, marginBottom: 10 },
   headRow: {

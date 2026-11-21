@@ -30,6 +30,7 @@ import {
 import { useRadioVisibility } from './radioVisibility';
 import { useAudioPttReceiver } from './useAudioPttReceiver';
 import { useAudioPttSender } from './useAudioPttSender';
+import { PTT_CODEC_CAPABILITIES } from './opusAudio';
 import {
   PTT_CHANNEL_STORAGE_KEY,
   PTT_CHANNELS,
@@ -367,7 +368,7 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
     const seq = ++joinSeqRef.current;
     const attempt = (retriesLeft: number) => {
       if (joinSeqRef.current !== seq) return;
-      sock.timeout(5000).emit(PTT_EVENTS.JOIN, { channel }, (error: Error | null, ack: { ok?: boolean; onlineCount?: number } | undefined) => {
+      sock.timeout(5000).emit(PTT_EVENTS.JOIN, { channel, codecs: PTT_CODEC_CAPABILITIES }, (error: Error | null, ack: { ok?: boolean; onlineCount?: number } | undefined) => {
         if (joinSeqRef.current !== seq) return;
         if (!error && ack?.ok) {
           if (typeof ack.onlineCount === 'number') setOnlineCount(ack.onlineCount);

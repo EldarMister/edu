@@ -154,6 +154,8 @@ export interface Dish {
   prepStation?: PrepStation | null;
   isSet?: boolean;
   isWeighted?: boolean;
+  hasModifiers?: boolean;
+  allowIngredientExclusions?: boolean;
   weightedMeasure?: 'weight' | 'volume';
   weightedPriceBase?: number;
   setComponents?: SetComponentDef[];
@@ -235,6 +237,13 @@ export interface WaiterShift {
   };
 }
 
+export interface DishModifierSelection {
+  optionId: string;
+  name: string;
+  quantity: number;
+  price: string | number;
+}
+
 export interface OrderItem {
   id: string;
   dishId: string | null;
@@ -249,6 +258,9 @@ export interface OrderItem {
   refundedQuantity?: number;
   status: OrderItemStatus;
   prepStation: PrepStation;
+  modifierSelections?: DishModifierSelection[];
+  excludedIngredientIds?: string[];
+  excludedIngredientNames?: string[];
   comment: string | null;
   takeaway?: boolean;
   rejectReason: string | null;
@@ -409,6 +421,9 @@ export interface CartLine {
   variant?: DishVariant;
   weightGrams?: number;
   quantity: number;
+  modifierSelections?: DishModifierSelection[];
+  excludedIngredientIds?: string[];
+  excludedIngredientNames?: string[];
   comment?: string;
   takeaway?: boolean;
   lineId?: string;

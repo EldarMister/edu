@@ -21,7 +21,7 @@ function loadSource(file, dependencies = {}) {
   return module.exports;
 }
 
-const { menuNavigation, warehouseNavigation } = loadSource('navigation/adminWorkspaceNavigation.ts');
+const { menuNavigation, resolveAdminSection, staffNavigation, warehouseNavigation } = loadSource('navigation/adminWorkspaceNavigation.ts');
 const { balanceValue, balanceQuantity } = loadSource('utils/warehouseBalance.ts');
 const ids = (entries) => Array.from(entries, ({ key }) => key);
 
@@ -35,8 +35,16 @@ test('warehouse navigation follows PWA order while hiding inactive operations an
   ]);
   assert.deepEqual(ids(warehouseNavigation((permission) => !['warehouseCosts', 'warehouseSettings'].includes(permission), 1)),
     ['balances', 'writeoffs', 'inventory']);
-  assert.deepEqual(ids(menuNavigation(false)), ['goods', 'recipes', 'categories', 'stations']);
-  assert.deepEqual(ids(menuNavigation(true)), ['goods', 'recipes', 'preparations', 'ingredients', 'categories', 'ingredientCategories', 'stations']);
+  assert.deepEqual(ids(menuNavigation(false)), ['goods', 'recipes', 'categories']);
+  assert.deepEqual(ids(menuNavigation(true)), ['goods', 'recipes', 'preparations', 'ingredients', 'categories', 'ingredientCategories']);
+});
+
+test('personnel navigation moves stations out of the menu and limits positions to the owner', () => {
+  assert.deepEqual(ids(staffNavigation(true)), ['employees', 'positions', 'stations']);
+  assert.deepEqual(ids(staffNavigation(false)), ['employees', 'stations']);
+  assert.equal(resolveAdminSection('menu', 'stations'), 'staff');
+  assert.equal(resolveAdminSection('menu', 'goods'), 'menu');
+  assert.equal(resolveAdminSection('staff', 'waiter-report'), 'staff');
 });
 
 test('balance valuation uses unrounded base cost and preserves unknown versus zero', () => {

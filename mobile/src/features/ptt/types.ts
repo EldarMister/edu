@@ -1,3 +1,5 @@
+import type { OpusMode } from './opusAudio';
+
 export const PTT_CHANNELS = [
   { key: 'general', label: 'Все' },
   { key: 'waiters', label: 'Официанты' },
@@ -34,7 +36,7 @@ export type PttPresencePayload = {
 export type PttBusyPayload = {
   channel: PttChannel;
   talkId?: string;
-  codec?: 'opus';
+  codec?: OpusMode;
   speaker?: { id: string; role: string; name?: string };
   startedAt?: string;
 };

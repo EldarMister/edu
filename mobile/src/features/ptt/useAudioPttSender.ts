@@ -7,10 +7,11 @@ import { getSocket } from '@/services/socket';
 import type { Workspace } from '@/lib/workspaces';
 import { PTT_EVENTS, type PttChannel, type PttDeniedPayload } from './types';
 import { configureRadioAudioSession, startRadioCapture } from './nativeAudio';
-import { createOpusEncoder } from './opusAudio';
+import { createOpusEncoder, type OpusMode } from './opusAudio';
+import { playPttCue } from './sounds';
 
 type Socket = ReturnType<typeof getSocket>;
-type Ack = { ok: boolean; reason?: string; talkId?: string; codec?: 'opus' };
+type Ack = { ok: boolean; reason?: string; talkId?: string; codec?: OpusMode };
 type Attempt = {
   socket: Socket;
   channel: PttChannel;
@@ -18,13 +19,14 @@ type Attempt = {
   requested: boolean;
   granted: boolean;
   released: boolean;
+  cue: AbortController;
   configuring?: Promise<void>;
   capture?: ReturnType<typeof startRadioCapture>;
   encoder?: ReturnType<typeof createOpusEncoder>;
   firstAudioTimeout?: ReturnType<typeof setTimeout>;
   pending: Float32Array[];
 };
-const MAX_PENDING_FRAMES = 100;
+const MAX_PENDING_FRAMES = 200;
 
 function releaseChannel({ socket, channel, talkId }: Attempt) {
   if (socket.connected) socket.emit(PTT_EVENTS.STOP_TALK, { channel, talkId });
@@ -32,7 +34,7 @@ function releaseChannel({ socket, channel, talkId }: Attempt) {
 
 function requestChannel({ socket, channel, talkId }: Attempt) {
   return new Promise<Ack>((resolve) => {
-    socket.timeout(3500).emit(PTT_EVENTS.START_TALK, { channel, talkId, codec: 'opus' }, (error: Error | null, ack?: Ack) =>
+    socket.timeout(3500).emit(PTT_EVENTS.START_TALK, { channel, talkId, codec: 'opus', preferHq: true }, (error: Error | null, ack?: Ack) =>
       resolve(error ? { ok: false, reason: 'timeout' } : ack ?? { ok: false }));
   });
 }
@@ -49,6 +51,7 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean, workspa
     attemptRef.current = null;
     setTalking(false);
     setPreparing(false);
+    attempt.cue.abort();
     clearTimeout(attempt.firstAudioTimeout);
     attempt.encoder?.close();
     if (attempt.requested) releaseChannel(attempt);
@@ -87,6 +90,7 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean, workspa
     const attempt = attemptRef.current;
     if (!attempt || attempt.released) return;
     attempt.released = true;
+    attempt.cue.abort();
     setTalking(false);
     setPreparing(false);
     clearTimeout(attempt.firstAudioTimeout);
@@ -95,12 +99,14 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean, workspa
       finish(attempt);
       return;
     }
-    void capture.stop().then((flushed) => {
-      if (attemptRef.current !== attempt) return;
-      attempt.capture = undefined;
-      if (!flushed) setDeniedReason('Не удалось передать конец фразы. Повторите последние слова');
-      if (attempt.granted) complete(attempt);
-    });
+    void capture.stop()
+      .catch(() => false)
+      .then((flushed) => {
+        if (attemptRef.current !== attempt) return;
+        attempt.capture = undefined;
+        if (!flushed) setDeniedReason('Не удалось передать конец фразы. Повторите последние слова');
+        if (attempt.granted) complete(attempt);
+      });
   }, [complete, finish]);
 
   const start = React.useCallback(async () => {
@@ -112,10 +118,13 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean, workspa
       return false;
     }
     const attempt: Attempt = {
-      socket, channel, talkId: randomUUID(), requested: false, granted: false, released: false, pending: [],
+      socket, channel, talkId: randomUUID(), requested: false, granted: false, released: false,
+      cue: new AbortController(), pending: [],
     };
     attemptRef.current = attempt;
     setPreparing(true);
+    // The local acknowledgement must never delay capture or the channel request.
+    void playPttCue('start', attempt.cue.signal).catch(() => undefined);
     try {
       const current = await Audio.getPermissionsAsync();
       if (attemptRef.current !== attempt) return false;
@@ -131,11 +140,9 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean, workspa
       if (attemptRef.current !== attempt) return false;
       configureRadioAudioSession(true);
 
-      const encoder = attempt.encoder = createOpusEncoder(attempt.talkId, (packet) => {
-        if (socket.connected && attemptRef.current === attempt) socket.emit(PTT_EVENTS.AUDIO_PACKET, packet);
-      });
-      // Capture before the grant so a delayed acknowledgement doesn't cut off
-      // the first words. Socket.IO sends the buffered frames once granted.
+      // Capture before the grant so a delayed acknowledgement doesn't cut off the first words.
+      // Keep the microphone samples until the server confirms the codec for this talk.
+      attempt.firstAudioTimeout = setTimeout(() => fail(attempt, 'Микрофон рации не передаёт звук'), 1200);
       attempt.capture = startRadioCapture((samples) => {
         if (attemptRef.current !== attempt) return;
         clearTimeout(attempt.firstAudioTimeout);
@@ -144,21 +151,23 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean, workspa
           else fail(attempt, 'Канал отвечает слишком долго. Повторите фразу');
           return;
         }
-        try { encoder.push(samples); }
+        try { attempt.encoder?.push(samples); }
         catch { fail(attempt, 'Не удалось передать звук. Повторите фразу'); }
       });
-      attempt.firstAudioTimeout = setTimeout(() => fail(attempt, 'Микрофон рации не передаёт звук'), 1200);
       attempt.requested = true;
       const ack = await requestChannel(attempt);
       if (attemptRef.current !== attempt) {
         if (ack.ok) releaseChannel(attempt);
         return false;
       }
-      if (!ack.ok || ack.talkId !== attempt.talkId || ack.codec !== 'opus') {
+      if (!ack.ok || ack.talkId !== attempt.talkId || (ack.codec !== 'opus' && ack.codec !== 'opus-hq')) {
         fail(attempt, ack.reason === 'busy' ? 'Канал занят' : ack.ok
           ? 'Обновите EDU POS, чтобы включить рацию' : 'Не удалось начать разговор');
         return false;
       }
+      const encoder = attempt.encoder = createOpusEncoder(attempt.talkId, (packet) => {
+        if (socket.connected && attemptRef.current === attempt) socket.emit(PTT_EVENTS.AUDIO_PACKET, packet);
+      }, ack.codec);
       attempt.granted = true;
       for (const samples of attempt.pending) encoder.push(samples);
       attempt.pending.length = 0;

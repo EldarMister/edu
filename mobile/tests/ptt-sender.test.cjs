@@ -9,9 +9,9 @@ const deferred = () => { let resolve; const promise = new Promise(done => { reso
 const settle = () => new Promise(resolve => setImmediate(resolve));
 const talkId = '1bf119a1-5269-45d2-aec7-511b7b35e111';
 
-function harness({ permission, preparation, permissionGranted = false } = {}) {
+function harness({ permission, preparation, permissionGranted = false, cuePlayback } = {}) {
   let permissionRequests = 0;
-  const events = [], effects = [], states = [], listeners = new Map();
+  const events = [], effects = [], states = [], cues = [], encoderModes = [], listeners = new Map();
   let appState, pendingAck, captured, finalFrames, stops = 0;
   const socket = {
     connected: true,
@@ -39,6 +39,7 @@ function harness({ permission, preparation, permissionGranted = false } = {}) {
     'expo-crypto': { randomUUID: () => talkId },
     '@/lib/sound': { configureAudioRecording: async active => { if (active && preparation) await preparation.promise; } },
     '@/services/socket': { getSocket: () => socket },
+    './sounds': { playPttCue: async (kind, signal) => { cues.push({ kind, signal }); await cuePlayback?.promise; } },
     './nativeAudio': {
       configureRadioAudioSession() {},
       startRadioCapture(onSamples) {
@@ -47,8 +48,9 @@ function harness({ permission, preparation, permissionGranted = false } = {}) {
       },
     },
     './opusAudio': {
-      createOpusEncoder(id, send) {
+      createOpusEncoder(id, send, mode) {
         assert.equal(id, talkId);
+        encoderModes.push(mode);
         return { push: send, flush: () => send('tail'), close() {} };
       },
     },
@@ -58,11 +60,11 @@ function harness({ permission, preparation, permissionGranted = false } = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
   }).outputText;
   const module = { exports: {} };
-  vm.runInNewContext(source, { module, exports: module.exports, setTimeout, clearTimeout, require: name => { assert.ok(name in modules, name); return modules[name]; } });
+  vm.runInNewContext(source, { module, exports: module.exports, AbortController, setTimeout, clearTimeout, require: name => { assert.ok(name in modules, name); return modules[name]; } });
   const sender = module.exports.useAudioPttSender('general', true);
   effects.forEach(effect => effect());
   return {
-    sender, events, states,
+    sender, events, states, cues, encoderModes,
     eventNames: () => events.map(event => event[0]),
     permissionRequests: () => permissionRequests,
     ack: (error, data) => pendingAck(error, data),
@@ -75,6 +77,25 @@ function harness({ permission, preparation, permissionGranted = false } = {}) {
   };
 }
 
+test('press plays the local radio cue once while capture and buffering continue', async () => {
+  const cuePlayback = deferred();
+  const env = harness({ cuePlayback });
+  const first = env.sender.start();
+  assert.equal(await env.sender.start(), false);
+  assert.deepEqual(env.cues.map(({ kind }) => kind), ['start']);
+  assert.equal(env.cues[0].signal.aborted, false);
+  await settle();
+  env.capture('first word');
+  assert.deepEqual(env.eventNames(), ['start']);
+  env.ack(null);
+  assert.equal(await first, true);
+  assert.deepEqual(env.events[1], ['audio', 'first word']);
+  env.sender.stop();
+  assert.equal(env.cues[0].signal.aborted, true);
+  cuePlayback.resolve();
+  await settle();
+});
+
 test('releasing during permissions does not reserve a channel or open capture', async () => {
   const permission = deferred();
   const env = harness({ permission });
@@ -84,6 +105,7 @@ test('releasing during permissions does not reserve a channel or open capture', 
   assert.equal(await start, false);
   assert.deepEqual(env.eventNames(), []);
   assert.equal(env.hasCapture(), false);
+  assert.equal(env.cues[0].signal.aborted, true);
 });
 
 test('capture starts before the channel grant and streams until the final microphone samples are sent', async () => {
@@ -95,8 +117,11 @@ test('capture starts before the channel grant and streams until the final microp
   assert.deepEqual(env.eventNames(), ['start']);
   assert.equal(env.events[0][1].talkId, talkId);
   assert.equal(env.events[0][1].codec, 'opus');
+  assert.equal(env.events[0][1].preferHq, true);
+  assert.deepEqual(env.encoderModes, []);
   env.ack(null);
   assert.equal(await first, true);
+  assert.deepEqual(env.encoderModes, ['opus']);
   env.capture('live words');
   assert.deepEqual(env.eventNames(), ['start', 'audio', 'audio']);
   env.finalFrames('last syllable');
@@ -106,6 +131,19 @@ test('capture starts before the channel grant and streams until the final microp
   assert.deepEqual(env.eventNames(), ['start', 'audio', 'audio', 'audio', 'audio', 'stop']);
   assert.equal(env.events.at(-1)[1].talkId, talkId);
   assert.equal(env.micStops(), 1);
+});
+
+test('confirmed HQ codec encodes the words captured before the grant', async () => {
+  const env = harness({ permissionGranted: true });
+  const start = env.sender.start();
+  await settle();
+  env.capture('first word');
+  env.ack(null, { ok: true, talkId, codec: 'opus-hq' });
+  assert.equal(await start, true);
+  assert.deepEqual(env.encoderModes, ['opus-hq']);
+  assert.deepEqual(env.events[1], ['audio', 'first word']);
+  env.sender.stop();
+  await settle();
 });
 
 test('a short transmission released before acknowledgement is drained after the grant', async () => {

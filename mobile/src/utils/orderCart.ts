@@ -19,6 +19,9 @@ export function orderToCartLines(order: Order, dishes: Dish[], policies?: Waiter
         orderItemId: item.id, lineId: `edit-${item.id}`,
         editAllowed: editPermission.allowed, cancelAllowed: cancelPermission.allowed,
         restrictionReason: !editPermission.allowed ? editPermission.reason : !cancelPermission.allowed ? cancelPermission.reason : undefined,
+        modifierSelections: item.modifierSelections ?? undefined,
+        excludedIngredientIds: item.excludedIngredientIds ?? undefined,
+        excludedIngredientNames: item.excludedIngredientNames ?? undefined,
       };
 
       if (dish.isSet && item.setComponents?.length) {

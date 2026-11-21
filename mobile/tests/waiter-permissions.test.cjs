@@ -98,11 +98,21 @@ test('edit API submits original item ids, audit reason and explicitly cleared or
     '@tanstack/react-query': { useMutation: options => options, useQuery() {}, useQueryClient: () => ({}) },
     '@/lib/api': { api: { patch: async (url, body) => { calls.push({ url, body }); return { data: {} }; } } },
   });
-  await api.useEditOrder().mutationFn({ orderId: 'order-1', comment: '  ', reason: 'Изменение состава заказа', lines: orderToCartLines(order([item('one'), item('two')]), [dish]) });
+  const configured = item('one', 'new', {
+    modifierSelections: [{ optionId: 'syrup', name: 'Сироп', price: '35', quantity: 2 }],
+    excludedIngredientIds: ['sugar'], excludedIngredientNames: ['Сахар'],
+  });
+  const lines = orderToCartLines(order([configured, item('two')]), [dish]);
+  assert.deepEqual(plain(lines[0].modifierSelections), configured.modifierSelections);
+  assert.deepEqual(plain(lines[0].excludedIngredientNames), ['Сахар']);
+  await api.useEditOrder().mutationFn({ orderId: 'order-1', comment: '  ', reason: 'Изменение состава заказа', lines });
   assert.equal(calls[0].url, '/orders/order-1');
   assert.equal(calls[0].body.comment, '');
   assert.equal(calls[0].body.reason, 'Изменение состава заказа');
   assert.deepEqual(plain(calls[0].body.items.map(line => line.id)), ['one', 'two']);
+  assert.deepEqual(plain(calls[0].body.items[0].modifierSelections), [{ optionId: 'syrup', quantity: 2 }]);
+  assert.deepEqual(plain(calls[0].body.items[0].excludedIngredientIds), ['sugar']);
+  assert.equal(calls[0].body.items[0].excludedIngredientNames, undefined);
 });
 
 test('switching tables restores edit mode and never submits edited lines as additions', () => {

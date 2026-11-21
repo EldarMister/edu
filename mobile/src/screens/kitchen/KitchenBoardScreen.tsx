@@ -46,6 +46,7 @@ import {
 } from '@/utils/format';
 import { apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
+import { ModifierSummary } from '@/components/ModifierSummary';
 import { StopListSheet } from './StopListSheet';
 import { KitchenVoiceSettingsSheet } from './KitchenVoiceSettingsSheet';
 import { KitchenStatsSheet } from './KitchenStatsSheet';
@@ -835,7 +836,10 @@ function KitchenCard({
             const actionQty = Math.min(it.quantity, actionQtys[it.id] ?? it.quantity);
             return (
               <View key={it.id}>
-                {renderLine(it.id, it.status, itemHeader(it), false, takeawayPill(it))}
+                {renderLine(it.id, it.status, itemHeader(it), false, <>
+                  <ModifierSummary details={it} />
+                  {takeawayPill(it)}
+                </>)}
                 {historyReason(it.status, it.rejectReason)}
                 {showStepper ? (
                   <View style={styles.stepperRow}>
@@ -882,6 +886,7 @@ function KitchenCard({
                   ) : null}
                   <View style={styles.itemContent}>
                     <Text style={styles.itemText}>{itemHeader(it)}</Text>
+                    <ModifierSummary details={it} />
                     {takeawayPill(it)}
                   </View>
                 </FastPressable>

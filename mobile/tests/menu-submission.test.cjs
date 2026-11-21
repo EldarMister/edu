@@ -27,7 +27,8 @@ function harness({ deliveryAllowed = false, roundOrderTotal = false } = {}) {
     useCallback(fn, deps) { return hooks.useMemo(() => fn, deps); },
     useEffect(fn, deps) { const i = cursor++; if (!cells[i] || differs(cells[i].deps, deps)) { const previous = cells[i]; cells[i] = { deps }; effects.push(() => { previous?.cleanup?.(); cells[i].cleanup = fn(); }); } },
   };
-  const cartModule = load('src/store/cart.ts', { zustand: require('zustand'), '@/utils/format': { dishUnitPrice: Number }, '@/utils/set': { calcSetPrice: Number } });
+  const cartModule = load('src/store/cart.ts', { zustand: require('zustand'),
+    '@/utils/format': { dishUnitPrice: Number, makeIdempotencyKey: () => 'configured-line' }, '@/utils/set': { calcSetPrice: Number } });
   const cart = cartModule.useCart;
   const useCart = selector => selector(cart.getState()); useCart.getState = cart.getState;
   const replacement = { target: null, clear() { replacement.target = null; } };
@@ -69,6 +70,7 @@ function harness({ deliveryAllowed = false, roundOrderTotal = false } = {}) {
     '@/lib/api': { apiError: error => error.message }, '@/services/socket': { useConnectionStatus: () => true },
     './CartSheet': { CartSheet: 'CartSheet' },
     './DeliveryDetailsSheet': { DeliveryDetailsSheet: 'DeliveryDetailsSheet' },
+    './ModifierPickerSheet': { ModifierPickerSheet: 'ModifierPickerSheet' },
     './TablePickerSheet': { TablePickerSheet: 'TablePickerSheet' },
     './WeightPickerSheet': { WeightPickerSheet: 'WeightPickerSheet' },
     './orderRules': {},
@@ -80,10 +82,54 @@ function harness({ deliveryAllowed = false, roundOrderTotal = false } = {}) {
     submit() { all(tree).find(x => x.type === 'CartSheet').props.onSubmit(); },
     deliveryForm() { return all(tree).find(x => x.type === 'DeliveryDetailsSheet')?.props; },
     cartSheet() { return all(tree).find(x => x.type === 'CartSheet')?.props; },
-    replace() { const grid = all(tree).find(x => x.type === 'FlatList'); grid.props.renderItem({ item: dish }).props.onAdd(dish); },
+    modifierPicker() { return all(tree).find(x => x.type === 'ModifierPickerSheet')?.props; },
+    replace(item = dish) { const grid = all(tree).find(x => x.type === 'FlatList'); grid.props.renderItem({ item }).props.onAdd(item); },
     unmount() { cells.forEach(cell => cell.cleanup?.()); },
   };
 }
+
+test('a configurable dish waits for choices and merges only matching additions and exclusions', async () => {
+  const h = harness();
+  const coffee = { ...dish, id: 'coffee', hasModifiers: true, allowIngredientExclusions: true };
+  const add = { modifierSelections: [{ optionId: 'syrup', name: 'Syrup', price: 30, quantity: 2 }],
+    excludedIngredientIds: ['milk'], excludedIngredientNames: ['Milk'] };
+  h.render(); h.replace(coffee); h.render();
+  assert.ok(h.modifierPicker());
+  assert.equal(h.cart.getState().lines.length, 1);
+  h.modifierPicker().onConfirm(add);
+  h.render(); h.replace(coffee); h.render(); h.modifierPicker().onConfirm(add);
+  h.render(); h.replace(coffee); h.render();
+  h.modifierPicker().onConfirm({ ...add, excludedIngredientIds: [], excludedIngredientNames: [] });
+  const lines = h.cart.getState().lines;
+  assert.deepEqual(Array.from(lines, line => line.quantity), [1, 2, 1]);
+  assert.equal(h.cartModule.linePrice(lines[1]), 320);
+  h.render(); h.submit();
+  assert.equal(h.requests[0].payload.lines[1].excludedIngredientIds[0], 'milk');
+  h.requests[0].resolve({ id: 'created-a' }); await flush();
+});
+
+test('confirming modifiers after switching tables cannot insert into the new draft', () => {
+  const h = harness();
+  h.render(); h.replace({ ...dish, hasModifiers: true }); h.render();
+  const confirm = h.modifierPicker().onConfirm;
+  h.cart.getState().selectTable(second);
+  confirm({ modifierSelections: [{ optionId: 'mint', name: 'Mint', price: 10, quantity: 1 }] });
+  assert.equal(h.cart.getState().lines.length, 0);
+  assert.equal(h.cart.getState().carts[first.id].lines.length, 1);
+});
+
+test('editing a configuration preserves the identity and restriction of an existing order position', () => {
+  const h = harness();
+  const changed = { modifierSelections: [], excludedIngredientIds: ['lemon'], excludedIngredientNames: ['Lemon'] };
+  const editable = { lineId: 'edit-1', orderItemId: '1', dish, quantity: 2 };
+  const locked = { lineId: 'edit-2', orderItemId: '2', dish, quantity: 1, cancelAllowed: false };
+  h.cart.getState().replaceLines([editable, locked]);
+  h.cart.getState().setLineModifiers('edit-1', changed);
+  h.cart.getState().setLineModifiers('edit-2', changed);
+  assert.equal(h.cart.getState().lines[0].orderItemId, '1');
+  assert.equal(h.cart.getState().lines[0].excludedIngredientIds[0], 'lemon');
+  assert.equal(h.cart.getState().lines[1], locked);
+});
 
 test('same-frame submit runs once and late response only clears the submitted table', async () => {
   const h = harness(); h.render(); h.submit(); h.submit();
