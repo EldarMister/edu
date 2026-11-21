@@ -22,21 +22,24 @@ export function FiscalSettingsPage() {
   const [tested, setTested] = useState(false);
   const saved = settings.data?.fiscalProvider ?? '';
   const mode = draft ?? saved;
-  const dirty = draft !== undefined && draft !== saved;
-  const { markSaved } = useEditorDirty(editable && dirty);
+  const dirty = draft !== undefined && (draft !== saved || update.isPending);
+  const { markSaved } = useEditorDirty(editable && dirty, save);
 
   if (settings.isPending) return <WorkspacePending />;
   if (settings.error) return <p role="alert" className="text-sm text-danger">{apiError(settings.error)}</p>;
 
   async function save() {
-    if (!editable || !dirty || draft === undefined || update.isPending) return;
+    if (!editable || !dirty || draft === undefined || update.isPending || test.isPending) return false;
+    setError('');
     try {
       await update.mutateAsync({ fiscalProvider: draft });
       markSaved();
       setDraft(undefined);
       push({ message: t('Настройки сохранены'), type: 'success', at: new Date().toISOString() });
+      return true;
     } catch (failure) {
       setError(apiError(failure));
+      return false;
     }
   }
 

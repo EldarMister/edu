@@ -1,4 +1,5 @@
 import { useId, useState, type FormEvent } from 'react';
+import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -170,10 +171,24 @@ function TaxEditor({ tax, onClose }: { tax?: MenuTax; onClose: () => void }) {
   const [type, setType] = useState<MenuTaxType>(tax?.type ?? 'vat');
   const percent = parseRate(rate);
   const close = () => { if (!save.isPending) onClose(); };
+  const dirty = name !== (tax?.name ?? '') || rate !== (tax ? String(tax.rate) : '') || type !== (tax?.type ?? 'vat');
+  const { markSaved } = useEditorDirty(dirty, saveTax);
+
+  async function saveTax() {
+    if (!name.trim() || percent === undefined || save.isPending) return false;
+    try {
+      await save.mutateAsync({ id: tax?.id, name: name.trim(), rate: percent, type });
+      markSaved();
+      onClose();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (!name.trim() || percent === undefined || save.isPending) return;
-    save.mutate({ id: tax?.id, name: name.trim(), rate: percent, type }, { onSuccess: onClose });
+    void saveTax();
   }
   return <Modal open title={tax ? 'Редактирование налога' : 'Добавление налога'} onClose={close}
     footer={<div className="flex justify-end gap-2">

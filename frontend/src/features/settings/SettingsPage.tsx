@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { WorkspacePending } from '../admin/components/WorkspacePending';
 import { Toggle } from '@/components/Toggle';
 import { CashShiftSettings } from './CashShiftControls';
@@ -15,7 +16,6 @@ import {
   useAdminSettings,
   useGenerateDeliveryApiKey,
   useUpdateSettings,
-  type SettingsInput,
 } from './api';
 import { OrderPermissionsSettings } from './OrderPermissionsSettings';
 import { DEFAULT_WAITER_PERMISSIONS, type WaiterOrderPermissions } from '@/lib/order-permissions';
@@ -64,8 +64,8 @@ function CafeSettings() {
   const [generatedDeliveryKey, setGeneratedDeliveryKey] = useState<string | null>(null);
 
   const [draft, setDraft] = useState<Form | null>(null);
-  const dirty = draft !== null;
-  const form: Form | null = draft ?? (data ? {
+  const draftVersion = useRef(0);
+  const baseline: Form | null = data ? {
     waiterOrderPermissions: data.waiterOrderPermissions ?? DEFAULT_WAITER_PERMISSIONS,
     cafeName: data.cafeName,
     taxesEnabled: data.taxesEnabled ?? false,
@@ -85,7 +85,10 @@ function CafeSettings() {
     qrGeoRadius: data.qrGeoRadius,
     queueDisplayEnabled: data.queueDisplayEnabled,
     queueDisplayMode: data.queueDisplayMode,
-  } : null);
+  } : null;
+  const form = draft ?? baseline;
+  const dirty = draft !== null && (update.isPending || JSON.stringify(draft) !== JSON.stringify(baseline));
+  useEditorDirty(permissions.canEditSection('settings') && dirty, saveSettings);
 
   if (isLoading) return <WorkspacePending />;
 
@@ -99,42 +102,20 @@ function CafeSettings() {
     );
   }
 
-  const toSettingsInput = (source: Form): SettingsInput => ({
-    waiterOrderPermissions: source.waiterOrderPermissions,
-    cafeName: source.cafeName,
-    taxesEnabled: source.taxesEnabled,
-    roundOrderTotal: source.roundOrderTotal,
-    address: source.address,
-    phone: source.phone,
-    phone2: source.phone2,
-    instagram: source.instagram,
-    website: source.website,
-    payQr: source.payQr,
-    payCash: source.payCash,
-    payCard: source.payCard,
-    deliveryEnabled: source.deliveryEnabled,
-    qrGeoEnabled: source.qrGeoEnabled,
-    qrGeoLat: source.qrGeoLat,
-    qrGeoLng: source.qrGeoLng,
-    qrGeoRadius: source.qrGeoRadius,
-    queueDisplayEnabled: source.queueDisplayEnabled,
-    queueDisplayMode: source.queueDisplayMode,
-  });
-
-  const saveSettings = async ({ silent = false }: { silent?: boolean } = {}) => {
-    if (!form) return false;
+  async function saveSettings() {
+    if (!permissions.canEditSection('settings') || !dirty || !draft || update.isPending) return false;
+    const version = draftVersion.current;
     try {
-      await update.mutateAsync(toSettingsInput(form));
-      setDraft((current) => current === form ? null : current);
-      if (!silent) {
-        push({ message: t('Настройки сохранены'), type: 'success', at: new Date().toISOString() });
-      }
+      await update.mutateAsync(draft);
+      if (draftVersion.current !== version) return false;
+      setDraft((current) => current === draft ? null : current);
+      push({ message: t('Настройки сохранены'), type: 'success', at: new Date().toISOString() });
       return true;
     } catch (err) {
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
       return false;
     }
-  };
+  }
 
   const set = <K extends keyof Form>(k: K, v: Form[K], _mode: 'debounce' | 'instant' = 'debounce') => {
     if (!form) return;
@@ -147,6 +128,7 @@ function CafeSettings() {
       });
       return;
     }
+    draftVersion.current++;
     setDraft(next);
   };
 
@@ -163,6 +145,7 @@ function CafeSettings() {
       (pos) => {
         const lat = Number(pos.coords.latitude.toFixed(6));
         const lng = Number(pos.coords.longitude.toFixed(6));
+        draftVersion.current++;
         setDraft((current) => ({ ...(current ?? form), qrGeoLat: lat, qrGeoLng: lng }));
         push({ message: t('Координаты получены. Нажмите «Сохранить изменения»'), type: 'success', at: new Date().toISOString() });
       },

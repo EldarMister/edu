@@ -1,13 +1,16 @@
-import { useCallback, useLayoutEffect, useRef } from 'react';
-import { useBeforeUnload, useBlocker, type BlockerFunction } from 'react-router-dom';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useBeforeUnload, useBlocker, type Blocker, type BlockerFunction } from 'react-router-dom';
+import { useT } from '@/lib/i18n';
 import { Modal } from './Modal';
 
-const editors = new Set<{ dirty: boolean }>();
-const hasChanges = () => [...editors].some((editor) => editor.dirty);
+type SaveEditor = () => Promise<boolean>;
+const editors = new Set<{ dirty: boolean; save?: SaveEditor }>();
+const dirtyEditors = () => [...editors].filter((editor) => editor.dirty);
+const hasChanges = () => dirtyEditors().length > 0;
 
 /** Register a form independently of where its header/footer are rendered. */
-export function useEditorDirty(dirty: boolean) {
-  const entry = useRef({ dirty: false, saved: false });
+export function useEditorDirty(dirty: boolean, save?: SaveEditor) {
+  const entry = useRef<{ dirty: boolean; saved: boolean; save?: SaveEditor }>({ dirty: false, saved: false });
   useLayoutEffect(() => {
     const current = entry.current;
     editors.add(current);
@@ -16,6 +19,7 @@ export function useEditorDirty(dirty: boolean) {
   useLayoutEffect(() => {
     if (!dirty) entry.current.saved = false;
     entry.current.dirty = dirty && !entry.current.saved;
+    entry.current.save = save;
   });
   const markSaved = useCallback(() => { entry.current.saved = true; entry.current.dirty = false; }, []);
   return { markSaved };
@@ -32,11 +36,57 @@ export function EditorNavigationGuard() {
   useBeforeUnload(useCallback((event) => {
     if (hasChanges()) { event.preventDefault(); event.returnValue = ''; }
   }, []));
-  if (blocker.state !== 'blocked') return null;
-  return <Modal open title="Есть несохранённые изменения" onClose={() => blocker.reset()} footer={
-    <div className="grid grid-cols-2 gap-2">
-      <button type="button" autoFocus className="btn-secondary btn-lg h-auto min-h-12 rounded px-2 py-2" onClick={() => blocker.reset()}>Продолжить редактирование</button>
-      <button type="button" className="btn-danger btn-lg h-auto min-h-12 rounded px-2 py-2 font-semibold" onClick={() => blocker.proceed()}>Выйти без сохранения</button>
+  return blocker.state === 'blocked' ? <UnsavedChangesDialog blocker={blocker} /> : null;
+}
+
+function UnsavedChangesDialog({ blocker }: { blocker: Extract<Blocker, { state: 'blocked' }> }) {
+  const t = useT();
+  const [canSave] = useState(() => {
+    const pending = dirtyEditors();
+    return pending.length > 0 && pending.every((editor) => editor.save !== undefined);
+  });
+  const [saving, setSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
+
+  async function saveAndLeave() {
+    if (saving) return;
+    setSaving(true);
+    setSaveFailed(false);
+    try {
+      for (const editor of dirtyEditors()) {
+        if (editor.dirty && (!editor.save || !await editor.save())) {
+          setSaveFailed(true);
+          return;
+        }
+      }
+      blocker.proceed();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function stay() {
+    if (!saving) blocker.reset();
+  }
+
+  return <Modal open title={t('Есть несохранённые изменения')} onClose={stay} footer={
+    <div className={canSave ? 'space-y-2' : ''}>
+      {canSave && <button type="button" disabled={saving} className="btn-primary btn-lg w-full"
+        onClick={() => void saveAndLeave()}>
+        {saving ? t('Сохраняем…') : t('Сохранить и выйти')}
+      </button>}
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" autoFocus disabled={saving} className="btn-secondary btn-lg h-auto min-h-12 px-2 py-2" onClick={stay}>
+          {t('Продолжить редактирование')}
+        </button>
+        <button type="button" disabled={saving} className="btn-danger btn-lg h-auto min-h-12 px-2 py-2" onClick={() => blocker.proceed()}>
+          {t('Выйти без сохранения')}
+        </button>
+      </div>
     </div>
-  }><p className="text-sm text-text-secondary">Изменения в документе ещё не сохранены. Остаться на странице и закончить работу?</p></Modal>;
+  }>
+    <p className="text-sm text-text-secondary">{canSave ? t('Сохранить изменения перед переходом на другую страницу?')
+        : 'Изменения в документе ещё не сохранены. Остаться на странице и закончить работу?'}</p>
+    {saveFailed && <p role="alert" className="mt-2 text-sm text-danger">{t('Не удалось сохранить изменения. Проверьте поля и повторите попытку.')}</p>}
+  </Modal>;
 }

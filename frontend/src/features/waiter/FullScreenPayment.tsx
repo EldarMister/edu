@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
 import { IconCard, IconCash, IconQr } from '@/features/admin/components/icons';
@@ -14,6 +14,16 @@ const METHODS = [
   { value: 'qr', label: 'QR-код', Icon: IconQr },
 ] as const;
 const EMPTY = { cash: '', card: '', qr: '' };
+
+function animatePaymentButton(event: MouseEvent<HTMLDivElement>) {
+  const button = event.target instanceof Element ? event.target.closest('button.payment-button') : null;
+  if (!button || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  button.animate(
+    [{ scale: '1' }, { scale: '0.96', offset: 0.3 }, { scale: '1' }],
+    { duration: 160, easing: 'ease-out' },
+  );
+}
 
 export function FullScreenPayment({ order, enabled, qrConfigured, allItemsServed, open, busy, error,
   splitOpen, onClose, onSplit, onConfirm }: {
@@ -110,7 +120,7 @@ export function FullScreenPayment({ order, enabled, qrConfigured, allItemsServed
   return (
     <Modal open={open} fullScreen title={`${t('Оплата заказа')} · ${displayOrderNumber(order.orderNumber)}`}
       onClose={() => { if (!busy && !splitOpen) onClose(); }}>
-      <div className="grid min-h-full grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      <div className="grid min-h-full grid-cols-[minmax(0,2fr)_minmax(0,3fr)]" onClickCapture={animatePaymentButton}>
         <aside className="flex justify-center border-r border-border bg-background p-4 min-[900px]:p-7 xl:p-10">
           <PaymentKeypad disabled={busy || !selected} onKey={pressKey} onExact={exactAmount}
             cashPresets={cashPresets} cashPresetsDisabled={busy || (selected !== undefined && selected !== 'cash')}
@@ -173,11 +183,11 @@ export function FullScreenPayment({ order, enabled, qrConfigured, allItemsServed
           </div>
 
           <div className="mt-auto flex flex-wrap items-center gap-3 border-t border-border pt-4">
-            <button ref={splitTrigger} type="button" className="btn-secondary btn-lg grow whitespace-nowrap"
+            <button ref={splitTrigger} type="button" className="payment-button btn-secondary btn-lg grow whitespace-nowrap"
               disabled={busy || !allItemsServed || !methods.length || total <= 0} onClick={onSplit}>
               {t('Разделить счёт')}
             </button>
-            <button type="button" className="btn-primary btn-lg grow font-semibold"
+            <button type="button" className="payment-button btn-primary btn-lg grow font-semibold"
               disabled={!canConfirm} onClick={() => { if (canConfirm) onConfirm(amounts, selected); }}>
               {busy ? <Spinner /> : t('Принять оплату')}
             </button>

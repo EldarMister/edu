@@ -40,7 +40,7 @@ export function ReceiptSettingsPage() {
   const [readingLogo, setReadingLogo] = useState(false);
   const logoInput = useRef<HTMLInputElement>(null);
   const dirty = Object.keys(changes).length > 0;
-  const { markSaved } = useEditorDirty(editable && dirty);
+  const { markSaved } = useEditorDirty(editable && dirty, save);
   const busy = update.isPending || readingLogo;
 
   if (isPending) return <WorkspacePending />;
@@ -84,15 +84,17 @@ export function ReceiptSettingsPage() {
   }
 
   async function save() {
-    if (!editable || busy || !dirty) return;
+    if (!editable || busy || !dirty) return false;
     setSaveError('');
     try {
       await update.mutateAsync(changes);
       markSaved();
       setChanges({});
       push({ message: t('Настройки сохранены'), type: 'success', at: new Date().toISOString() });
+      return true;
     } catch (failure) {
       setSaveError(apiError(failure));
+      return false;
     }
   }
 
