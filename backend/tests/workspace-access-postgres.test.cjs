@@ -137,9 +137,14 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
         body: { tableId: table.id, items: [{ dishId: fixture.dish.id, quantity: 1 }], idempotencyKey: randomUUID() } });
       assert.equal(order.waiterId, fixture.owner.id);
       await request(`/orders/${order.id}/served`, { token, workspace: 'terminal', method: 'POST', status: 201 });
-      const paid = await request('/payments', { token, workspace: 'terminal', method: 'POST', status: 201, body: { orderId: order.id, method: 'cash' } });
-      assert.equal(paid.status, 'paid');
       const terminal = { token, workspace: 'terminal', method: 'POST' };
+      const cashBody = { orderId: order.id, method: 'cash' };
+      await request('/payments', { ...terminal, status: 409,
+        body: { ...cashBody, expectedAmount: Number(order.finalAmount) + 1 } });
+      assert.equal(await db.payment.count({ where: { orderId: order.id } }), 0);
+      const paid = await request('/payments', { ...terminal, status: 201,
+        body: { ...cashBody, expectedAmount: Number(order.finalAmount) } });
+      assert.equal(paid.status, 'paid');
       const admin = { token, workspace: 'admin', method: 'PATCH' };
       const nextTable = await newTable();
       const mixed = await request('/orders', { ...terminal, status: 201,

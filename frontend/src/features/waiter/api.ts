@@ -286,6 +286,35 @@ export const useToPayment = () => useOrderAction((id) => `/orders/${id}/to-payme
 export const useResolvePartialRejection = () => useOrderAction((id) => `/orders/${id}/resolve-partial-rejection`);
 export const useClaimQrOrder = () => useOrderAction((id) => `/orders/${id}/claim-qr`);
 
+export type SplitOrderLine = { itemId: string; quantity: number };
+type SplitOrderResult = { sourceOrder: Order; newOrder: Order };
+
+export function useSplitOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId, ...payload }: {
+      orderId: string;
+      items: SplitOrderLine[];
+      expectedUpdatedAt: string;
+      idempotencyKey: string;
+    }) => (await api.post<SplitOrderResult>(`/orders/${orderId}/split`, payload)).data,
+    retry: networkRetry,
+    onSuccess: async ({ sourceOrder, newOrder }) => {
+      const key = ['orders', 'active'];
+      await qc.cancelQueries({ queryKey: key });
+      qc.setQueryData<Order[]>(key, (current = []) => [
+        ...current.filter((order) => order.id !== sourceOrder.id && order.id !== newOrder.id),
+        ...[sourceOrder, newOrder].filter((order) => order.status !== 'paid' && order.status !== 'cancelled'),
+      ]);
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['orders'] });
+      void qc.invalidateQueries({ queryKey: ['halls'] });
+      void qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
+    },
+  });
+}
+
 export function useRemoveRejectedItem() {
   const qc = useQueryClient();
   return useMutation({
@@ -359,6 +388,7 @@ export function usePay() {
     mutationFn: async (payload: {
       orderId: string;
       method: PaymentMethod;
+      expectedAmount: number;
       cashAmount?: number;
       qrAmount?: number;
       cardAmount?: number;

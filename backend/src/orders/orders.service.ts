@@ -11,7 +11,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   OrderItemStatus,
   OrderStatus,
@@ -38,6 +38,8 @@ import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { IngredientStockService } from '../warehouse/ingredient-stock.service';
 import { assertAssignableStation, lockStationRouting, PrepStation } from '../kitchen/preparation-stations';
 import { CreateOrderDto, CreateOrderItemDto, CreateTerminalDeliveryDto, OrderCompositionDto } from './dto/create-order.dto';
+import type { SplitOrderDto } from './dto/split-order.dto';
+import { moveSplitCheckItems } from './split-check-items';
 import { orderInclude, unitPricing, round2 } from './order.helpers';
 import { resolveMenuSelections, selectionIdentity } from '../warehouse/menu-modifiers';
 import { lockOrder } from './order-lock';
@@ -384,7 +386,7 @@ export class OrdersService {
         return Object.assign(createdOrder, { ingredientStockWarnings });
       });
     } catch (err) {
-      if (this.isUniqueConstraintError(err)) {
+      if (this.isUniqueConstraintError(err) || this.isTableFamilyConstraintError(err)) {
         const existing = await this.findTerminalOrderByKey(dto.idempotencyKey, waiterId, target);
         if (existing) return existing;
         if (!delivery && await this.activeOrderForTable(table.id)) {
@@ -489,7 +491,7 @@ export class OrdersService {
         });
         break;
       } catch (err) {
-        if (!this.isUniqueConstraintError(err)) throw err;
+        if (!this.isUniqueConstraintError(err) && !this.isTableFamilyConstraintError(err)) throw err;
         if (params.idempotencyKey) {
           const existing = await this.prisma.order.findUnique({
             where: { idempotencyKey: params.idempotencyKey },
@@ -497,6 +499,7 @@ export class OrdersService {
           });
           if (existing) return existing;
         }
+        if (this.isTableFamilyConstraintError(err)) throw new ConflictException('У этого стола уже есть активный заказ');
         if (attempt === 2) throw err;
       }
     }
@@ -779,12 +782,12 @@ export class OrdersService {
       if (actor.role === Role.WAITER) for (const item of active) assertWaiterItemOperation(policy, order.status, item, 'cancel');
       for (const item of active) await this.cancelLine(tx, orderId, item, actor, cleanReason);
       await this.recalcOrder(tx, orderId);
-      await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.free } });
+      await this.updateTableAfterClosingCheck(tx, order);
       return tx.order.update({ where: { id: orderId }, data: { status: OrderStatus.cancelled, requiresWaiterDecision: false, closedAt: new Date() }, include: orderInclude });
     });
     Object.assign(updated, { kitchenChange: { itemIds: changedItemIds, kind: 'cancelled', reason: cleanReason } });
     this.emitStatusChanged(updated);
-    this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.free, updated.table.hallId);
+    this.emitTableStatus(updated.table.id, updated.table.number, updated.table.status, updated.table.hallId);
     await this.audit.log({ actor, actionType: AuditAction.ORDER_CANCELLED, entityType: AuditEntity.ORDER, entityId: orderId, orderId, tableId: updated.tableId,
       description: `${actor.name ?? 'Сотрудник'} отменил заказ ${updated.orderNumber}: ${cleanReason}`,
       metadata: { reason: cleanReason, itemIds: updated.items.filter(i => i.status === OrderItemStatus.cancelled).map(i => i.id) } });
@@ -1391,8 +1394,7 @@ export class OrdersService {
       await tx.kitchenEvent.create({
         data: { orderId, type: KitchenEventType.reject_order, reason, comment, createdById: kitchenUserId },
       });
-      // Весь заказ отклонён — стол освобождается.
-      await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.free } });
+      await this.updateTableAfterClosingCheck(tx, order);
       const o = await tx.order.update({
         where: { id: orderId },
         data: { status: OrderStatus.rejected, requiresWaiterDecision: false },
@@ -1402,7 +1404,7 @@ export class OrdersService {
     });
 
     this.emitStatusChanged(updated);
-    this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.free, updated.table.hallId);
+    this.emitTableStatus(updated.table.id, updated.table.number, updated.table.status, updated.table.hallId);
     this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_REJECTED, updated);
     this.notifyWaiter(
       updated.waiterId,
@@ -1449,9 +1451,8 @@ export class OrdersService {
         where: { orderId, status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
       });
       await this.recalcOrder(tx, orderId);
-      // Все блюда отклонены — стол освобождается.
       if (remaining === 0) {
-        await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.free } });
+        await this.updateTableAfterClosingCheck(tx, order);
       }
       const o = await tx.order.update({
         where: { id: orderId },
@@ -1466,7 +1467,7 @@ export class OrdersService {
 
     this.emitStatusChanged(updated);
     if (updated.status === OrderStatus.rejected) {
-      this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.free, updated.table.hallId);
+      this.emitTableStatus(updated.table.id, updated.table.number, updated.table.status, updated.table.hallId);
     }
     this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_REJECTED, updated);
     const partialText =
@@ -1942,7 +1943,7 @@ export class OrdersService {
       });
       await this.recalcOrder(tx, orderId);
       if (remaining === 0) {
-        await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.free } });
+        await this.updateTableAfterClosingCheck(tx, order);
       }
       return tx.order.update({
         where: { id: orderId },
@@ -1956,7 +1957,7 @@ export class OrdersService {
 
     this.emitStatusChanged(updated);
     if (updated.status === OrderStatus.rejected) {
-      this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.free, updated.table.hallId);
+      this.emitTableStatus(updated.table.id, updated.table.number, updated.table.status, updated.table.hallId);
     }
     this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_REJECTED, updated);
     const componentNames = components.map((c) =>
@@ -2163,14 +2164,15 @@ export class OrdersService {
       await this.recalcOrder(tx, orderId);
       const status = await this.statusFromActiveItems(tx, orderId);
       const tableStatus = this.tableStatusForOrderStatus(status);
-      if (tableStatus) await tx.table.update({ where: { id: order.tableId }, data: { status: tableStatus } });
+      if (tableStatus === TableStatus.free) await this.updateTableAfterClosingCheck(tx, order);
+      else if (tableStatus) await tx.table.update({ where: { id: order.tableId }, data: { status: tableStatus } });
       return tx.order.update({ where: { id: orderId }, data: { status, requiresWaiterDecision: await this.pendingRejectedDecisions(tx, orderId) > 0,
         ...(status === OrderStatus.cancelled ? { closedAt: new Date() } : {}) }, include: orderInclude });
     });
     Object.assign(updated, { kitchenChange: { itemIds: [itemId], kind: 'cancelled', reason: cleanReason } });
     this.emitStatusChanged(updated);
     const tableStatus = this.tableStatusForOrderStatus(updated.status);
-    if (tableStatus) this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
+    if (tableStatus) this.emitTableStatus(updated.table.id, updated.table.number, updated.table.status, updated.table.hallId);
     await this.audit.log({ actor, actionType: AuditAction.ORDER_UPDATED, entityType: AuditEntity.ORDER, entityId: orderId, orderId, tableId: updated.tableId,
       description: `${actor.name ?? 'Сотрудник'} отменил блюдо в заказе ${updated.orderNumber}: ${cleanReason}`, metadata: { itemId, reason: cleanReason } });
     return updated;
@@ -2233,6 +2235,110 @@ export class OrdersService {
     return updated;
   }
 
+  /** Move selected units to a new unpaid check on the same table. */
+  async splitCheck(orderId: string, actor: AuditActor, input: SplitOrderDto) {
+    const key = orderId + ':' + input.idempotencyKey;
+    const request = new Map(input.items.map(({ itemId, quantity }) => [itemId, quantity]));
+    if (!request.size || request.size !== input.items.length) throw new BadRequestException('Укажите каждую позицию один раз');
+    const signature = createHash('sha256').update(JSON.stringify([
+      input.expectedUpdatedAt, Array.from(request).sort(([a], [b]) => a.localeCompare(b)),
+    ])).digest('hex');
+    const result = await this.prisma.$transaction(async (tx) => {
+      await lockOrder(tx, orderId);
+      const source = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
+      if (!this.canWaiterAccessOrder(source, actor.id)) throw new ForbiddenException('Это не ваш заказ');
+      const existing = await tx.orderAction.findUnique({ where: { type_idempotencyKey: { type: 'split_check', idempotencyKey: key } } });
+      if (existing) {
+        const details = existing.details as { signature?: string; newOrderId?: string } | null;
+        if (existing.userId !== actor.id || details?.signature !== signature || !details.newOrderId) {
+          throw new ConflictException('Ключ операции уже использован');
+        }
+        const newOrder = await tx.order.findUniqueOrThrow({ where: { id: details.newOrderId }, include: orderInclude });
+        if (!this.canWaiterAccessOrder(newOrder, actor.id)) throw new ForbiddenException('Это не ваш заказ');
+        return { sourceOrder: source, newOrder, changed: false };
+      }
+      this.assertOrderEditable(source, actor);
+      this.ensureNoPendingWaiterDecision(source);
+      if (source.source === 'delivery') throw new BadRequestException('Разделение по позициям доступно для заказов в зале');
+      if (source.status !== OrderStatus.served && source.status !== OrderStatus.waiting_payment) {
+        throw new BadRequestException('Разделить чек можно после подачи всех позиций');
+      }
+      this.ensureAllActiveItemsServed(source);
+      if (source.updatedAt.getTime() !== Date.parse(input.expectedUpdatedAt)) {
+        throw new ConflictException('Чек изменился. Обновите его перед разделением');
+      }
+      const active = await tx.orderItem.findMany({
+        where: { orderId, status: OrderItemStatus.served },
+        include: { setComponents: true },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+      const selected = active.flatMap((item) => request.has(item.id) ? [{ item, quantity: request.get(item.id)! }] : []);
+      if (selected.length !== request.size || selected.some(({ item, quantity }) => !Number.isSafeInteger(quantity) || quantity < 1 || quantity > item.quantity)) {
+        throw new BadRequestException('Выбранные позиции или их количество изменились');
+      }
+      if (selected.length === active.length && selected.every(({ item, quantity }) => quantity === item.quantity)) {
+        throw new BadRequestException('Оставьте хотя бы одну позицию в исходном чеке');
+      }
+      const newOrder = await tx.order.create({ data: {
+        cafeId: source.cafeId, tableId: source.tableId, waiterId: source.waiterId, waiterShiftId: source.waiterShiftId,
+        splitFromOrderId: source.splitFromOrderId ?? source.id,
+        businessDate: source.businessDate, orderNumber: await this.nextOrderNumber(tx, source.businessDate),
+        status: source.status, source: 'pos', comment: source.comment,
+        roundOrderTotal: source.roundOrderTotal,
+      } });
+      await moveSplitCheckItems(tx, source.id, newOrder.id, selected);
+      await this.recalcOrder(tx, source.id);
+      await this.recalcOrder(tx, newOrder.id);
+      if (source.roundOrderTotal) await this.preserveSplitTotal(tx, source, newOrder.id);
+      await tx.order.update({ where: { id: source.id }, data: {
+        updatedAt: new Date(Math.max(Date.now(), source.updatedAt.getTime() + 1)),
+      } });
+      await tx.orderAction.create({ data: {
+        orderId: source.id, type: 'split_check', idempotencyKey: key, userId: actor.id,
+        details: { signature, newOrderId: newOrder.id },
+      } });
+      return {
+        sourceOrder: await tx.order.findUniqueOrThrow({ where: { id: source.id }, include: orderInclude }),
+        newOrder: await tx.order.findUniqueOrThrow({ where: { id: newOrder.id }, include: orderInclude }),
+        changed: true,
+      };
+    }, { timeout: 20000 });
+    const { sourceOrder, newOrder, changed } = result;
+    if (changed) {
+      this.emitStatusChanged(sourceOrder);
+      this.emitStatusChanged(newOrder);
+      await this.audit.log({
+        actor, actionType: AuditAction.ORDER_UPDATED, entityType: AuditEntity.ORDER,
+        entityId: sourceOrder.id, orderId: sourceOrder.id, tableId: sourceOrder.tableId,
+        description: `Из чека ${sourceOrder.orderNumber} выделен чек ${newOrder.orderNumber}`,
+        metadata: { newOrderId: newOrder.id, items: input.items.map(({ itemId, quantity }) => ({ itemId, quantity })) },
+      });
+    }
+    return { sourceOrder, newOrder };
+  }
+
+  /** Independent rounding may discount the same som twice. Retain the original
+   * total by sharing its rounding adjustment between both checks in that case. */
+  private async preserveSplitTotal(tx: Prisma.TransactionClient, original: {
+    id: string; finalAmount: Prisma.Decimal; roundingAmount: Prisma.Decimal;
+  }, childId: string) {
+    const [remaining, child] = await Promise.all([original.id, childId].map((id) => tx.order.findUniqueOrThrow({
+      where: { id }, select: { id: true, finalAmount: true, roundingAmount: true },
+    })));
+    if (remaining.finalAmount.add(child.finalAmount).eq(original.finalAmount)) return;
+    const remainingSubtotal = remaining.finalAmount.add(remaining.roundingAmount);
+    const childSubtotal = child.finalAmount.add(child.roundingAmount);
+    const rounding = remainingSubtotal.add(childSubtotal).sub(original.finalAmount);
+    if (rounding.lt(0)) throw new ConflictException('Итог чека не совпадает с суммой его позиций');
+    const childRounding = rounding.mul(childSubtotal).div(remainingSubtotal.add(childSubtotal)).toDecimalPlaces(2);
+    for (const { id, subtotal, adjustment } of [
+      { id: remaining.id, subtotal: remainingSubtotal, adjustment: rounding.sub(childRounding) },
+      { id: child.id, subtotal: childSubtotal, adjustment: childRounding },
+    ]) {
+      await tx.order.update({ where: { id }, data: { roundingAmount: adjustment, finalAmount: subtotal.sub(adjustment) } });
+    }
+  }
+
   /** Перевод к оплате. */
   async toPayment(orderId: string, waiterId: string) {
     await this.assertOwnedOrder(orderId, waiterId);
@@ -2272,12 +2378,16 @@ export class OrdersService {
     method: PaymentMethod,
     parts?: { method: PaymentMethod; amount: number }[],
     source: PaymentSource = PaymentSource.normal,
+    expectedAmount?: number,
   ) {
     const cashierId = actor.id;
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
     if (!order) throw new NotFoundException('Заказ не найден');
     if (actor.role === Role.WAITER && !this.canWaiterAccessOrder(order, actor.id)) {
       throw new ForbiddenException('Это не ваш заказ');
+    }
+    if (expectedAmount !== undefined && !order.finalAmount.eq(expectedAmount)) {
+      throw new ConflictException('Сумма заказа изменилась. Обновите заказ перед оплатой');
     }
     if (order.status === OrderStatus.paid) {
       return order;
@@ -2309,10 +2419,10 @@ export class OrdersService {
     const updated = await this.prisma.$transaction(async (tx) => {
       await lockOrder(tx, orderId);
       const latest = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
+      if (Number(latest.finalAmount) !== final) throw new ConflictException('Сумма заказа изменилась. Обновите заказ перед оплатой');
       if (latest.status === OrderStatus.paid) return latest;
       this.assertOrderEditable(latest, actor);
       this.ensureAllActiveItemsServed(latest);
-      if (Number(latest.finalAmount) !== final) throw new ConflictException('Сумма заказа изменилась. Обновите заказ перед оплатой');
       const existingPayment = await tx.payment.findFirst({ where: { orderId, status: PaymentStatus.paid } });
       if (!existingPayment) {
         await tx.payment.createMany({
@@ -2335,8 +2445,7 @@ export class OrdersService {
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       });
       await recordOrderTaxes(tx, orderId, latest.cafeId, taxItems, closedAt, roundedPayable);
-      // Стол освобождается.
-      await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.free } });
+      await this.updateTableAfterClosingCheck(tx, latest);
       return tx.order.update({
         where: { id: orderId },
         data: {
@@ -2350,7 +2459,7 @@ export class OrdersService {
     });
 
     this.emitStatusChanged(updated);
-    this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.free, updated.table.hallId);
+    this.emitTableStatus(updated.table.id, updated.table.number, updated.table.status, updated.table.hallId);
 
     const methodLabel = PAYMENT_METHOD_LABEL[method] ?? method;
     await this.audit.log({
@@ -2410,7 +2519,7 @@ export class OrdersService {
     const targetIsActive = ACTIVE_ORDER_STATUSES.includes(targetStatus);
     if (targetIsActive) {
       const activeOrder = await this.activeOrderForTable(order.tableId);
-      if (activeOrder && activeOrder.id !== order.id) {
+      if (activeOrder && (activeOrder.splitFromOrderId ?? activeOrder.id) !== (order.splitFromOrderId ?? order.id)) {
         throw new BadRequestException('На этом столе уже есть активный заказ');
       }
     }
@@ -2472,7 +2581,8 @@ export class OrdersService {
         });
       }
 
-      await tx.table.update({ where: { id: order.tableId }, data: { status: targetTableStatus } });
+      if (toClosedCancelled) await this.updateTableAfterClosingCheck(tx, latest);
+      else await tx.table.update({ where: { id: order.tableId }, data: { status: targetTableStatus } });
       return tx.order.update({
         where: { id: orderId },
         data: {
@@ -2487,7 +2597,7 @@ export class OrdersService {
     });
 
     this.emitStatusChanged(updated);
-    this.emitTableStatus(updated.table.id, updated.table.number, targetTableStatus, updated.table.hallId);
+    this.emitTableStatus(updated.table.id, updated.table.number, updated.table.status, updated.table.hallId);
 
     await this.audit.log({
       actor,
@@ -3007,12 +3117,47 @@ export class OrdersService {
 
   // ---------- Действия со столом (закрыть / перенести / передать) ----------
 
+  private async lockTables(tx: Prisma.TransactionClient, cafeId: string | null, ids: string[]) {
+    await tx.$queryRaw`
+      SELECT id FROM tables WHERE id IN (${Prisma.join(ids)}) AND cafe_id IS NOT DISTINCT FROM ${cafeId}
+      ORDER BY id FOR UPDATE
+    `;
+  }
+
+  private async updateTableAfterClosingCheck(
+    tx: Prisma.TransactionClient, order: { id: string; tableId: string; cafeId: string | null; source: string },
+  ) {
+    // Two sibling checks can be paid concurrently. Take the table lock before
+    // reading the other checks so the second payment observes the first one.
+    await this.lockTables(tx, order.cafeId, [order.tableId]);
+    const other = order.source === 'delivery' ? null : await tx.order.findFirst({
+      where: { tableId: order.tableId, id: { not: order.id }, source: { not: 'delivery' }, status: { in: ACTIVE_ORDER_STATUSES } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: { status: true },
+    });
+    const status = other ? this.tableStatusForOrderStatus(other.status) ?? TableStatus.sent_to_kitchen : TableStatus.free;
+    await tx.table.update({ where: { id: order.tableId }, data: { status } });
+  }
+
   /** Активный заказ стола (если есть). */
-  private activeOrderForTable(tableId: string) {
-    return this.prisma.order.findFirst({
+  private activeOrderForTable(tableId: string, tx: Prisma.TransactionClient = this.prisma) {
+    return tx.order.findFirst({
       where: { tableId, source: { not: 'delivery' }, status: { in: ACTIVE_ORDER_STATUSES } },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  private async lockTableChecks(tx: Prisma.TransactionClient, tableId: string) {
+    const find = () => tx.order.findMany({
+      where: { tableId, source: { not: 'delivery' }, status: { in: ACTIVE_ORDER_STATUSES } }, orderBy: { id: 'asc' },
+    });
+    const orders = await find();
+    for (const { id } of orders) await lockOrder(tx, id);
+    const current = await find();
+    if (current.length !== orders.length || current.some(({ id }, index) => id !== orders[index].id)) {
+      throw new ConflictException('Чеки стола изменились. Обновите стол и повторите действие');
+    }
+    return current;
   }
 
   /** Закрыть стол — сделать его свободным. Нельзя при незавершённом заказе. */
@@ -3071,36 +3216,36 @@ export class OrdersService {
     if (!target) throw new NotFoundException('Целевой стол не найден');
     if (!target.isActive) throw new BadRequestException('Целевой стол отключён');
 
-    const targetBusy = await this.activeOrderForTable(targetTableId);
-    if (targetBusy) throw new BadRequestException('Целевой стол занят');
-
-    const order = await this.activeOrderForTable(sourceTableId);
-    if (!order) throw new BadRequestException('У стола нет активного заказа для переноса');
-    if (actor.role === Role.WAITER && !this.canWaiterAccessOrder(order, actor.id)) {
-      throw new ForbiddenException('Это не ваш заказ');
-    }
-
-    const updated = await this.prisma.$transaction(async (tx) => {
-      await tx.table.update({ where: { id: targetTableId }, data: { status: source.status } });
+    const moved = await this.prisma.$transaction(async (tx) => {
+      const orders = await this.lockTableChecks(tx, sourceTableId);
+      if (!orders.length) throw new BadRequestException('У стола нет активного заказа для переноса');
+      if (actor.role === Role.WAITER && orders.some((order) => !this.canWaiterAccessOrder(order, actor.id))) {
+        throw new ForbiddenException('Это не ваш заказ');
+      }
+      await this.lockTables(tx, source.cafeId, [sourceTableId, targetTableId]);
+      if (await this.activeOrderForTable(targetTableId, tx)) throw new BadRequestException('Целевой стол занят');
+      const from = await tx.table.findUniqueOrThrow({ where: { id: sourceTableId }, select: { status: true } });
+      await tx.table.update({ where: { id: targetTableId }, data: { status: from.status } });
       await tx.table.update({ where: { id: sourceTableId }, data: { status: TableStatus.free } });
-      return tx.order.update({
-        where: { id: order.id },
-        data: { tableId: targetTableId },
-        include: orderInclude,
+      const ids = orders.map(({ id }) => id);
+      await tx.order.updateMany({ where: { id: { in: ids } }, data: { tableId: targetTableId } });
+      return tx.order.findMany({
+        where: { id: { in: ids } }, include: orderInclude, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       });
     });
+    const [updated] = moved;
 
     this.emitTableStatus(source.id, source.number, TableStatus.free, source.hallId);
-    this.emitTableStatus(target.id, target.number, source.status, target.hallId);
-    this.emitStatusChanged(updated);
+    this.emitTableStatus(target.id, target.number, updated.table.status, target.hallId);
+    for (const order of moved) this.emitStatusChanged(order);
     // Уведомление о переносе показывается локально на фронте у инициатора.
 
     await this.audit.log({
       actor,
       actionType: AuditAction.TABLE_MOVED,
       entityType: AuditEntity.ORDER,
-      entityId: order.id,
-      orderId: order.id,
+      entityId: updated.id,
+      orderId: updated.id,
       tableId: targetTableId,
       description: `${actor.name ?? 'Сотрудник'} перенёс заказ ${updated.orderNumber} со стола ${source.number} на стол ${target.number}`,
       oldValue: { tableId: sourceTableId, tableNumber: source.number },
@@ -3109,6 +3254,7 @@ export class OrdersService {
         fromTableNumber: source.number,
         toTableNumber: target.number,
         orderNumber: updated.orderNumber,
+        orderIds: moved.map(({ id }) => id),
         amount: Number(updated.finalAmount),
       },
     });
@@ -3118,30 +3264,28 @@ export class OrdersService {
   /** Передать стол (активный заказ) другому официанту. */
   async transferTable(sourceTableId: string, waiterId: string, actor: AuditActor) {
     const byUserId = actor.id;
-    const order = await this.activeOrderForTable(sourceTableId);
-    if (!order) throw new BadRequestException('У стола нет активного заказа для передачи');
-    if (actor.role === Role.WAITER && !this.canWaiterAccessOrder(order, actor.id)) {
-      throw new ForbiddenException('Это не ваш заказ');
-    }
-
     const waiter = await this.prisma.user.findUnique({ where: { id: waiterId }, include: { position: true } });
     if (!waiter || !resolveUserPermissions(waiter).terminalAccess || !waiter.isActive) {
       throw new BadRequestException('Официант недоступен');
     }
-    if (waiter.id === order.waiterId) {
-      throw new BadRequestException('Стол уже закреплён за этим официантом');
-    }
-
-    const fromWaiterId = order.waiterId;
-
-    const updated = await this.prisma.$transaction(async (db) => {
+    const { assigned, previousWaiters } = await this.prisma.$transaction(async (db) => {
+      const orders = await this.lockTableChecks(db, sourceTableId);
+      if (!orders.length) throw new BadRequestException('У стола нет активного заказа для передачи');
+      if (actor.role === Role.WAITER && orders.some((order) => !this.canWaiterAccessOrder(order, actor.id))) {
+        throw new ForbiddenException('Это не ваш заказ');
+      }
+      if (orders.every((order) => waiterId === order.waiterId)) {
+        throw new BadRequestException('Стол уже закреплён за этим официантом');
+      }
       const shift = await this.shifts.shiftForTerminalOrder(waiterId, db);
-      return db.order.update({
-        where: { id: order.id },
-        data: { waiterId, waiterShiftId: shift?.id ?? null },
-        include: orderInclude,
-      });
+      const ids = orders.map(({ id }) => id);
+      await db.order.updateMany({ where: { id: { in: ids } }, data: { waiterId, waiterShiftId: shift?.id ?? null } });
+      const assigned = await db.order.findMany({ where: { id: { in: ids } }, include: orderInclude,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+      return { assigned, previousWaiters: new Map(orders.map(({ id, waiterId }) => [id, waiterId])) };
     });
+    const [updated] = assigned;
+    const fromWaiterId = previousWaiters.get(updated.id);
 
     // История передачи (ТЗ §18 — audit log). fromWaiterId не null: метод доступен только
     // владельцу заказа-официанту (QR-заказ без официанта сюда не дойдёт).
@@ -3152,26 +3296,28 @@ export class OrdersService {
       actor,
       actionType: AuditAction.TABLE_TRANSFERRED,
       entityType: AuditEntity.ORDER,
-      entityId: order.id,
-      orderId: order.id,
+      entityId: updated.id,
+      orderId: updated.id,
       tableId: sourceTableId,
       description: `${actor.name ?? 'Сотрудник'} передал стол ${updated.table.number} официанту ${waiter.name}`,
-      oldValue: { waiterId: fromWaiterId, waiterName: fromWaiter?.name },
+      oldValue: { waiterId: fromWaiterId ?? null, waiterName: fromWaiter?.name },
       newValue: { waiterId, waiterName: waiter.name },
       metadata: {
         tableNumber: updated.table.number,
         orderNumber: updated.orderNumber,
+        orderIds: assigned.map(({ id }) => id),
         fromWaiterName: fromWaiter?.name,
         toWaiterName: waiter.name,
       },
     });
 
-    this.emitStatusChanged(updated);
+    for (const order of assigned) this.emitStatusChanged(order);
     this.notifyWaiter(waiterId, `Вам передан стол №${updated.table.number}`, updated, 'info');
     // Бывшему официанту — только если передачу сделал не он сам (напр. админ).
-    if (fromWaiterId !== waiterId && fromWaiterId !== byUserId) {
+    for (const previousId of new Set(previousWaiters.values())) {
+      if (!previousId || previousId === waiterId || previousId === byUserId) continue;
       this.notifyWaiter(
-        fromWaiterId,
+        previousId,
         `Стол №${updated.table.number} передан официанту ${waiter.name}`,
         updated,
         'info',
@@ -3201,6 +3347,10 @@ export class OrdersService {
 
   private isUniqueConstraintError(err: unknown) {
     return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+  }
+
+  private isTableFamilyConstraintError(err: unknown) {
+    return err instanceof Error && err.message.includes('orders_one_active_family_per_table');
   }
 
   private emitStatusChanged(

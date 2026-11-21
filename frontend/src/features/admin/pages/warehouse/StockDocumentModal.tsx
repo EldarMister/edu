@@ -12,6 +12,7 @@ import { InventoryTimingFields } from './InventoryTimingFields';
 import { StockOperationDateField } from './StockOperationDateField';
 import { inventoryTimingFor, inventoryTimingValue, inventoryTimingError, inventoryTimeDisplay } from './inventory-time';
 import { InventoryFlowDetails } from './InventoryFlowDetails';
+import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
@@ -31,6 +32,7 @@ import {
   type WriteoffReason,
 } from './stock-documents-api';
 import {
+  documentDisplayStatus,
   documentLabel,
   documentStatus,
   formatDocumentDate,
@@ -55,7 +57,10 @@ export function StockDocumentModal({
   const locations = useWarehouseLocations();
   const { can } = usePermissions();
   const document = query.data;
+  const reopened = document && documentDisplayStatus(document) === 'reopened';
+  const canApproveInventory = can('actions.warehouseApprove');
   const canEditDocument = !!document && can(`actions.${document.kind === 'inventory' ? 'warehouseCount' : document.kind === 'writeoff' ? 'warehouseWriteoff' : document.kind === 'transfer' ? 'warehouseTransfer' : 'warehouseReceive'}`);
+  const canEditDraft = canEditDocument && (!reopened || canApproveInventory);
   const documentWarehouse =
     locations.data?.locations.find((l) => l.id === document?.warehouseId) ?? warehouse;
   const canApprove =
@@ -63,7 +68,7 @@ export function StockDocumentModal({
       ? can('actions.warehouseTransfer')
       : document?.kind === 'supplier_return'
         ? can('actions.warehouseReceive') && can('actions.warehouseCosts')
-        : isOwner;
+        : document?.kind === 'inventory' ? canApproveInventory : isOwner;
   return (
     <EditorPage
       open
@@ -86,7 +91,7 @@ export function StockDocumentModal({
           <WorkspaceHeaderActions><button type="button" className="btn-ghost btn-md text-primary"
             onClick={() => onCopyTransfer(document.id)}>Копировать</button></WorkspaceHeaderActions>
         )}
-      {document?.status === 'draft' && canEditDocument && (
+      {document?.status === 'draft' && canEditDraft && (
         <StockDocumentDraft
           document={document}
           warehouse={documentWarehouse}
@@ -95,8 +100,9 @@ export function StockDocumentModal({
           onClose={onClose}
         />
       )}
-      {document && (document.status !== 'draft' || !canEditDocument) && (
-        <StockDocumentReview document={document} warehouse={documentWarehouse} isOwner={canApprove} />
+      {document && (document.status !== 'draft' || !canEditDraft) && (
+        <StockDocumentReview document={document} warehouse={documentWarehouse} canApprove={canApprove}
+          canReopenInventory={canEditDocument && canApproveInventory} onReload={() => { void query.refetch(); }} />
       )}
     </EditorPage>
   );
@@ -130,6 +136,7 @@ function StockDocumentDraft({
 }) {
   const { update } = useStockDocumentMutations();
   const { can } = usePermissions();
+  const reopened = documentDisplayStatus(document) === 'reopened';
   const editable = can(
     `actions.${document.kind === 'inventory' ? 'warehouseCount' : document.kind === 'writeoff' ? 'warehouseWriteoff' : document.kind === 'transfer' ? 'warehouseTransfer' : 'warehouseReceive'}`,
   );
@@ -148,7 +155,8 @@ function StockDocumentDraft({
   const [savedCountedAt, setSavedCountedAt] = useState(document.countedAt ?? null);
   const [timingApplied, setTimingApplied] = useState(false);
   const [parametersOpen, setParametersOpen] = useState(false);
-  const countedAt = document.kind === 'inventory' ? inventoryTimingValue(timing, savedCountedAt) : undefined;
+  const trackedCountedAt = reopened ? savedCountedAt : inventoryTimingValue(timing, savedCountedAt);
+  const countedAt = document.kind === 'inventory' ? trackedCountedAt : undefined;
   const [savedEffectiveAt, setSavedEffectiveAt] = useState(document.effectiveAt ?? null);
   const effectiveAt = supportsStockDate ? inventoryTimingValue(timing, savedEffectiveAt) : undefined;
   const historical = supportsStockDate && timing.mode === 'past';
@@ -156,7 +164,7 @@ function StockDocumentDraft({
   const historicalScopeChanged = document.kind === 'inventory' && !!countedAt && items.some(({ item }) => !document.items.some((saved) => saved.ingredientId === item.ingredientId));
   const previewNeedsSave = timingChanged || historicalScopeChanged;
   useEffect(() => { if (previewNeedsSave) setParametersOpen(true); }, [previewNeedsSave]);
-  const timingReady = (document.kind !== 'inventory' && !supportsStockDate) ||
+  const timingReady = reopened || (document.kind !== 'inventory' && !supportsStockDate) ||
     (timingValid && !inventoryTimingError(timing) && (supportsStockDate ? effectiveAt !== undefined : countedAt !== undefined));
   const [savedValues, setSavedValues] = useState(() => draftValues(draftItems(document), document.reason ?? '', document.note ?? '', document.countedAt));
   const { markSaved } = useEditorDirty(draftValues(items, reason, note, countedAt) !== savedValues ||
@@ -261,7 +269,7 @@ function StockDocumentDraft({
         reason: needsReason ? reason || null : undefined,
         note: note.trim(),
         recount: action === 'recount' || undefined,
-        countedAt: document.kind === 'inventory' ? countedAt : undefined,
+        countedAt: document.kind === 'inventory' && !reopened ? countedAt : undefined,
         effectiveAt,
         sourceLines: document.kind === 'writeoff' ? writeoffLines.input() : undefined,
         items: document.kind === 'writeoff' ? undefined : items.map(({ item, input }) => ({
@@ -275,11 +283,11 @@ function StockDocumentDraft({
       markSaved();
       if (action === 'submit') {
         push({
-          message: canApprove ? 'Документ проведён' : 'Документ отправлен на утверждение',
+          message: reopened ? 'Инвентаризация проведена повторно' : canApprove ? 'Документ проведён' : 'Документ отправлен на утверждение',
           at: new Date().toISOString(),
         });
       } else {
-        push({ message: timingChanged ? 'Время проверки применено. Фактические количества сохранены.' : historicalScopeChanged ? 'Учётные остатки пересчитаны. Фактические количества сохранены.' : 'Черновик сохранён', at: new Date().toISOString() });
+        push({ message: reopened ? 'Изменения сохранены' : timingChanged ? 'Время проверки применено. Фактические количества сохранены.' : historicalScopeChanged ? 'Учётные остатки пересчитаны. Фактические количества сохранены.' : 'Черновик сохранён', at: new Date().toISOString() });
       }
       if (action === 'submit' || writeoff) onClose();
     } catch (err) {
@@ -313,10 +321,12 @@ function StockDocumentDraft({
     const preview = document.items.find((row) => row.ingredientId === item.ingredientId) ?? item;
     const quantity = input.trim() === '' ? null : Number(input);
     const validQuantity = quantity !== null && Number.isFinite(quantity) && quantity >= 0 ? quantity : null;
-    const expected = timingChanged || (historicalScopeChanged && !document.items.some((saved) => saved.ingredientId === item.ingredientId)) ? null : preview.expected ?? ingredient?.stock ?? null;
+    const fallbackStock = reopened ? null : ingredient?.stock ?? null;
+    const fallbackCost = reopened ? null : ingredient?.avgCost ?? null;
+    const expected = timingChanged || (historicalScopeChanged && !document.items.some((saved) => saved.ingredientId === item.ingredientId)) ? null : preview.expected ?? fallbackStock;
     const unitCost = writeoff
       ? deficient.has(item.ingredientId) ? null : documentUnitCost(item.unit, ingredient?.avgCostBase)
-      : preview.costKnown === false ? null : (preview.unitCost ?? ingredient?.avgCost ?? null);
+      : preview.costKnown === false ? null : preview.unitCost ?? fallbackCost;
     const difference =
       validQuantity === null
         ? null
@@ -368,7 +378,7 @@ function StockDocumentDraft({
       </>}
       <div className="poster-document-panel poster-document-fields space-y-3">
         <DocumentHeader document={document} warehouse={warehouse} editingStockDate={supportsStockDate} />
-        {!writeoff && <div className="border-t border-border pt-3">
+        {!writeoff && !reopened && <div className="border-t border-border pt-3">
           <button type="button" className="text-sm text-primary" aria-expanded={parametersOpen}
             onClick={() => setParametersOpen((open) => !open)}>Изменить параметры</button>
           {parametersOpen && <div className="mt-4 space-y-3">
@@ -428,7 +438,7 @@ function StockDocumentDraft({
         showCost={!historical}
         inventoryId={writeoff || timingChanged ? undefined : document.id}
         previewPending={!writeoff && previewNeedsSave}
-        addProducts={!full ? {
+        addProducts={!full && !reopened ? {
           options: available,
           onSelect: addIngredient,
           loading: ingredients.isPending || (document.kind === 'supplier_return' && sourcePurchase.isPending),
@@ -442,7 +452,7 @@ function StockDocumentDraft({
             setItems((current) =>
               current.map((row) => (row.item.ingredientId === ingredientId ? { ...row, input } : row)),
             ),
-          onRemove: full
+          onRemove: full || reopened
             ? undefined
             : (ingredientId) =>
                 setItems((current) => current.filter(({ item }) => item.ingredientId !== ingredientId)),
@@ -490,11 +500,13 @@ function StockDocumentDraft({
           ) : null}
         </div>
       )}
-      <p className="text-sm text-text-muted">{writeoff
+      <p className="text-sm text-text-muted">{reopened
+        ? 'Исправленные количества применятся при повторном проведении. Дата проверки, склад и список позиций зафиксированы.'
+        : writeoff
         ? canApprove ? '«Сохранить» проведёт документ и изменит остатки. Черновик сохраняет данные без изменения остатков.' : 'Черновик не меняет остатки. Они изменятся после утверждения документа.'
         : savedCountedAt ? `Черновик не меняет остатки. Учётные и фактические количества сравниваются на ${inventoryTimeDisplay(savedCountedAt)} по времени Бишкека. Более поздние движения сохраняются.`
           : 'Черновик не меняет остатки. Учётные остатки показываются на текущий момент; перед проведением проверьте, что введённые фактические количества актуальны.'}</p>
-      {!writeoff && error.includes('проведена другая инвентаризация') && (
+      {!writeoff && !reopened && error.includes('проведена другая инвентаризация') && (
         <details className="poster-advanced">
           <summary className="cursor-pointer text-sm text-primary">Повторный подсчёт после другой инвентаризации</summary>
           <p className="mt-3 max-w-2xl text-sm text-text-secondary">Если эти продукты уже проверили другой инвентаризацией, пересчитайте их и внесите свежие фактические остатки. Затем сохраните повторный подсчёт. Это обновит черновик; остатки изменятся только при завершении.</p>
@@ -523,7 +535,7 @@ function StockDocumentDraft({
           disabled={pending || stale || !sourceReady || !timingReady || previewNeedsSave || (document.kind === 'writeoff' && (writeoffLines.calculating || !writeoffLines.options.isSuccess))}
           onClick={() => void save('save')}
         >
-          Сохранить черновик
+          {reopened ? 'Сохранить изменения' : 'Сохранить черновик'}
         </button>
       </DocumentFooter>
     </div>
@@ -533,18 +545,25 @@ function StockDocumentDraft({
 function StockDocumentReview({
   document,
   warehouse,
-  isOwner,
+  canApprove,
+  canReopenInventory,
+  onReload,
 }: {
   document: StockDocumentDetails;
   warehouse: WarehouseLocation;
-  isOwner: boolean;
+  canApprove: boolean;
+  canReopenInventory: boolean;
+  onReload: () => void;
 }) {
   const { transition } = useStockDocumentMutations();
   const { can } = usePermissions();
   const [error, setError] = useState('');
+  const [confirmReopen, setConfirmReopen] = useState(false);
   const push = useNotifications((state) => state.push);
   const pending = transition.isPending;
   const needsApproval = document.status === 'submitted';
+  const canReopenPosted = document.kind === 'inventory' && document.status === 'posted' && canReopenInventory;
+  const canReverse = document.status === 'posted' && can('actions.warehouseApprove');
   const pendingHistorical = !!document.effectiveAt && document.status === 'submitted';
   const showAvailability = needsApproval && document.kind !== 'inventory' && !pendingHistorical;
   const approvalCatalog = useIngredients('', warehouse.id, showAvailability);
@@ -554,23 +573,29 @@ function StockDocumentReview({
   const reason = WRITEOFF_REASONS.find(({ value }) => value === document.reason)?.label;
 
   async function change(action: 'approve' | 'reopen' | 'reverse') {
+    if (pending) return;
     const note =
       action === 'reverse' ? window.prompt('Укажите причину отмены проведения')?.trim() : undefined;
     if (action === 'reverse' && !note) return;
     setError('');
     try {
       await transition.mutateAsync({ id: document.id, action, revision: document.revision, note });
+      setConfirmReopen(false);
       push({
         message:
           action === 'approve'
             ? 'Документ проведён'
             : action === 'reverse'
               ? 'Проведение отменено'
-              : 'Документ возвращён в черновик',
+              : canReopenPosted ? 'Инвентаризация открыта для редактирования' : 'Документ возвращён в черновик',
         at: new Date().toISOString(),
       });
     } catch (err) {
       setError(apiError(err));
+      if (canReopenPosted && action === 'reopen') {
+        setConfirmReopen(false);
+        onReload();
+      }
     }
   }
 
@@ -606,7 +631,7 @@ function StockDocumentReview({
         inventoryId={document.kind === 'inventory' ? document.id : undefined}
       />}
       {showAvailability && <DocumentStockWarnings shortages={shortages} isTransfer={document.kind === 'transfer'} />}
-      {document.reversalBlockedReason && <p role="status" className="rounded-lg bg-background p-3 text-sm text-text-secondary">{document.reversalBlockedReason}</p>}
+      {canReverse && document.reversalBlockedReason && <p role="status" className="rounded-lg bg-background p-3 text-sm text-text-secondary">Отмена проведения недоступна. {document.reversalBlockedReason}</p>}
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}
@@ -621,9 +646,9 @@ function StockDocumentReview({
           Печать
         </button>
       </WorkspaceHeaderActions>
-      {((needsApproval && isOwner) || (document.status === 'posted' && can('actions.warehouseApprove'))) && (
+      {((needsApproval && canApprove) || canReverse || canReopenPosted) && (
         <DocumentFooter>
-          {needsApproval && isOwner && (
+          {needsApproval && canApprove && (
             <>
               <button
                 type="button"
@@ -643,7 +668,13 @@ function StockDocumentReview({
               </button>}
             </>
           )}
-          {document.status === 'posted' && can('actions.warehouseApprove') && (
+          {canReopenPosted && (
+            <button type="button" className="btn-primary btn-md" disabled={pending}
+              onClick={() => { setError(''); setConfirmReopen(true); }}>
+              Открыть период и редактировать
+            </button>
+          )}
+          {canReverse && (
             <button
               type="button"
               className="btn-secondary btn-md"
@@ -655,6 +686,13 @@ function StockDocumentReview({
           )}
         </DocumentFooter>
       )}
+      {confirmReopen && canReopenPosted && <Modal open title="Открыть период инвентаризации" onClose={() => { if (!pending) setConfirmReopen(false); }}
+        footer={<div className="flex flex-wrap justify-end gap-2">
+          <button type="button" className="btn-secondary btn-md" disabled={pending} onClick={() => setConfirmReopen(false)}>Отмена</button>
+          <button type="button" className="btn-primary btn-md" disabled={pending} onClick={() => void change('reopen')}>Открыть период</button>
+        </div>}>
+        <p className="text-sm text-text-secondary">Уточните фактические остатки на исходную дату. Исправленные количества применятся при повторном проведении.</p>
+      </Modal>}
     </div>
   );
 }
@@ -672,6 +710,7 @@ function DocumentHeader({
   const sourcePurchase = usePurchase(document.kind === 'supplier_return' ? document.sourcePurchaseId ?? null : null);
   const destination = locations.data?.locations.find((l) => l.id === document.destinationWarehouseId);
   const inventory = document.kind === 'inventory';
+  const status = documentDisplayStatus(document);
   const operationDate = inventory ? document.createdAt : (document.effectiveAt ?? document.postedAt ?? document.createdAt);
   const operator = !inventory && document.postedAt ? document.postedByName : document.createdByName;
   return (
@@ -693,12 +732,12 @@ function DocumentHeader({
       {inventory && (
         <Meta label="Тип инвентаризации">{document.mode === 'full' ? 'Полная' : 'Частичная'}</Meta>
       )}
-      {inventory && document.status !== 'draft' && <Meta label="Остатки проверены на">
+      {inventory && status !== 'draft' && <Meta label="Остатки проверены на">
         {document.countedAt || document.postedAt ? `${inventoryTimeDisplay(document.countedAt ?? document.postedAt!)} · Бишкек` : 'Момент проведения'}
       </Meta>}
       <Meta label="Статус">
-        <span className="document-status" data-status={document.status}>
-          {documentStatus(document.status)}
+        <span className="document-status" data-status={status}>
+          {documentStatus(status)}
         </span>
       </Meta>
       {document.postedAt && (inventory || document.effectiveAt) ? (

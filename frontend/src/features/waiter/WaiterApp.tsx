@@ -68,6 +68,7 @@ import { CashShiftBanner } from '@/features/settings/CashShiftControls';
 import { WorkspaceLinks } from '@/components/WorkspaceLinks';
 import { useRadioVisibility } from '@/features/ptt/radioVisibility';
 import { PaymentModal } from './PaymentModal';
+import { canSplitOrder, SplitOrderModal } from './SplitOrderModal';
 import { ReceiptPrintSheet } from './ReceiptPrintSheet';
 import { ShiftSummaryModal } from './ShiftSummaryModal';
 import { ShiftRequiredScreen } from './ShiftRequiredScreen';
@@ -90,6 +91,7 @@ type DesktopTab = 'tables' | 'orders' | 'profile';
 const CANCEL_UNDO_SECONDS = 6;
 type PendingCancel = { order: Order; reason: string; deadline: number };
 type ReplacementTarget = { order: Order; item: Order['items'][number] };
+const checkFamily = (order: Order) => order.splitFromOrderId ?? order.id;
 const EMPTY_DELIVERY_DETAILS: DeliveryDetails = { customerName: '', customerPhone: '', deliveryAddress: '' };
 const WIDE_TERMINAL = '(min-width: 768px)';
 
@@ -152,7 +154,9 @@ export function WaiterApp() {
 
   const [tab, setTab] = useState<Tab>('tables');
   const [viewingOrderId, setViewingOrderId] = useState<string | null>(null);
+  const [selectedCheckId, setSelectedCheckId] = useState<string | null>(null);
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
+  const [splitOrder, setSplitOrder] = useState<Order | null>(null);
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [administratorCallTarget, setAdministratorCallTarget] = useState<Order | null>(null);
@@ -232,13 +236,16 @@ export function WaiterApp() {
   const selectedHallName = selectedTable
     ? halls.find((h) => h.id === selectedTable.hallId)?.name
     : undefined;
-  const activeOrder = selectedTableId ? ordersByTable.get(selectedTableId)
+  const selectedCheck = selectedCheckId ? orders.find((order) => order.id === selectedCheckId && order.table.id === selectedTableId) : undefined;
+  const activeOrder = selectedTableId ? selectedCheck ?? ordersByTable.get(selectedTableId)
     : deliveryCart?.orderId ? orders.find((order) => order.id === deliveryCart.orderId) : undefined;
   const canUseMenu = !!(selectedTable || (newDelivery ? canCreateDelivery : deliveryCart && activeOrder));
   const editing = !!editingOrderId && !!activeOrder && activeOrder.id === editingOrderId;
   const roundCart = activeOrder ? editing && activeOrder.roundOrderTotal : settings.data?.roundOrderTotal;
   const viewingOrder = viewingOrderId ? orders.find((o) => o.id === viewingOrderId) : undefined;
   const displayedOrder = viewingOrder ?? activeOrder;
+  const relatedChecks = displayedOrder?.source === 'delivery' || !displayedOrder ? []
+    : orders.filter((order) => checkFamily(order) === checkFamily(displayedOrder));
   const showCart = !viewingOrder && (cart.lines.length > 0 || !activeOrder);
   const activeNavTab: Tab = viewingOrder && tab === 'cart' ? 'orders' : tab;
   // Направления позиций корзины. Только «Без отправки» → готовить нечего,
@@ -378,6 +385,7 @@ export function WaiterApp() {
   }
 
   function selectOrderCart(order: Order) {
+    setSelectedCheckId(order.id);
     if (order.source === 'delivery') cart.select({ kind: 'delivery', orderId: order.id });
     else cart.selectTable(order.table.id);
   }
@@ -669,6 +677,28 @@ export function WaiterApp() {
     }
   }
 
+  function showSplitOrder(order: Order) {
+    setPaymentOrder(null);
+    setSplitOrder(order);
+    setViewingOrderId(order.id);
+  }
+
+  function showNewCheck(source: Order, next: Order) {
+    setSplitOrder(null);
+    selectOrderCart(source);
+    setViewingOrderId(source.id);
+    setTab('cart');
+    push({ message: `${t('Создан чек')} ${displayOrderNumber(next.orderNumber)}`, type: 'success', at: new Date().toISOString() });
+  }
+
+  function finishPayment(order: Order) {
+    setPaymentOrder(null);
+    const remaining = orders.find((candidate) => candidate.id !== order.id && checkFamily(candidate) === checkFamily(order));
+    if (remaining) selectOrderCart(remaining);
+    setViewingOrderId(remaining?.id ?? null);
+    setTab(remaining ? 'cart' : 'tables');
+  }
+
   // «Счёт»: создаём запрос на печать предварительного расчёта (тот же поток
   // подтверждения администратором, что и обычный чек) и открываем лист ожидания.
   async function requestPreliminaryReceipt(order: Order) {
@@ -929,6 +959,7 @@ export function WaiterApp() {
         <EmptyHint text={t('Выберите стол, чтобы открыть заказ')} />
       ) : displayedOrder && !showCart ? (
         <OrderPanel
+          key={displayedOrder.id}
           order={displayedOrder}
           submitting={actionPending}
           preliminaryPending={createPrintRequest.isPending || printingPreliminary}
@@ -946,6 +977,9 @@ export function WaiterApp() {
           onInsufficientPermissions={() => openAdministratorPrompt(displayedOrder)}
           onCancelOrder={() => cancelAfterPartialRejection(displayedOrder)}
           onEdit={() => startEditOrder(displayedOrder)}
+          onSplitOrder={canTakePayment && canWork && canSplitOrder(displayedOrder) ? () => showSplitOrder(displayedOrder) : undefined}
+          relatedChecks={relatedChecks}
+          onSelectCheck={(id) => { setSelectedCheckId(id); setViewingOrderId(id); }}
         />
       ) : (
         <CartPanel
@@ -1033,7 +1067,7 @@ export function WaiterApp() {
       <WorkspaceLinks current="terminal" />
       <OfflineBanner inHeader />
       </div>
-      <CashShiftBanner promptOnEntry={canWork && !showShiftGate && tab !== 'profile' && !paymentOrder} />
+      <CashShiftBanner promptOnEntry={canWork && !showShiftGate && tab !== 'profile' && !paymentOrder && !splitOrder} />
 
       {showPushBanner && (
         <BackgroundPushBanner onEnable={pushNotifications.enable} />
@@ -1195,17 +1229,18 @@ export function WaiterApp() {
 
       {canTakePayment && paymentOrder && (
         <PaymentModal
+          key={paymentOrder.id}
           order={paymentOrder}
           wideLayout={wideLayout}
           open={!!paymentOrder}
           onClose={() => setPaymentOrder(null)}
-          onPaid={() => {
-            setPaymentOrder(null);
-            setViewingOrderId(null);
-            setTab('tables');
-          }}
+          onPaid={() => finishPayment(paymentOrder)}
+          onSplitItems={canWork && canSplitOrder(paymentOrder) ? () => showSplitOrder(paymentOrder) : undefined}
         />
       )}
+
+      {splitOrder && canTakePayment && <SplitOrderModal order={splitOrder}
+        onClose={() => setSplitOrder(null)} onSplit={showNewCheck} />}
 
       <CancelOrderModal
         open={!!cancelTarget}

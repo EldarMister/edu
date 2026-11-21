@@ -11,6 +11,7 @@
 .poster-workspace .poster-inventory-scope-category .poster-inventory-scope-heading { background: rgb(var(--edu-card)); }
 .poster-workspace .poster-inventory-scope-product { padding-left: 36px; border-top: 1px solid light-dark(#f1f5f9, rgb(var(--edu-border))); cursor: pointer; }
 .poster-workspace .poster-inventory-scope-product:hover { background: light-dark(#f7f9fb, var(--edu-raised)); }
+.poster-workspace .document-status[data-status='reopened'] { color: rgb(var(--edu-text)); background: rgb(var(--edu-warning) / .10); }
 .poster-workspace .poster-document--inventory .poster-document-fields > dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px 24px; }
 .poster-workspace .poster-document--inventory .poster-document-fields .poster-document-meta { display: block; min-height: 0; margin-top: 0; }
 .poster-workspace .poster-document--inventory .poster-document-meta dt { margin-bottom: 5px; font-size: 12px; color: rgb(var(--edu-text-muted)); }

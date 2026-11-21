@@ -64,8 +64,9 @@ export async function assertInventoryCutoff(
     where: {
       cafeId: warehouse.cafeId, documentId: { not: documentId }, ingredientId: { in: ingredientIds }, quantity: { not: null },
       document: {
-        warehouseId: warehouse.id, kind: 'inventory', status: { in: ['posted', 'reversed'] },
-        OR: [{ postedAt: { gte: countedAt } }, { reversedAt: { gte: countedAt } }],
+        warehouseId: warehouse.id, kind: 'inventory',
+        AND: [{ OR: [{ status: { in: ['posted', 'reversed'] } }, { reopenedAt: { not: null } }] },
+          { OR: [{ postedAt: { gte: countedAt } }, { reversedAt: { gte: countedAt } }] }],
       },
     },
     select: { name: true },
@@ -115,7 +116,7 @@ export async function inventoryHistoricalPlan(
       JOIN warehouse_documents d ON d.cafe_id = i.cafe_id AND d.id = i.document_id
       WHERE i.cafe_id = ${cafeId} AND d.warehouse_id = ${warehouseId} AND i.ingredient_id IN (${idsSql})
         AND d.kind = 'inventory' AND d.posted_at < ${cutoffUtc}
-        AND (d.status = 'posted' OR (d.status = 'reversed' AND d.reversed_at >= ${cutoffUtc}))
+        AND (d.status = 'posted' OR d.reopened_at IS NOT NULL OR (d.status = 'reversed' AND d.reversed_at >= ${cutoffUtc}))
         AND i.quantity IS NOT NULL
       ORDER BY i.ingredient_id, d.posted_at DESC, d.id DESC
     `,

@@ -40,12 +40,14 @@ export function PaymentModal({
   open,
   onClose,
   onPaid,
+  onSplitItems,
 }: {
   order: Order;
   wideLayout: boolean;
   open: boolean;
   onClose: () => void;
   onPaid: () => void;
+  onSplitItems?: () => void;
 }) {
   const t = useT();
   const pay = usePay();
@@ -133,7 +135,7 @@ export function PaymentModal({
     if (paying.current || paymentAccepted) return;
     paying.current = true;
     try {
-      await pay.mutateAsync(payload);
+      await pay.mutateAsync({ ...payload, expectedAmount: total });
       setPaymentAccepted(true);
       beep('payment');
       push({ message: t('Оплата принята'), type: 'success', at: new Date().toISOString() });
@@ -387,7 +389,7 @@ export function PaymentModal({
     <>
       <FullScreenPayment order={order} enabled={enabled} qrImageUrl={qrImageUrl} allItemsServed={allActiveItemsServed}
         open={open} busy={pay.isPending} error={error} splitOpen={splitOpen} onClose={close}
-        onSplit={() => setSplitOpen(true)} onConfirm={confirmTender} />
+        onSplit={() => setSplitOpen(true)} onSplitItems={onSplitItems} onConfirm={confirmTender} />
       {splitBill}
     </>,
     document.body,
@@ -402,11 +404,11 @@ export function PaymentModal({
       footer={
         <div className="flex items-center gap-2.5">
           <button
-            className="btn-secondary btn-lg min-w-[126px] max-w-[158px] shrink-0 basis-[34%] whitespace-nowrap border-primary bg-white px-3 text-sm font-medium text-primary"
+            className="btn-secondary btn-lg min-w-0 shrink-0 basis-[42%] border-primary bg-white px-2 text-sm font-medium leading-tight text-primary"
             disabled={pay.isPending || !canSplit}
             onClick={() => setSplitOpen(true)}
           >
-            {t('Разделить счёт')}
+            {t('Разделить по сумме')}
           </button>
           <button
             className="btn-primary btn-lg min-w-0 flex-1 font-semibold"
@@ -432,6 +434,8 @@ export function PaymentModal({
             <span className="text-text-secondary">{t('К оплате')}</span>
             <span className="text-2xl font-semibold">{money(order.finalAmount)}</span>
           </div>
+          {onSplitItems && <button type="button" className="mb-3 py-1 text-sm font-medium text-primary hover:underline"
+            disabled={pay.isPending || splitOpen} onClick={onSplitItems}>{t('Разделить по позициям')}</button>}
 
           {!allActiveItemsServed && (
             <div className="mb-4 rounded-xl bg-warning/10 px-3 py-2 text-sm text-warning">

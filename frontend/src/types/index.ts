@@ -263,6 +263,7 @@ export interface Order {
   taxes?: ReceiptTax[];
   stationHistoryAt?: string;
   id: string;
+  splitFromOrderId?: string | null;
   orderNumber: string;
   status: OrderStatus;
   totalAmount: string;
@@ -277,6 +278,7 @@ export interface Order {
   comment: string | null;
   requiresWaiterDecision: boolean;
   createdAt: string;
+  updatedAt?: string;
   table: TableItem & { hall?: { name: string } };
   waiter: { id: string; name: string } | null;
   source?: 'pos' | 'qr' | 'delivery';

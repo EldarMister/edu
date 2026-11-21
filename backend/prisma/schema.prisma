@@ -685,6 +685,7 @@ model Order {
   // Бизнес-день заказа (локальная полночь) — для дневной нумерации и уникальности номера в дне.
   businessDate           DateTime       @default(now()) @map("business_date")
   tableId                String         @map("table_id")
+  splitFromOrderId       String?        @map("split_from_order_id")
   // nullable: заказ из QR-меню создаётся без официанта (source=qr).
   waiterId               String?        @map("waiter_id")
   // Источник заказа: pos — в зале, qr — QR-меню, delivery — доставка с кассы или из интеграции.
@@ -722,6 +723,8 @@ model Order {
   fiscalizedAt        DateTime? @map("fiscalized_at") // момент успешного пробития
 
   table                Table                 @relation(fields: [tableId], references: [id])
+  splitFromOrder       Order?                @relation("SplitOrderFamily", fields: [splitFromOrderId], references: [id], onDelete: NoAction)
+  splitOrders          Order[]               @relation("SplitOrderFamily")
   waiter               User?                 @relation("WaiterOrders", fields: [waiterId], references: [id])
   waiterShift          WaiterShift?          @relation(fields: [waiterShiftId], references: [id])
   items                OrderItem[]
@@ -740,6 +743,7 @@ model Order {
   @@index([status])
   @@index([source, status])
   @@index([tableId])
+  @@index([splitFromOrderId])
   @@index([waiterId])
   @@index([waiterShiftId])
   @@map("orders")
@@ -752,6 +756,7 @@ model OrderAction {
   type           String
   idempotencyKey String   @map("idempotency_key")
   userId         String?  @map("user_id")
+  details        Json?
   createdAt      DateTime @default(now()) @map("created_at")
 
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -1422,6 +1427,7 @@ model WarehouseDocument {
   createdAt       DateTime                @default(now()) @map("created_at")
   submittedAt     DateTime?               @map("submitted_at")
   postedAt        DateTime?               @map("posted_at")
+  reopenedAt      DateTime?               @map("reopened_at")
   countedAt       DateTime?               @map("counted_at")
   effectiveAt     DateTime?               @map("effective_at")
   createdById     String                  @map("created_by_id")
@@ -1447,6 +1453,7 @@ model WarehouseDocumentItem {
   unit                String
   expected            Decimal?          @db.Decimal(14, 3)
   quantity            Decimal?          @db.Decimal(14, 3)
+  reopenedQuantity    Decimal?          @map("reopened_quantity") @db.Decimal(14, 3)
   difference          Decimal?          @db.Decimal(14, 3)
   unitCost            Decimal?          @map("unit_cost") @db.Decimal(20, 8)
   inventoryGeneration Int?              @map("inventory_generation")

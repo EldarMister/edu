@@ -8,6 +8,7 @@ import { displayOrderNumber, money, orderItemDisplayName, orderPlaceLabel } from
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
 import { Modal } from '@/components/Modal';
+import { Select } from '@/components/Select';
 
 const ITEM_CANCEL_REASONS = ['Клиент передумал', 'Ошибка официанта', 'Другое'] as const;
 
@@ -103,6 +104,9 @@ export function OrderPanel({
   onInsufficientPermissions,
   onCancelOrder,
   onEdit,
+  onSplitOrder,
+  relatedChecks,
+  onSelectCheck,
 }: {
   order: Order;
   submitting: boolean;
@@ -122,6 +126,9 @@ export function OrderPanel({
   onCancelOrder: () => void;
   /** Открыть редактирование заказа (переиспользует логику корзины/сетов). */
   onEdit?: () => void;
+  onSplitOrder?: () => void;
+  relatedChecks: Pick<Order, 'id' | 'orderNumber'>[];
+  onSelectCheck: (id: string) => void;
 }) {
   const t = useT();
   const [billItemId, setBillItemId] = useState<string | null>(null);
@@ -186,6 +193,10 @@ export function OrderPanel({
             )}
           </div>
         </div>
+        {relatedChecks.length > 1 && <Select value={order.id} ariaLabel={t('Чеки стола')}
+          className="mt-2 h-9 w-full max-w-52" disabled={submitting}
+          options={relatedChecks.map((check) => ({ value: check.id, label: `${t('Чек')} ${displayOrderNumber(check.orderNumber)}` }))}
+          onChange={onSelectCheck} />}
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           {waitingDecision && (
             <span className="rounded-md bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning">
@@ -343,6 +354,8 @@ export function OrderPanel({
               {t('Этот QR-заказ видят все официанты. Нажмите «Взять заказ», чтобы закрепить его за собой.')}
             </div>
           )}
+          {onSplitOrder && <button type="button" className="mb-2 block py-1 text-sm font-medium text-primary hover:underline"
+            disabled={submitting || preliminaryPending} onClick={onSplitOrder}>{t('Разделить по позициям')}</button>}
           <div className="flex gap-2">
           {onPreliminaryReceipt && [
             'sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready',

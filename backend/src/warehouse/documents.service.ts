@@ -9,7 +9,7 @@ import { inventoryPeriodContext } from './inventory-period-context';
 import { postStockMovement } from './stock-posting';
 import { parseStockEffectiveAt } from './stock-effective-time';
 import { replayHistoricalStock } from './historical-stock-replay';
-import { inventoryReversalBlockedReason } from './closed-inventory-period';
+import { inventoryReversalBlockedReason, nextInventoryPeriods } from './closed-inventory-period';
 import { lockIngredients, lockWarehouseCatalog } from './stock-lock';
 import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, UnitCode, unitLabel } from './units';
 import { getWarehouseBalance, resolveWarehouse, warehouseBalances, warehouseDocumentFilter, WarehouseLocation } from './warehouse-location';
@@ -18,7 +18,7 @@ import { previewWriteoffSources, readWriteoffSnapshot, resolveWriteoffSources, s
 
 type Actor = Pick<AuthUser, 'id' | 'role' | 'name' | 'cafeId'> & Partial<Pick<AuthUser, 'permissions'>>;
 type Document = WarehouseDocument & { items: WarehouseDocumentItem[] };
-type StockLine = Omit<WarehouseDocumentItem, 'documentId' | 'cafeId'>;
+type StockLine = Omit<WarehouseDocumentItem, 'documentId' | 'cafeId' | 'reopenedQuantity'>;
 const documentInclude = { items: { orderBy: [{ name: 'asc' }, { ingredientId: 'asc' }] } } satisfies Prisma.WarehouseDocumentInclude;
 const maxQuantity = new Prisma.Decimal('99999999999.999');
 const zero = new Prisma.Decimal(0);
@@ -172,7 +172,7 @@ export class WarehouseDocumentsService {
             const saved = existing.items.find((item) => item.ingredientId === line.ingredientId);
             return line.quantity === null || !saved?.quantity?.eq(new Prisma.Decimal(toBase(line.quantity, normalizeUnit(saved.unit))).toDecimalPlaces(3));
           }))) throw new ConflictException('Ключ повторного запроса уже использован с другими позициями');
-          return this.finalize(tx, actor, existing.id, dto.finalize);
+          return existing.reopenedAt ? this.preview(tx, existing) : this.finalize(tx, actor, existing.id, dto.finalize);
         }
       }
       const warehouse = await this.warehouse(tx, dto.warehouseId);
@@ -209,6 +209,7 @@ export class WarehouseDocumentsService {
     this.assertActor(actor);
     return this.prisma.$transaction(async (tx) => {
       const document = await this.lockDocument(tx, id, dto.revision, 'draft');
+      if (document.reopenedAt) return this.updateReopenedInventory(tx, actor, document, dto);
       const warehouse = await this.warehouse(tx, document.warehouseId);
       const countedAt = parseInventoryCountedAt(document.kind, dto.countedAt);
       const effectiveAt = documentEffectiveAt(document.kind, dto.effectiveAt);
@@ -250,6 +251,7 @@ export class WarehouseDocumentsService {
 
   private async submitInTransaction(tx: Prisma.TransactionClient, actor: Actor, id: string, revision?: number) {
     const document = await this.lockDocument(tx, id, revision, 'draft');
+    if (document.reopenedAt) throw new BadRequestException('Проведите исправленную инвентаризацию повторно');
     await this.validateSourceSnapshot(tx, document);
     await this.validateLines(tx, document);
     if (document.kind === 'writeoff') {
@@ -269,13 +271,97 @@ export class WarehouseDocumentsService {
   async reopen(actor: Actor, id: string, revision?: number) {
     this.assertActor(actor, true);
     return this.prisma.$transaction(async (tx) => {
-      const document = await this.lockDocument(tx, id, revision, 'submitted');
+      const document = await this.lockDocument(tx, id, revision, ['submitted', 'posted']);
+      if (document.status === 'posted') {
+        if (document.kind !== 'inventory') throw new BadRequestException('Переоткрыть можно только проведённую инвентаризацию');
+        if (actor.role !== Role.OWNER && !actor.permissions?.actions?.warehouseCount) {
+          throw new ForbiddenException('Для редактирования нужен доступ к инвентаризации');
+        }
+        this.assertInventoryRevision(revision);
+        await tx.$queryRaw`SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtext(${'inventory-open:' + document.warehouseId}))) AS reopen_lock`;
+        if (await tx.warehouseDocument.findFirst({
+          where: { cafeId: document.cafeId, warehouseId: document.warehouseId, reopenedAt: { not: null } }, select: { id: true },
+        })) {
+          throw new ConflictException('По этому складу уже открыта инвентаризация на редактирование. Сначала проведите её.');
+        }
+        await lockIngredients(tx, document.items.map(({ ingredientId }) => ingredientId));
+        const posted = await this.load(tx, id);
+        if (!posted.postedAt || !posted.items.length || posted.items.some((item) => !item.quantity || !item.expected)) {
+          throw new ConflictException('В журнале отсутствуют подтверждённые результаты инвентаризации');
+        }
+        const reopenedAt = new Date();
+        await this.auditInventoryEdit(tx, actor, posted, 'WAREHOUSE_INVENTORY_REOPENED', 'Инвентаризация открыта на редактирование');
+        return this.preview(tx, await tx.warehouseDocument.update({ where: { id, cafeId: document.cafeId },
+          data: { status: 'draft', reopenedAt, revision: { increment: 1 } }, include: documentInclude }));
+      }
       return this.preview(tx, await tx.warehouseDocument.update({
         where: { id, cafeId: document.cafeId },
         data: { status: 'draft', revision: { increment: 1 } },
         include: documentInclude,
       }));
     }, transactionOptions);
+  }
+
+  private assertInventoryRevision(revision?: number) {
+    if (revision === undefined) throw new BadRequestException('Обновите данные инвентаризации перед редактированием');
+  }
+
+  private async updateReopenedInventory(tx: Prisma.TransactionClient, actor: Actor, document: Document, dto: UpdateWarehouseDocumentDto) {
+    this.assertInventoryRevision(dto.revision);
+    this.assertActor(actor, true);
+    const cutoffAt = document.countedAt ?? document.postedAt!;
+    if ((dto.countedAt !== undefined && parseInventoryCountedAt('inventory', dto.countedAt)?.getTime() !== cutoffAt.getTime())
+      || dto.recount || dto.effectiveAt != null || dto.sourceLines || dto.reason != null) {
+      throw new BadRequestException('При повторном проведении дата, вид и список позиций инвентаризации остаются прежними');
+    }
+    if (dto.finalize === 'submit') throw new BadRequestException('Проведите исправленную инвентаризацию повторно');
+    await lockIngredients(tx, document.items.map(({ ingredientId }) => ingredientId));
+    if (dto.items) {
+      const values = new Map(dto.items.map(({ ingredientId, quantity }) => [ingredientId, quantity]));
+      if (dto.items.length !== document.items.length || values.size !== document.items.length
+        || document.items.some(({ ingredientId }) => !values.has(ingredientId))) {
+        throw new BadRequestException('Список позиций проведённой инвентаризации нельзя изменить');
+      }
+      for (const item of document.items) {
+        const quantity = values.get(item.ingredientId);
+        if (quantity == null) throw new BadRequestException('Укажите фактический остаток для всех позиций, включая нулевые');
+        await tx.warehouseDocumentItem.update({
+          where: { documentId_ingredientId: { documentId: document.id, ingredientId: item.ingredientId }, cafeId: document.cafeId },
+          data: { reopenedQuantity: this.quantity(quantity, normalizeUnit(item.unit), 'inventory') },
+        });
+      }
+    }
+    if (dto.finalize === 'post') {
+      const corrected = await this.load(tx, document.id);
+      const recordedAt = new Date();
+      await this.auditInventoryEdit(tx, actor, corrected, 'WAREHOUSE_INVENTORY_REPOSTED', 'Инвентаризация проведена повторно');
+      const changed = corrected.items.filter(({ quantity, reopenedQuantity }) => reopenedQuantity && !reopenedQuantity.eq(quantity!));
+      if (changed.length) {
+        await replayHistoricalStock(tx, { cafeId: document.cafeId, effectiveAt: cutoffAt, insertedMovementIds: [],
+          inventoryRepost: { id: document.id, ingredientIds: changed.map(({ ingredientId }) => ingredientId),
+            recordedAt, actorId: actor.id, actorName: actor.name, note: dto.note === undefined ? document.note : dto.note?.trim() || null } });
+      }
+      await tx.warehouseDocumentItem.updateMany({
+        where: { cafeId: document.cafeId, documentId: document.id, reopenedQuantity: { not: null } },
+        data: { reopenedQuantity: null },
+      });
+    }
+    return this.preview(tx, await tx.warehouseDocument.update({
+      where: { id: document.id, cafeId: document.cafeId },
+      data: { revision: { increment: 1 }, note: dto.note === undefined ? undefined : dto.note?.trim() || null,
+        ...(dto.finalize === 'post' ? { status: 'posted', reopenedAt: null, postedById: actor.id, postedByName: actor.name } : {}) },
+      include: documentInclude,
+    }));
+  }
+
+  private auditInventoryEdit(tx: Prisma.TransactionClient, actor: Actor, document: Document, actionType: string, description: string) {
+    return tx.auditLog.create({ data: { cafeId: document.cafeId, userId: actor.id, userName: actor.name, userRole: actor.role,
+      actionType, description, entityType: 'WAREHOUSE_DOCUMENT', entityId: document.id,
+      oldValue: { note: document.note, items: document.items.map(({ ingredientId, expected, quantity, difference, unitCost }) =>
+        ({ ingredientId, expected: expected?.toString() ?? null, quantity: quantity?.toString() ?? null,
+          difference: difference?.toString() ?? null, unitCost: unitCost?.toString() ?? null })) },
+      newValue: { items: document.items.map(({ ingredientId, quantity, reopenedQuantity }) =>
+        ({ ingredientId, quantity: (reopenedQuantity ?? quantity)?.toString() ?? null })) } } });
   }
 
   async approve(actor: Actor, id: string, revision?: number) {
@@ -357,10 +443,14 @@ export class WarehouseDocumentsService {
     return this.prisma.$transaction(async (tx) => {
       const document = await this.lockDocument(tx, id, revision, 'posted');
       await lockIngredients(tx, document.items.map((item) => item.ingredientId));
-      const blocked = await this.reversalBlockedReason(tx, document);
+      const { blocked, historical } = await this.reversalPeriod(tx, document);
       if (blocked) throw new ConflictException(blocked);
       const movements = await tx.stockMovement.findMany({ where: { cafeId: document.cafeId, sourceId: id, sourceType: document.kind }, orderBy: { createdAt: 'desc' } });
-      const transferReversalAt = document.kind === 'transfer' ? new Date() : undefined;
+      const recordedAt = new Date();
+      const historicalAt = historical ? movements[0]?.createdAt : undefined;
+      if (historical && !historicalAt) throw new ConflictException('В журнале отсутствуют исходные проводки');
+      const movementAt = historicalAt ?? (document.kind === 'transfer' ? recordedAt : undefined);
+      const insertedMovementIds: string[] = [];
       // Reverse withdrawals before receipts, so both sides of a transfer remain atomic.
       for (const movement of movements.sort((a, b) => Number(b.change) - Number(a.change))) {
         const warehouse = await this.warehouse(tx, movement.warehouseId!);
@@ -378,16 +468,26 @@ export class WarehouseDocumentsService {
         // A cost-only count has no physical reversal. A newer operation
         // already established the warehouse's own carrying average.
         if (resetCost && movement.change.isZero() && !restoreCost) continue;
-        await postStockMovement(tx, { ingredientId: movement.ingredientId, warehouse, change: movement.change.negated(),
+        const { movement: reversal } = await postStockMovement(tx, { ingredientId: movement.ingredientId, warehouse, change: movement.change.negated(),
           carriedAverage: restoreCost ? movement.costAtMoment : undefined,
           cost: movement.costAtMoment, costKnown: movement.costKnown,
-          valuation: movement.change.isZero() ? 'preserve' : movement.change.lt(0) ? 'average' : 'value',
-          movement: { createdAt: transferReversalAt, type: 'cancel', sourceType: document.kind, sourceId: id, actorId: actor.id, actorName: actor.name,
+          allowNegative: historicalAt ? true : undefined,
+          valuation: historicalAt || movement.change.isZero() ? 'preserve' : movement.change.lt(0) ? 'average' : 'value',
+          movement: { createdAt: movementAt, recordedAt: historicalAt ? recordedAt : undefined,
+            type: 'cancel', sourceType: document.kind, sourceId: id, actorId: actor.id, actorName: actor.name,
             comment: `Сторно: ${note.trim()}`, reason: 'reversal',
             ...(movement.recipeSnapshot ? { recipeSnapshot: movement.recipeSnapshot as Prisma.InputJsonValue } : {}) } });
+        if (historicalAt) insertedMovementIds.push(reversal.id);
+      }
+      if (historicalAt) {
+        await replayHistoricalStock(tx, { cafeId: document.cafeId, effectiveAt: historicalAt, insertedMovementIds });
+        await tx.auditLog.create({ data: { cafeId: document.cafeId, userId: actor.id, userName: actor.name, userRole: actor.role,
+          actionType: 'WAREHOUSE_DOCUMENT_REVERSED_RETROSPECTIVELY', entityType: 'WAREHOUSE_DOCUMENT', entityId: id,
+          description: 'Складской документ сторнирован в открытом инвентаризационном периоде',
+          metadata: { effectiveAt: historicalAt.toISOString(), recordedAt: recordedAt.toISOString(), movementIds: insertedMovementIds } } });
       }
       return this.serialize(await tx.warehouseDocument.update({ where: { id, cafeId: document.cafeId },
-        data: { status: 'reversed', revision: { increment: 1 }, reversedAt: transferReversalAt ?? new Date(), reversedById: actor.id,
+        data: { status: 'reversed', revision: { increment: 1 }, reversedAt: recordedAt, reversedById: actor.id,
           reversedByName: actor.name, reversalReason: note.trim() }, include: documentInclude }));
     }, transactionOptions);
   }
@@ -490,6 +590,11 @@ export class WarehouseDocumentsService {
     const warehouse = await this.warehouse(tx, document.warehouseId);
     const itemIds = new Set(document.items.map((item) => item.ingredientId));
     const catalog = await this.lockCatalog(tx, warehouse, [...itemIds], document.mode === 'full');
+    if (document.kind === 'inventory' && await tx.warehouseDocument.findFirst({
+      where: { cafeId: document.cafeId, warehouseId: warehouse.id, reopenedAt: { not: null } }, select: { id: true },
+    })) {
+      throw new ConflictException('Сначала проведите открытую на редактирование инвентаризацию этого склада');
+    }
     const ingredients = new Map(catalog.map((ingredient) => [ingredient.id, ingredient]));
     for (const item of document.items) {
       const ingredient = ingredients.get(item.ingredientId);
@@ -540,6 +645,16 @@ export class WarehouseDocumentsService {
       return { ...serialize(document), sourceLines: valuation.sourceLines, sourceTotal: valuation.total };
     }
     if (document.kind !== 'inventory') return serialize(document);
+    if (document.reopenedAt) {
+      const warehouse = await this.warehouse(tx, document.warehouseId);
+      const cutoffAt = document.countedAt ?? document.postedAt!;
+      document = { ...document, items: document.items.map((item) => {
+        const quantity = item.reopenedQuantity ?? item.quantity;
+        return { ...item, quantity, difference: quantity && item.expected ? quantity.sub(item.expected) : null };
+      }) };
+      return { ...serialize(document), ...(includeInventoryContext
+        ? { inventoryContext: await inventoryPeriodContext(tx, warehouse, document.id, document.items, cutoffAt) } : {}) };
+    }
     const draft = document.status === 'draft' || document.status === 'submitted';
     const cutoffAt = document.countedAt ?? (draft ? new Date() : document.postedAt);
     if (!draft && (!includeInventoryContext || !cutoffAt)) return serialize(document);
@@ -561,12 +676,22 @@ export class WarehouseDocumentsService {
     return { ...serialized, inventoryContext: await inventoryPeriodContext(tx, warehouse, document.id, document.items, cutoffAt) };
   }
 
-  private reversalBlockedReason(tx: Prisma.TransactionClient, document: Document) {
-    if (document.status !== 'posted' || !document.postedAt) return Promise.resolve(null);
+  private async reversalBlockedReason(tx: Prisma.TransactionClient, document: Document) {
+    return (await this.reversalPeriod(tx, document)).blocked;
+  }
+
+  private async reversalPeriod(tx: Prisma.TransactionClient, document: Document) {
+    if (document.status !== 'posted' || !document.postedAt) return { blocked: null, historical: false };
     const warehouseIds = [document.warehouseId, ...(document.destinationWarehouseId ? [document.destinationWarehouseId] : [])];
-    return inventoryReversalBlockedReason(tx, document.cafeId, document.countedAt ?? document.effectiveAt ?? document.postedAt,
-      warehouseIds.flatMap((warehouseId) => document.items.filter((item) => item.quantity !== null)
-        .map(({ ingredientId }) => ({ warehouseId, ingredientId }))), document.id);
+    const itemIds = document.items.filter((item) => item.quantity !== null).map(({ ingredientId }) => ingredientId);
+    const effectiveAt = document.countedAt ?? document.effectiveAt ?? document.postedAt;
+    const blocked = await inventoryReversalBlockedReason(tx, document.cafeId, effectiveAt,
+      warehouseIds.flatMap((warehouseId) => itemIds.map((ingredientId) => ({ warehouseId, ingredientId }))), document.id);
+    if (blocked && document.kind !== 'inventory') {
+      const periods = await nextInventoryPeriods(tx, document.cafeId, effectiveAt, warehouseIds, itemIds);
+      if (periods.length && periods.every(({ document: count }) => count.reopenedAt)) return { blocked: null, historical: true };
+    }
+    return { blocked, historical: false };
   }
 
   private async validateSourceSnapshot(tx: Prisma.TransactionClient, document: Document) {
@@ -592,7 +717,8 @@ export class WarehouseDocumentsService {
       by: ['ingredientId'],
       where: {
         cafeId: warehouse.cafeId, ingredientId: { in: ingredientIds },
-        document: { warehouseId: warehouse.id, kind: 'inventory', status: { in: ['posted', 'reversed'] } },
+        document: { warehouseId: warehouse.id, kind: 'inventory',
+          OR: [{ status: { in: ['posted', 'reversed'] } }, { reopenedAt: { not: null } }] },
       },
       _count: { _all: true },
     });
@@ -614,11 +740,12 @@ export class WarehouseDocumentsService {
     return document;
   }
 
-  private async lockDocument(tx: Prisma.TransactionClient, id: string, revision: number | undefined, status: WarehouseDocument['status']) {
+  private async lockDocument(tx: Prisma.TransactionClient, id: string, revision: number | undefined, status: WarehouseDocument['status'] | WarehouseDocument['status'][]) {
     const cafeId = this.cafeId();
     await tx.$queryRaw`SELECT id FROM warehouse_documents WHERE id = ${id} AND cafe_id = ${cafeId} FOR UPDATE`;
     const document = await this.load(tx, id);
-    if ((revision !== undefined && document.revision !== revision) || document.status !== status) {
+    const statuses = Array.isArray(status) ? status : [status];
+    if ((revision !== undefined && document.revision !== revision) || !statuses.includes(document.status)) {
       throw new ConflictException('Документ уже изменился. Обновите данные');
     }
     return document;
@@ -661,7 +788,8 @@ export class WarehouseDocumentsService {
       reason: document.reason, note: document.note, status: document.status, revision: document.revision,
       destinationWarehouseId: document.destinationWarehouseId, sourcePurchaseId: document.sourcePurchaseId,
       reversedAt: document.reversedAt, reversedByName: document.reversedByName, reversalReason: document.reversalReason,
-      createdAt: document.createdAt, submittedAt: document.submittedAt, postedAt: document.postedAt, countedAt: document.countedAt, effectiveAt: document.effectiveAt,
+      createdAt: document.createdAt, submittedAt: document.submittedAt, postedAt: document.postedAt, reopenedAt: document.reopenedAt,
+      countedAt: document.countedAt ?? (document.reopenedAt ? document.postedAt : null), effectiveAt: document.effectiveAt,
       createdByName: document.createdByName, submittedByName: document.submittedByName, postedByName: document.postedByName,
       itemsCount,
       varianceValue: variance == null ? null : Number(variance.toDecimalPlaces(2)),

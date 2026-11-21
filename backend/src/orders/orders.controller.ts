@@ -7,6 +7,7 @@ import { EditOrderDto } from './dto/edit-order.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CancelOrderItemDto } from './dto/cancel-order-item.dto';
 import { ReplaceRejectedItemDto } from './dto/resolve-rejected-item.dto';
+import { SplitOrderDto } from './dto/split-order.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
@@ -134,5 +135,12 @@ export class OrdersController {
   @RequirePermission('actions.acceptOrderPayments')
   toPayment(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.orders.toPayment(id, user.id);
+  }
+
+  @Post(':id/split')
+  @Roles(Role.WAITER)
+  @RequirePermission('actions.acceptOrderPayments')
+  split(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: SplitOrderDto) {
+    return this.orders.splitCheck(id, user, dto);
   }
 }

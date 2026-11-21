@@ -1,6 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import { Prisma, type StockMovement } from '@prisma/client';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
+import { nextInventoryPeriods } from './closed-inventory-period';
 import { getWarehouseBalance, setWarehouseBalance, warehouseDocumentFilter, type WarehouseLocation } from './warehouse-location';
 
 type Purchase = { id: string; cafeId: string | null; items: { ingredientId: string }[] };
@@ -51,13 +52,11 @@ export async function purchaseCorrectionEligibility(
       include: { ingredient: { select: { name: true } } }, orderBy: { createdAt: 'asc' },
     });
     // A count with no discrepancy has no movement, but is still an accounting boundary.
-    const counted = await tx.warehouseDocumentItem.findFirst({ where: {
-      cafeId: purchase.cafeId ?? undefined, ingredientId: { in: [...new Set(ingredientIds)] }, quantity: { not: null },
-      document: { kind: 'inventory', status: { in: ['posted', 'reversed'] }, postedAt: { gte: stockPostedAt },
-        warehouseId: { in: warehouses.flatMap((warehouse) => warehouse ? [warehouse.id] : []) } },
-    } });
-    if (counted) correctionBlockedReason = 'После поставки по её продуктам проведена инвентаризация. Период закрыт.';
-    else if (following) {
+    const periods = await nextInventoryPeriods(tx, purchase.cafeId, stockPostedAt,
+      warehouses.flatMap((warehouse) => warehouse ? [warehouse.id] : []), [...new Set(ingredientIds)]);
+    if (periods.some(({ document }) => !document.reopenedAt)) {
+      correctionBlockedReason = 'После поставки по её продуктам проведена инвентаризация. Откройте ближайшую инвентаризацию на редактирование.';
+    } else if (following || periods.length) {
       const anchor = posted.at(-1)!.createdAt;
       const [priorCorrections, sameTime, dependentProduction] = await Promise.all([
         tx.stockMovement.findMany({ where: { cafeId: purchase.cafeId, sourceType: 'purchase', sourceId: purchase.id, type: 'correction' } }),

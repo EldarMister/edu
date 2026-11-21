@@ -6,8 +6,8 @@ import {
   useProductionJournal,
   type WarehouseLocation,
 } from './api';
-import { useStockDocuments, type StockDocument, type StockDocumentKind, type StockDocumentStatus } from './stock-documents-api';
-import { documentStatus, formatDocumentDate, formatVariance, WRITEOFF_REASONS } from './stock-document-format';
+import { useStockDocuments, type StockDocument, type StockDocumentKind } from './stock-documents-api';
+import { documentDisplayStatus, documentStatus, formatDocumentDate, formatVariance, WRITEOFF_REASONS, type StockDocumentDisplayStatus } from './stock-document-format';
 import { useListPeriod } from './ListPeriodFilter';
 import { balanceMoney } from './balance-format';
 import { QueryState } from './WarehouseUi';
@@ -48,10 +48,12 @@ export function DocumentList({
   const canCreate = can(`actions.${kind === 'inventory' ? 'warehouseCount' : kind === 'writeoff' ? 'warehouseWriteoff' : 'warehouseTransfer'}`);
   const inventory = kind === 'inventory';
   const transfer = kind === 'transfer';
+  const statuses: StockDocumentDisplayStatus[] = inventory
+    ? ['draft', 'submitted', 'posted', 'reopened', 'reversed'] : ['draft', 'submitted', 'posted', 'reversed'];
   const operationDate = (document: StockDocument) => document.countedAt ?? document.effectiveAt ?? document.postedAt ?? document.createdAt;
   const names = new Map(locations.map((location) => [location.id, location.name]));
   const rows = (query.data ?? []).filter((document) =>
-    (!status || document.status === status) &&
+    (!status || documentDisplayStatus(document) === status) &&
     (!reason || document.reason === reason) &&
     (!categories.length || document.categories?.some((category) => categories.includes(category))) &&
     period.includes(operationDate(document)),
@@ -83,8 +85,10 @@ export function DocumentList({
     : <span className="text-text-muted">—</span>;
   const dateColumn = inventory ? 1 : 0;
   const countTime = (document: StockDocument) => document.countedAt ?? document.postedAt;
-  const statusCell = (document: StockDocument) =>
-    <span className="document-status" data-status={document.status}>{documentStatus(document.status)}</span>;
+  const statusCell = (document: StockDocument) => {
+    const state = documentDisplayStatus(document);
+    return <span className="document-status" data-status={state}>{documentStatus(state)}</span>;
+  };
   const empty = <div className="poster-list-empty">
     <svg aria-hidden viewBox="0 0 40 40" fill="none"><path d="M11 11h18l6 16v6H5v-6l6-16Z" stroke="currentColor" strokeWidth="2.5"/><path d="M6 26h8l3 5h6l3-5h8" stroke="currentColor" strokeWidth="2.5"/></svg>
     <h3>{filtered ? 'Ничего не найдено' : inventory ? 'Здесь будут инвентаризации' : transfer ? 'Здесь будут перемещения' : 'Здесь будут списания'}</h3>
@@ -109,8 +113,8 @@ export function DocumentList({
           <summary>+ Фильтр{status ? ' · 1' : ''}</summary>
           <div className="poster-list-filter-content">
             <Select ariaLabel="Статус документа" value={status} onChange={(value) => changeFilter('Status', value)} className="w-48"
-              options={[{ value: '', label: 'Все статусы' }, ...['draft', 'submitted', 'posted', 'reversed'].map((value) => ({
-                value, label: documentStatus(value as StockDocumentStatus),
+              options={[{ value: '', label: 'Все статусы' }, ...statuses.map((value) => ({
+                value, label: documentStatus(value),
               }))]} />
           </div>
         </details>
@@ -165,7 +169,7 @@ export function DocumentList({
                     </span>
                   </td>
                 </>}
-                <td><div className="poster-row-actions"><button onClick={() => onOpen(document.id)}>{document.status === 'draft' ? 'Ред.' : 'Открыть'}</button></div></td>
+                <td><div className="poster-row-actions"><button onClick={() => onOpen(document.id)}>{document.status === 'draft' ? 'Ред.' : inventory ? 'Посмотреть' : 'Открыть'}</button></div></td>
               </tr>)}
             </tbody>
           </table>
@@ -176,7 +180,7 @@ export function DocumentList({
             <span className="flex justify-between gap-2"><span className="font-medium text-primary">{inventory ? warehouses(document) : products(document)}</span>{costs && <span className="whitespace-nowrap">{amount(document)}</span>}</span>
             <span className="block text-xs text-text-muted">{inventory && !countTime(document) ? 'При проведении' : formatDocumentListDate(operationDate(document))} · {inventory ? document.mode === 'full' ? 'Полная' : 'Частичная' : warehouses(document)}</span>
             {kind === 'writeoff' && <span className="block text-xs text-text-secondary">Причина: {writeoffReason(document)}</span>}
-            <span className="flex items-center justify-between gap-2 text-xs">{statusCell(document)}<span>{inventory && document.postedAt ? 'Проведена ' + formatDocumentDate(document.postedAt) : inventory ? document.createdByName : employee(document)}</span></span>
+            <span className="flex items-center justify-between gap-2 text-xs">{statusCell(document)}<span>{inventory && document.postedAt && !document.reopenedAt ? 'Проведена ' + formatDocumentDate(document.postedAt) : inventory ? document.createdByName : employee(document)}</span></span>
           </button>)}
         </div>
         {(!inventory || !!rows.length) && <div className="poster-register-footer flex flex-wrap items-center gap-4">

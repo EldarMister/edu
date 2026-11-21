@@ -26,6 +26,7 @@ export class PaymentsService {
     qrAmount?: number,
     splitPayments?: PaymentPartDto[],
     cardAmount?: number,
+    expectedAmount?: number,
   ) {
     if (splitPayments?.length) {
       const parts = splitPayments.filter((p) => p.amount > 0);
@@ -40,7 +41,7 @@ export class PaymentsService {
       }
       const unique = [...new Set(parts.map((p) => p.method))];
       const orderMethod = unique.length === 1 ? unique[0] : PaymentMethod.mixed;
-      return this.orders.markPaid(orderId, actor, orderMethod, parts, PaymentSource.split);
+      return this.orders.markPaid(orderId, actor, orderMethod, parts, PaymentSource.split, expectedAmount);
     }
 
     if (method === PaymentMethod.mixed) {
@@ -50,10 +51,10 @@ export class PaymentsService {
         { method: PaymentMethod.card, amount: cardAmount ?? 0 },
       ].filter((part) => part.amount > 0);
       for (const part of parts) await this.settings.assertMethodEnabled(part.method);
-      return this.orders.markPaid(orderId, actor, method, parts);
+      return this.orders.markPaid(orderId, actor, method, parts, PaymentSource.normal, expectedAmount);
     }
     await this.settings.assertMethodEnabled(method);
-    return this.orders.markPaid(orderId, actor, method);
+    return this.orders.markPaid(orderId, actor, method, undefined, PaymentSource.normal, expectedAmount);
   }
 
   /** Данные для печати чека (ТЗ §4.8) — реквизиты берём из настроек заведения. */

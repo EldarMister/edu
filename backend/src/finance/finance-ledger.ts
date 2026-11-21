@@ -16,7 +16,8 @@ export async function assertDrawerBalance(
 }
 
 export async function lockFinance(tx: Prisma.TransactionClient, cafeId: string) {
-  await tx.$queryRaw`SELECT id FROM cafes WHERE id = ${cafeId} FOR UPDATE`;
+  // Serialize finance writers without waiting on foreign keys from new payments.
+  await tx.$queryRaw`SELECT id FROM cafes WHERE id = ${cafeId} FOR NO KEY UPDATE`;
 }
 
 export async function ensureFinanceAccounts(tx: Prisma.TransactionClient, cafeId: string) {

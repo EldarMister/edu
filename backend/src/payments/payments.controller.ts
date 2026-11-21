@@ -18,7 +18,7 @@ export class PaymentsController {
     }
     assertAdminSectionAccess(user, 'orders', true);
     assertAdminSectionAccess(user, 'checks', true);
-    return this.payments.pay(user, dto.orderId, dto.method, dto.cashAmount, dto.qrAmount, dto.splitPayments, dto.cardAmount);
+    return this.payments.pay(user, dto.orderId, dto.method, dto.cashAmount, dto.qrAmount, dto.splitPayments, dto.cardAmount, dto.expectedAmount);
   }
 
   @Get(':orderId/receipt')

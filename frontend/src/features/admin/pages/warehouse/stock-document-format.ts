@@ -11,16 +11,23 @@ export const WRITEOFF_REASONS: { value: WriteoffReason; label: string }[] = [
   { value: 'other', label: 'Другое' },
 ];
 
-const STATUS_LABEL: Record<StockDocumentStatus, string> = {
+export type StockDocumentDisplayStatus = StockDocumentStatus | 'reopened';
+
+const STATUS_LABEL: Record<StockDocumentDisplayStatus, string> = {
   draft: 'Черновик',
   submitted: 'На утверждении',
   posted: 'Проведён',
+  reopened: 'Открыта для редактирования',
   reversed: 'Сторнирован',
 };
 
 const DOCUMENT_DATE = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
 
-export function documentStatus(status: StockDocumentStatus) {
+export function documentDisplayStatus(document: StockDocument): StockDocumentDisplayStatus {
+  return document.status === 'draft' && document.reopenedAt ? 'reopened' : document.status;
+}
+
+export function documentStatus(status: StockDocumentDisplayStatus) {
   return STATUS_LABEL[status];
 }
 

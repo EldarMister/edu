@@ -19,6 +19,11 @@ export class PayDto {
   @IsEnum(PaymentMethod)
   method: PaymentMethod;
 
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  expectedAmount?: number;
+
   // Суммы по способам смешанной оплаты (method = mixed).
   @IsOptional()
   @IsNumber()

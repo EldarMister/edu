@@ -35,7 +35,7 @@ export async function inventoryPeriodContext(
       WHERE i.cafe_id = ${cafeId} AND d.warehouse_id = ${warehouseId}
         AND i.ingredient_id IN (${ingredientIds}) AND i.quantity IS NOT NULL
         AND d.kind = 'inventory' AND d.id <> ${documentId} AND d.posted_at < ${cutoffUtc}
-        AND (d.status = 'posted' OR (d.status = 'reversed' AND d.reversed_at > ${cutoffUtc}))
+        AND (d.status = 'posted' OR d.reopened_at IS NOT NULL OR (d.status = 'reversed' AND d.reversed_at > ${cutoffUtc}))
       ORDER BY i.ingredient_id, d.posted_at DESC, d.id DESC
     ), flows AS (
       SELECT m.ingredient_id, m.change,

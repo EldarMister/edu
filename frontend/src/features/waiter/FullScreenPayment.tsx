@@ -27,7 +27,7 @@ function animatePaymentButton(event: MouseEvent<HTMLDivElement>) {
 }
 
 export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, open, busy, error,
-  splitOpen, onClose, onSplit, onConfirm }: {
+  splitOpen, onClose, onSplit, onSplitItems, onConfirm }: {
   order: Order;
   enabled: readonly string[];
   qrImageUrl: string | null;
@@ -38,6 +38,7 @@ export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, 
   splitOpen: boolean;
   onClose: () => void;
   onSplit: () => void;
+  onSplitItems?: () => void;
   onConfirm: (amounts: TenderAmounts, active: TenderMethod) => void;
 }) {
   const t = useT();
@@ -135,6 +136,8 @@ export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, 
               <h3 className="text-lg font-medium text-text-secondary">{t('К оплате')}</h3>
               <p className="text-3xl font-semibold tabular-nums text-text-primary xl:text-4xl">{money(total)}</p>
             </div>
+            {onSplitItems && <button type="button" className="mt-2 py-1 text-sm font-medium text-primary hover:underline"
+              disabled={busy || splitOpen} onClick={onSplitItems}>{t('Разделить по позициям')}</button>}
           </div>
 
           {!allItemsServed && <p role="alert" className="rounded-xl bg-warning/10 px-3 py-2 text-sm text-warning">
@@ -188,7 +191,7 @@ export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, 
           <div className="mt-auto flex flex-wrap items-center gap-3 border-t border-border pt-4">
             <button ref={splitTrigger} type="button" className="payment-button btn-secondary btn-lg grow whitespace-nowrap"
               disabled={busy || !allItemsServed || !canSplit} onClick={onSplit}>
-              {t('Разделить счёт')}
+              {t('Разделить по сумме')}
             </button>
             <button type="button" className="payment-button btn-primary btn-lg grow font-semibold"
               disabled={!canConfirm} onClick={() => { if (canConfirm) onConfirm(amounts, selected); }}>
