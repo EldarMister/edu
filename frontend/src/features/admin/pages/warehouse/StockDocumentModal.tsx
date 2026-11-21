@@ -76,7 +76,7 @@ export function StockDocumentModal({
           <Spinner />
         </div>
       )}
-      {query.isError && (
+      {query.isError && !document && (
         <p role="alert" className="text-sm text-danger">
           {apiError(query.error)}
         </p>
@@ -90,7 +90,7 @@ export function StockDocumentModal({
         <StockDocumentDraft
           document={document}
           warehouse={documentWarehouse}
-          onReload={() => query.refetch()}
+          onReload={() => query.refetch({ throwOnError: true })}
           canApprove={canApprove}
           onClose={onClose}
         />
@@ -162,6 +162,7 @@ function StockDocumentDraft({
   const { markSaved } = useEditorDirty(draftValues(items, reason, note, countedAt) !== savedValues ||
     (supportsStockDate && effectiveAt !== savedEffectiveAt) || !timingReady || (document.kind === 'writeoff' && writeoffLines.dirty));
   const [error, setError] = useState('');
+  const [reloadError, setReloadError] = useState('');
   const [reloading, setReloading] = useState(false);
   const [validationAttempt, setValidationAttempt] = useState(0);
   const [submitAttempt, setSubmitAttempt] = useState(false);
@@ -288,10 +289,13 @@ function StockDocumentDraft({
 
   async function reload() {
     setReloading(true);
-    setError('');
+    setReloadError('');
     try {
       const result = await onReload();
       if (result.data) adopt(result.data);
+      setError('');
+    } catch (err) {
+      setReloadError(apiError(err));
     } finally {
       setReloading(false);
     }
@@ -332,7 +336,7 @@ function StockDocumentDraft({
       input,
       error: validationAttempt ? documentQuantityError(input, !writeoff, remainingFor(item)) : undefined,
       remaining: remainingFor(item),
-      stock: document.kind === 'transfer' && ingredient ? documentQuantityFromBase(ingredient.stockBase, item.unit) : undefined,
+      stock: document.kind === 'transfer' && !historical && ingredient ? documentQuantityFromBase(ingredient.stockBase, item.unit) : undefined,
       category: ingredient?.category ?? undefined,
     };
   });
@@ -450,14 +454,14 @@ function StockDocumentDraft({
           Пустые поля сохраняются как «не посчитано». Для отсутствующего товара укажите 0.
         </p>
       )}
-      {document.kind !== 'writeoff' && !previewNeedsSave && unknownValue && can('actions.warehouseCosts') && <p className="text-xs text-text-muted">Стоимость части посчитанных позиций неизвестна, итоговая сумма пока не определена.</p>}
+      {document.kind !== 'writeoff' && !historical && !previewNeedsSave && unknownValue && can('actions.warehouseCosts') && <p className="text-xs text-text-muted">Стоимость части посчитанных позиций неизвестна, итоговая сумма пока не определена.</p>}
       {submitHint && (writeoff || invalidCount || !items.length) && <p className="poster-document-validation text-sm text-text-muted" role={invalidCount ? 'alert' : 'status'}>{submitHint}</p>}
-      {stale && (
+      {(stale || reloadError) && (
         <div
           role="alert"
           className="flex flex-wrap items-center gap-2 rounded-lg bg-warning/10 p-3 text-sm text-text-primary"
         >
-          Документ изменился. Загрузите актуальную версию перед сохранением.
+          {reloadError || 'Документ изменился. Загрузите актуальную версию перед сохранением.'}
           <button
             type="button"
             className="btn-secondary btn-md"
@@ -468,13 +472,13 @@ function StockDocumentDraft({
           </button>
         </div>
       )}
-      {writeoff && <DocumentStockWarnings shortages={shortages} />}
+      {writeoff && <DocumentStockWarnings shortages={shortages} isTransfer={document.kind === 'transfer'} />}
       {error && (
         <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-danger">
           {error}
           {document.kind === 'writeoff' && error.includes('Состав изменился') ? (
             <button type="button" className="btn-secondary btn-md" disabled={pending} onClick={() => { setError(''); writeoffLines.refresh(); }}>Обновить расчёт</button>
-          ) : writeoff || stale || error.includes('Документ уже изменился') ? (
+          ) : !stale && !reloadError && (writeoff || error.includes('Документ уже изменился')) ? (
           <button
             type="button"
             className="btn-secondary btn-md"
@@ -601,7 +605,7 @@ function StockDocumentReview({
         showCost={!pendingHistorical}
         inventoryId={document.kind === 'inventory' ? document.id : undefined}
       />}
-      {showAvailability && <DocumentStockWarnings shortages={shortages} />}
+      {showAvailability && <DocumentStockWarnings shortages={shortages} isTransfer={document.kind === 'transfer'} />}
       {document.reversalBlockedReason && <p role="status" className="rounded-lg bg-background p-3 text-sm text-text-secondary">{document.reversalBlockedReason}</p>}
       {error && (
         <p role="alert" className="text-sm text-danger">

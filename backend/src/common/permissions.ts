@@ -156,12 +156,11 @@ function pick<T extends string>(keys: readonly T[], src: unknown, fallback: Reco
 }
 
 /**
- * Итоговые права: дефолты по роли, поверх которых накладывается сохранённое
- * (только известные ключи). Владелец всегда получает полный доступ.
+ * Итоговые права: известные ключи накладываются на дефолты роли или текущие
+ * настройки при частичном обновлении. Владелец всегда получает полный доступ.
  */
-export function resolvePermissions(role: Role, stored: unknown): EmployeePermissions {
-  const def = getDefaultPermissionsByRole(role);
-  if (role === Role.OWNER) return def;
+export function resolvePermissions(role: Role, stored: unknown, def = getDefaultPermissionsByRole(role)): EmployeePermissions {
+  if (role === Role.OWNER) return getDefaultPermissionsByRole(role);
   if (!stored || typeof stored !== 'object') return def;
   const s = stored as { sections?: unknown; actions?: unknown; readOnlySections?: unknown; terminalAccess?: unknown; adminAccess?: unknown; workShiftRequired?: unknown };
   const permissions: EmployeePermissions = {
@@ -173,9 +172,10 @@ export function resolvePermissions(role: Role, stored: unknown): EmployeePermiss
   const fixedWorkspace = fixedPositionWorkspace(role, stored);
   if (fixedWorkspace) permissions.adminAccess = false;
   if (fixedWorkspace === 'production') permissions.terminalAccess = false;
-  if (typeof s.workShiftRequired === 'boolean') permissions.workShiftRequired = s.workShiftRequired;
-  if (Array.isArray(s.readOnlySections)) {
-    const selected = s.readOnlySections;
+  const workShiftRequired = typeof s.workShiftRequired === 'boolean' ? s.workShiftRequired : def.workShiftRequired;
+  if (workShiftRequired !== undefined) permissions.workShiftRequired = workShiftRequired;
+  const selected = Array.isArray(s.readOnlySections) ? s.readOnlySections : def.readOnlySections;
+  if (selected) {
     permissions.readOnlySections = READ_ONLY_SECTION_KEYS.filter((key) => permissions.sections[key] && selected.includes(key));
     for (const section of permissions.readOnlySections) {
       for (const action of SECTION_WRITE_ACTIONS[section] ?? []) permissions.actions[action] = false;
@@ -193,8 +193,8 @@ export function resolveUserPermissions(user: {
 }
 
 /** Нормализовать входные данные перед сохранением (whitelist ключей, только boolean). */
-export function sanitizePermissionsInput(role: Role, input: unknown): EmployeePermissions {
-  return resolvePermissions(role, input);
+export function sanitizePermissionsInput(role: Role, input: unknown, fallback?: EmployeePermissions): EmployeePermissions {
+  return resolvePermissions(role, input, fallback);
 }
 
 /** Проверка одного права по строке вида "sections.warehouse" / "actions.editMenu". */

@@ -171,7 +171,7 @@ function MenuDishList({ view }: { view: MenuView }) {
               />
             )}
             {editable && <button type="button" className="btn-primary btn-md" onClick={() => openEditor({ type: 'entry' })}>
-              {t(isGoods ? 'Добавить товар' : 'Добавить техкарту')}
+              {t(isGoods ? 'Добавить товар' : 'Добавить блюдо')}
             </button>}
           </div>
         )}
@@ -315,8 +315,8 @@ function MenuDishList({ view }: { view: MenuView }) {
                       ? 'Добавьте первый товар для продажи'
                       : 'Товаров пока нет'
                     : editable
-                      ? 'Добавьте первую техкарту'
-                      : 'Техкарт пока нет'}
+                      ? 'Добавьте первое блюдо'
+                      : 'Блюд пока нет'}
               </p>
               {filtered && (
                 <button

@@ -1,6 +1,5 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { DatePicker } from '@/components/DatePicker';
 import { Select } from '@/components/Select';
 import { IconTrash } from '../../components/icons';
 import { WorkspaceHeaderCount } from '../WorkspaceHeader';
@@ -9,7 +8,7 @@ import { EditorPage } from '../warehouse/EditorPage';
 import { QueryState } from '../warehouse/WarehouseUi';
 import { useEditorRoute, usePageFilters } from '../warehouse/workspace-route';
 import { useListPeriod } from '../warehouse/ListPeriodFilter';
-import { useFinance, useFinanceWrites, usePayroll, type FinanceAccount } from './api';
+import { useFinance, useFinanceWrites, usePayroll, type FinanceAccount, type FinanceEntry } from './api';
 import { AccountTrashPage, ArchiveAccountDialog } from './AccountTrashPage';
 import { CashShiftsPage } from './CashShiftsPage';
 import { CashFlowMatrix } from './CashFlowMatrix';
@@ -55,8 +54,7 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
   const toggleSort = () => setAscending((current) => !current);
   const setSearch = (value: string) => setFilters({ financeSearch: value });
   const setScope = (value: string) => setFilters({ financeScope: value });
-  const hasDates = view === 'transactions' || view === 'cashFlow';
-  const rangeValid = !hasDates || (!!from && !!to && from <= to);
+  const rangeValid = view !== 'cashFlow' || (!!from && !!to && from <= to);
   const finance = useFinance({
     from: view === 'transactions' ? transactionPeriod.range.dateFrom ?? '2000-01-01' : from,
     to: view === 'transactions' ? transactionPeriod.range.dateTo ?? today : to,
@@ -71,11 +69,6 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
   const addButton = (label: string, type: string) => <button type="button" className="btn-primary btn-md"
     onClick={() => openEditor({ type })}>{label}</button>;
   const quickSearch = <WorkspaceSearch value={search} onChange={setSearch} label="Быстрый поиск" />;
-  const dateFilters = hasDates && <div className="flex flex-wrap items-center gap-2">
-    <DatePicker value={from} onChange={(value) => setFilters({ financeFrom: value })} max={to || today} className="input w-[125px]" aria-label="С даты" />
-    <span className="text-text-muted">—</span>
-    <DatePicker value={to} onChange={(value) => setFilters({ financeTo: value })} min={from} max={today} className="input w-[125px]" aria-label="По дату" />
-  </div>;
 
   const transactionEditor = view === 'transactions' && editor?.type === 'financeTransaction' ? editor : null;
   if (data && editor && !transactionEditor) {
@@ -119,7 +112,7 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
     {showSearch && <WorkspaceSearch value={search} onChange={setSearch} label="Быстрый поиск" />}
       {view === 'cashFlow'
         ? <FinancePeriod from={from} to={to} onApply={(period) => setFilters({ financeFrom: period.from, financeTo: period.to })} />
-        : dateFilters}
+        : view === 'transactions' ? transactionPeriod.filter : null}
     {filters}
     {add && <button type="button" className="btn-primary btn-md ml-auto" onClick={() => openEditor({ type: add.editor })}>{add.label}</button>}
   </div>;
@@ -214,6 +207,8 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
   const expenseCategories = editCategoryChoices('expense');
   const selectedCategories = new Set(categoryId ? data.categories.filter((category) => category.id === categoryId
     || categoryAncestors(category, categoriesById).some(({ id }) => id === categoryId)).map(({ id }) => id) : []);
+  const categoryName = (entry: FinanceEntry) => entry.kind === 'transfer' && !entry.reversalOf ? 'Переводы'
+    : entryCategoryLabel(entry, entry.categoryId ? categoriesById.get(entry.categoryId)?.name : undefined);
   const showDeleted = kind === 'reversal';
   const transactions = data.entries.filter((entry) => (!scope || entry.accountId === scope) &&
     (scope || entry.kind !== 'transfer' || !entry.counterpartyAccountId || entry.counterpartyArchived || entry.amount < 0) &&
@@ -221,7 +216,8 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
     (!categoryId || (entry.categoryId && selectedCategories.has(entry.categoryId))) &&
     filterByName([entry.note, entry.actorName, accountNames.get(entry.accountId),
       entry.counterpartyAccountId && (accountNames.get(entry.counterpartyAccountId) ?? entry.counterpartyName),
-      entry.categoryId && categoriesById.get(entry.categoryId)?.name].filter(Boolean).join(' '), search))
+      categoryName(entry), entryLabel(entry), financeDateTime(entry.occurredAt), transactionDay.format(new Date(entry.occurredAt)),
+      financeMoney(!scope && entry.kind === 'transfer' ? Math.abs(entry.amount) : entry.amount)].filter(Boolean).join(' '), search))
     .sort((a, b) => (ascending ? 1 : -1) * (a.occurredAt.localeCompare(b.occurredAt)
       || (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id)));
   const selectedEntry = data.entries.find(({ id }) => id === transactionEditor?.id);
@@ -258,8 +254,7 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
       </>}
       totals={showDeleted ? undefined : { date: { value: 'Итого' }, amount: { value: total, display: <span className={total < 0 ? 'text-danger' : undefined}>{financeMoney(total)}</span> } }}
       rows={transactions.map((entry, index) => {
-        const categoryLabel = entry.kind === 'transfer' && !entry.reversalOf ? 'Переводы'
-          : entryCategoryLabel(entry, entry.categoryId ? categoriesById.get(entry.categoryId)?.name : undefined);
+        const categoryLabel = categoryName(entry);
         const comment = <span>{entry.note || '—'}{entry.reversedAt && <span className="ml-2 text-xs text-text-muted">Удалена</span>}</span>;
         const showDate = !index || financeDay(new Date(entry.occurredAt)) !== financeDay(new Date(transactions[index - 1].occurredAt));
         const amount = !scope && entry.kind === 'transfer' ? Math.abs(entry.amount) : entry.amount;

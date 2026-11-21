@@ -94,7 +94,7 @@ test('PostgreSQL: backdated receipt reprices two warehouse transfers, writeoff, 
       assert.deepEqual(await repriced(pastTransfer.id), [40, 40]);
       assert.deepEqual(await repriced(onward.id), [28.57142857, 28.57142857]);
       assert.deepEqual(await repriced(orderId), [32.38095238, 32.38095238]);
-      await assert.rejects(docs.create(actor, { kind: 'transfer', warehouseId: kitchen.id, destinationWarehouseId: main.id,
+      await assert.rejects(docs.create(actor, { kind: 'writeoff', warehouseId: kitchen.id, reason: 'damage',
         effectiveAt: new Date(+effective - 2).toISOString(), items: [{ ingredientId: product.id, quantity: 1 }],
         finalize: 'post' }), /историческом периоде недостаточно/);
 
@@ -119,6 +119,31 @@ test('PostgreSQL: backdated receipt reprices two warehouse transfers, writeoff, 
       await assert.rejects(purchases.create({ ...receiptInput, items: [{ ingredientId: untracked.id, quantity: 3, purchasePrice: 2 }] }, actor),
         /журнал не подтверждает начальный остаток/);
       assert.equal(Number((await db.ingredient.findUniqueOrThrow({ where: { id: untracked.id } })).stock), 6);
+
+      const empty = await ingredients.create({ name: 'Backdated transfer from empty stock', unit: 'pcs' });
+      const moved = await docs.create(actor, { kind: 'transfer', warehouseId: main.id, destinationWarehouseId: bar.id,
+        effectiveAt: effective.toISOString(), items: [{ ingredientId: empty.id, quantity: 3 }], finalize: 'post' });
+      assert.equal(moved.items[0].expected, 0);
+      const restock = await purchases.create({ ...receiptInput, supplier: 'Partial restock', effectiveAt: new Date(+effective + 1).toISOString(),
+        items: [{ ingredientId: empty.id, quantity: 1, purchasePrice: 30 }] }, actor);
+      const receiptEntry = await db.stockMovement.findFirstOrThrow({ where: { sourceId: restock.id } });
+      assert.equal(Number(receiptEntry.beforeStock), -3);
+      assert.equal(Number(receiptEntry.afterStock), -2);
+      const backdatedBalances = (await ingredients.findOne(empty.id)).balances;
+      assert.equal(backdatedBalances.find(({ warehouseId }) => warehouseId === main.id).stock, -2);
+      assert.equal(backdatedBalances.find(({ warehouseId }) => warehouseId === bar.id).stock, 3);
+
+      const formerShortage = await ingredients.create({ name: 'Older negative stock policy', unit: 'pcs', stock: 2, avgCost: 10 });
+      await db.stockMovement.updateMany({ where: { ingredientId: formerShortage.id }, data: { createdAt: opening } });
+      await db.settings.upsert({ where: { cafeId: cafe.id }, create: { cafeId: cafe.id, allowNegativeIngredientStock: true },
+        update: { allowNegativeIngredientStock: true } });
+      const earlierWaste = await docs.create(actor, { kind: 'writeoff', warehouseId: main.id, reason: 'damage',
+        items: [{ ingredientId: formerShortage.id, quantity: 5 }], finalize: 'post' });
+      await db.settings.update({ where: { cafeId: cafe.id }, data: { allowNegativeIngredientStock: false } });
+      await purchases.create({ ...receiptInput, supplier: 'Historically allowed shortage',
+        items: [{ ingredientId: formerShortage.id, quantity: 1, purchasePrice: 30 }] }, actor);
+      assert.equal((await ingredients.findOne(formerShortage.id)).stock, -2);
+      assert.deepEqual(await repriced(earlierWaste.id), [16.66666667]);
     });
   } finally {
     await db.auditLog.deleteMany({ where: { cafeId: cafe.id } });
@@ -127,6 +152,7 @@ test('PostgreSQL: backdated receipt reprices two warehouse transfers, writeoff, 
     await db.purchase.deleteMany({ where: { cafeId: cafe.id } });
     await db.ingredient.deleteMany({ where: { cafeId: cafe.id } });
     await db.user.deleteMany({ where: { cafeId: cafe.id } });
+    await db.settings.deleteMany({ where: { cafeId: cafe.id } });
     await db.cafe.delete({ where: { id: cafe.id } });
     await db.$disconnect();
   }

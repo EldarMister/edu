@@ -3,6 +3,7 @@ import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useT } from '@/lib/i18n';
+import { exportCsv, printReport } from '@/lib/report-output';
 import type { StatisticsReports } from '../api';
 import { WorkspaceHeaderActions, WorkspaceHeaderCount } from './WorkspaceHeader';
 import { WorkspaceSearch } from './WorkspaceSearch';
@@ -27,7 +28,7 @@ const columns: Record<Report, Column[]> = {
     quantity, cash('gross', 'Валовый оборот'), cash('discount', 'Скидка'), revenue, profit],
   staff: [{ key: 'name', label: 'Официант' }, revenue, profit, orders, avgCheck,
     { key: 'avgSeconds', label: 'Среднее время', format: 'duration' }],
-  categories: [{ key: 'name', label: 'Категория' }, quantity, cost, revenue, profit,
+  categories: [{ key: 'name', label: 'Категория' }, quantity, cost, revenue, cash('tax', 'Сумма налога'), profit,
     { key: 'foodCost', label: 'Food cost', format: 'percent' }],
   payments: [date, orders, ...methods, cash('total', 'Всего')],
 };
@@ -57,51 +58,6 @@ function totalFor(rows: Row[], column: Column) {
   if (key === 'foodCost') return rows.some((row) => row.cost == null) || !sum(rows, 'revenue')
     ? null : 100 * sum(rows, 'cost') / sum(rows, 'revenue');
   return rows.some((row) => row[key] == null) ? null : sum(rows, key);
-}
-
-function exportCsv(title: string, headings: string[], rows: string[][]) {
-  const csv = [headings, ...rows].map((row) => row.map((value) => {
-    const isNegativeNumber = /^-\d+(?:[\u00a0\u202f ]\d{3})*(?:,\d+)?(?: с|%| сек\.)?$/.test(value);
-    const safe = /^\s*[=+@-]/.test(value) && !isNegativeNumber ? "'" + value : value;
-    return '"' + safe.replaceAll('"', '""') + '"';
-  }).join(';')).join('\r\n');
-  const url = URL.createObjectURL(new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = title + '.csv';
-  link.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function printReport(title: string, caption: string, headings: string[], rows: string[][]) {
-  const target = window.open('', '_blank', 'width=1000,height=730');
-  if (!target) return false;
-  const doc = target.document;
-  doc.title = title;
-  const style = doc.createElement('style');
-  style.textContent = '@page { size: landscape; margin: 12mm; } body { font: 13px sans-serif; } table { width: 100%; border-collapse: collapse; } th, td { padding: 7px; border: 1px solid #ccc; text-align: left; }';
-  doc.head.append(style);
-  const heading = doc.createElement('h1');
-  heading.textContent = title;
-  const period = doc.createElement('p');
-  period.textContent = caption;
-  const table = doc.createElement('table');
-  const header = table.createTHead().insertRow();
-  for (const value of headings) {
-    const th = doc.createElement('th');
-    th.textContent = value;
-    header.append(th);
-  }
-  const body = table.createTBody();
-  for (const data of rows) {
-    const row = body.insertRow();
-    for (const value of data) row.insertCell().textContent = value;
-  }
-  doc.body.append(heading, period, table);
-  target.addEventListener('afterprint', () => target.close(), { once: true });
-  target.focus();
-  target.print();
-  return true;
 }
 
 function choices(rows: Row[], key: string, label: string, all: string) {

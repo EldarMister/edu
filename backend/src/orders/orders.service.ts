@@ -2328,9 +2328,13 @@ export class OrdersService {
       }
       const closedAt = new Date();
       if (latest.cafeId) await recordOrderReceipts(tx, latest.cafeId, orderId, cashierId, closedAt);
-      const taxFactor = latest.roundingAmount?.gt(0)
-        ? latest.finalAmount.div(latest.finalAmount.add(latest.roundingAmount)) : undefined;
-      await recordOrderTaxes(tx, orderId, latest.cafeId, latest.items, closedAt, taxFactor);
+      const roundedPayable = latest.roundingAmount?.gt(0) ? latest.finalAmount : undefined;
+      const taxItems = roundedPayable === undefined ? latest.items : await tx.orderItem.findMany({
+        where: { orderId },
+        select: { id: true, dishId: true, status: true, finalPrice: true },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+      await recordOrderTaxes(tx, orderId, latest.cafeId, taxItems, closedAt, roundedPayable);
       // Стол освобождается.
       await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.free } });
       return tx.order.update({

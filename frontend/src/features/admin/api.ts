@@ -116,7 +116,8 @@ export interface WaiterOrdersReportItem {
   id: string;
   orderId: string;
   orderedAt: string;
-  servedAt: string;
+  paidAt: string;
+  waiterName: string;
   orderNumber: string;
   tableNumber: number;
   dishName: string;
@@ -133,7 +134,7 @@ export interface WaiterOrdersReportResponse {
     ordersCount: number;
     dishesCount: number;
     amount: number;
-    averageServingSeconds: number;
+    averagePaymentSeconds: number;
   };
 }
 export interface OrdersPage {
@@ -239,7 +240,7 @@ export interface StatisticsReports {
   range: { from: string | null; to: string };
   sales: { date: string; revenue: number; orders: number; avgCheck: number; discount: number }[];
   products: ProductStats[];
-  categories: { id: string; name: string; quantity: number; revenue: number; cost: number | null; profit: number | null }[];
+  categories: { id: string; name: string; quantity: number; revenue: number; cost: number | null; tax: number | null; profit: number | null }[];
   staff: { id: string; name: string; revenue: number; orders: number; avgCheck: number; avgSeconds: number | null; profit: number | null }[];
   payments: { date: string; orders: number; cash: number; card: number; qr: number; other: number; total: number }[];
 }

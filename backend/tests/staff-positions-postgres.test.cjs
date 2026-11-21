@@ -112,6 +112,33 @@ test('PostgreSQL: positions determine employee access, support safe reassignment
         await assert.rejects(staff.update(employee.id, { positionId: cook.id }, actor), { status: 403 });
       });
 
+      await t.test('partial updates preserve the assigned position’s other access rules', async () => {
+        const position = await positions.create(ownerActor, {
+          name: 'Кассир с ограниченным доступом',
+          role: 'ADMIN',
+          permissions: {
+            terminalAccess: true,
+            adminAccess: false,
+            sections: { orders: false, warehouse: true },
+            readOnlySections: ['warehouse'],
+            workShiftRequired: false,
+            actions: { acceptOrderPayments: false },
+          },
+        });
+        const employee = await staff.create(input(position.id), ownerActor);
+        await positions.update(ownerActor, position.id, {
+          name: position.name,
+          permissions: { actions: { printReceipts: true } },
+        });
+        const { access, permissions } = await new AuthService(db, {}).me(employee.id);
+        assert.deepEqual(access, { terminal: true, admin: false, production: null });
+        assert.equal(permissions.actions.printReceipts, true);
+        assert.equal(permissions.actions.acceptOrderPayments, false);
+        assert.equal(permissions.sections.orders, false);
+        assert.deepEqual(permissions.readOnlySections, ['warehouse']);
+        assert.equal(permissions.workShiftRequired, false);
+      });
+
       await t.test('workspace changes wait for active shifts and atomically reset station and personal access', async () => {
         const employee = await staff.create(input(waiter.id), ownerActor);
         const shift = await db.waiterShift.create({ data: { waiterId: employee.id } });

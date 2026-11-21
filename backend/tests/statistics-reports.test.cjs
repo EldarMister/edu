@@ -1,6 +1,7 @@
 require('ts-node/register/transpile-only');
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { Prisma } = require('@prisma/client');
 const { buildStatisticsReports } = require('../src/admin/statistics-reports.ts');
 const { StatisticsService } = require('../src/admin/statistics.service.ts');
 const { StatisticsController } = require('../src/admin/statistics.controller.ts');
@@ -17,6 +18,8 @@ const order = {
   payments: [{ method: 'cash', amount: 20, status: 'paid' }, { method: 'card', amount: 40, status: 'paid' },
     { method: 'qr', amount: 60, status: 'refunded' }],
   items: [item],
+  taxes: [],
+  refunds: [],
 };
 const movement = {
   type: 'sale', sourceType: 'order', sourceId: order.id, orderItemId: item.id, saleLineId: null,
@@ -32,7 +35,7 @@ test('daily sales, payment splits and report dimensions aggregate the same close
   assert.deepEqual({ ...product, id: undefined }, { id: undefined, name: 'Эспрессо · Двойной',
     categoryId: 'coffee-category', category: 'Кофе', waiterId: 'alice', waiter: 'Алиса', quantity: 2,
     gross: 60, discount: 5, revenue: 55, cost: 8, profit: 47 });
-  assert.deepEqual(result.categories, [{ id: 'coffee-category', name: 'Кофе', quantity: 2, revenue: 55, cost: 8, profit: 47 }]);
+  assert.deepEqual(result.categories, [{ id: 'coffee-category', name: 'Кофе', quantity: 2, revenue: 55, cost: 8, tax: 0, profit: 47 }]);
   assert.deepEqual(result.staff, [{ id: 'alice', name: 'Алиса', orders: 1, revenue: 60, avgCheck: 60, avgSeconds: 60, profit: 52 }]);
 });
 
@@ -44,6 +47,29 @@ test('costs follow split line origin and return; historical payment fallback ret
   assert.equal(result.products[0].cost, 4);
   assert.equal(result.payments[0].qr, 30);
   assert.equal(result.payments[0].total, 30);
+});
+
+test('profit subtracts recorded tax and restores the refunded part without taxing exempt products', () => {
+  const exempt = { ...item, id: 'exempt', dishId: 'water', dishNameSnapshot: 'Вода',
+    dishVariantNameSnapshot: null, quantity: 1, finalPrice: 20 };
+  const taxable = { ...item, refundedQuantity: 1 };
+  const recorded = { ...order, finalAmount: 75, refundedAmount: 27.5, items: [taxable, exempt],
+    taxes: [{ taxId: 'vat', amount: new Prisma.Decimal(6), salesAmount: new Prisma.Decimal(55), itemAmounts: { [item.id]: '55' } }],
+    refunds: [{ taxReversals: [{ taxId: 'vat', amount: '3' }] }],
+  };
+  const waterCost = { ...movement, orderItemId: exempt.id, change: -1, costAtMoment: 2 };
+  const returned = { ...movement, type: 'return', change: 10, saleLineId: item.id };
+  const { products, categories, staff } = buildStatisticsReports([recorded], [movement, returned, waterCost], true);
+  assert.deepEqual(products.map(({ name, profit }) => [name, profit]), [['Эспрессо · Двойной', 20.5], ['Вода', 18]]);
+  assert.equal(categories[0].tax, 3);
+  assert.equal(categories[0].profit, 38.5);
+  assert.equal(staff[0].profit, 38.5);
+
+  const legacy = { ...recorded, taxes: [{ ...recorded.taxes[0], itemAmounts: null }] };
+  const legacyReport = buildStatisticsReports([legacy], [movement, returned, waterCost], true);
+  assert.ok(legacyReport.products.every(({ profit }) => profit === null));
+  assert.equal(legacyReport.categories[0].tax, null);
+  assert.equal(legacyReport.staff[0].profit, 38.5);
 });
 
 test('missing or restricted stock prices surface as null instead of claiming zero cost', () => {

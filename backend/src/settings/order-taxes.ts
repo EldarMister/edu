@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { MenuTaxType, OrderItemStatus, Prisma } from '@prisma/client';
+import { allocateCents } from '../orders/order-net';
 import { getCafeId } from '../tenant/tenant-context';
 
 const rateSelect = { id: true, cafeId: true, name: true, type: true, rate: true } as const;
@@ -32,7 +33,7 @@ export async function dishTaxFields(tx: Prisma.TransactionClient, { taxId, taxEx
 }
 
 // The taxable base is the actual selling price after discounts, grouped by rate on the receipt.
-export function calculateSaleTaxes(lines: TaxableLine[], saleFactor = new Prisma.Decimal(1)) {
+export function calculateSaleTaxes(lines: TaxableLine[]) {
   const totals = new Map<string, TaxableLine>();
   for (const line of lines) {
     if (!line.salesAmount.gt(0)) continue;
@@ -41,39 +42,41 @@ export function calculateSaleTaxes(lines: TaxableLine[], saleFactor = new Prisma
   }
   return [...totals.values()].map(({ rate, salesAmount }) => {
     const divisor = rate.type === MenuTaxType.vat ? rate.rate.add(100) : 100;
-    const adjustedSales = salesAmount.mul(saleFactor).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
     return {
-      taxId: rate.id, name: rate.name, rate: rate.rate, type: rate.type, salesAmount: adjustedSales,
-      amount: adjustedSales.mul(rate.rate).div(divisor).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP),
+      taxId: rate.id, name: rate.name, rate: rate.rate, type: rate.type, salesAmount,
+      amount: salesAmount.mul(rate.rate).div(divisor).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP),
     };
   }).filter((row) => row.salesAmount.gt(0));
 }
 
 export async function recordOrderTaxes(
   tx: Prisma.TransactionClient, orderId: string, cafeId: string | null, items: SaleItem[], soldAt: Date,
-  saleFactor?: Prisma.Decimal,
+  roundedPayable?: Prisma.Decimal,
 ) {
-  const active = items.filter((item) => item.dishId && item.status !== 'cancelled' && item.status !== 'rejected');
-  if (!active.length) return;
+  const active = items.filter((item) => item.status !== 'cancelled' && item.status !== 'rejected');
+  const dishIds = [...new Set(active.flatMap(({ dishId }) => dishId ? [dishId] : []))];
+  if (!dishIds.length) return;
   const settings = await tx.settings.findFirst({ where: { cafeId }, select: { taxesEnabled: true } });
   if (!settings?.taxesEnabled) return;
   const dishes = await tx.dish.findMany({
-    where: { cafeId, id: { in: [...new Set(active.map((item) => item.dishId!))] } },
+    where: { cafeId, id: { in: dishIds } },
     select: { id: true, taxExempt: true, tax: { select: rateSelect }, category: { select: { tax: { select: rateSelect } } } },
   });
   const rates = new Map(dishes.map((dish) => [dish.id, dish.taxExempt ? null : (dish.tax ?? dish.category.tax)]));
-  const lines = active.flatMap((item) => {
-    const rate = rates.get(item.dishId!);
-    return rate && rate.cafeId === cafeId ? [{ itemId: item.id, rate, salesAmount: item.finalPrice }] : [];
+  const prorated = roundedPayable === undefined ? null : allocateCents(roundedPayable.mul(100).round().toNumber(),
+    active.map(({ finalPrice }) => Math.max(0, finalPrice.mul(100).round().toNumber())));
+  const lines = active.flatMap((item, index) => {
+    const rate = item.dishId ? rates.get(item.dishId) : null;
+    const salesAmount = prorated ? new Prisma.Decimal(prorated[index]).div(100) : item.finalPrice;
+    return rate && rate.cafeId === cafeId && salesAmount.gt(0) ? [{ itemId: item.id, rate, salesAmount }] : [];
   });
   const itemAmountsByTax = new Map<string, Record<string, string>>();
   for (const { itemId, rate, salesAmount } of lines) {
-    if (salesAmount.lte(0)) continue;
     const itemAmounts = itemAmountsByTax.get(rate.id) ?? {};
     itemAmounts[itemId] = salesAmount.toString();
     itemAmountsByTax.set(rate.id, itemAmounts);
   }
-  const snapshot = calculateSaleTaxes(lines, saleFactor);
+  const snapshot = calculateSaleTaxes(lines);
   if (snapshot.length) {
     await tx.orderTax.createMany({ data: snapshot.map((line) => ({ ...line, orderId, cafeId, soldAt, itemAmounts: itemAmountsByTax.get(line.taxId) })) });
   }

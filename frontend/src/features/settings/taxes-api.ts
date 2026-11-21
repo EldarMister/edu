@@ -23,13 +23,13 @@ type TaxInput = { name: string; rate: number; type: MenuTaxType };
 type QueryParams = Record<string, string | number | undefined>;
 const key = ['admin', 'taxes'];
 export const taxReportKey = ['admin', 'stats', 'taxes'];
-const endpoint = '/admin/settings/taxes';
+export const TAX_DIRECTORY_ENDPOINT = '/admin/settings/taxes';
 export const TAX_REPORT_ENDPOINT = '/admin/statistics/taxes';
 
 export function useTaxDirectory(params: QueryParams) {
   return useQuery({
     queryKey: [...key, 'directory', params],
-    queryFn: async () => (await api.get<MenuTax[]>(endpoint, { params })).data,
+    queryFn: async () => (await api.get<MenuTax[]>(TAX_DIRECTORY_ENDPOINT, { params })).data,
   });
 }
 
@@ -52,10 +52,11 @@ export function useTaxMutations() {
   const refresh = () => client.invalidateQueries({ queryKey: key });
   return {
     save: useMutation({
-      mutationFn: ({ id, ...body }: TaxInput & { id?: string }) => id ? api.patch(`${endpoint}/${id}`, body) : api.post(endpoint, body),
+      mutationFn: ({ id, ...body }: TaxInput & { id?: string }) =>
+        id ? api.patch(`${TAX_DIRECTORY_ENDPOINT}/${id}`, body) : api.post(TAX_DIRECTORY_ENDPOINT, body),
       onSuccess: refresh,
     }),
-    remove: useMutation({ mutationFn: (id: string) => api.delete(`${endpoint}/${id}`), onSuccess: refresh }),
+    remove: useMutation({ mutationFn: (id: string) => api.delete(`${TAX_DIRECTORY_ENDPOINT}/${id}`), onSuccess: refresh }),
   };
 }
 

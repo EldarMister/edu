@@ -452,6 +452,32 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
         await assert.rejects(orders.cancelOrder(order.id, owner, 'Отмена после возврата'), /оплачен/);
       });
 
+      await t.test('rounded checkout records the same line amounts for payment, tax and refunds', async () => {
+        await settings.update({ taxesEnabled: true, roundOrderTotal: true }, owner);
+        const lines = [];
+        for (const idx of [1, 2, 3]) {
+          const tax = await db.menuTax.create({ data: { name: 'Tax ' + idx, type: 'turnover', rate: 10 } });
+          const dish = await db.dish.create({ data: { name: 'Taxable ' + idx, categoryId: category.id, price: '0.67', taxId: tax.id } });
+          lines.push({ dishId: dish.id, quantity: 1 });
+        }
+        const order = await newOrder(lines);
+        await db.orderItem.updateMany({ where: { orderId: order.id }, data: { status: 'served' } });
+        await db.order.update({ where: { id: order.id }, data: { status: 'served' } });
+        const paid = await orders.markPaid(order.id, waiter, 'cash');
+        const taxes = await db.orderTax.findMany({ where: { orderId: order.id } });
+        assert.equal(taxes.length, 3);
+        assert.ok(taxes.reduce((sum, row) => sum.add(row.salesAmount), paid.finalAmount.mul(0)).eq(paid.finalAmount));
+        assert.equal(paid.finalAmount.toString(), '2');
+
+        const refunds = new OrderRefundsService(db, audit, events, new IngredientStockService());
+        for (const row of taxes) {
+          const [itemId] = Object.keys(row.itemAmounts);
+          const quote = await refunds.quote(owner, order.id, { itemId });
+          assert.equal(quote.amount, row.salesAmount.toFixed(2));
+        }
+        await settings.update({ taxesEnabled: false, roundOrderTotal: false }, owner);
+      });
+
       await t.test('waiter history pages through tied timestamps and stays scoped to the waiter and cafe', async () => {
         const historyWaiter = await makeUser('History waiter', 'WAITER');
         const table = await db.table.create({ data: { hallId: hall.id, number: tableNumber++ } });

@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react';
 import { Select } from '@/components/Select';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
+import { usePermissions } from '@/hooks/usePermissions';
 import { WorkspacePending } from '../components/WorkspacePending';
-import { IconTables } from '../components/icons';
+import { IconPrinter, IconTables } from '../components/icons';
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { ReportPeriodFilter, type PeriodPreset } from './warehouse/ReportPeriodFilter';
 import { calendarDate, warehouseDay, warehousePeriodRange } from './warehouse/warehouse-period';
 import { visibleWarehouseColumns, WarehouseColumnSettings } from './warehouse/WarehouseColumnSettings';
 import { displayOrderNumber, money } from '@/lib/format';
+import { exportCsv, printReport } from '@/lib/report-output';
 import { useWaiterOrdersReport, type StaffMember, type WaiterOrdersReportItem } from '../api';
 
 type DishTotal = { name: string; quantity: number; amount: number };
@@ -15,14 +17,15 @@ type CategoryTotal = { name: string; quantity: number; amount: number; dishes: D
 
 const EMPTY_REPORT_ROWS: WaiterOrdersReportItem[] = [];
 
-const COLUMN_KEYS = ['dishName', 'orderNumber', 'orderedAt', 'servedAt', 'tableNumber', 'categoryName', 'quantity', 'unitPrice', 'amount'] as const;
+const COLUMN_KEYS = ['dishName', 'orderNumber', 'waiterName', 'orderedAt', 'paidAt', 'tableNumber', 'categoryName', 'quantity', 'unitPrice', 'amount'] as const;
 type ColumnKey = typeof COLUMN_KEYS[number];
 const defaultColumns = [...COLUMN_KEYS];
 const columnLabels: Record<ColumnKey, string> = {
   dishName: 'Блюдо',
   orderNumber: '№ заказа',
+  waiterName: 'Сотрудник',
   orderedAt: 'Время заказа',
-  servedAt: 'Время подачи',
+  paidAt: 'Время оплаты',
   tableNumber: 'Стол',
   categoryName: 'Категория',
   quantity: 'Кол-во',
@@ -37,7 +40,7 @@ const reportDateTime = new Intl.DateTimeFormat('ru-RU', {
 const reportSort = new Intl.Collator('ru-RU', { numeric: true });
 
 function columnValue(row: WaiterOrdersReportItem, key: ColumnKey) {
-  if (key === 'orderedAt' || key === 'servedAt') return reportDateTime.format(new Date(row[key]));
+  if (key === 'orderedAt' || key === 'paidAt') return reportDateTime.format(new Date(row[key]));
   if (key === 'unitPrice' || key === 'amount') return money(row[key]);
   if (key === 'orderNumber') return displayOrderNumber(row[key]);
   return row[key];
@@ -53,14 +56,11 @@ function durationLabel(seconds: number) {
   return minutes > 0 ? `${minutes} мин ${rest} сек` : `${rest} сек`;
 }
 
-function csvCell(value: string | number) {
-  return `"${String(value).replace(/"/g, '""')}"`;
-}
-
 export function WaiterOrdersReport({ staff, staffLoading }: {
   staff: Pick<StaffMember, 'id' | 'name' | 'role'>[];
   staffLoading: boolean;
 }) {
+  const { canAction } = usePermissions();
   const today = warehouseDay();
   const todayKey = calendarDate(today);
   const [period, setPeriod] = useState<PeriodPreset>('today');
@@ -73,24 +73,27 @@ export function WaiterOrdersReport({ staff, staffLoading }: {
   const [sort, setSort] = useState<{ key: ColumnKey; descending: boolean }>({ key: 'orderedAt', descending: true });
   const [columnPreference, saveColumns] = useColumnPreference('waiter-orders-report');
   const [columnsOpen, setColumnsOpen] = useState(false);
-  const columns = visibleWarehouseColumns(columnPreference, defaultColumns);
+  const [printError, setPrintError] = useState(false);
+  const resolvedPreference = columnPreference.split(',').map((key) => key === 'servedAt' ? 'paidAt' : key).join(',');
+  const columns = visibleWarehouseColumns(resolvedPreference, defaultColumns);
   const activeSort = columns.includes(sort.key) ? sort : { key: columns[0], descending: false };
   const waiterOptions = useMemo(
-    () => staff
-      .filter((member) => member.role === 'WAITER')
-      .map((waiter) => ({ value: waiter.id, label: waiter.name })),
+    () => [
+      { value: 'all', label: 'Все сотрудники' },
+      ...staff
+        .filter((member) => member.role !== 'OWNER')
+        .map((waiter) => ({ value: waiter.id, label: waiter.name })),
+    ],
     [staff],
   );
   const [waiterId, setWaiterId] = useState('');
-  const selectedWaiterId = waiterOptions.some((option) => option.value === waiterId)
-    ? waiterId
-    : waiterOptions[0]?.value ?? '';
+  const selectedWaiterId = staffLoading ? '' : waiterOptions.some((option) => option.value === waiterId) ? waiterId : 'all';
   const report = useWaiterOrdersReport(selectedWaiterId, from, to);
   const data = report.data;
   const rows = data?.items ?? EMPTY_REPORT_ROWS;
   const query = search.trim().toLocaleLowerCase('ru-RU');
   const displayedRows = rows.filter((row) => !query || [
-    row.dishName, row.categoryName, displayOrderNumber(row.orderNumber), String(row.tableNumber),
+    row.dishName, row.categoryName, row.waiterName, displayOrderNumber(row.orderNumber), String(row.tableNumber),
   ].some((value) => value.toLocaleLowerCase('ru-RU').includes(query))).sort((left, right) => {
     const a = left[activeSort.key];
     const b = right[activeSort.key];
@@ -132,27 +135,39 @@ export function WaiterOrdersReport({ staff, staffLoading }: {
       .sort((left, right) => right.quantity - left.quantity || right.amount - left.amount);
   }, [rows]);
 
-  function exportCsv() {
-    if (!data || !displayedRows.length) return;
-    const header = ['Время заказа', 'Время подачи', '№ заказа', 'Стол', 'Блюдо', 'Категория', 'Кол-во', 'Цена', 'Сумма'];
-    const lines = displayedRows.map((item) => [
-      reportDateTime.format(new Date(item.orderedAt)),
-      reportDateTime.format(new Date(item.servedAt)),
-      displayOrderNumber(item.orderNumber),
-      item.tableNumber,
-      item.dishName,
-      item.categoryName,
-      item.quantity,
-      item.unitPrice,
-      item.amount,
-    ].map(csvCell).join(';'));
-    const csv = '\ufeff' + [header.map(csvCell).join(';'), ...lines].join('\r\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `waiter-orders-${data.waiter.name}-${from}-${to}.csv`;
-    link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const hasOutput = view === 'orders' ? displayedRows.length > 0 : categoryTotals.length > 0;
+
+  function outputReport(format: 'print' | 'csv') {
+    if (!data || !hasOutput) return;
+    const renderAmount = format === 'print' ? money : (amount: number) => amount.toFixed(2).replace('.', ',');
+    const renderQuantity = (quantity: number) => String(quantity).replace('.', ',');
+    const headings = view === 'orders'
+      ? columns.map((key) => columnLabels[key])
+      : ['Категория', 'Блюдо', 'Кол-во', 'Сумма'];
+    const reportRows = view === 'orders'
+      ? displayedRows.map((row) => columns.map((key) => {
+        if (key === 'amount' || key === 'unitPrice') return renderAmount(row[key]);
+        if (key === 'quantity') return renderQuantity(row.quantity);
+        return String(columnValue(row, key));
+      }))
+      : categoryTotals.flatMap((category) => category.dishes.map((dish) => [
+        category.name, dish.name, renderQuantity(dish.quantity), renderAmount(dish.amount),
+      ]));
+    if (view === 'orders') {
+      reportRows.push(columns.map((key) => {
+        if (key === 'dishName') return 'Итого';
+        if (key === 'quantity') return renderQuantity(rowQuantity);
+        if (key === 'amount') return renderAmount(rowAmount);
+        return '';
+      }));
+    } else {
+      reportRows.push(['Итого', '', renderQuantity(data.summary.dishesCount), renderAmount(data.summary.amount)]);
+    }
+    if (format === 'csv') {
+      exportCsv(`Отчёт официанта ${from} — ${to}`, headings, reportRows);
+    } else {
+      setPrintError(!printReport('Отчёт официанта', `${data.waiter.name} · ${from} — ${to}`, headings, reportRows));
+    }
   }
 
   return (
@@ -161,9 +176,9 @@ export function WaiterOrdersReport({ staff, staffLoading }: {
         <h2 className="text-xl font-semibold tracking-tight text-text-primary">Отчёт официанта</h2>
         <div className="no-print flex flex-wrap items-center gap-2">
           <Select
-            ariaLabel="Официант" value={selectedWaiterId} onChange={setWaiterId} options={waiterOptions}
-            searchable placeholder={staffLoading ? 'Загрузка…' : 'Выберите официанта'}
-            disabled={staffLoading || waiterOptions.length === 0} className="min-h-10 w-40 max-w-full sm:w-44"
+            ariaLabel="Фильтр по сотруднику" value={selectedWaiterId} onChange={setWaiterId} options={waiterOptions}
+            searchable placeholder={staffLoading ? 'Загрузка…' : 'Выберите сотрудника'}
+            disabled={staffLoading} className="min-h-10 w-56 max-w-full"
           />
           <div className="[&_.report-period-trigger]:min-h-10 [&_.report-period-trigger]:rounded-lg">
             <ReportPeriodFilter label="Период отчёта" confirmSelection includeAll={false}
@@ -174,7 +189,6 @@ export function WaiterOrdersReport({ staff, staffLoading }: {
               }} />
           </div>
         </div>
-        {data && <p className="hidden print:block">{data.waiter.name} · {from} — {to}</p>}
       </div>
 
       {data && (
@@ -182,8 +196,8 @@ export function WaiterOrdersReport({ staff, staffLoading }: {
           <SummaryItem label="Сумма по позициям" value={money(data.summary.amount)} />
           <SummaryItem label="Оплачено заказов" value={data.summary.ordersCount} />
           <SummaryItem label="Блюд" value={data.summary.dishesCount} />
-          <SummaryItem label="Среднее время подачи" value={data.summary.ordersCount
-            ? durationLabel(data.summary.averageServingSeconds) : '—'} />
+          <SummaryItem label="Среднее время до оплаты" value={data.summary.ordersCount
+            ? durationLabel(data.summary.averagePaymentSeconds) : '—'} />
         </dl>
       )}
 
@@ -195,22 +209,26 @@ export function WaiterOrdersReport({ staff, staffLoading }: {
             <button type="button" aria-pressed={view === 'dishes'} onClick={() => setView('dishes')}
               className="btn-ghost btn-md aria-pressed:bg-primary/10 aria-pressed:text-primary">По блюдам</button>
           </div>
-          {view === 'orders' && <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <WorkspaceSearch value={search} onChange={setSearch} label="Поиск по заказам" placeholder="Блюдо или № заказа"
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {view === 'orders' && <>
+              <WorkspaceSearch value={search} onChange={setSearch} label="Поиск по заказам" placeholder="Блюдо или № заказа"
               className="max-sm:w-full [&_.input]:pl-8 [&_.input]:pr-8" />
-            <button type="button" onClick={() => setColumnsOpen(true)} className="btn-secondary btn-md">
-              <IconTables className="h-4 w-4" /> Столбцы
-            </button>
-            <button type="button" onClick={exportCsv} className="btn-secondary btn-md" disabled={!displayedRows.length}>
+              <button type="button" onClick={() => setColumnsOpen(true)} className="btn-secondary btn-md">
+                <IconTables className="h-4 w-4" /> Столбцы
+              </button>
+            </>}
+            {canAction('exportReports') && <button type="button" onClick={() => outputReport('csv')} className="btn-secondary btn-md" disabled={!hasOutput}>
               Экспорт CSV
+            </button>}
+            <button type="button" onClick={() => outputReport('print')} className="btn-secondary btn-md" disabled={!hasOutput}>
+              <IconPrinter className="h-4 w-4" /> Печать
             </button>
-          </div>}
+          </div>
         </div>
+        {printError && <p role="alert" className="no-print px-4 py-2 text-sm text-danger">Разрешите всплывающие окна, чтобы распечатать отчёт</p>}
 
         {report.isLoading || staffLoading ? (
           <WorkspacePending />
-        ) : !selectedWaiterId ? (
-          <p className="px-4 py-12 text-center text-sm text-text-muted">Добавьте официанта, чтобы сформировать отчёт</p>
         ) : report.isError && !data ? (
           <div className="px-4 py-12 text-center">
             <p role="alert" className="text-sm text-danger">Не удалось загрузить отчёт</p>

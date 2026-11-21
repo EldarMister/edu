@@ -5,7 +5,8 @@ const { randomUUID } = require('node:crypto');
 const { Prisma, PrismaClient } = require('@prisma/client');
 const { getDefaultPermissionsByRole } = require('../src/common/permissions.ts');
 const { recordOrderReceipts } = require('../src/finance/order-receipts.ts');
-const { buildRefundPlan, allocateRefundCents } = require('../src/orders/order-refund-plan.ts');
+const { buildRefundPlan } = require('../src/orders/order-refund-plan.ts');
+const { allocateCents: allocateRefundCents } = require('../src/orders/order-net.ts');
 const { OrderRefundsService } = require('../src/orders/order-refunds.service.ts');
 const { TaxesService } = require('../src/settings/taxes.service.ts');
 const { tenantPrismaMiddleware, runWithTenant } = require('../src/tenant/tenant-context.ts');
@@ -109,6 +110,8 @@ test('PostgreSQL: a server requests a refund and an administrator can reject, ap
       const first = await service.create(waiter, order.id, input, false);
       assert.equal(first.status, 'pending');
       assert.equal((await service.create(waiter, order.id, input, false)).id, first.id);
+      await assert.rejects(service.create(waiter, order.id, { ...input, reason: 'A different reason' }, false), { status: 409 });
+      await assert.rejects(service.create(waiter, order.id, { ...input, quantity: 2 }, false), { status: 409 });
       assert.equal((await db.order.findUniqueOrThrow({ where: { id: order.id } })).refundedAmount.toString(), '0');
       assert.equal(await db.financeEntry.count({ where: { cafeId, kind: 'refund' } }), 0);
       await assert.rejects(service.create(waiter, order.id, { ...input, requestId: randomUUID() }, false), { status: 409 });

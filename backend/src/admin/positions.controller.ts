@@ -6,7 +6,7 @@ import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { fixedPositionWorkspace, resolvePermissions, sanitizePermissionsInput, type FixedWorkspace } from '../common/permissions';
+import { fixedPositionWorkspace, resolvePermissions, sanitizePermissionsInput, type EmployeePermissions, type FixedWorkspace } from '../common/permissions';
 import { PrismaService } from '../prisma/prisma.service';
 import { lockFinance } from '../finance/finance-ledger';
 import { currentPayrollMonth, salaryRates, type SalaryRates } from '../finance/payroll';
@@ -36,9 +36,9 @@ class PositionSalaryDto implements SalaryRates {
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100) shiftPercent!: number;
 }
 
-function positionPermissions(role: Role, input: unknown, fixedWorkspace: FixedWorkspace | null = null) {
+function positionPermissions(role: Role, input: unknown, fixedWorkspace: FixedWorkspace | null = null, fallback?: EmployeePermissions) {
     const stored = input && typeof input === 'object' ? input : {};
-    const permissions = sanitizePermissionsInput(role, { ...stored, fixedWorkspace });
+    const permissions = sanitizePermissionsInput(role, { ...stored, fixedWorkspace }, fallback);
     permissions.actions.editMenu &&= permissions.sections.menu;
     permissions.actions.refundChecks &&= permissions.sections.checks;
     permissions.actions.manageStaff &&= permissions.sections.staff;
@@ -115,8 +115,8 @@ export class PositionsController {
     const { before, row } = await this.withUniqueName(() => this.prisma.$transaction(async (db) => {
       await lockFinance(db, cafeId);
       const before = await this.find(cafeId, id, db);
-      const permissions = positionPermissions(before.role, dto.permissions ?? before.permissions,
-        fixedPositionWorkspace(before.role, before.permissions));
+      const permissions = positionPermissions(before.role, dto.permissions,
+        fixedPositionWorkspace(before.role, before.permissions), resolvePermissions(before.role, before.permissions));
       const next = { role: before.role, permissions };
       const losesAccess = losesOperationalAccess(before, next);
       const disablesTracking = disablesWorkTracking(before, next);

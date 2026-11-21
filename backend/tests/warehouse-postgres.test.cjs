@@ -169,10 +169,11 @@ test('PostgreSQL: warehouse receipts and transfers are scoped and consistent', {
       const onlyBar = await ingredients.create({ name: 'Тоник', unit: 'pcs', stock: 3, avgCost: 2, warehouseId: bar.id });
       assert.equal(onlyBar.stock, 3);
       assert.equal((await ingredients.findAll({ warehouseId: main.id, search: 'Тоник' }))[0].stock, 0);
-      await locations.transfer({ ingredientId: cola.id, fromWarehouseId: main.id, toWarehouseId: bar.id, quantity: 10, unit: 'pcs' });
-      await assert.rejects(locations.transfer({
-        ingredientId: cola.id, fromWarehouseId: main.id, toWarehouseId: bar.id, quantity: 11, unit: 'pcs',
-      }), /недостаточно/);
+      const transfer = { ingredientId: cola.id, fromWarehouseId: main.id, toWarehouseId: bar.id,
+        quantity: 10, unit: 'pcs', requestKey: randomUUID() };
+      const [firstTransfer, duplicateTransfer] = await Promise.all([locations.transfer(transfer), locations.transfer(transfer)]);
+      assert.equal(firstTransfer.documentId, duplicateTransfer.documentId);
+      await assert.rejects(locations.transfer({ ...transfer, toWarehouseId: main.id, requestKey: randomUUID() }), /другой склад/);
 
       const purchase = await purchases.create({
         supplier: 'Поставщик', warehouseId: bar.id, items: [{ ingredientId: cola.id, quantity: 10, total: 60 }],

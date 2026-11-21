@@ -413,25 +413,52 @@ test(
               dish: {
                 ...product.dish,
                 name: 'Сок с вариантом',
-                variants: [{ name: '0,5 л', price: 80 }],
+                variants: [{ name: '0,5 л', price: 80, unit: 'l' }],
               },
             };
             const single = await service.save(null, singleDto, actor);
-            const binding = single.dish.variants[0].stockIngredientId;
+            const original = single.dish.variants[0];
+            const binding = original.stockIngredientId;
             await db.ingredient.update({ where: { id: binding }, data: { stock: 12 } });
+            const edit = { id: original.id, name: '0,5 л', price: 85 };
+            await assert.rejects(
+              service.save(single.dish.id, {
+                ...singleDto,
+                expectedVersion: single.recipe.version,
+                dish: { ...singleDto.dish, variants: [{ ...edit, unit: 'kg' }] },
+              }, actor),
+              /Единица товара с настроенным складским учётом не меняется/,
+            );
+            const unchangedUnit = await service.save(single.dish.id, {
+              ...singleDto,
+              expectedVersion: single.recipe.version,
+              dish: { ...singleDto.dish, variants: [edit] },
+            }, actor);
+            assert.equal(unchangedUnit.dish.variants[0].unit, 'л');
+            assert.equal(Number(unchangedUnit.dish.variants[0].stockAmount), 1000);
             const result = await service.save(
               single.dish.id,
               {
                 ...singleDto,
-                expectedVersion: single.recipe.version,
+                expectedVersion: unchangedUnit.recipe.version,
                 dish: { ...singleDto.dish, variants: [] },
               },
               actor,
             );
             assert.equal(result.dish.stockIngredientId, binding);
+            assert.equal(result.dish.unit, 'л');
+            assert.equal(Number(result.dish.stockAmount), 1000);
             assert.equal(
               Number((await db.ingredient.findUniqueOrThrow({ where: { id: binding } })).stock),
               12,
+            );
+            await assert.rejects(
+              service.save(result.dish.id, {
+                ...singleDto,
+                expectedVersion: result.recipe.version,
+                dish: { ...singleDto.dish, unit: 'л', variants: [{ name: 'Первый', price: 85, unit: 'kg' }] },
+              }, actor),
+              /Единица товара с настроенным складским учётом не меняется/,
             );
             const multiDto = {
               ...singleDto,

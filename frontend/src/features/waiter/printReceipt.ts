@@ -1,8 +1,8 @@
 import QRCode from 'qrcode';
 import type { Receipt } from '@/types';
-import { displayOrderNumber, money, orderItemDisplayName, paymentMethodLabel, taxRateLabel, timeHM } from '@/lib/format';
+import { displayOrderNumber, money, orderItemDisplayName, paymentMethodLabel, taxRateLabel } from '@/lib/format';
 import { translate, type TFunc } from '@/lib/i18n';
-import { receiptFooterText, receiptHeader, receiptPrintSettings } from '@/lib/receipt';
+import { receiptDateTime, receiptFooterText, receiptHeader, receiptPrintSettings } from '@/lib/receipt';
 
 /** Данные фискального чека от ККМ — если переданы, печатается фискальный чек, а не товарный. */
 export interface FiscalPrintData {
@@ -28,8 +28,7 @@ export async function printReceipt(
   const { receiptLanguage } = receiptPrintSettings(r);
   const t: TFunc = (label) => translate(receiptLanguage, label);
   const header = receiptHeader(r, !!fiscal && !fiscal.simulated);
-  const date = new Date(r.date);
-  const dateStr = `${date.toLocaleDateString(receiptLanguage === 'ky' ? 'ky-KG' : 'ru-RU')} ${timeHM(r.date)}`;
+  const dateStr = receiptDateTime(r.date);
   const orderNumber = displayOrderNumber(r.orderNumber);
   const receiptKind = t(preliminary ? 'Счёт' : fiscal?.simulated ? 'Тестовый чек' : fiscal ? 'Фискальный чек' : 'Товарный чек');
   const orderPlace = r.source === 'delivery' ? t('Доставка') : `${t('Стол')} ${r.tableNumber}`;
@@ -48,9 +47,9 @@ export async function printReceipt(
 
   const html = `<!doctype html><html lang="${receiptLanguage}"><head><meta charset="utf-8"><title>${receiptKind} ${escapeHtml(orderNumber)}</title>
   <style>
-    @page { size: 80mm auto; margin: 0; }
+    @page { size: auto; margin: 0; }
     * { box-sizing: border-box; }
-    body { width: 80mm; margin: 0 auto; padding: 6mm 3mm 7mm; color: #000; background: #fff; font-family: Arial, sans-serif; font-size: 13px; font-weight: 400; line-height: 1.28; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { width: 80mm; max-width: 100%; margin: 0 auto; padding: 6mm 3mm 7mm; color: #000; background: #fff; font-family: Arial, sans-serif; font-size: 13px; font-weight: 400; line-height: 1.28; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     h1 { font-family: Arial, sans-serif; font-size: 21px; line-height: 1.1; text-align: center; margin: 0 0 5px; font-weight: 700; letter-spacing: -0.4px; }
     .receipt-logo { display: block; max-width: 45mm; max-height: 20mm; width: auto; height: auto; margin: 0 auto 7px; object-fit: contain; }
     .receipt-kind { text-align: center; font-family: Arial, sans-serif; font-size: 15px; font-weight: 700; margin: 0 0 5px; }
@@ -62,15 +61,14 @@ export async function printReceipt(
     th { border-bottom: 1px solid #111; padding: 0 0 6px; font-family: Arial, sans-serif; font-size: 10px; font-weight: 700; text-align: left; white-space: nowrap; }
     td { border-bottom: 1px dashed #777; padding: 6px 0; vertical-align: top; font-weight: 400; }
     tbody tr:last-child td { border-bottom: 0; }
-    .item-name { padding-right: 5px; }
+    .item-name { padding-right: 5px; overflow-wrap: anywhere; }
     .c { text-align: center; width: 14%; white-space: nowrap; }
     .r { text-align: right; white-space: nowrap; }
     .order-meta { font-size: 13px; text-align: center; font-weight: 400; }
     .total { display: flex; justify-content: space-between; align-items: baseline; font-family: Arial, sans-serif; font-size: 20px; font-weight: 700; letter-spacing: -0.1px; }
     .pair { display: flex; justify-content: space-between; gap: 10px; margin: 5px 0; font-weight: 400; }
     .pair > :last-child { text-align: right; }
-    .payment { gap: 5px; font-size: 11px; white-space: nowrap; }
-    .payment-value { flex: 1; max-width: none; white-space: nowrap; }
+    .payment { gap: 5px; font-size: 11px; break-inside: avoid; }
     .fiscal-qr { display: block; width: 142px; height: 142px; margin: 11px auto 2px; image-rendering: pixelated; }
     .footer { margin-top: 11px; font-size: 13px; font-weight: 400; }
   </style></head><body>
@@ -147,14 +145,17 @@ async function fiscalQrSrc(qrCode?: string): Promise<string | null> {
   }
 }
 
-/** Блок оплаты: выводит каждый фактический способ и его сумму в одной строке. */
+/** Для каждой части оплаты выделена строка, чтобы суммы поместились на термоленте. */
 function paymentBlock(r: Receipt, t: TFunc): string {
   const parts = r.payments?.length
-    ? r.payments.map((p) => `${t(paymentMethodLabel(p.method))}: ${money(p.amount)}`)
+    ? r.payments
     : r.paymentMethod
-      ? [`${t(paymentMethodLabel(r.paymentMethod))}: ${money(r.finalAmount)}`]
-      : ['—'];
-  return `<div class="pair payment"><span>${t('Оплата')}</span><span class="payment-value">${parts.map(escapeHtml).join('&nbsp;')}</span></div>`;
+      ? [{ method: r.paymentMethod, amount: r.finalAmount }]
+      : [];
+  const rows = parts.map(({ method, amount }) =>
+    `<div class="pair payment"><span>${escapeHtml(t(paymentMethodLabel(method)))}</span><span>${money(amount)}</span></div>`).join('');
+  return rows ? `<div class="muted">${t('Оплата')}</div>${rows}`
+    : `<div class="pair payment"><span>${t('Оплата')}</span><span>—</span></div>`;
 }
 
 function escapeHtml(s: string): string {

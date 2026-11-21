@@ -40,8 +40,10 @@ function newVariant(): VariantDraft {
   return { key: crypto.randomUUID(), name: '', price: '', unit: 'шт' };
 }
 
-function salePrice(value: string, minimum: number) {
-  return value.trim() !== '' && Number.isFinite(Number(value)) && Number(value) >= minimum;
+function salePrice(value: string): number | null {
+  const normalized = value.trim().replace(',', '.').replace(/^0+(?=\d)/, '');
+  if (!/^(?:\d{1,8}(?:\.\d{1,2})?|\.\d{1,2})$/.test(normalized)) return null;
+  return Number(normalized);
 }
 
 export function MenuEntryPage({ id, kind, categoryId, onClose, initialTab = 'main' }: {
@@ -84,8 +86,8 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
   const dish = initial?.dish;
   const catalogKind = dish?.catalogKind ?? kind;
   const isGoods = catalogKind === 'goods';
-  const title = dish ? (isGoods ? 'Редактирование товара' : 'Редактирование техкарты')
-    : (isGoods ? 'Добавление товара' : 'Добавление техкарты');
+  const title = dish ? (isGoods ? 'Редактирование товара' : 'Редактирование блюда')
+    : (isGoods ? 'Добавление товара' : 'Добавление блюда');
   const categories = useAdminCategories().data ?? [];
   const stations = usePreparationStations().data ?? [];
   const { can, canEditSection } = usePermissions();
@@ -183,12 +185,16 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
       setError('Добавьте хотя бы один вариант товара или выберите одну позицию.');
       return;
     }
-    if (!activeVariants.length && !salePrice(form.price, 0)) {
-      setError('Укажите цену продажи.');
+    const price = salePrice(form.price);
+    if (!activeVariants.length && price === null) {
+      setError('Укажите цену продажи с точностью до двух знаков после запятой.');
       return;
     }
-    if (activeVariants.some((variant) => !variant.name.trim() || !salePrice(variant.price, 0.01))) {
-      setError('Проверьте название и цену каждого варианта.');
+    const pricedVariants = activeVariants.map(({ key, id, name, price, unit }) => ({
+      id, clientKey: key, name: name.trim(), price: salePrice(price) ?? 0, unit,
+    }));
+    if (pricedVariants.some((variant) => !variant.name || variant.name.length > 80 || variant.price <= 0)) {
+      setError('Укажите название и цену больше нуля для каждого варианта. В цене допускаются два знака после запятой.');
       return;
     }
     if (canRecipe && !isGoods && rows.some((row) => row.amount <= 0 || (row.netAmount ?? row.amount) > row.amount)) {
@@ -204,16 +210,13 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
     submission.current = true;
     setPending(true);
     try {
-      const pricedVariants = activeVariants.map(({ key, id, name, price, unit }) => ({
-        id, clientKey: key, name: name.trim(), price: Number(price), unit,
-      }));
       const body = {
         catalogKind, requestKey, expectedVersion: initial?.recipe.version,
         dish: {
           ...form,
           ...(tax !== dishTaxValue(dish) ? dishTaxInput(tax) : {}),
           name: form.name.trim(),
-          price: Number(form.price),
+          price: price ?? 0,
           imageUrl: typedPhotoUrl || form.imageUrl,
           prepStation: form.prepStation || null,
           variants: pricedVariants,
@@ -237,7 +240,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
         qc.invalidateQueries({ queryKey: ['admin'] }),
         qc.invalidateQueries({ queryKey: ['menu'] }),
       ]);
-      push({ message: isGoods ? 'Товар сохранён' : 'Техкарта сохранена', at: new Date().toISOString() });
+      push({ message: isGoods ? 'Товар сохранён' : 'Блюдо сохранено', at: new Date().toISOString() });
       markSaved();
       if (createAnother && !dish) onCreateAnother(form.categoryId);
       else onClose();
@@ -251,7 +254,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
 
   function addVariant() {
     const variant = newVariant();
-    setVariants((current) => [...current, variant]);
+    setVariants((current) => [...current, isGoods ? { ...variant, unit: form.unit } : variant]);
   }
 
   function changeVariant(key: string, value: Partial<VariantDraft>) {
@@ -270,7 +273,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
 
   const variantCards = <div className="space-y-3">
     {activeVariants.map((variant, index) => <VariantCard key={variant.key} value={variant} index={index}
-      count={activeVariants.length} isGoods={isGoods} disabled={!canEdit || busy}
+      count={activeVariants.length} disabled={!canEdit || busy} unitLocked={isGoods && !!variant.id}
       cost={canCosts && isGoods && variant.id ? ingredientCost(variant.stockIngredientId ?? dish?.stockIngredientId)?.avgCost : undefined}
       showCost={canCosts && isGoods} onChange={(value) => changeVariant(variant.key, value)}
       onMove={(direction) => moveVariant(index, index + direction)}
@@ -370,7 +373,12 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
             <div role="group" aria-label="Формат товара" className="divide-y divide-border rounded-xl border border-border">
               <div className={!withVariants ? 'bg-background/50' : undefined}>
                 <ModeOption name={formId + '-mode'} checked={!withVariants} label="Без вариантов"
-                  description="Одна цена и общий остаток" onSelect={() => setWithVariants(false)} />
+                  description="Одна цена и общий остаток" onSelect={() => {
+                    if (!dish?.stockIngredientId && dish?.variants?.length === 1 && dish.variants[0].stockIngredientId) {
+                      patch({ unit: normalizeUnitLabel(dish.variants[0].unit) });
+                    }
+                    setWithVariants(false);
+                  }} />
                 {!withVariants && <div className="space-y-3 px-4 pb-4">
                   <div className="grid gap-3 min-[430px]:grid-cols-2">
                     <Field label={priceLabel}>{priceInput}</Field>
@@ -472,27 +480,28 @@ function ModeOption({ name, checked, label, description, onSelect, disabled }: {
   </label>;
 }
 
-function PriceInput({ label, value, onChange, minimum = 0 }: {
-  label: string; value: string; onChange: (price: string) => void; minimum?: number;
+function PriceInput({ label, value, onChange }: {
+  label: string; value: string; onChange: (price: string) => void;
 }) {
   return <div className="relative">
-    <input aria-label={label} type="number" min={minimum} step="0.01" inputMode="decimal" className="input !pr-9"
+    <input aria-label={label} type="text" inputMode="decimal" className="input !pr-9"
       value={value} onChange={(event) => onChange(event.target.value)} />
     <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-text-muted">с</span>
   </div>;
 }
 
 function PriceMetrics({ cost, price, costLabel = 'Себестоимость' }: { cost?: number | null; price?: string; costLabel?: string }) {
-  const markup = cost != null && cost > 0 && price != null && salePrice(price, 0)
-    ? taxRateLabel((Number(price) / cost - 1) * 100) : '—';
+  const amount = price == null ? null : salePrice(price);
+  const markup = cost != null && cost > 0 && amount !== null
+    ? taxRateLabel((amount / cost - 1) * 100) : '—';
   return <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
     <div><dt className="text-text-muted">{costLabel}</dt><dd className="font-medium">{cost == null ? '—' : money(cost)}</dd></div>
     {price != null && <div><dt className="text-text-muted">Наценка</dt><dd className="font-medium">{markup}</dd></div>}
   </dl>;
 }
 
-function VariantCard({ value, index, count, isGoods, disabled, cost, showCost, onChange, onMove, onRemove, onDragStart, onDragEnd, onDrop }: {
-  value: VariantDraft; index: number; count: number; isGoods: boolean; disabled: boolean;
+function VariantCard({ value, index, count, disabled, unitLocked, cost, showCost, onChange, onMove, onRemove, onDragStart, onDragEnd, onDrop }: {
+  value: VariantDraft; index: number; count: number; disabled: boolean; unitLocked: boolean;
   cost?: Ingredient['avgCost']; showCost: boolean; onChange: (value: Partial<VariantDraft>) => void;
   onMove: (direction: -1 | 1) => void; onRemove: () => void;
   onDragStart?: () => void; onDragEnd: () => void; onDrop: () => void;
@@ -515,14 +524,14 @@ function VariantCard({ value, index, count, isGoods, disabled, cost, showCost, o
     <div className="grid gap-3 min-[430px]:grid-cols-2 xl:grid-cols-[1.5fr_1fr_1fr]">
       <Field label="Название варианта">
         <input aria-label="Название варианта" className="input" placeholder="Например, 250 мл" value={value.name}
-          maxLength={120} onChange={(event) => onChange({ name: event.target.value })} />
+          maxLength={80} onChange={(event) => onChange({ name: event.target.value })} />
       </Field>
       <Field label="Цена продажи">
-        <PriceInput label={'Цена ' + caption} value={value.price} minimum={0.01} onChange={(price) => onChange({ price })} />
+        <PriceInput label={'Цена ' + caption} value={value.price} onChange={(price) => onChange({ price })} />
       </Field>
       <Field label="Единица учёта">
         <Select ariaLabel={'Единица учёта ' + caption} className="h-11 w-full" value={value.unit}
-          disabled={disabled || (isGoods && !!value.id)} onChange={(unit) => onChange({ unit })} options={unitLabelOptions(value.unit)} />
+          disabled={disabled || unitLocked} onChange={(unit) => onChange({ unit })} options={unitLabelOptions(value.unit)} />
       </Field>
     </div>
     {showCost && <PriceMetrics cost={cost} price={value.price} costLabel="Себестоимость по складу" />}

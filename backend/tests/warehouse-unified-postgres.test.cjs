@@ -340,24 +340,25 @@ test('PostgreSQL: unified catalog, precise receipts, transfers, returns and reve
         assert.equal(Number(value), balance.stock * balance.avgCost);
         await db.settings.update({ where: { cafeId: cafe.id }, data: { allowNegativeIngredientStock: false } });
       });
-      await t.test('a shortage blocks both sides of a transfer unless the warehouse policy allows it', async () => {
+      await t.test('transfers may create a shortage and partial receipts can repair it', async () => {
         const item = await items.create({ name: 'Проверка перемещения в минус', unit: 'pcs', stock: 1, avgCost: 20 });
         const payload = { kind: 'transfer', warehouseId: main.id, destinationWarehouseId: bar.id,
-          items: [{ ingredientId: item.id, quantity: 2 }], finalize: 'post' };
-        await assert.rejects(docs.create(admin, payload), /недостаточно товара/);
-        assert.deepEqual([(await stock(item.id)).stock, (await stock(item.id, bar.id)).stock], [1, 0]);
+          items: [{ ingredientId: item.id, quantity: 4 }], finalize: 'post' };
+        const document = await docs.create(admin, payload);
+        assert.equal(document.status, 'posted');
+        assert.deepEqual([(await stock(item.id)).stock, (await stock(item.id, bar.id)).stock], [-3, 4]);
+        const legs = await db.stockMovement.findMany({ where: { sourceId: document.id } });
+        assert.equal(legs.length, 2);
+        assert.equal(legs.every(({ costKnown }) => !costKnown), true);
 
-        await db.settings.update({ where: { cafeId: cafe.id }, data: { allowNegativeIngredientStock: true } });
-        try {
-          const document = await docs.create(admin, payload);
-          assert.equal(document.status, 'posted');
-          assert.deepEqual([(await stock(item.id)).stock, (await stock(item.id, bar.id)).stock], [-1, 2]);
-          const legs = await db.stockMovement.findMany({ where: { sourceId: document.id } });
-          assert.equal(legs.length, 2);
-          assert.equal(legs.every(({ costKnown }) => !costKnown), true);
-        } finally {
-          await db.settings.update({ where: { cafeId: cafe.id }, data: { allowNegativeIngredientStock: false } });
-        }
+        const receive = (quantity) => purchases.create({ supplier: 'Пополнение', complete: true, warehouseId: main.id,
+          items: [{ ingredientId: item.id, quantity, purchasePrice: 15 }] });
+        await receive(1);
+        assert.equal((await stock(item.id)).stock, -2);
+        await assert.rejects(post({ kind: 'writeoff', reason: 'damage', items: [{ ingredientId: item.id, quantity: 1 }] }), /недостаточно товара/);
+        await receive(3);
+        const balance = await stock(item.id);
+        assert.deepEqual([balance.stock, balance.avgCost, (await stock(item.id, bar.id)).stock], [1, 15, 4]);
       });
       await t.test('opening and all stock movements reconcile to balances', async () => {
         const opening = await items.create({ name: 'Салфетки', unit: 'pcs', stock: 10, avgCost: 0.5, kind: 'consumable' });

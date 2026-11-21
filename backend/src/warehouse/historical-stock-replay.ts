@@ -361,8 +361,11 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
     if (!next) throw cannotReplay('связанные складские операции не образуют корректный порядок');
     const { key, row } = next;
     const before = balances.get(key)!;
-    const canStayNegative = settings?.allowNegativeIngredientStock === true || (row.sourceType === 'order' && row.type !== 'sale');
-    if (!canStayNegative && before.stock.add(row.change).lt(0)) {
+    const afterStock = before.stock.add(row.change);
+    const recordedShortage = !stagedOrder.has(row.id) && row.afterStock.lt(0) && afterStock.gte(row.afterStock);
+    const canStayNegative = settings?.allowNegativeIngredientStock === true || recordedShortage
+      || (row.sourceType === 'transfer' && row.type === 'transfer') || (row.sourceType === 'order' && row.type !== 'sale');
+    if (!canStayNegative && row.change.lt(0) && afterStock.lt(0)) {
       throw cannotReplay('в историческом периоде недостаточно запаса для списания или перемещения');
     }
     const original = dependency(row);

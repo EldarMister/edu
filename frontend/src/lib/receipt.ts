@@ -39,3 +39,13 @@ export function receiptHeader(receipt: Receipt, fiscal = false) {
 export function receiptFooterText(text: string, language: ReceiptLanguage): string {
   return text === DEFAULT_RECEIPT_TEXT ? translate(language, text) : text;
 }
+
+const receiptClock = new Intl.DateTimeFormat('ru-RU', {
+  timeZone: 'Asia/Bishkek',
+  day: '2-digit', month: '2-digit', year: 'numeric',
+  hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+});
+
+export function receiptDateTime(value: string): string {
+  return receiptClock.format(new Date(value));
+}

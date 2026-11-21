@@ -95,7 +95,7 @@ test('legacy sessions retain the original workplace defaults without capability 
   }
 });
 
-test('production keeps read-only warehouse access without granting the administration panel', () => {
+test('production needs administration access before it can use read-only warehouse permissions', () => {
   for (const role of ['KITCHEN', 'BAR']) {
     const permissions = getDefaultPermissionsByRole(role);
     permissions.sections.warehouse = true;
@@ -106,9 +106,14 @@ test('production keeps read-only warehouse access without granting the administr
     const user = employee(role, permissions);
     assert.equal(canOpenWorkspace(user, 'admin'), false);
     assert.equal(canOpenWorkspace(user, 'terminal'), false);
-    assert.equal(canOpenWorkspace(user, 'warehouse'), true);
+    assert.equal(canOpenWorkspace(user, 'warehouse'), false);
     assert.equal(canOpenWorkspace(user, role === 'BAR' ? 'kitchen' : 'bar'), false);
-    const production = workspacePermissions(user, 'production');
+    assert.equal(workspacePermissions(user, 'production').sections.warehouse, false);
+    assert.equal(workspacePermissions(user, 'production').actions.warehouseCosts, false);
+
+    const authorized = employee(role, { ...permissions, adminAccess: true });
+    assert.equal(canOpenWorkspace(authorized, 'warehouse'), true);
+    const production = workspacePermissions(authorized, 'production');
     assert.equal(production.sections.orders, true);
     assert.equal(production.sections.warehouse, true);
     assert.deepEqual(Array.from(production.readOnlySections), ['warehouse']);

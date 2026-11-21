@@ -320,7 +320,7 @@ export class WarehouseDocumentsService {
       const source = await postStockMovement(tx, { ingredientId: item.ingredientId, warehouse, change: difference,
         costKnown: difference.gt(0) ? balance.valuationKnown : undefined,
         carriedAverage: resetCost ? zero : undefined,
-        allowNegative: effectiveAt ? true : undefined,
+        allowNegative: effectiveAt || kind === 'transfer' ? true : undefined,
         movement: { ...dateEvidence, type: kind, sourceType: kind, sourceId: id, actorId: actor.id, actorName: actor.name,
           reason: document.reason, comment,
           ...(resetCost ? { recipeSnapshot: { kind: inventoryCostReset } }

@@ -206,6 +206,7 @@ export class MenuEntryService {
                 data: {
                   stockIngredientId: source.stockIngredientId,
                   stockAmount: source.stockAmount,
+                  unit: source.unit,
                 },
               });
             }
@@ -238,11 +239,19 @@ export class MenuEntryService {
             where: { dishId: dish.id, id: { notIn: ids } },
           });
           for (const [sortOrder, variant] of variants.entries()) {
+            const existingVariant = previous?.variants.find((item) => item.id === variant.id);
+            const unit = normalizeUnit(variant.unit ?? existingVariant?.unit ?? dish.unit);
+            const existingBinding = existingVariant && (existingVariant.stockIngredientId || dish.stockIngredientId);
+            const reusesProductStock = dish.stockIngredientId && sortOrder === 0 && !previous?.variants.length;
+            if (dto.catalogKind === 'goods' && (
+              (existingBinding && unit !== normalizeUnit(existingVariant.unit)) ||
+              (reusesProductStock && unit !== normalizeUnit(dish.unit))
+            )) throw new BadRequestException('Единица товара с настроенным складским учётом не меняется');
             const variantData = {
               name: variant.name.trim(),
               price: new Prisma.Decimal(variant.price),
               sortOrder,
-              unit: unitLabel(normalizeUnit(variant.unit ?? dish.unit)),
+              unit: unitLabel(unit),
             };
             const saved = variant.id
               ? await tx.dishVariant.update({

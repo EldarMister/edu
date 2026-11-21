@@ -61,13 +61,7 @@ function AccessRow<Value extends string>({ name, label, note, options, selected,
 }
 
 function initialPermissions(position?: StaffPosition): EmployeePermissions {
-  if (position) {
-    const current = resolvePermissions(position.role, position.permissions);
-    // Legacy terminal sections describe the cash app, not administrative access.
-    if (!current.adminAccess && position.role === 'WAITER') current.sections = getDefaultPermissionsByRole('BAR').sections;
-    if (!current.adminAccess && position.role === 'WAITER') current.sections.orders = false;
-    return current;
-  }
+  if (position) return resolvePermissions(position.role, position.permissions);
   const permissions = getDefaultPermissionsByRole('ADMIN');
   permissions.terminalAccess = false;
   permissions.adminAccess = false;

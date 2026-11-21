@@ -9,9 +9,10 @@ import { IconEdit, IconTrash } from '../components/icons';
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { WorkspaceHeaderCount } from './WorkspaceHeader';
 import { QueryState } from './warehouse/WarehouseUi';
-import { useEditorRoute, usePageFilter } from './warehouse/workspace-route';
+import { useEditorRoute, usePageFilter, usePageFilters } from './warehouse/workspace-route';
 import { useStaffPositionMutations, useStaffPositions, type StaffPosition } from './positions-api';
 import { positionAccessSummary } from './position-permissions';
+import { FinanceRegister } from './finance/FinanceRegister';
 import type { Role } from '@/types';
 
 const accessFilters = [{ value: 'terminal', label: 'Доступ к кассе' }, { value: 'admin', label: 'Доступ к админ-панели' }, { value: 'production', label: 'Экран приготовления' }];
@@ -23,8 +24,7 @@ export function PositionsPage() {
   const { isOwner } = usePermissions();
   const query = useStaffPositions(isOwner);
   const { editor, openEditor, closeEditor } = useEditorRoute();
-  const [search, setSearch] = usePageFilter('search');
-  const [roleFilter, setRoleFilter] = usePageFilter('role');
+  const [{ search, role: roleFilter }, setFilters] = usePageFilters({ search: '', role: '' });
   const [sortDirection, setSortDirection] = usePageFilter('sort', 'asc');
   const [removePosition, setRemovePosition] = useState<StaffPosition | null>(null);
   const [replacementId, setReplacementId] = useState('');
@@ -48,36 +48,33 @@ export function PositionsPage() {
   const entry = positionEditor?.id ? query.data?.find(({ id }) => id === positionEditor.id) : undefined;
   return <div className="min-w-0 overflow-hidden rounded-t-2xl bg-card text-sm">
     <WorkspaceHeaderCount count={query.isSuccess ? rows.length : undefined} />
-    <p className="px-4 pt-4 text-text-secondary">Создайте должность, настройте права и выберите её в карточке сотрудника.</p>
-    <div className="flex flex-wrap items-center gap-2 p-4">
-      <WorkspaceSearch className="[&_.input]:h-9 [&_.input]:rounded-full [&_.input]:pl-8 [&_.input]:pr-8"
-        label="Поиск должностей" placeholder="Поиск..." value={search} onChange={setSearch} />
-      <Select ariaLabel="Фильтр должностей" className="h-9 !rounded-md !px-2 !text-sm" value={roleFilter} onChange={setRoleFilter}
-        options={[{ value: '', label: 'Все должности' }, ...accessFilters]} />
-      <button type="button" className="btn-primary btn-md ml-auto" aria-label="Добавить должность"
-        onClick={() => openEditor({ type: 'position' })}>Добавить</button>
-    </div>
     <QueryState pending={query.isPending} error={query.error}>
-      <div className="relative overflow-x-auto">
-        <table className="w-full min-w-[560px] text-left text-sm">
-          <thead><tr className="border-b border-border text-text-muted">
-            <th scope="col" className="w-[42%] px-3 py-3 font-normal" aria-sort={sortDirection === 'desc' ? 'descending' : 'ascending'}>
-              <button type="button" className="text-left" onClick={() => setSortDirection(sortDirection === 'desc' ? 'asc' : 'desc')}>
-                Название должности <span aria-hidden>{sortDirection === 'desc' ? '↓' : '↑'}</span>
-              </button>
-            </th>
-            <th scope="col" className="px-3 py-3 font-normal">Права доступа</th>
-            <th scope="col" className="px-3 py-3 text-right font-normal">Сотрудники</th>
-            <th scope="col" className="px-3 py-3 text-right font-normal">Действия</th>
-          </tr></thead>
-          <tbody>{rows.map(({ id, name, role, access, position }) => <tr className="h-12 border-b border-border hover:bg-background/60" key={id}>
-            <td className="px-3 py-2"><div className="flex items-center gap-2">
+      <FinanceRegister title="Должности" columnPreference="staff-positions"
+        columns={[
+          { key: 'name', label: 'Название должности', width: '42%',
+            sort: { ascending: sortDirection !== 'desc', toggle: () => setSortDirection(sortDirection === 'desc' ? 'asc' : 'desc') } },
+          { key: 'access', label: 'Права доступа' },
+          { key: 'employees', label: 'Сотрудники', width: 100, numeric: true },
+        ]}
+        defaultColumns={['name', 'access', 'employees']}
+        filters={<>
+          <WorkspaceSearch label="Поиск должностей" placeholder="Поиск..." value={search}
+            onChange={(value) => setFilters({ search: value })} />
+          <Select ariaLabel="Фильтр должностей" value={roleFilter} onChange={(value) => setFilters({ role: value })}
+            options={[{ value: '', label: 'Все должности' }, ...accessFilters]} />
+          {(search || roleFilter) && <button type="button" className="finance-tool"
+            onClick={() => setFilters({ search: '', role: '' })}>Сбросить</button>}
+        </>}
+        tools={<button type="button" className="btn-primary btn-md" aria-label="Добавить должность"
+          onClick={() => openEditor({ type: 'position' })}>Добавить</button>}
+        rows={rows.map(({ id, name, role, access, position }) => ({ id, values: {
+          name: { value: name, display: <div className="flex items-center gap-2">
               <span aria-hidden className={'h-2 w-2 shrink-0 rounded-full ' + roleDots[role]} />
               {position ? <button type="button" className="text-left" onClick={() => openEditor({ type: 'position', id })}>{name}</button> : name}
-            </div></td>
-            <td className="px-3 py-2">{access}</td>
-            <td className="px-3 py-2 text-right tabular-nums">{position?.employees ?? '—'}</td>
-            <td className="w-24 px-3 py-2 text-right">{position ? <div className="flex items-center justify-end gap-1">
+            </div> },
+          access: { value: access },
+          employees: { value: position?.employees ?? null, display: position?.employees ?? '—' },
+        }, action: position ? <div className="flex items-center justify-end gap-1">
               <button type="button" title="Редактировать" aria-label={`Редактировать должность ${name}`}
                 className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-background hover:text-primary"
                 onClick={() => openEditor({ type: 'position', id })}>
@@ -92,11 +89,8 @@ export function PositionsPage() {
                 }}>
                 <IconTrash className="h-4 w-4" />
               </button>
-            </div> : <span className="text-xs text-text-muted">Владелец аккаунта</span>}</td>
-          </tr>)}</tbody>
-        </table>
-      </div>
-      {!rows.length && <p role="status" className="p-8 text-center text-text-muted">Должности не найдены</p>}
+            </div> : <span className="text-xs text-text-muted">Владелец аккаунта</span> }))}
+        empty="Должности не найдены" />
     </QueryState>
     {positionEditor && (positionEditor.id && !entry
       ? <Modal open title="Должность" onClose={closeEditor}>

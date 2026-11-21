@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { MenuTaxType, OrderItemStatus, OrderStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import type { OrderRefundSelectionDto } from './dto/order-refund.dto';
+import { allocateCents } from './order-net';
 
 export const refundOrderInclude = {
   table: { select: { number: true } },
@@ -60,20 +61,6 @@ const money = (amount: number) => new Prisma.Decimal(amount).div(100).toFixed(2)
 const proportionalCents = (amount: number, quantity: number, total: number) =>
   new Prisma.Decimal(amount).mul(quantity).div(total).round().toNumber();
 
-/** Split cents by weight, assigning any remainder in a stable order. */
-export function allocateRefundCents(amount: number, weights: number[]) {
-  const denominator = weights.reduce((sum, weight) => sum + BigInt(weight), 0n);
-  if (!amount || !denominator) return weights.map(() => 0);
-  const rows = weights.map((weight, index) => {
-    const numerator = BigInt(weight) * BigInt(amount);
-    return { index, amount: Number(numerator / denominator), remainder: numerator % denominator };
-  });
-  const extra = amount - rows.reduce((sum, row) => sum + row.amount, 0);
-  const ranked = rows.slice().sort((a, b) => a.remainder === b.remainder ? a.index - b.index : a.remainder > b.remainder ? -1 : 1);
-  for (let index = 0; index < extra; index++) ranked[index].amount++;
-  return rows.map((row) => row.amount);
-}
-
 function calculatePaymentParts(order: RefundOrder, credit: number, remaining: number): RefundPart[] {
   if (!credit) return [];
   if (!order.payments.length && order.paymentMethod && order.paymentMethod !== 'mixed') {
@@ -87,7 +74,7 @@ function calculatePaymentParts(order: RefundOrder, credit: number, remaining: nu
   if (payments.reduce((sum, payment) => sum + payment.available, 0) !== remaining) {
     throw new ConflictException('В чеке не сходятся суммы исходных оплат. Проверьте платежи заказа.');
   }
-  const amounts = allocateRefundCents(credit, payments.map((payment) => payment.available));
+  const amounts = allocateCents(credit, payments.map((payment) => payment.available));
   return payments.flatMap(({ paymentId, method }, index) =>
     amounts[index] > 0 ? [{ paymentId, method, amount: money(amounts[index]) }] : []);
 }
@@ -166,7 +153,7 @@ export function buildRefundPlan(order: RefundOrder, selected: OrderRefundSelecti
     throw new ConflictException('В заказе не осталось позиций для возврата');
   }
   const weights = order.items.map((item) => Math.max(0, cents(item.finalPrice)));
-  const allocations = allocateRefundCents(cents(order.finalAmount),
+  const allocations = allocateCents(cents(order.finalAmount),
     weights.some((amount) => amount > 0) ? weights : order.items.map((item) => item.quantity));
   const allocationById = new Map(order.items.map((item, index) => [item.id, allocations[index]]));
   const items: RefundLine[] = selectedLines.map(({ item, quantity }) => {

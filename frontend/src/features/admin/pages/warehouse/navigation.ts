@@ -33,7 +33,7 @@ export function warehouseViewAllowed(view: { permission?: string; costs?: boolea
 }
 export const MENU_NAV: { key: MenuView; label: string }[] = [
   { key: 'goods', label: 'Товары' },
-  { key: 'recipes', label: 'Техкарты' },
+  { key: 'recipes', label: 'Блюда' },
   { key: 'preparations', label: 'Полуфабрикаты' },
   { key: 'ingredients', label: 'Ингредиенты' },
   { key: 'categories', label: 'Категории товаров и блюд' },

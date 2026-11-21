@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { OrderItemStatus, OrderStatus, PaymentMethod, PaymentStatus, Prisma, Role, WaiterShiftStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
-import { netItemAmount, netItemQuantity, netOrderAmount, netPaymentAmount } from '../orders/order-net';
+import { allocateCents, netItemAmount, netItemQuantity, netOrderAmount, netPaymentAmount } from '../orders/order-net';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { lockStationRouting, staffStation } from '../kitchen/preparation-stations';
@@ -816,14 +816,15 @@ export class StaffService {
     };
   }
 
-  /** Детальный отчет по блюдам в оплаченных заказах одного официанта. */
+  /** Позиции оплаченных заказов по назначенным сотрудникам. */
   async waiterOrdersReport(params: WaiterOrdersReportQueryDto) {
     const range = warehouseDateRange(params.from, params.to)!;
     const from = range.gte!;
     const toInclusive = range.lte!;
     const to = new Date(toInclusive.getTime() + 1);
 
-    const waiter = await this.prisma.user.findFirst({
+    const all = params.waiterId === 'all';
+    const waiter = all ? { id: 'all', name: 'Все сотрудники' } : await this.prisma.user.findFirst({
       where: {
         id: params.waiterId,
         role: { not: Role.OWNER },
@@ -834,20 +835,23 @@ export class StaffService {
 
     const orders = await this.prisma.order.findMany({
       where: {
-        waiterId: waiter.id,
+        ...(all ? { waiter: { role: { not: Role.OWNER } } } : { waiterId: waiter.id }),
         status: OrderStatus.paid,
         paymentStatus: { not: PaymentStatus.refunded },
         closedAt: { gte: from, lt: to },
       },
-      orderBy: { closedAt: 'asc' },
+      orderBy: [{ closedAt: 'asc' }, { id: 'asc' }],
       select: {
         id: true,
         orderNumber: true,
         createdAt: true,
+        closedAt: true,
+        finalAmount: true,
+        waiter: { select: { name: true } },
         table: { select: { number: true } },
         items: {
           where: { status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
-          orderBy: { createdAt: 'asc' },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           select: {
             id: true,
             dishNameSnapshot: true,
@@ -862,22 +866,30 @@ export class StaffService {
       },
     });
 
-    const servingSeconds: number[] = [];
+    let totalServingSeconds = 0;
+    let totalPaymentSeconds = 0;
     const rows = orders.flatMap((order) => {
+      const paidAt = order.closedAt ?? order.createdAt;
       const servedAt = order.items.length
         ? new Date(Math.max(...order.items.map((item) => item.updatedAt.getTime())))
         : order.createdAt;
-      servingSeconds.push(Math.max(0, Math.round((servedAt.getTime() - order.createdAt.getTime()) / 1000)));
+      totalServingSeconds += Math.max(0, Math.round((servedAt.getTime() - order.createdAt.getTime()) / 1000));
+      totalPaymentSeconds += Math.max(0, (paidAt.getTime() - order.createdAt.getTime()) / 1000);
 
-      return order.items.flatMap((item) => {
+      const weights = order.items.map((item) => Math.max(0, item.finalPrice.mul(100).round().toNumber()));
+      const allocations = allocateCents(order.finalAmount.mul(100).round().toNumber(),
+        weights.some((amount) => amount > 0) ? weights : order.items.map((item) => item.quantity));
+      return order.items.flatMap((item, index) => {
         const quantity = netItemQuantity(item);
         if (quantity <= 0) return [];
-        const amount = Number(netItemAmount(item, item.finalPrice));
+        const amount = Number(netItemAmount(item, allocations[index] / 100));
         return {
           id: item.id,
           orderId: order.id,
           orderedAt: order.createdAt.toISOString(),
           servedAt: servedAt.toISOString(),
+          paidAt: paidAt.toISOString(),
+          waiterName: order.waiter?.name ?? waiter.name,
           orderNumber: order.orderNumber,
           tableNumber: order.table.number,
           dishName: item.dishVariantNameSnapshot
@@ -898,10 +910,9 @@ export class StaffService {
       summary: {
         ordersCount: orders.length,
         dishesCount: rows.reduce((sum, row) => sum + row.quantity, 0),
-        amount: rows.reduce((sum, row) => sum + row.amount, 0),
-        averageServingSeconds: servingSeconds.length
-          ? Math.round(servingSeconds.reduce((sum, seconds) => sum + seconds, 0) / servingSeconds.length)
-          : 0,
+        amount: Math.round(rows.reduce((sum, row) => sum + row.amount, 0) * 100) / 100,
+        averageServingSeconds: orders.length ? Math.round(totalServingSeconds / orders.length) : 0,
+        averagePaymentSeconds: orders.length ? Math.round(totalPaymentSeconds / orders.length) : 0,
       },
     };
   }

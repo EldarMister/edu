@@ -76,10 +76,15 @@ async function findAccount(db: Db, cafeId: string, id: string) {
 }
 
 async function shiftForEntry(db: Db, cafeId: string, accountId: string, at: Date, amount?: Prisma.Decimal) {
-  const shift = await db.cashShift.findFirst({ where: { cafeId, accountId, closedAt: null } });
-  if (shift && at < shift.openedAt) throw new BadRequestException('Дата операции раньше открытия кассовой смены');
-  if (shift && amount) await assertDrawerBalance(db, shift, amount);
-  return shift?.id;
+  const shift = await db.cashShift.findFirst({ where: { cafeId, accountId }, orderBy: [{ openedAt: 'desc' }, { id: 'desc' }] });
+  if (!shift) return undefined;
+  if (shift.closedAt) {
+    if (at < shift.closedAt) throw new ConflictException('Дата операции относится к закрытому кассовому периоду');
+    return undefined;
+  }
+  if (at < shift.openedAt) throw new BadRequestException('Дата операции раньше открытия кассовой смены');
+  if (amount) await assertDrawerBalance(db, shift, amount);
+  return shift.id;
 }
 
 const manualKey = 'manual:';

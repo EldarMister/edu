@@ -74,7 +74,8 @@ test('PostgreSQL: editing a manual transaction updates the account, journal and 
     await check([140, 60, 0]);
 
     const drawer = await db.financeAccount.findFirstOrThrow({ where: { cafeId, isDefault: true, type: 'cash' } });
-    await db.cashShift.create({ data: { cafeId, accountId: drawer.id, openedById: owner.id, openingAmount: 0 } });
+    const openedAt = new Date(Date.now() - 120_000);
+    const shift = await db.cashShift.create({ data: { cafeId, accountId: drawer.id, openedAt, openedById: owner.id, openingAmount: 0 } });
     await assert.rejects(finance.editTransaction(owner, transfer.id, {
       kind: 'income', accountId: drawer.id, amount: 60,
     }), { status: 409 });
@@ -83,6 +84,17 @@ test('PostgreSQL: editing a manual transaction updates the account, journal and 
       kind: 'income', accountId: source.id, amount: 1,
     }), { status: 409 });
     await check([70, 60, 0]);
+    const closedAt = new Date(Date.now() - 60_000);
+    await db.cashShift.update({ where: { id: shift.id }, data: { closedAt, closedById: owner.id } });
+    await assert.rejects(post({
+      kind: 'income', accountId: drawer.id, amount: 80, occurredAt: openedAt.toISOString(),
+    }), { status: 409 });
+    await assert.rejects(post({
+      kind: 'transfer', accountId: source.id, destinationAccountId: drawer.id, amount: 40, occurredAt: openedAt.toISOString(),
+    }), { status: 409 });
+    await check([70, 60, 0]);
+    const current = await post({ kind: 'income', accountId: drawer.id, amount: 15, occurredAt: closedAt.toISOString() });
+    assert.equal(current.cashShiftId, null);
   } finally {
     await db.financeEntry.deleteMany({ where: { cafeId } });
     await db.cashShift.deleteMany({ where: { cafeId } });

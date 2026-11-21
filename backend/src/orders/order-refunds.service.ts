@@ -97,7 +97,9 @@ export class OrderRefundsService {
         where: { id: dto.requestId, cafeId: actor.cafeId }, include: { order: refundOrderDetails },
       });
       if (existing) {
-        if (existing.orderId !== orderId || existing.requestedById !== actor.id || (direct && existing.status !== 'approved')) {
+        if (existing.orderId !== orderId || existing.requestedById !== actor.id || (direct && existing.status !== 'approved')
+          || existing.quoteVersion !== dto.quoteVersion || existing.reason !== reason || existing.itemId !== (dto.itemId ?? null)
+          || (dto.quantity != null && existing.quantity !== dto.quantity)) {
           throw new ConflictException('Ключ операции уже использован');
         }
         return { refund: existing, waiterId: order.waiterId, changed: false };

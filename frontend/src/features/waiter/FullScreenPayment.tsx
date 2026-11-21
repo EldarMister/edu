@@ -7,6 +7,7 @@ import { useT } from '@/lib/i18n';
 import type { Order } from '@/types';
 import { PaymentKeypad, type PaymentKey } from './PaymentKeypad';
 import { normalizeAmount, quickCashAmounts, tenderTotals, type TenderAmounts, type TenderMethod } from './paymentAmounts';
+import { PaymentQrPreview } from './PaymentQrPreview';
 
 const METHODS = [
   { value: 'cash', label: 'Наличные', Icon: IconCash },
@@ -25,11 +26,11 @@ function animatePaymentButton(event: MouseEvent<HTMLDivElement>) {
   );
 }
 
-export function FullScreenPayment({ order, enabled, qrConfigured, allItemsServed, open, busy, error,
+export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, open, busy, error,
   splitOpen, onClose, onSplit, onConfirm }: {
   order: Order;
   enabled: readonly string[];
-  qrConfigured: boolean;
+  qrImageUrl: string | null;
   allItemsServed: boolean;
   open: boolean;
   busy: boolean;
@@ -54,8 +55,9 @@ export function FullScreenPayment({ order, enabled, qrConfigured, allItemsServed
     qr: enabled.includes('qr') ? Number(draft.qr) || 0 : 0,
   };
   const { amounts, remaining, change, over } = tenderTotals(total, entered);
-  const showQrWarning = !qrConfigured && (selected === 'qr' || entered.qr > 0);
-  const qrMissing = !qrConfigured && (entered.qr > 0 || (total === 0 && selected === 'qr'));
+  const showQrWarning = !qrImageUrl && (selected === 'qr' || entered.qr > 0);
+  const qrMissing = !qrImageUrl && (entered.qr > 0 || (total === 0 && selected === 'qr'));
+  const canSplit = methods.some(({ value }) => value !== 'qr' || !!qrImageUrl) && Math.round(total * 100) >= 2;
   const cashDue = amounts.cash + remaining;
   const cashPresets = enabled.includes('cash') ? quickCashAmounts(cashDue) : [];
   const canConfirm = selected && allItemsServed && !busy && !remaining && !over && !qrMissing;
@@ -171,6 +173,7 @@ export function FullScreenPayment({ order, enabled, qrConfigured, allItemsServed
           {showQrWarning && <p role="alert" className="text-sm text-warning">
             {t('QR-код не загружен. Добавьте его в настройках или выберите другой способ оплаты.')}
           </p>}
+          {qrImageUrl && (selected === 'qr' || entered.qr > 0) && <PaymentQrPreview url={qrImageUrl} />}
 
           <div className="space-y-2 border-t border-border pt-4 text-sm" aria-live="polite">
             {over ? <p className="text-danger">{t('Сумма превышает итог заказа')}</p> : (
@@ -184,7 +187,7 @@ export function FullScreenPayment({ order, enabled, qrConfigured, allItemsServed
 
           <div className="mt-auto flex flex-wrap items-center gap-3 border-t border-border pt-4">
             <button ref={splitTrigger} type="button" className="payment-button btn-secondary btn-lg grow whitespace-nowrap"
-              disabled={busy || !allItemsServed || !methods.length || total <= 0} onClick={onSplit}>
+              disabled={busy || !allItemsServed || !canSplit} onClick={onSplit}>
               {t('Разделить счёт')}
             </button>
             <button type="button" className="payment-button btn-primary btn-lg grow font-semibold"

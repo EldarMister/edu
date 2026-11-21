@@ -99,12 +99,9 @@ export class WarehouseLocationsService {
     const quantity = toBase(input.quantity, unit) / toBase(1, normalizeUnit(ingredient.displayUnit));
     const user = actor ?? { id: 'system', name: 'Система', role: 'OWNER', cafeId: getCafeId() ?? null };
     const documents = new WarehouseDocumentsService(this.prisma);
-    let document = await documents.create(user, { kind: 'transfer', warehouseId: input.fromWarehouseId,
+    const document = await documents.create(user, { kind: 'transfer', warehouseId: input.fromWarehouseId,
       destinationWarehouseId: input.toWarehouseId, requestKey: input.requestKey,
-      items: [{ ingredientId: ingredient.id, quantity }] });
-    if (document.status === 'posted') return { ok: true, documentId: document.id };
-    if (document.status === 'draft') document = await documents.submit(user, document.id, document.revision);
-    await documents.approve(user, document.id, document.revision);
+      items: [{ ingredientId: ingredient.id, quantity }], finalize: 'post' });
     return { ok: true, documentId: document.id };
   }
 }

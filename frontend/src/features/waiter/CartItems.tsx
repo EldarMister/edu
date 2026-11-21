@@ -32,7 +32,7 @@ export function CartLinesList({
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   return (
     <div className="divide-y divide-border">
-      {modifierLine && <ModifierPicker line={modifierLine} onClose={() => setModifierLine(null)} onConfirm={(modifiers) => { setLineModifiers(cartLineKey(modifierLine), modifiers); setModifierLine(null); }} />}
+      {modifierLine && <ModifierPicker editing line={modifierLine} onClose={() => setModifierLine(null)} onConfirm={(modifiers) => { setLineModifiers(cartLineKey(modifierLine), modifiers); setModifierLine(null); }} />}
       {lines.map((l) => {
         const key = cartLineKey(l);
         const unit = cartLineUnitPrice(l);

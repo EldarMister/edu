@@ -24,8 +24,13 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
       warehouseCosts: false, warehouseReceive: false, warehouseApprove: false, warehouseSettings: false,
     } });
     const counter = await createUser('ADMIN', { sections: { warehouse: true }, actions: { warehouseCount: true, warehouseWriteoff: true, warehouseApprove: false, warehouseCosts: false } });
-    const chef = await createUser('KITCHEN', { sections: { warehouse: true }, actions: { warehouseProduce: true, warehouseRecipes: false, warehouseReports: false, warehouseCosts: false } });
-    const reader = await createUser('KITCHEN', { sections: { warehouse: true }, actions: { warehouseProduce: false, warehouseRecipes: true, warehouseReports: false, warehouseCosts: false } });
+    const chefPermissions = { sections: { warehouse: true }, actions: {
+      warehouseProduce: true, warehouseRecipes: false, warehouseReports: false, warehouseCosts: false,
+    } };
+    const chef = await createUser('KITCHEN', { ...chefPermissions, adminAccess: true });
+    const stationOnlyChef = await createUser('KITCHEN', chefPermissions);
+    const reader = await createUser('KITCHEN', { adminAccess: true, sections: { warehouse: true },
+      actions: { warehouseProduce: false, warehouseRecipes: true, warehouseReports: false, warehouseCosts: false } });
     const outsider = await createUser('WAITER', { sections: { warehouse: true }, actions: { warehouseApprove: true } });
     const reportReader = await createUser('ADMIN', { sections: { warehouse: true }, actions: {
       warehouseReports: true, warehouseCosts: true, warehouseReceive: false, exportReports: false,
@@ -38,6 +43,7 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
     };
     const ownerToken = await login(owner), keeperToken = await login(keeper), outsiderToken = await login(outsider);
     const chefToken = await login(chef), readerToken = await login(reader), counterToken = await login(counter);
+    const stationOnlyChefToken = await login(stationOnlyChef);
     const reportReaderToken = await login(reportReader);
     const reportBlockedToken = await login(reportBlocked);
     const request = (token, path, method = 'GET', body) => fetch(`${api}/api${path}`, {
@@ -200,7 +206,10 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
     assert.equal(recipeResponse.status, 200);
     assert.equal((await request(chefToken, '/admin/warehouse/movements')).status, 403);
     assert.equal((await request(chefToken, '/admin/warehouse/reports?view=movements')).status, 403);
-    const produceResponse = await request(chefToken, `/admin/warehouse/preparation/${output.id}/batches`, 'POST', { quantity: 1, unit: 'pcs', warehouseId: main.id, requestKey: randomUUID(), batchNumber: 'CHEF-HTTP' });
+    const producePath = `/admin/warehouse/preparation/${output.id}/batches`;
+    const produceBody = { quantity: 1, unit: 'pcs', warehouseId: main.id, requestKey: randomUUID(), batchNumber: 'CHEF-HTTP' };
+    assert.equal((await request(stationOnlyChefToken, producePath, 'POST', produceBody)).status, 403);
+    const produceResponse = await request(chefToken, producePath, 'POST', produceBody);
     assert.equal(produceResponse.status, 201); const produced = await produceResponse.json();
     assert.equal(produced.totalCost, null); assert.equal(produced.unitCost, null);
     const journalResponse = await request(chefToken, '/admin/warehouse/preparation/batches');

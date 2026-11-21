@@ -2,6 +2,20 @@ import { Prisma } from '@prisma/client';
 
 type Money = Prisma.Decimal | number | string;
 
+/** Split cents by weight, assigning any remainder in a stable order. */
+export function allocateCents(amount: number, weights: number[]) {
+  const denominator = weights.reduce((sum, weight) => sum + BigInt(weight), 0n);
+  if (!amount || !denominator) return weights.map(() => 0);
+  const rows = weights.map((weight, index) => {
+    const numerator = BigInt(weight) * BigInt(amount);
+    return { index, amount: Number(numerator / denominator), remainder: numerator % denominator };
+  });
+  const extra = amount - rows.reduce((sum, row) => sum + row.amount, 0);
+  const ranked = rows.slice().sort((a, b) => a.remainder === b.remainder ? a.index - b.index : a.remainder > b.remainder ? -1 : 1);
+  for (let index = 0; index < extra; index++) ranked[index].amount++;
+  return rows.map((row) => row.amount);
+}
+
 export function netOrderAmount(order: { finalAmount: Money; refundedAmount?: Money | null }) {
   return new Prisma.Decimal(order.finalAmount).sub(order.refundedAmount ?? 0);
 }

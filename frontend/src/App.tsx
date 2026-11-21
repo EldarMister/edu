@@ -30,6 +30,7 @@ export function App() {
   const updateUser = useAuth((s) => s.updateUser);
   const location = useLocation();
   const theme = useTheme((state) => state.theme);
+  const home = user ? homeForUser(user) : '/login';
   const publicPage = /^\/(menu|queue|q)(\/|$)/.test(location.pathname);
   const waiterButtonVisible = useRadioVisibility((s) => s.waiterButtonVisible);
   const onWaiter = location.pathname.startsWith('/waiter');
@@ -104,7 +105,7 @@ export function App() {
 
         <Route
           path="/login"
-          element={user ? <Navigate to={homeForUser(user)} replace /> : <LoginPage />}
+          element={user ? <Navigate to={home} replace /> : <LoginPage />}
         />
 
         <Route
@@ -154,14 +155,14 @@ export function App() {
           }
         />
 
-        <Route path="/access-denied" element={user ? <div className="grid h-full place-content-center gap-4 p-6 text-center">
+        <Route path="/access-denied" element={home === '/access-denied' ? <div className="grid h-full place-content-center gap-4 p-6 text-center">
           <h1 className="text-xl font-semibold">Доступ не назначен</h1>
           <p>Владелец должен назначить должность с доступом к кассе или админ-панели.</p>
           <button className="btn-secondary btn-md" onClick={() => useAuth.getState().logout()}>Выйти</button>
-        </div> : <Navigate to="/login" replace />} />
+        </div> : <Navigate to={home} replace />} />
         <Route
           path="*"
-          element={<Navigate to={user ? homeForUser(user) : '/login'} replace />}
+          element={<Navigate to={home} replace />}
         />
       </Routes>
       {showPtt && <PttOverlay waiterMode={onWaiter} buttonHidden={onWaiter && !waiterButtonVisible} />}

@@ -61,7 +61,7 @@ export async function postStockMovement(tx: Prisma.TransactionClient, input: Val
   const before = await getWarehouseBalance(tx, input.warehouse, ingredient);
   const { stock, avgCost, valuationKnown, change, cost, costKnown, valuationAdjustment } = calculateStockValuation(before, input);
   if (ingredient.preparationMode === 'virtual' && !change.isZero()) throw new ConflictException('Заготовка без отдельного остатка раскрывается по рецептуре и не участвует в складских движениях');
-  if (stock.lt(0)) {
+  if (change.lt(0) && stock.lt(0)) {
     const allowNegative = input.allowNegative ?? (await tx.settings.findFirst({ where: cafeId ? { cafeId } : {}, select: { allowNegativeIngredientStock: true } }))?.allowNegativeIngredientStock ?? false;
     if (!allowNegative) throw new ConflictException(`На выбранном складе недостаточно товара «${ingredient.name}»`);
   }

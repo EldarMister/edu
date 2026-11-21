@@ -538,7 +538,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
             </button>}
           </section>
         )}
-        {!inventory && <DocumentStockWarnings shortages={shortages} />}
+        {!inventory && <DocumentStockWarnings shortages={shortages} isTransfer={kind === 'transfer'} />}
         {error && (
           <p role="alert" className="text-danger text-sm">
             {error}

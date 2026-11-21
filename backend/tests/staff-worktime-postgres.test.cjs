@@ -21,6 +21,61 @@ const databaseUrl = process.env.ORDER_FEATURE_TEST_DATABASE_URL;
 if (databaseUrl && (!['localhost', '127.0.0.1'].includes(new URL(databaseUrl).hostname)
   || !new URL(databaseUrl).pathname.includes('test'))) throw new Error('Only a dedicated local test database is allowed');
 
+test('PostgreSQL: waiter reports use Bishkek payment dates, exclude returns and group assigned employees', { skip: !databaseUrl }, async () => {
+  const db = new PrismaClient({ datasourceUrl: databaseUrl });
+  db.$use(tenantPrismaMiddleware);
+  const cafe = await db.cafe.create({ data: { name: 'Waiter report ' + randomUUID() } });
+  try {
+    await runWithTenant({ cafeId: cafe.id }, async () => {
+      const createEmployee = (name, role) => db.user.create({
+        data: { name, role, phone: randomUUID(), passwordHash: 'fixture' },
+      });
+      const waiter = await createEmployee('Официант', 'WAITER');
+      const cashier = await createEmployee('Кассир', 'ADMIN');
+      const owner = await createEmployee('Владелец', 'OWNER');
+      const hall = await db.hall.create({ data: { name: 'Тестовый зал' } });
+      const table = await db.table.create({ data: { hallId: hall.id, number: 1 } });
+      const date = '2026-10-04';
+      const paidAt = new Date('2026-10-03T18:00:00.000Z');
+      const createCheck = async (employee, seconds, { paid = paidAt, refunded = 0, finalAmount = 100, paymentStatus = 'paid' } = {}) => {
+        const order = await db.order.create({ data: {
+          tableId: table.id, waiterId: employee.id, orderNumber: randomUUID(), status: 'paid',
+          paymentStatus, closedAt: paid, finalAmount, createdAt: new Date(paid.getTime() - seconds * 1000),
+        } });
+        await db.orderItem.create({ data: {
+          orderId: order.id, dishNameSnapshot: 'Чай', priceSnapshot: 50, quantity: 2, finalPrice: 100,
+          refundedQuantity: refunded, updatedAt: new Date('2026-10-05T11:00:00.000Z'),
+        } });
+      };
+      await createCheck(waiter, 120, { refunded: 1, finalAmount: 99 });
+      await createCheck(cashier, 60);
+      await createCheck(waiter, 60, { paid: new Date(paidAt.getTime() - 1) });
+      await createCheck(waiter, 60, { refunded: 2, paymentStatus: 'refunded' });
+      await createCheck(owner, 60);
+
+      const staff = new StaffService(db, {});
+      const all = await staff.waiterOrdersReport({ waiterId: 'all', from: date, to: date });
+      assert.equal(all.summary.ordersCount, 2);
+      assert.equal(all.summary.dishesCount, 3);
+      assert.equal(all.summary.amount, 149.5);
+      assert.equal(all.summary.averagePaymentSeconds, 90);
+      assert.deepEqual(all.items.map((item) => item.waiterName).sort(), ['Кассир', 'Официант']);
+      assert.ok(all.items.every((item) => item.paidAt === paidAt.toISOString()));
+
+      const single = await staff.waiterOrdersReport({ waiterId: waiter.id, from: date, to: date });
+      assert.equal(single.summary.ordersCount, 1);
+      assert.equal(single.summary.amount, 49.5);
+      assert.equal(single.summary.averagePaymentSeconds, 120);
+
+      await db.user.update({ where: { id: waiter.id }, data: { role: 'KITCHEN' } });
+      const afterReassignment = await staff.waiterOrdersReport({ waiterId: 'all', from: date, to: date });
+      assert.deepEqual(afterReassignment.items, all.items);
+    });
+  } finally {
+    await db.$disconnect();
+  }
+});
+
 test('work-time routes allow each employee to manage their own shift without staff management rights', async () => {
   const roles = new RolesGuard(new Reflector());
   const permissions = new PermissionsGuard(new Reflector());
