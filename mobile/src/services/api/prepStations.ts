@@ -31,7 +31,14 @@ export function usePrepStationMutations() {
       (await api.patch<PrepStationEntry>(`/prep-stations/${encodeURIComponent(id)}`, patch)).data,
     onSuccess: refresh,
   });
-  return { create, update };
+  const remove = useMutation({
+    mutationFn: async ({ id, confirmation }: { id: string; confirmation: string }) =>
+      (await api.delete<{ ok: true }>(`/prep-stations/${encodeURIComponent(id)}`, { data: { confirmation } })).data,
+    onSuccess: () => Promise.all([
+      refresh(), qc.invalidateQueries({ queryKey: ['admin', 'warehouse', 'locations'] }),
+    ]),
+  });
+  return { create, update, remove };
 }
 
 export function prepStationOptions(stations: PrepStationEntry[], selected?: string) {

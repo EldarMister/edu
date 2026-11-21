@@ -70,7 +70,10 @@ function screenHarness(options = {}) {
     detail: { data: undefined, isLoading: false },
   };
   const navigations = [];
-  const navigation = { getParent: () => ({ navigate: value => navigations.push(value) }) };
+  const navigation = {
+    getParent: () => ({ navigate: value => navigations.push(value) }),
+    replace: (name, params) => navigations.push({ name, params }),
+  };
   const mutation = () => ({ isPending: false, mutate() {}, mutateAsync() {} });
   const api = Object.fromEntries([
     'usePickedUp', 'useServed', 'useToPayment', 'useResolvePartialRejection',
@@ -125,13 +128,20 @@ function screenHarness(options = {}) {
     '@/lib/order-permissions': loadSource('src/lib/order-permissions.ts', {}),
     '@/lib/api': { apiError: String },
     '@/features/refunds/OrderRefunds': { TerminalOrderRefunds: 'TerminalOrderRefunds' },
+    '@/features/requests/itemCancellations': {
+      useRequestItemCancellation: () => ({ reset() {} }), usePendingItemCancellations: () => ({}),
+    },
+    '@/store/auth': { useAuth: (selector) => selector({ user: { role: 'WAITER' } }) },
+    axios: { isAxiosError: () => false },
     '@/utils/format': { displayOrderNumber: String, money: String },
     '@/utils/orderCart': { orderToCartLines: () => [] },
     './useReceiptPrinter': { useReceiptPrinter: () => async () => {} },
     '@/components/ModifierSummary': { ModifierSummary: 'ModifierSummary' },
-    '@/hooks/usePermissions': { usePermissions: () => ({ canAction: () => true }) },
+    '@/hooks/usePermissions': { usePermissions: () => ({ canAction: () => true, canOwnerOperation: () => true }) },
     './PaymentSheet': { PaymentSheet: 'PaymentSheet' },
-    './InsufficientPermissionsSheet': { InsufficientPermissionsSheet: 'InsufficientPermissionsSheet' },
+    './SplitOrderSheet': { SplitOrderSheet: 'SplitOrderSheet' },
+    './splitOrderPlan': loadSource('src/screens/waiter/splitOrderPlan.ts', {}),
+    '@/lib/i18n': { useT: () => value => value },
     './orderRules': {
       canRequestPreliminaryBill: () => false, deliveryDetails: () => null, orderLocation: () => 'Стол 2',
     },
@@ -190,6 +200,37 @@ test('payment sheet survives active-order removal, detail loading, fallback and 
   completed.props.onPaid();
   assert.equal(paymentSlot(env.render()).props.visible, false);
   assert.deepEqual(env.navigations, ['Tables']);
+});
+
+test('item split leaves payment openable on the source and advances to the other check after payment', () => {
+  const env = screenHarness();
+  const waiting = {
+    id: 'order-102', orderNumber: 102, status: 'waiting_payment', source: 'pos',
+    waiter: { id: 'waiter-1' }, table: { id: 'table-2', number: 2 }, finalAmount: 420,
+    updatedAt: '2026-11-22T14:00:00.000Z',
+    items: [{ id: 'line', status: 'served', quantity: 2, finalPrice: '420', dishNameSnapshot: 'Суп' }],
+  };
+  env.queries.active = { data: [waiting], isLoading: false, isFetched: true };
+  const original = paymentSlot(env.render());
+  assert.equal(original.props.visible, true);
+  original.props.onSplitItems(waiting);
+  const opened = env.render();
+  assert.equal(paymentSlot(opened).props.visible, false);
+  const split = React.Children.toArray(opened.props.children).find((child) => child.type === 'SplitOrderSheet');
+  assert.ok(split);
+
+  const source = { ...waiting, updatedAt: '2026-11-22T14:01:00.000Z', finalAmount: '210',
+    items: [{ ...waiting.items[0], quantity: 1, finalPrice: '210' }] };
+  const other = { ...source, id: 'order-103', orderNumber: 103, splitFromOrderId: source.id };
+  env.queries.active = { data: [source, other], isLoading: false, isFetched: true };
+  split.props.onSplit(source, other);
+  assert.equal(paymentSlot(env.render()).props.order, source);
+  assert.equal(paymentSlot(env.render()).props.visible, false);
+
+  paymentSlot(env.render()).props.onPaid();
+  assert.deepEqual(JSON.parse(JSON.stringify(env.navigations)), [
+    { name: 'OrderDetail', params: { orderId: 'order-103', fromSplitFamily: true } },
+  ]);
 });
 
 test('initial loading and missing order keep the same payment slot and show their fallback', () => {

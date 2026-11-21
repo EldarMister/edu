@@ -14,6 +14,16 @@
         "buildType": "apk"
       }
     },
+    "ios-production": {
+      "distribution": "store",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://edu-production-2395.up.railway.app",
+        "EXPO_PUBLIC_WEB_URL": "https://edu-pos.up.railway.app"
+      },
+      "ios": {
+        "image": "macos-sequoia-15.6-xcode-26.2"
+      }
+    },
     "production": {
       "android": {
         "buildType": "app-bundle"

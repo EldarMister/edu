@@ -2,10 +2,9 @@ import { useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { View } from '@/components/themed';
 import { Text } from '@/components/typography';
-import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
+import { SheetScrollView } from '@/components/BottomSheet';
 import { Button, Loading } from '@/components/ui';
 import { apiError } from '@/lib/api';
-import { useT } from '@/lib/i18n';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useAuth } from '@/store/auth';
 import { colors, radius, spacing } from '@/theme';
@@ -23,8 +22,8 @@ const statusLabels = {
 
 export function TerminalOrderRefunds({ order }: { order: Order }) {
   const userId = useAuth((state) => state.user?.id);
-  const { effectiveRole, canSection } = usePermissions();
-  if (effectiveRole !== 'WAITER' || !canSection('orders') || order.waiter?.id !== userId || order.status !== 'paid') return null;
+  const { effectiveRole, canSection, canOwnerOperation } = usePermissions();
+  if (!canOwnerOperation('refunds') || effectiveRole !== 'WAITER' || !canSection('orders') || order.waiter?.id !== userId || order.status !== 'paid') return null;
   return <OrderRefunds key={order.id} order={order} mode="request" />;
 }
 
@@ -65,41 +64,30 @@ export function OrderRefunds({ order, mode }: { order: Order; mode: 'request' | 
   );
 }
 
-export function RefundQueueButton() {
-  const t = useT();
+export function RefundQueuePage() {
   const pending = usePendingRefunds(true);
-  const [open, setOpen] = useState(false);
   const [review, setReview] = useState<OrderRefund>();
   const requests = pending.data ?? [];
-  const title = t('Заявки на возврат');
-  return (
-    <>
-      <Button title={requests.length ? title + ' · ' + requests.length : title}
-        size="md" variant="secondary" onPress={() => setOpen(true)} />
-      <BottomSheet visible={open} onClose={() => setOpen(false)} title={title} maxHeight="88%">
-        <SheetScrollView contentContainerStyle={styles.stack}>
-          {pending.isPending ? <Loading /> : null}
-          {pending.error ? <RefundLoadError message={apiError(pending.error)} retry={() => void pending.refetch()} /> : null}
-          {pending.isSuccess && requests.length === 0 ? (
-            <Text style={styles.muted} translate>Ожидающих заявок на возврат нет</Text>
-          ) : null}
-          {requests.map((refund) => (
-            <View style={styles.card} key={refund.id}>
-              <View style={styles.row}>
-                <Text style={styles.heading}><Text translate>Заказ</Text> {displayOrderNumber(refund.orderNumber)}</Text>
-                <Text style={styles.heading}>{money(refund.amount)}</Text>
-              </View>
-              <Text style={styles.muted}>{refund.requestedByName} · {timeHM(refund.createdAt)}</Text>
-              <RefundScope refund={refund} />
-              <Text style={styles.body}>{refund.reason}</Text>
-              <Button title="Рассмотреть заявку" size="md" onPress={() => setReview(refund)} />
-            </View>
-          ))}
-          {review ? <ReviewOrderRefund key={review.id} refund={review} onClose={() => setReview(undefined)} /> : null}
-        </SheetScrollView>
-      </BottomSheet>
-    </>
-  );
+  return <SheetScrollView contentContainerStyle={styles.queueContent} keyboardShouldPersistTaps="handled">
+    {pending.isPending ? <Loading /> : null}
+    {pending.error ? <RefundLoadError message={apiError(pending.error)} retry={() => void pending.refetch()} /> : null}
+    {pending.isSuccess && requests.length === 0 ? (
+      <Text style={styles.muted} translate>Ожидающих заявок на возврат нет</Text>
+    ) : null}
+    {requests.map((refund) => (
+      <View style={styles.card} key={refund.id}>
+        <View style={styles.row}>
+          <Text style={styles.heading}><Text translate>Заказ</Text> {displayOrderNumber(refund.orderNumber)}</Text>
+          <Text style={styles.heading}>{money(refund.amount)}</Text>
+        </View>
+        <Text style={styles.muted}>{refund.requestedByName} · {timeHM(refund.createdAt)}</Text>
+        <RefundScope refund={refund} />
+        <Text style={styles.body}>{refund.reason}</Text>
+        <Button title="Рассмотреть заявку" size="md" onPress={() => setReview(refund)} />
+      </View>
+    ))}
+    {review ? <ReviewOrderRefund key={review.id} refund={review} onClose={() => setReview(undefined)} /> : null}
+  </SheetScrollView>;
 }
 
 function RefundScope({ refund }: { refund: OrderRefund }) {
@@ -122,6 +110,7 @@ function RefundLoadError({ message, retry }: { message: string; retry: () => voi
 }
 
 const styles = StyleSheet.create({
+  queueContent: { padding: spacing.lg, gap: spacing.md },
   stack: { gap: spacing.md, paddingBottom: spacing.sm },
   card: { gap: spacing.sm, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.md },
   entry: { gap: spacing.xs, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm },

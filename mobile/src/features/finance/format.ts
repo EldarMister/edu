@@ -12,6 +12,7 @@ export function entryLabel(entry: FinanceEntry) {
 export function entryCategoryLabel(entry: FinanceEntry, categoryName?: string) {
   if (entry.reversalOf) return entryLabel(entry);
   if (categoryName) return categoryName;
+  if (entry.sourceKey?.startsWith('cash-handover:')) return 'Сдача наличных';
   if (entry.kind !== 'transfer' && (entry.sourceKey?.startsWith('cash-pos:')
     || entry.sourceKey?.startsWith('cash-open:') || (entry.cashShiftId && ['sale', 'refund', 'adjustment'].includes(entry.kind)))) {
     return 'Кассовые смены';

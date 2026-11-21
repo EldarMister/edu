@@ -1,6 +1,8 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { StyleSheet } from 'react-native';
 import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
+import { DateField } from '@/components/DateField';
+import { financeDay } from './format';
 import { Select, type SelectOption } from '@/components/Select';
 import { View } from '@/components/themed';
 import { Text } from '@/components/typography';
@@ -102,6 +104,19 @@ export function FinanceQueryError({ error, retry }: { error: unknown; retry: () 
     <View style={financeStyles.card}>
       <Text accessibilityRole="alert" style={financeStyles.error}>{apiError(error)}</Text>
       <Button title="Повторить" variant="secondary" size="md" onPress={retry} />
+    </View>
+  );
+}
+
+export function DateRange({ from, to, onFrom, onTo }: { from: string; to: string; onFrom: (next: string) => void; onTo: (next: string) => void }) {
+  const today = new Date(financeDay() + 'T12:00:00');
+  const toDate = to ? new Date(to + 'T12:00:00') : today;
+  const fromDate = from ? new Date(from + 'T12:00:00') : undefined;
+  return (
+    <View style={financeStyles.row}>
+      <DateField label="С даты" value={from} onChangeText={onFrom} containerStyle={financeStyles.grow} maximumDate={toDate} />
+      <DateField label="По дату" value={to} onChangeText={onTo} containerStyle={financeStyles.grow}
+        minimumDate={fromDate} maximumDate={today} />
     </View>
   );
 }

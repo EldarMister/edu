@@ -22,7 +22,7 @@ import {
 import { qty, useIngredients, type WarehouseLocation } from '@/services/api/warehouse';
 import { colors, fontSize, spacing } from '@/theme';
 import { money } from '@/utils/format';
-import { documentQuantities } from '@/utils/warehouseDocumentForm';
+import { documentDisplayStatus, documentQuantities, STOCK_DOCUMENT_STATUS } from '@/utils/warehouseDocumentForm';
 import { warehouseTimingFor, warehouseTimingValue, warehouseTimingError, warehouseTimeDisplay } from '@/utils/warehouseTiming';
 import { WarehouseTimingField } from './WarehouseTimingField';
 import { WarehouseWorkspace } from './WarehouseWorkspace';
@@ -30,7 +30,6 @@ import { useWarehouseWriteoffLines, WarehouseWriteoffLines } from './WarehouseWr
 import { WarehouseDocumentRegister, type DocumentRegisterScope } from './WarehouseDocumentRegister';
 import { WarehouseInventoryScope } from './WarehouseInventoryScope';
 
-const STATUS_LABELS = { draft: 'Черновик', submitted: 'На утверждении', posted: 'Проведён', reversed: 'Сторнирован' } as const;
 const MODE_OPTIONS: { value: StockInventoryMode; label: string }[] = [
   { value: 'full', label: 'Полная' },
   { value: 'partial', label: 'Частичная' },
@@ -209,7 +208,10 @@ function DocumentForm({ incoming, warehouseName, onClose }: {
   const isInventory = document.kind === 'inventory';
   const isFull = document.mode === 'full';
   const isWriteoff = document.kind === 'writeoff';
-  const editable = document.status === 'draft' && canAction(isInventory ? 'warehouseCount' : 'warehouseWriteoff');
+  const reopened = documentDisplayStatus(document) === 'reopened';
+  const canCount = canAction('warehouseCount');
+  const canReopenPosted = isInventory && document.status === 'posted' && canCount && canApprove;
+  const editable = document.status === 'draft' && (isInventory ? canCount && (!reopened || canApprove) : canAction('warehouseWriteoff'));
   const reviewing = canApprove && document.status === 'submitted';
   const t = useT();
   const ingredients = useIngredients('', document.warehouseId, isInventory);
@@ -244,10 +246,11 @@ function DocumentForm({ incoming, warehouseName, onClose }: {
   const values = documentQuantities(itemValues, isInventory);
   const counted = itemValues.filter((item) => item.value !== '');
   const savedTime = (isInventory ? document.countedAt : document.effectiveAt) ?? null;
-  const time = warehouseTimingValue(timing, savedTime);
-  const timingChanged = time !== savedTime;
-  const needsApplyTime = isInventory && (timingChanged || (!!time && localRows.length > 0));
-  const validNumbers = (isWriteoff ? writeoff.ready : values.valid) && !warehouseTimingError(timing) && time !== undefined;
+  const time = reopened ? savedTime : warehouseTimingValue(timing, savedTime);
+  const timingChanged = !reopened && time !== savedTime;
+  const needsApplyTime = isInventory && !reopened && (timingChanged || (!!time && localRows.length > 0));
+  const validNumbers = (isWriteoff ? writeoff.ready : values.valid)
+    && (reopened ? values.canSubmit : !warehouseTimingError(timing) && time !== undefined);
   const canSubmit = validNumbers && !needsApplyTime && (isWriteoff ? writeoff.enteredCount > 0 : values.canSubmit) &&
     (isInventory || (!!currentReason && (currentReason !== 'other' || !!currentNote.trim())));
   const dirty = editRevision !== undefined || timingChanged || (isWriteoff && writeoff.dirty);
@@ -332,7 +335,7 @@ function DocumentForm({ incoming, warehouseName, onClose }: {
         reason: currentReason || undefined, note: currentNote,
         items: isWriteoff ? undefined : values.items,
         sourceLines: isWriteoff ? writeoff.input() : undefined,
-        countedAt: isInventory ? time : undefined, effectiveAt: !isInventory ? time : undefined,
+        countedAt: isInventory && !reopened ? time : undefined, effectiveAt: !isInventory ? time : undefined,
         finalize: submit ? canApprove ? 'post' : 'submit' : undefined,
       });
       clearEdits(updated);
@@ -365,15 +368,24 @@ function DocumentForm({ incoming, warehouseName, onClose }: {
 
   const footer: ReactNode = editable ? (
     <View style={styles.actions}>
-      <Button title={needsApplyTime ? 'Применить дату и остатки' : 'Сохранить черновик'} style={styles.action} size="md" variant="secondary" disabled={!dirty || !validNumbers || pending || stale}
+      <Button title={reopened ? 'Сохранить изменения' : needsApplyTime ? 'Применить дату и остатки' : 'Сохранить черновик'} style={styles.action} size="md" variant="secondary" disabled={!dirty || !validNumbers || pending || stale}
         onPress={() => void saveDraft()} />
-      <Button title={canApprove ? 'Провести' : 'На утверждение'} style={styles.action} size="md" disabled={!canSubmit || pending || stale} onPress={() => Alert.alert(canApprove ? 'Провести документ?' : 'Отправить на утверждение?', 'Проверьте дату и фактические количества.', [{ text: 'Назад', style: 'cancel' }, { text: canApprove ? 'Провести' : 'Отправить', onPress: () => void saveDraft(true) }])} />
+      <Button title={reopened ? 'Провести повторно' : canApprove ? 'Провести' : 'На утверждение'} style={styles.action} size="md"
+        disabled={!canSubmit || pending || stale} onPress={() => Alert.alert(reopened ? 'Провести инвентаризацию повторно?'
+          : canApprove ? 'Провести документ?' : 'Отправить на утверждение?',
+        reopened ? 'Остатки и последующие движения пересчитаются с исходной даты проверки.' : 'Проверьте дату и фактические количества.',
+        [{ text: 'Назад', style: 'cancel' }, { text: canApprove ? 'Провести' : 'Отправить', onPress: () => void saveDraft(true) }])} />
     </View>
   ) : reviewing ? (
     <View style={styles.actions}>
       <Button title="Вернуть в черновик" style={styles.action} size="md" variant="secondary" disabled={pending || stale} onPress={() => void changeStatus('reopen')} />
       <Button title="Утвердить и провести" style={styles.action} size="md" disabled={pending || stale} onPress={confirmApprove} />
     </View>
+  ) : canReopenPosted ? (
+    <Button title="Открыть период и редактировать" size="md" disabled={pending || stale}
+      onPress={() => Alert.alert('Открыть период инвентаризации',
+        'Уточните фактические остатки на исходную дату. Исправленные количества применятся при повторном проведении.',
+        [{ text: 'Отмена', style: 'cancel' }, { text: 'Открыть период', onPress: () => void changeStatus('reopen') }])} />
   ) : undefined;
 
   return (
@@ -384,10 +396,11 @@ function DocumentForm({ incoming, warehouseName, onClose }: {
           <View style={styles.stack}>
             <View style={styles.row}>
               <Text style={styles.title}>{warehouseName ?? '—'}</Text>
-              <Text style={styles.status} translate>{STATUS_LABELS[document.status]}</Text>
+              <Text style={styles.status} translate>{STOCK_DOCUMENT_STATUS[documentDisplayStatus(document)]}</Text>
             </View>
             <Text style={styles.muted}>{documentDate(document.createdAt)}{document.createdByName ? ` · ${document.createdByName}` : ''}</Text>
-            {editable ? <WarehouseTimingField label={isInventory ? 'Проверка остатков' : 'Дата списания'} value={timing} onChange={setTiming} disabled={pending || stale} inventory={isInventory} /> : <Text>{isInventory ? 'Дата проверки' : 'Учётная дата'}: {savedTime ? documentDate(savedTime) : document.postedAt ? documentDate(document.postedAt) : 'На момент проведения'}</Text>}
+            {editable && !reopened ? <WarehouseTimingField label={isInventory ? 'Проверка остатков' : 'Дата списания'} value={timing} onChange={setTiming} disabled={pending || stale} inventory={isInventory} /> : <Text>{isInventory ? 'Дата проверки' : 'Учётная дата'}: {savedTime ? documentDate(savedTime) : document.postedAt ? documentDate(document.postedAt) : 'На момент проведения'}</Text>}
+            {reopened ? <Text style={styles.muted} translate>Уточните фактические остатки. Дата проверки и список позиций остаются прежними.</Text> : null}
             {needsApplyTime ? <Text style={styles.muted}>Примените дату перед проведением. Учётные остатки будут пересчитаны, введённые фактические количества сохранятся.</Text> : null}
             {stale && dirty ? <><FormError message="Документ изменён другим сотрудником. Ваш ввод сохранён на экране. Перед сохранением загрузите актуальную версию." /><Button title="Загрузить актуальную версию" variant="secondary" onPress={() => Alert.alert('Заменить ваш ввод?', 'Будут загружены последние сохранённые значения.', [{ text: 'Назад', style: 'cancel' }, { text: 'Загрузить', onPress: () => clearEdits(incoming) }])} /></> : null}
             {document.submittedAt ? <Text style={styles.muted}>{t('Отправлено')}: {documentDate(document.submittedAt)}{document.submittedByName ? ` · ${document.submittedByName}` : ''}</Text> : null}
@@ -404,7 +417,7 @@ function DocumentForm({ incoming, warehouseName, onClose }: {
               onChangeText={(value) => { markEdited(); setNote(value); }} /> : currentNote ? <Text>{currentNote}</Text> : null}
             {isWriteoff ? <WarehouseWriteoffLines editor={editable ? writeoff : undefined} sourceLines={document.sourceLines} disabled={pending || stale} showCost={showCost && !(editable && timing.mode === 'past')} /> : null}
             {isWriteoff && !editable && !document.sourceLines?.length ? <Text style={styles.muted}>{document.items?.map((item) => `${item.name}: ${item.quantity == null ? '—' : qty(item.quantity, item.unit)}`).join('\n')}</Text> : null}
-            {editable && !isFull && !isWriteoff ? <Select searchable title="Добавить продукт" placeholder="+ Добавить продукт" value="" options={options} onChange={addRow} disabled={pending || stale} /> : null}
+            {editable && !isFull && !isWriteoff && !reopened ? <Select searchable title="Добавить продукт" placeholder="+ Добавить продукт" value="" options={options} onChange={addRow} disabled={pending || stale} /> : null}
             {ingredients.isError && !ingredients.data ? <QueryError error={ingredients.error} retry={() => void ingredients.refetch()} /> : null}
             {showCost && !(editable && timing.mode === 'past') && (!dirty || isWriteoff) ? <Text style={styles.title}>{t(isInventory ? 'Итоговое расхождение' : 'Сумма списания')}: {(isWriteoff && editable ? writeoff.total : document.varianceValue) == null ? 'Стоимость неизвестна' : documentValue(document.kind, (isWriteoff && editable ? writeoff.total : document.varianceValue)!)}</Text> : null}
             {showCost && editable && timing.mode === 'past' ? <Text style={styles.muted}>Окончательная стоимость определяется на учётную дату при проведении.</Text> : null}
@@ -433,7 +446,7 @@ function DocumentForm({ incoming, warehouseName, onClose }: {
                 </FastPressable> : null}
               </View>
             </Card>}
-            {editable && isInventory && canApprove && document.submittedAt ? (
+            {editable && isInventory && !reopened && canApprove && document.submittedAt ? (
               <Button title="Обновить учётный остаток" size="md" variant="secondary" disabled={pending || !validNumbers}
                 onPress={() => Alert.alert('Обновить учётный остаток?', 'Сверьте фактические значения перед сохранением.', [
                   { text: 'Назад', style: 'cancel' },
@@ -460,7 +473,7 @@ function DocumentForm({ incoming, warehouseName, onClose }: {
             <View style={styles.countRow}>
               <View style={styles.row}>
                 <Text style={[styles.title, styles.flex]}>{item.name}</Text>
-                {editable && !isFull ? <FastPressable accessibilityRole="button" accessibilityLabel={`Убрать ${item.name}`} style={styles.remove} disabled={pending || stale}
+                {editable && !isFull && !reopened ? <FastPressable accessibilityRole="button" accessibilityLabel={`Убрать ${item.name}`} style={styles.remove} disabled={pending || stale}
                   onPress={() => removeRow(item.ingredientId)}><Text style={styles.muted}>×</Text></FastPressable> : null}
               </View>
               {item.expected != null && !needsApplyTime ? <Text style={styles.muted}>{t('Плановый остаток')}: {qty(item.expected, item.unit)}</Text> : null}

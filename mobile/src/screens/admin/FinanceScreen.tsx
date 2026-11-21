@@ -1,21 +1,21 @@
 import { useState } from 'react';
 import { View } from '@/components/themed';
 import { Text } from '@/components/typography';
-import { DateField } from '@/components/DateField';
 import { Select } from '@/components/Select';
 import { SheetScrollView } from '@/components/BottomSheet';
 import { EmptyState, Loading } from '@/components/ui';
 import { usePermissions } from '@/hooks/usePermissions';
 import { CashFlowRegister } from '@/features/finance/CashFlow';
 import { CashShiftRegister } from '@/features/finance/CashShifts';
+import { CashHandoverRegister } from '@/features/finance/CashHandover';
 import { PayrollRegister } from '@/features/finance/Payroll';
 import { AccountDirectory, CategoryDirectory, TransactionRegister } from '@/features/finance/Registers';
 import { useFinance } from '@/features/finance/api';
-import { FinanceQueryError, financeStyles } from '@/features/finance/components';
+import { DateRange, FinanceQueryError, financeStyles } from '@/features/finance/components';
 import { financeDay } from '@/features/finance/format';
 import { spacing } from '@/theme';
 
-export type FinanceView = 'transactions' | 'cashFlow' | 'cashShifts' | 'payroll' | 'accounts' | 'categories';
+import type { CashHandoverFilter, FinanceView } from '@/navigation/adminWorkspaceNavigation';
 
 const periods = [
   { value: 'all', label: 'За всё время' }, { value: 'today', label: 'Сегодня' },
@@ -32,7 +32,7 @@ function periodStart(today: string, period: string) {
   }
 }
 
-export function FinanceScreen({ view }: { view: FinanceView }) {
+export function FinanceScreen({ view, handover }: { view: FinanceView; handover?: CashHandoverFilter }) {
   const { canAction, canSection, canEditSection } = usePermissions();
   const canViewShifts = canSection('finance') || canAction('financeCashShifts');
   const canManageShifts = canSection('finance') ? canEditSection('finance') : canAction('financeCashShifts');
@@ -41,12 +41,15 @@ export function FinanceScreen({ view }: { view: FinanceView }) {
       keyboardShouldPersistTaps="handled">
       {view === 'cashShifts' ? (
         canViewShifts ? <CashShiftRegister canManage={canManageShifts} /> : <EmptyState text="Нет доступа к кассовым сменам" />
+      ) : view === 'cashHandover' ? (
+        <CashHandoverRegister key={handover ? handover.date + ':' + handover.employeeId : 'all'} initialFilter={handover}
+          allowExport={canAction('exportReports') || canEditSection('finance')} />
       ) : <FinanceOverview view={view} allowExport={canAction('exportReports') || canEditSection('finance')} />}
     </SheetScrollView>
   );
 }
 
-function FinanceOverview({ view, allowExport }: { view: Exclude<FinanceView, 'cashShifts'>; allowExport: boolean }) {
+function FinanceOverview({ view, allowExport }: { view: Exclude<FinanceView, 'cashShifts' | 'cashHandover'>; allowExport: boolean }) {
   const today = financeDay();
   const [period, setPeriod] = useState('all');
   const [from, setFrom] = useState(today.slice(0, 7) + '-01');
@@ -82,18 +85,5 @@ function FinanceOverview({ view, allowExport }: { view: Exclude<FinanceView, 'ca
         ) : <EmptyState text="Нет доступа к движению денег" />
         : <TransactionRegister data={finance.data} allowExport={allowExport} />}
     </>
-  );
-}
-
-export function DateRange({ from, to, onFrom, onTo }: { from: string; to: string; onFrom: (next: string) => void; onTo: (next: string) => void }) {
-  const today = new Date(financeDay() + 'T12:00:00');
-  const toDate = to ? new Date(to + 'T12:00:00') : today;
-  const fromDate = from ? new Date(from + 'T12:00:00') : undefined;
-  return (
-    <View style={financeStyles.row}>
-      <DateField label="С даты" value={from} onChangeText={onFrom} containerStyle={financeStyles.grow} maximumDate={toDate} />
-      <DateField label="По дату" value={to} onChangeText={onTo} containerStyle={financeStyles.grow}
-        minimumDate={fromDate} maximumDate={today} />
-    </View>
   );
 }

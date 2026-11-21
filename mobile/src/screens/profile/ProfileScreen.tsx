@@ -1,6 +1,7 @@
 import { FinishShiftButton, ShiftSummarySheet } from '@/components/ShiftSummarySheet';
 import { StaffShiftCard } from '@/components/StaffShiftGate';
 import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher';
+import { PrivacyPolicyLink } from '@/components/PrivacyPolicyLink';
 import { ScrollView, View, SafeAreaView } from '@/components/themed';
 import React from 'react';
 import { BackHandler, Image, Linking, StyleSheet } from 'react-native';
@@ -305,6 +306,7 @@ export function ProfileScreen() {
           </Card>
 
           <WorkspaceSwitcher />
+          <PrivacyPolicyLink />
           <Button title="Выйти" variant="secondary" danger onPress={onLogout} />
 
           <Text style={styles.version}>v{Constants.expoConfig?.version ?? '0.1.1'}</Text>
@@ -410,6 +412,7 @@ function WaiterCabinetScreen({
           </Card>
 
           <WorkspaceSwitcher />
+          <PrivacyPolicyLink />
           <Button title="Выйти" variant="secondary" danger onPress={onLogout} />
         </SheetScrollView>
       </SafeAreaView>

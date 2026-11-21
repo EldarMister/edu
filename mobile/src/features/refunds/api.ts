@@ -46,9 +46,9 @@ export async function invalidateRefunds(cache: QueryClient, status: RefundStatus
 }
 
 export function useCanManageOrderRefunds() {
-  const { effectiveRole, canEditSection, canAction } = usePermissions();
+  const { effectiveRole, canEditSection, canAction, canOwnerOperation } = usePermissions();
   return (effectiveRole === 'ADMIN' || effectiveRole === 'OWNER') && canEditSection('orders')
-    && canEditSection('checks') && canAction('refundChecks');
+    && canEditSection('checks') && canAction('refundChecks') && canOwnerOperation('refunds');
 }
 
 export function useRefundHistory(orderId: string | undefined) {

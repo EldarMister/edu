@@ -1,3 +1,12 @@
+import type { StockDocument } from '@/services/api/stockDocuments';
+
+export const STOCK_DOCUMENT_STATUS = {
+  draft: 'Черновик', submitted: 'На утверждении', posted: 'Проведён', reopened: 'Открыт для редактирования', reversed: 'Сторнирован',
+} as const;
+
+export const documentDisplayStatus = ({ status, reopenedAt }: Pick<StockDocument, 'status' | 'reopenedAt'>): keyof typeof STOCK_DOCUMENT_STATUS =>
+  status === 'draft' && reopenedAt ? 'reopened' : status;
+
 export interface DocumentQuantityRow { ingredientId: string; value: string }
 
 /** Empty is an uncounted selected position; zero is a real count. */

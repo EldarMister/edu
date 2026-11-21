@@ -13,7 +13,8 @@ import { DateField } from '@/components/DateField';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { apiError } from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
-import { RefundQueueButton } from '@/features/refunds/OrderRefunds';
+import { useColumnPreference } from '@/hooks/useColumnPreference';
+import { WarehouseMultiSelect } from './WarehouseMultiSelect';
 import { useCanManageOrderRefunds } from '@/features/refunds/api';
 import { useNotifications } from '@/store/notifications';
 import { displayOrderNumber, hallSuffix, money, paymentCell, timeHM } from '@/utils/format';
@@ -106,6 +107,10 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
   const [period, setPeriod] = useState('all');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('default');
+  const [visibleColumns, saveColumns] = useColumnPreference<OrderColumn>('orders', orderColumns.map(({ key }) => key));
+  const chosenColumns = orderColumns.filter(({ key }) => visibleColumns.includes(key));
+  const columns: ReadonlyArray<typeof orderColumns[number]> = chosenColumns.length ? chosenColumns : orderColumns;
+  const tableWidth = columns.reduce((width, column) => width + column.width, 0);
   const [customDate, setCustomDate] = useState('');
   const [calendarRequest, setCalendarRequest] = useState(0);
 
@@ -119,8 +124,9 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
   const [manualReason, setManualReason] = useState('');
 
   const push = useNotifications((s) => s.push);
-  const { canEditSection } = usePermissions();
+  const { canEditSection, canOwnerOperation } = usePermissions();
   const canEditOrders = canEditSection('orders');
+  const canCancelOrders = canEditOrders && canOwnerOperation('cancelOrders');
   const canManageRefunds = useCanManageOrderRefunds();
   const cancelOrder = useCancelOrder();
   const updateStatus = useUpdateOrderStatus();
@@ -140,7 +146,7 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
   const { fetchNextPage, hasNextPage, isFetchingNextPage } = ordersQ;
 
   const confirmCancel = async (reason: string) => {
-    if (!cancelTarget) return;
+    if (!cancelTarget || !canCancelOrders) return;
     try {
       await cancelOrder.mutateAsync({ orderId: cancelTarget.id, reason });
       push({ message: 'Заказ отменён', type: 'success', at: new Date().toISOString() });
@@ -157,7 +163,7 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
   };
 
   const confirmStatusChange = async () => {
-    if (!statusTarget) return;
+    if (!statusTarget || !canEditOrders || (manualStatus === 'cancelled' && !canCancelOrders)) return;
     try {
       await updateStatus.mutateAsync({
         orderId: statusTarget.id,
@@ -202,13 +208,14 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
 
         {/* Фильтры */}
         <View style={styles.filters}>
-          {canManageRefunds ? <RefundQueueButton /> : null}
           <Select style={styles.filterControl} value={tab} onChange={setTab} options={STATUS_OPTIONS} title="Статус" />
           <Select style={styles.filterControl} value={paymentMethod} onChange={setPaymentMethod} options={PAYMENT_OPTIONS} title="Способ оплаты" />
           <Select style={styles.filterControl} value={waiterId} onChange={setWaiterId} options={waiterOptions} title="Официант" />
           <Select style={styles.filterControl} value={period} onChange={(next) => { setPeriod(next); if (next === 'custom') setCalendarRequest(request => request + 1); }} options={PERIOD_OPTIONS} title="Период" />
           {period === 'custom' ? <DateField key={calendarRequest} accessibilityLabel="Дата заказов" value={customDate} onChangeText={setCustomDate} openOnMount /> : null}
           <Select style={styles.filterControl} value={sort} onChange={setSort} options={SORT_OPTIONS} title="Сортировка" />
+          <WarehouseMultiSelect label="Столбцы" value={visibleColumns} onChange={(keys) => { if (keys.length) saveColumns(keys); }}
+            options={orderColumns.map(({ key, label }) => ({ value: key, label }))} />
           <View style={styles.searchWrap}><PwaIcon name="search" size={21} color="#64799E" /><TextInput
             style={styles.search}
             placeholder="Поиск по заказам"
@@ -233,26 +240,21 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
             <SheetScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ width: TABLE_WIDTH }}
+              contentContainerStyle={{ width: tableWidth }}
             >
-              <View style={{ width: TABLE_WIDTH }}>
+              <View style={{ width: tableWidth }}>
                 <View style={styles.thead}>
-                  <Text style={[styles.th, { width: COL.num }]} translate>№ заказа</Text>
-                  <Text style={[styles.th, { width: COL.date }]} translate>Дата и время</Text>
-                  <Text style={[styles.th, { width: COL.table }]} translate>Стол</Text>
-                  <Text style={[styles.th, { width: COL.waiter }]} translate>Официант</Text>
-                  <Text style={[styles.th, styles.thRight, { width: COL.amount }]} translate>Сумма</Text>
-                  <Text style={[styles.th, { width: COL.status }]} translate>Статус заказа</Text>
-                  <Text style={[styles.th, { width: COL.pay }]} translate>Способ оплаты</Text>
-                  <Text style={[styles.th, styles.thCenter, { width: COL.act }]} translate>Действия</Text>
+                  {columns.map(({ key, label, width }) => <Text key={key} translate
+                    style={[styles.th, key === 'amount' && styles.thRight, key === 'act' && styles.thCenter, { width }]}>{label}</Text>)}
                 </View>
                 {items.map((ord) => (
                   <OrderTableRow
                     key={ord.id}
                     order={ord}
+                    columns={columns}
                     onOpen={() => { setDetailsOrder(ord); setDetailId(ord.id); }}
                     onEdit={canEditOrders && ord.status !== 'paid' ? () => openStatusEditor(ord) : undefined}
-                    onCancel={canEditOrders && CANCELLABLE.has(ord.status) ? () => setCancelTarget(ord) : undefined}
+                    onCancel={canCancelOrders && CANCELLABLE.has(ord.status) ? () => setCancelTarget(ord) : undefined}
                   />
                 ))}
               </View>
@@ -286,66 +288,68 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
         value={manualStatus}
         reason={manualReason}
         submitting={updateStatus.isPending}
+        canCancelOrders={canCancelOrders}
         onValueChange={setManualStatus}
         onReasonChange={setManualReason}
         onClose={() => setStatusTarget(null)}
         onConfirm={confirmStatusChange}
       />
-      <OrderDetailsModal order={details.data ?? detailsOrder} onOrderChange={setDetailsOrder} allowItemCancellation={canEditOrders}
+      <OrderDetailsModal order={details.data ?? detailsOrder} onOrderChange={setDetailsOrder} allowItemCancellation={canEditOrders && canOwnerOperation('cancelItems')}
         allowRefunds={canManageRefunds && !!details.data} onClose={() => { setDetailsOrder(null); setDetailId(null); }} />
     </>
   );
 }
 
 const COL = { num: 90, date: 157, table: 112, waiter: 123, amount: 101, status: 213, pay: 235, act: 89 } as const;
-const TABLE_WIDTH = COL.num + COL.date + COL.table + COL.waiter + COL.amount + COL.status + COL.pay + COL.act;
+const orderColumns = [
+  { key: 'num', label: '№ заказа', width: COL.num },
+  { key: 'date', label: 'Дата и время', width: COL.date },
+  { key: 'table', label: 'Стол', width: COL.table },
+  { key: 'waiter', label: 'Официант', width: COL.waiter },
+  { key: 'amount', label: 'Сумма', width: COL.amount },
+  { key: 'status', label: 'Статус заказа', width: COL.status },
+  { key: 'pay', label: 'Способ оплаты', width: COL.pay },
+  { key: 'act', label: 'Действия', width: COL.act },
+] as const;
+
+type OrderColumn = typeof orderColumns[number]['key'];
 
 function OrderTableRow({
   order,
+  columns,
   onOpen,
   onEdit,
   onCancel,
 }: {
   order: Order;
+  columns: ReadonlyArray<typeof orderColumns[number]>;
   onOpen: () => void;
   onEdit?: () => void;
   onCancel?: () => void;
 }) {
+  const values = {
+    num: displayOrderNumber(order.orderNumber),
+    date: new Date(order.createdAt).toLocaleDateString('ru-RU') + ' ' + timeHM(order.createdAt),
+    table: order.source === 'delivery' ? '—' : `Стол ${order.table.number}${hallSuffix(order.table)}`,
+    waiter: order.source === 'delivery' ? 'Доставка' : order.waiter?.name ?? 'QR menu',
+    amount: money(order.finalAmount),
+    pay: paymentCell(order),
+  };
   return (
     <FastPressable onPress={onOpen} style={styles.tr}>
-      <Text style={[styles.td, styles.tdStrong, { width: COL.num }]} numberOfLines={1}>
-        {displayOrderNumber(order.orderNumber)}
-      </Text>
-      <Text style={[styles.td, styles.tdSecondary, { width: COL.date }]} numberOfLines={1}>
-        {new Date(order.createdAt).toLocaleDateString('ru-RU')} {timeHM(order.createdAt)}
-      </Text>
-      <Text style={[styles.td, styles.tdSecondary, { width: COL.table }]} numberOfLines={1} translate>
-        {order.source === 'delivery' ? '—' : `Стол ${order.table.number}${hallSuffix(order.table)}`}
-      </Text>
-      <Text style={[styles.td, styles.tdSecondary, { width: COL.waiter }]} numberOfLines={1} translate>
-        {order.source === 'delivery' ? 'Доставка' : order.waiter?.name ?? 'QR menu'}
-      </Text>
-      <Text style={[styles.td, styles.tdStrong, styles.tdRight, { width: COL.amount }]} numberOfLines={1}>
-        {money(order.finalAmount)}
-      </Text>
-      <View style={[styles.tdCell, { width: COL.status }]}>
-        <OrderStatusBadges order={order} size="sm" align="start" />
-      </View>
-      <Text style={[styles.td, styles.tdSecondary, { width: COL.pay }]} numberOfLines={1}>
-        {paymentCell(order)}
-      </Text>
-      <View style={[styles.tdCell, styles.tdActions, { width: COL.act }]}>
-        {onEdit ? (
-          <FastPressable onPress={onEdit} hitSlop={6} style={styles.actionBtn}>
-            <PwaIcon name="pencil" size={16} color={colors.textMuted} />
-          </FastPressable>
-        ) : null}
-        {onCancel ? (
-          <FastPressable onPress={onCancel} hitSlop={6} style={styles.actionBtn}>
-            <PwaIcon name="close" size={16} color={colors.danger} />
-          </FastPressable>
-        ) : null}
-      </View>
+      {columns.map(({ key, width }) => key === 'status'
+        ? <View key={key} style={[styles.tdCell, { width }]}><OrderStatusBadges order={order} size="sm" align="start" /></View>
+        : key === 'act'
+          ? <View key={key} style={[styles.tdCell, styles.tdActions, { width }]}>
+            {onEdit ? <FastPressable onPress={onEdit} hitSlop={6} style={styles.actionBtn} accessibilityLabel="Изменить статус заказа">
+              <PwaIcon name="pencil" size={16} color={colors.textMuted} />
+            </FastPressable> : null}
+            {onCancel ? <FastPressable onPress={onCancel} hitSlop={6} style={styles.actionBtn} accessibilityLabel="Отменить заказ">
+              <PwaIcon name="close" size={16} color={colors.danger} />
+            </FastPressable> : null}
+          </View>
+          : <Text key={key} style={[styles.td, key === 'num' || key === 'amount' ? styles.tdStrong : styles.tdSecondary,
+            key === 'amount' && styles.tdRight, { width }]} numberOfLines={1} translate={key === 'waiter' || key === 'table'}>{values[key]}</Text>)}
     </FastPressable>
   );
 }
@@ -355,6 +359,7 @@ function StatusEditorModal({
   value,
   reason,
   submitting,
+  canCancelOrders,
   onValueChange,
   onReasonChange,
   onClose,
@@ -364,6 +369,7 @@ function StatusEditorModal({
   value: OrderStatus;
   reason: string;
   submitting: boolean;
+  canCancelOrders: boolean;
   onValueChange: (v: OrderStatus) => void;
   onReasonChange: (v: string) => void;
   onClose: () => void;
@@ -383,7 +389,7 @@ function StatusEditorModal({
             size="lg"
             style={{ flex: 1 }}
             loading={submitting}
-            disabled={order.status === value}
+            disabled={order.status === value || (value === 'cancelled' && !canCancelOrders)}
             onPress={onConfirm}
           />
         </View>
@@ -394,7 +400,8 @@ function StatusEditorModal({
         {hallSuffix(order.table)}
       </Text>
       <View style={{ gap: spacing.md, marginTop: spacing.md }}>
-        <Select value={value} onChange={(v) => onValueChange(v as OrderStatus)} options={MANUAL_STATUS_OPTIONS} title="Статус" />
+        <Select value={value} onChange={(v) => onValueChange(v as OrderStatus)}
+          options={MANUAL_STATUS_OPTIONS.filter((option) => option.value !== 'cancelled' || canCancelOrders)} title="Статус" />
         <TextInput
           style={styles.textarea}
           placeholder="Причина изменения"

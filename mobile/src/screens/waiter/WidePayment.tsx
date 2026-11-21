@@ -2,6 +2,7 @@ import { View } from '@/components/themed';
 import { Text, TextInput } from '@/components/typography';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon, type PwaIconName } from '@/components/PwaIcon';
+import { Button } from '@/components/ui';
 import { colors, spacing } from '@/theme';
 import { displayOrderNumber, money } from '@/utils/format';
 import type { Order, PaymentMethod } from '@/types';
@@ -19,7 +20,7 @@ const methods: { key: TenderMethod; label: string; icon: PwaIconName }[] = [
 const empty = { cash: '', card: '', qr: '' };
 const rows = [['7', '8', '9'], ['4', '5', '6'], ['1', '2', '3'], ['.', '0', '⌫']];
 
-export function WidePayment({ order, enabled, qrConfigured, served, busy, error, onSplit, onConfirm }: {
+export function WidePayment({ order, enabled, qrConfigured, served, busy, error, onSplit, onSplitItems, onConfirm }: {
   order: Order;
   enabled: PaymentMethod[];
   qrConfigured: boolean;
@@ -27,6 +28,7 @@ export function WidePayment({ order, enabled, qrConfigured, served, busy, error,
   busy: boolean;
   error: string;
   onSplit: () => void;
+  onSplitItems?: () => void;
   onConfirm: (amounts: TenderAmounts, active: TenderMethod) => void;
 }) {
   const { height } = useWindowDimensions();
@@ -111,6 +113,7 @@ export function WidePayment({ order, enabled, qrConfigured, served, busy, error,
         <View style={styles.summary}>
           <Text style={styles.label} translate>К оплате</Text><Text style={styles.total}>{money(total)}</Text>
         </View>
+        {onSplitItems && <Button title="Разделить по позициям" size="md" variant="secondary" disabled={busy} onPress={onSplitItems} />}
         {!served && <Text style={styles.alert} accessibilityRole="alert" translate>Нельзя принять оплату: есть неподанные блюда.</Text>}
         <Text style={styles.muted} translate>Способ оплаты</Text>
         {available.map(({ key, icon, label }) => (

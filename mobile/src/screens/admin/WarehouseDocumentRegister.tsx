@@ -12,11 +12,11 @@ import { useStockDocuments, type StockDocument, type StockDocumentReason } from 
 import type { WarehouseLocation } from '@/services/api/warehouse';
 import { colors, spacing, useThemeColors } from '@/theme';
 import { balanceMoney } from '@/utils/warehouseBalance';
-import { documentOperationDate } from '@/utils/warehouseDocumentForm';
+import { documentDisplayStatus, documentOperationDate, STOCK_DOCUMENT_STATUS } from '@/utils/warehouseDocumentForm';
 import { warehouseLocalTime, warehouseReportRange, warehouseTimeDisplay, type WarehousePeriod } from '@/utils/warehouseTiming';
 import { WarehouseMultiSelect } from './WarehouseMultiSelect';
 
-export const STOCK_DOCUMENT_STATUS = { draft: 'Черновик', submitted: 'На утверждении', posted: 'Проведён', reversed: 'Сторнирован' } as const;
+
 export const WRITEOFF_REASONS: { value: StockDocumentReason; label: string }[] = [
   { value: 'spoilage', label: 'Порча' }, { value: 'expired', label: 'Просрочка' },
   { value: 'damage', label: 'Брак' }, { value: 'staff_meal', label: 'Питание персонала' },
@@ -85,7 +85,7 @@ export function WarehouseDocumentRegister({
     .sort((a, b) => a.localeCompare(b, 'ru')).map((value) => ({ value, label: value, translate: false }));
   const rows = validDates ? (query.data ?? []).filter((document) => {
     const date = warehouseLocalTime(documentOperationDate(document)).date;
-    return (!status || document.status === status) && (!reason || document.reason === reason)
+    return (!status || documentDisplayStatus(document) === status) && (!reason || document.reason === reason)
       && (!categories.length || document.categories?.some((category) => categories.includes(category)))
       && (!range.from || date >= range.from) && (!range.to || date <= range.to);
   }).sort((a, b) => (Date.parse(documentOperationDate(a)) - Date.parse(documentOperationDate(b))) * (ascending ? 1 : -1)) : [];
@@ -110,7 +110,7 @@ export function WarehouseDocumentRegister({
   const columnWidth = (index: number) => (columns[index] === 'Товары' || columns[index] === 'Наименование') ? 200 : columns[index] ? 125 : 75;
   const cells = (document: StockDocument) => inventory
     ? [warehouseName(document), document.countedAt || document.postedAt ? displayDate(document.countedAt ?? document.postedAt) : 'При проведении',
-      displayDate(document.postedAt), mode(document), ...(showCost ? [amount(document.varianceValue)] : []), STOCK_DOCUMENT_STATUS[document.status]]
+      displayDate(document.postedAt), mode(document), ...(showCost ? [amount(document.varianceValue)] : []), STOCK_DOCUMENT_STATUS[documentDisplayStatus(document)]]
     : [displayDate(documentOperationDate(document)), ...(!transfer ? [warehouseName(document)] : []), products(document),
       ...(showCost ? [amount(document.varianceValue)] : []), actor(document), transfer ? warehouseName(document) : reasonLabel(document.reason)];
   const periodControl = <Select title="Период" value={period} options={PERIODS} onChange={filter(setPeriod)} style={styles.filter} />;
@@ -138,7 +138,8 @@ export function WarehouseDocumentRegister({
           <Select title="Причина списания" value={reason} options={[{ value: '', label: 'Причина' }, ...WRITEOFF_REASONS]} onChange={filter(setReason)} style={styles.filter} />
         </> : null}
         <Select title="Статус документа" value={status} options={[{ value: '', label: status ? 'Все статусы' : '+ Фильтр' },
-          ...Object.entries(STOCK_DOCUMENT_STATUS).map(([value, label]) => ({ value, label }))]} style={styles.filter} onChange={filter(setStatus)} />
+          ...Object.entries(STOCK_DOCUMENT_STATUS).filter(([value]) => inventory || value !== 'reopened')
+            .map(([value, label]) => ({ value, label }))]} style={styles.filter} onChange={filter(setStatus)} />
       </View>
       {period === 'custom' ? <View style={styles.wrap}>
         <DateField label="С даты" value={custom.from} containerStyle={styles.dateField} onChangeText={(from) => filter(setCustom)({ ...custom, from })} />
@@ -176,8 +177,8 @@ export function WarehouseDocumentRegister({
         <Text style={styles.muted}>{inventory && !document.countedAt && !document.postedAt ? 'При проведении' : displayDate(documentOperationDate(document))} · {inventory ? mode(document) : warehouseName(document)}</Text>
         {kind === 'writeoff' ? <Text style={styles.muted}>Причина: {reasonLabel(document.reason)}</Text> : null}
         <View style={styles.actions}>
-          <Text style={[styles.status, document.status === 'posted' && styles.posted]} translate>{STOCK_DOCUMENT_STATUS[document.status]}</Text>
-          <Text style={styles.muted}>{inventory && document.postedAt ? 'Проведена ' + warehouseTimeDisplay(document.postedAt) : actor(document)}</Text>
+          <Text style={[styles.status, document.status === 'posted' && styles.posted]} translate>{STOCK_DOCUMENT_STATUS[documentDisplayStatus(document)]}</Text>
+          <Text style={styles.muted}>{inventory && document.postedAt && !document.reopenedAt ? 'Проведена ' + warehouseTimeDisplay(document.postedAt) : actor(document)}</Text>
         </View>
       </FastPressable>)}
     {rows.length > 0 && <View style={[styles.footer, styles.wrap]}>

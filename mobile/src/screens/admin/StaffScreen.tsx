@@ -14,6 +14,7 @@ import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
 import { usePrepStations } from '@/services/api/prepStations';
 import { displayOrderNumber, money, timeHM } from '@/utils/format';
+import { financeMoney } from '@/features/finance/format';
 import {
   useReportEmployees,
   useSetCashHanded,
@@ -33,7 +34,6 @@ import {
 import type { Role } from '@/types';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useAuth } from '@/store/auth';
-import { EmployeePermissionsSheet } from './EmployeePermissionsSheet';
 import { AdminLoadingSkeleton } from './AdminLoadingSkeleton';
 import { WarehouseDirectorySearch } from './WarehouseDirectoryTable';
 import { useAssignableStaffPositions } from '@/services/api/positions';
@@ -113,7 +113,10 @@ function fromDateTimeLocal(value: string) {
 }
 
 /** Персонал и текущая смена (порт PWA StaffPage — вкладка «Текущая смена» + CRUD). */
-export function StaffScreen({ initialTab = 'current' }: { initialTab?: StaffTab } = {}) {
+export function StaffScreen({ initialTab = 'current', onOpenCashHandover }: {
+  initialTab?: StaffTab;
+  onOpenCashHandover?: (date: string, employeeId: string) => void;
+} = {}) {
   const { width } = useWindowDimensions();
   const { stations } = usePrepStations();
   const stationNames = useMemo(() => new Map(stations.map(({ id, name }) => [id, name])), [stations]);
@@ -129,11 +132,10 @@ export function StaffScreen({ initialTab = 'current' }: { initialTab?: StaffTab 
   const [historyExpanded, setHistoryExpanded] = useState<string | null>(null);
   const [editingShift, setEditingShift] = useState<ShiftHistoryRow | null>(null);
   const [editing, setEditing] = useState<StaffMember | null | 'new'>(null);
-  const [permissionsFor, setPermissionsFor] = useState<StaffMember | null>(null);
   const [exporting, setExporting] = useState(false);
   const particles = useDeletionParticles();
   const currentUserId = useAuth((state) => state.user?.id);
-  const { isOwner, canAction, canEditSection } = usePermissions();
+  const { isOwner, canAction, canEditSection, canSection } = usePermissions();
   const mayManageStaff = canEditSection('staff') && canAction('manageStaff');
   const mayCloseShift = canEditSection('staff') && canAction('closeShift');
 
@@ -268,6 +270,8 @@ export function StaffScreen({ initialTab = 'current' }: { initialTab?: StaffTab 
                   positionName={positionName(member, row.role)}
                   inactive={member?.isActive === false}
                   date={date}
+                  onOpenCashHandover={canSection('finance') && onOpenCashHandover
+                    ? () => onOpenCashHandover(date, row.waiterId) : undefined}
                   open={expanded === row.waiterId}
                   onToggle={() => setExpanded((cur) => (cur === row.waiterId ? null : row.waiterId))}
                   onEdit={canManage ? () => setEditing(member) : undefined}
@@ -317,10 +321,9 @@ export function StaffScreen({ initialTab = 'current' }: { initialTab?: StaffTab 
         </BottomSheet>
       )}
       {editing !== null ? (
-        <StaffModal member={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onViewPermissions={editing !== 'new' ? () => { setPermissionsFor(editing); setEditing(null); } : undefined} />
+        <StaffModal member={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />
       ) : null}
       {editingShift ? <ShiftEditModal row={editingShift} onClose={() => setEditingShift(null)} /> : null}
-      {permissionsFor ? <EmployeePermissionsSheet member={permissionsFor} onClose={() => setPermissionsFor(null)} /> : null}
       {particles.overlay}
     </View>
   );
@@ -575,6 +578,7 @@ function ShiftRow({
   positionName,
   inactive,
   date,
+  onOpenCashHandover,
   open,
   onToggle,
   onEdit,
@@ -585,6 +589,7 @@ function ShiftRow({
   positionName: string;
   inactive: boolean;
   date: string;
+  onOpenCashHandover?: () => void;
   open: boolean;
   onToggle: () => void;
   onEdit?: () => void;
@@ -615,7 +620,7 @@ function ShiftRow({
           <Text style={[styles.staffCellText, { width: 130 }]}>{shiftLabel(row)}</Text>
           <Text style={[styles.staffCellText, styles.staffCellStrong, { width: 110, textAlign: 'right' }]}>{money(row.turnover)}</Text>
           <Text style={[styles.staffCellText, { width: 130, textAlign: 'right' }]}>{money(row.cashDue)}</Text>
-          <View style={[styles.staffCell, { width: 130, alignItems: 'flex-end' }]}><CashHandedCell row={row} date={date} /></View>
+          <View style={[styles.staffCell, { width: 130, alignItems: 'flex-end' }]}><CashHandedCell row={row} date={date} onOpenCashHandover={onOpenCashHandover} /></View>
           <Text style={[styles.staffCellText, { width: 110, textAlign: 'right', color: diffColor }]}>{signedMoney(row.difference)}</Text>
         </> : <Text style={[styles.staffCellText, { width: 610, textAlign: 'center', color: colors.textLight }]}>—</Text>}
         <View style={[styles.actions, { width: 90, justifyContent: 'flex-end', paddingHorizontal: 12 }]}>
@@ -641,7 +646,11 @@ function Fin({ label, value, valueColor }: { label: string; value: string; value
   );
 }
 
-function CashHandedCell({ row, date }: { row: ShiftReportRow; date: string }) {
+function CashHandedCell({ row, date, onOpenCashHandover }: {
+  row: ShiftReportRow;
+  date: string;
+  onOpenCashHandover?: () => void;
+}) {
   const { canEditSection, canAction } = usePermissions();
   const canSetCash = canEditSection('staff') && canAction('closeShift');
   const setCash = useSetCashHanded();
@@ -659,6 +668,14 @@ function CashHandedCell({ row, date }: { row: ShiftReportRow; date: string }) {
     setCash.mutate({ waiterId: row.waiterId, date, cashHanded: num }, { onError: (error) => push({ message: apiError(error), type: 'error', at: new Date().toISOString() }) });
   };
 
+  if (row.cashHandover) {
+    const amount = financeMoney(row.cashReceivedAt || row.cashHanded ? row.cashHanded : null);
+    return onOpenCashHandover
+      ? <FastPressable onPress={onOpenCashHandover} accessibilityRole="button" accessibilityLabel="Открыть сдачу наличных">
+        <Text style={[styles.staffCellText, { color: colors.primary }]} translate>{amount === '—' ? 'Сдача наличных' : amount}</Text>
+      </FastPressable>
+      : <Text style={styles.staffCellText}>{amount}</Text>;
+  }
   if (!canSetCash) return <Text style={styles.staffCellText}>{money(row.cashHanded)}</Text>;
 
   return (
@@ -749,7 +766,7 @@ function CategoryRow({ cat }: { cat: ShiftReportCategory }) {
   );
 }
 
-function StaffModal({ member, onClose, onViewPermissions }: { member: StaffMember | null; onClose: () => void; onViewPermissions?: () => void }) {
+function StaffModal({ member, onClose }: { member: StaffMember | null; onClose: () => void }) {
   const isEdit = !!member;
   const { create, update } = useStaffMutations();
   const push = useNotifications((s) => s.push);
@@ -842,7 +859,6 @@ function StaffModal({ member, onClose, onViewPermissions }: { member: StaffMembe
             <Toggle checked={isActive} onChange={setIsActive} />
           </View>
         ) : null}
-        {onViewPermissions ? <Button title="Права доступа" variant="secondary" size="md" onPress={onViewPermissions} /> : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
     </BottomSheet>

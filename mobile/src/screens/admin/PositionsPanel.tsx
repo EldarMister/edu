@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, useWindowDimensions } from 'react-native';
+import { useMutation } from '@tanstack/react-query';
 import { View } from '@/components/themed';
 import { Alert, Text, TextInput } from '@/components/typography';
 import { BottomSheet } from '@/components/BottomSheet';
@@ -7,11 +8,12 @@ import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { Select } from '@/components/Select';
 import { Button, Loading, PillTabs, Toggle } from '@/components/ui';
-import { apiError } from '@/lib/api';
+import { api, apiError } from '@/lib/api';
+import { useAuth } from '@/store/auth';
 import { ACTION_KEYS, ACTION_LABELS, getDefaultPermissionsByRole, READ_ONLY_SECTION_KEYS, resolvePermissions, SECTION_KEYS, SECTION_LABELS, SECTION_WRITE_ACTIONS } from '@/lib/permissions';
 import { useStaffPositionMutations, useStaffPositions, type PositionRole, type PositionSalary, type StaffPosition } from '@/services/api/positions';
 import { colors, spacing } from '@/theme';
-import type { ActionKey, EmployeePermissions, SectionKey } from '@/types';
+import type { ActionKey, EmployeePermissions, OwnerOperations, SectionKey } from '@/types';
 
 const SECTIONS = SECTION_KEYS.filter((key) => key !== 'paymentReconciliation');
 const SECTION_ACTIONS: Partial<Record<SectionKey, ActionKey[]>> = {
@@ -88,6 +90,7 @@ export function PositionsPanel({ enabled = true }: { enabled?: boolean }) {
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<StaffPosition | 'new' | null>(null);
   const [deleting, setDeleting] = useState<StaffPosition | null>(null);
+  const [editingOwner, setEditingOwner] = useState(false);
   if (!enabled) return null;
   const rows = positions.data ?? [];
   const term = search.trim().toLocaleLowerCase();
@@ -104,6 +107,10 @@ export function PositionsPanel({ enabled = true }: { enabled?: boolean }) {
               <Text style={styles.name} translate>Владелец</Text>
               <Text style={styles.hint} translate>Полный доступ</Text>
             </View>
+            <FastPressable style={styles.icon} accessibilityRole="button" accessibilityLabel="Редактировать права владельца"
+              onPress={() => setEditingOwner(true)}>
+              <PwaIcon name="pencil" color={colors.textMuted} size={18} />
+            </FastPressable>
           </View> : null}
           {rows.filter(({ name }) => name.toLocaleLowerCase().includes(term)).map((position) => (
             <View key={position.id} style={styles.item}>
@@ -121,10 +128,44 @@ export function PositionsPanel({ enabled = true }: { enabled?: boolean }) {
           ))}
         </View>
       )}
+      {editingOwner ? <OwnerOperationsEditor onClose={() => setEditingOwner(false)} /> : null}
       {editing ? <PositionEditor position={editing === 'new' ? null : editing} onClose={() => setEditing(null)} /> : null}
       {deleting ? <DeletePosition position={deleting} positions={rows} onClose={() => setDeleting(null)} /> : null}
     </View>
   );
+}
+
+const ownerOperations = [
+  ['refunds', 'Оформлять возвраты и рассматривать заявки на возврат'],
+  ['cancelOrders', 'Отменять заказы'],
+  ['cancelItems', 'Отменять блюда и подтверждать заявки на отмену'],
+  ['printRequests', 'Отправлять и обрабатывать заявки на печать'],
+] as const satisfies readonly [keyof OwnerOperations, string][];
+
+function OwnerOperationsEditor({ onClose }: { onClose: () => void }) {
+  const { width } = useWindowDimensions();
+  const permissions = useAuth((state) => state.user?.permissions);
+  const updateUser = useAuth((state) => state.updateUser);
+  const [values, setValues] = useState<OwnerOperations>(() => resolvePermissions('OWNER', permissions).ownerOperations!);
+  const save = useMutation({
+    mutationFn: async () => (await api.patch<OwnerOperations>('/admin/positions/owner-operations', values)).data,
+    onSuccess: (operations) => {
+      updateUser({ permissions: { ...getDefaultPermissionsByRole('OWNER'), ownerOperations: operations } });
+      onClose();
+    },
+  });
+  return <BottomSheet visible title="Права владельца" presentation={width >= 768 ? 'dialog' : 'bottom'}
+    dismissible={!save.isPending} onClose={onClose} footer={<View style={styles.buttons}>
+      <Button title="Отмена" variant="secondary" disabled={save.isPending} onPress={onClose} />
+      <Button title="Сохранить" loading={save.isPending} onPress={() => save.mutate()} />
+    </View>}>
+    <View style={styles.field}>
+      <Text style={styles.hint} translate>Действия в заказах и на кассе</Text>
+      {ownerOperations.map(([key, label]) => <PermissionToggle key={key} label={label} checked={values[key]}
+        disabled={save.isPending} onChange={(checked) => setValues((current) => ({ ...current, [key]: checked }))} />)}
+      {save.error && <Text accessibilityRole="alert" style={styles.error}>{apiError(save.error)}</Text>}
+    </View>
+  </BottomSheet>;
 }
 
 function AccessRow<T extends string>({ label, hint, options, value, onChange }: {
@@ -146,10 +187,12 @@ function AccessRow<T extends string>({ label, hint, options, value, onChange }: 
   </View>;
 }
 
-function PermissionToggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
+function PermissionToggle({ label, checked, onChange, disabled }: {
+  label: string; checked: boolean; onChange: (value: boolean) => void; disabled?: boolean;
+}) {
   return <View style={styles.switchRow}>
     <Text style={styles.switchLabel} translate>{label}</Text>
-    <Toggle checked={checked} onChange={onChange} accessibilityLabel={label} />
+    <Toggle checked={checked} onChange={onChange} disabled={disabled} accessibilityLabel={label} />
   </View>;
 }
 
@@ -163,10 +206,9 @@ function PositionEditor({ position, onClose }: { position: StaffPosition | null;
   const [details, setDetails] = useState(false);
   const [panelKey, setPanelKey] = useState(0);
   const { save } = useStaffPositionMutations();
-  const canChangeAdmin = !position?.fixedWorkspace;
-  const canChangeTerminal = position?.fixedWorkspace !== 'production';
-  const adminEnabled = canChangeAdmin && permissions.adminAccess === true;
-  const terminalEnabled = canChangeTerminal && permissions.terminalAccess === true;
+  const canChangeWorkspaces = !position?.fixedWorkspace;
+  const adminEnabled = permissions.adminAccess === true;
+  const terminalEnabled = permissions.terminalAccess === true;
   const production = role === 'KITCHEN' || role === 'BAR';
   const hasAccess = terminalEnabled || production || (adminEnabled && SECTIONS.some((key) => permissions.sections[key]));
   const tabs = TABS.filter(({ key }) => key === 'general' || (key === 'admin' && adminEnabled) || (key === 'terminal' && terminalEnabled));
@@ -235,10 +277,16 @@ function PositionEditor({ position, onClose }: { position: StaffPosition | null;
           <Text style={styles.name} translate>Название должности</Text>
           <TextInput style={styles.input} value={name} onChangeText={setName} maxLength={80} placeholder="Например, управляющий" placeholderTextColor={colors.textLight} />
         </View>
-        {canChangeAdmin || canChangeTerminal ? <View style={styles.field}>
+        {canChangeWorkspaces ? <View style={styles.field}>
           <Text style={styles.heading} translate>Рабочие места</Text>
-          {canChangeAdmin ? <PermissionToggle label="Вход в админ-панель" checked={adminEnabled} onChange={(adminAccess) => setPermissions({ ...permissions, adminAccess })} /> : null}
-          {canChangeTerminal ? <PermissionToggle label="Открывать кассу и оформлять заказы гостей" checked={terminalEnabled} onChange={(terminalAccess) => setPermissions({ ...permissions, terminalAccess })} /> : null}
+          <PermissionToggle label="Вход в админ-панель" checked={adminEnabled}
+            onChange={(adminAccess) => setPermissions((current) => ({ ...current, adminAccess }))} />
+          <PermissionToggle label="Открывать кассу и оформлять заказы гостей" checked={terminalEnabled}
+            onChange={(terminalAccess) => setPermissions((current) => ({ ...current, terminalAccess }))} />
+        </View> : null}
+        {position?.fixedWorkspace === 'admin' ? <View style={styles.field}>
+          <Text style={styles.heading} translate>Рабочее место</Text>
+          <Text style={styles.name} translate>Админ-панель</Text>
         </View> : null}
         <View style={styles.field}>
           <Text style={styles.heading} translate>Экран приготовления</Text>

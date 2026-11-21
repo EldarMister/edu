@@ -50,7 +50,10 @@ export type ActionKey =
   | 'warehouseReports'
   | 'warehouseSettings';
 
+export type OwnerOperations = Record<'refunds' | 'cancelOrders' | 'cancelItems' | 'printRequests', boolean>;
+
 export interface EmployeePermissions {
+  ownerOperations?: OwnerOperations;
   terminalAccess?: boolean;
   adminAccess?: boolean;
   workShiftRequired?: boolean;
@@ -273,6 +276,7 @@ export interface Order {
   id: string;
   cafeId?: string | null;
   orderNumber: string;
+  splitFromOrderId?: string | null;
   status: OrderStatus;
   totalAmount: string;
   discountAmount: string;

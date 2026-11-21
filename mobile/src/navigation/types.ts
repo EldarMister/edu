@@ -1,9 +1,9 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
-import type { AdminSection, FinanceView, SettingsView, StaffView, MenuView, StatisticsView, WarehouseView } from './adminWorkspaceNavigation';
+import type { AdminSection, FinanceView, RequestView, SettingsView, StaffView, MenuView, StatisticsView, WarehouseView } from './adminWorkspaceNavigation';
 
 export type OrdersStackParamList = {
   OrdersList: undefined;
-  OrderDetail: { orderId: string };
+  OrderDetail: { orderId: string; fromSplitFamily?: boolean };
 };
 export type WaiterTabParamList = {
   Tables: undefined;
@@ -22,7 +22,7 @@ export type RootStackParamList = {
   Waiter: NavigatorScreenParams<WaiterTabParamList> | undefined;
   Kitchen: NavigatorScreenParams<KitchenTabParamList> | undefined;
   Bar: NavigatorScreenParams<KitchenTabParamList> | undefined;
-  Admin: { section?: AdminSection; view?: MenuView | StatisticsView | WarehouseView | FinanceView | SettingsView | StaffView | 'waiter-report'; orderId?: string } | undefined;
+  Admin: { section?: AdminSection; view?: MenuView | StatisticsView | WarehouseView | FinanceView | RequestView | SettingsView | StaffView | 'waiter-report'; orderId?: string } | undefined;
   Staff: undefined;
   PublicHome: undefined;
   QrMenu: { tableToken: string };

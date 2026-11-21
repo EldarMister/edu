@@ -24,6 +24,9 @@ import { announceAdministratorCall, announceReceiptRequest, type AdministratorVo
 import { isPttBackgroundRuntimeActive } from '@/features/ptt/backgroundFlag';
 import { useRadioOverlayBlocker } from '@/features/ptt/radioVisibility';
 import { CashShiftBanner } from '@/features/cash-shifts/CashShiftControls';
+import { RefundQueuePage } from '@/features/refunds/OrderRefunds';
+import { useCanManageOrderRefunds } from '@/features/refunds/api';
+import { ItemCancellationQueuePage } from '@/features/requests/ItemCancellationQueuePage';
 import { useNotifications } from '@/store/notifications';
 import { ScreenTransition } from '@/components/ScreenTransition';
 import { StatisticsScreen } from '@/screens/admin/StatisticsScreen';
@@ -46,8 +49,8 @@ import { useWarehouseLocations, useWarehousePolicy } from '@/services/api/wareho
 import type { ReceiptPrintRequest, SectionKey } from '@/types';
 import type { RootStackParamList } from './types';
 import {
-  financeNavigation, menuNavigation, resolveAdminSection, settingsNavigation, staffNavigation, statisticsNavigation, warehouseNavigation, type FinanceView, type SettingsView, type AdminSection as Section, type MenuView,
-  type StaffView, type StatisticsView, type WarehouseView, type WorkspaceEntry,
+  financeNavigation, menuNavigation, requestsNavigation, resolveAdminSection, settingsNavigation, staffNavigation, statisticsNavigation, warehouseNavigation, type FinanceView, type SettingsView, type AdminSection as Section, type MenuView,
+  type RequestView, type StaffView, type StatisticsView, type WarehouseView, type WorkspaceEntry,
 } from './adminWorkspaceNavigation';
 
 type Group = WorkspaceEntry['section'];
@@ -58,12 +61,12 @@ const SECTIONS: {
   label: string;
   icon: PwaIconName;
   perm: SectionKey;
-  adminOnly?: boolean;
 }[] = [
   { key: 'stats', label: 'Статистика', icon: 'adminStats', perm: 'statistics' },
   { key: 'finance', label: 'Финансы', icon: 'adminReconcile', perm: 'finance' },
   { key: 'orders', label: 'Заказы', icon: 'adminOrders', perm: 'orders' },
-  { key: 'receipts', label: 'Печать чека', icon: 'adminPrinter', perm: 'checks', adminOnly: true },
+  { key: 'requests', label: 'Заявки', icon: 'adminJournal', perm: 'orders' },
+  { key: 'receipts', label: 'Печать чека', icon: 'adminPrinter', perm: 'checks' },
   { key: 'tables', label: 'Столы', icon: 'grid', perm: 'tables' },
   { key: 'menu', label: 'Меню', icon: 'menu', perm: 'menu' },
   { key: 'warehouse', label: 'Склад', icon: 'adminWarehouse', perm: 'warehouse' },
@@ -82,9 +85,14 @@ export function AdminNavigator() {
   const push = useNotifications((s) => s.push);
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
-  const { canAction, canSection, effectiveRole } = usePermissions();
+  const { canAction, canSection, canEditSection, canOwnerOperation, effectiveRole } = usePermissions();
   const isOwner = effectiveRole === 'OWNER';
   const isAdmin = effectiveRole === 'ADMIN' || isOwner;
+  const canHandlePrintRequests = canSection('checks') && canOwnerOperation('printRequests');
+  const canManageRefunds = useCanManageOrderRefunds();
+  const canManageCancellations = isAdmin && canEditSection('orders');
+  const requestEntries = React.useMemo(() => requestsNavigation.filter(({ key }) =>
+    key === 'refunds' ? canManageRefunds : canManageCancellations), [canManageRefunds, canManageCancellations]);
 
   const financeAccess = useFinanceAccess(isAdmin);
   const canSeeFinance = canSection('finance') || financeAccess.data?.allowed || canAction('financeCashShifts');
@@ -94,17 +102,24 @@ export function AdminNavigator() {
       : canSection('finance') || financeAccess.data?.canViewAll
   )), [canAction, canSection, financeAccess.data]);
   const sections = React.useMemo(
-    () => SECTIONS.filter((s) => (!s.adminOnly || isAdmin) && (s.key === 'finance' ? canSeeFinance : canSection(s.perm))),
-    [canSection, isAdmin, canSeeFinance],
+    () => SECTIONS.filter((s) => {
+      if (s.key === 'finance') return canSeeFinance;
+      if (s.key === 'requests') return requestEntries.length > 0;
+      if (s.key === 'receipts') return canHandlePrintRequests;
+      return canSection(s.perm);
+    }),
+    [canSection, canHandlePrintRequests, canSeeFinance, requestEntries.length],
   );
   const [section, setSection] = React.useState<Section>(isOwner ? 'stats' : 'orders');
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [collapsedGroup, setCollapsedGroup] = React.useState<Group | null>(null);
   const [statisticsView, setStatisticsView] = React.useState<StatisticsView>('overview');
+  const [requestView, setRequestView] = React.useState<RequestView>('refunds');
   const [staffView, setStaffView] = React.useState<StaffView>('employees');
   const [menuView, setMenuView] = React.useState<MenuView>('goods');
   const settingsGuard = React.useRef<SettingsNavigationGuard | null>(null);
   const [financeView, setFinanceView] = React.useState<FinanceView>('transactions');
+  const [cashHandover, setCashHandover] = React.useState<{ date: string; employeeId: string }>();
   const [settingsView, setSettingsView] = React.useState<SettingsView>('general');
   const [warehouseView, setWarehouseView] = React.useState<WarehouseView>('balances');
   const warehouseAccess = canSection('warehouse');
@@ -121,12 +136,15 @@ export function AdminNavigator() {
   const workspaces = React.useMemo(() => ({
     stats: statisticsNavigation,
     finance: financeEntries,
+    requests: requestEntries,
     settings: canSection('settings') ? settingsNavigation : [],
     menu: menuEntries,
     warehouse: warehouseEntries,
     staff: staffEntries,
-  }), [canSection, financeEntries, menuEntries, warehouseEntries, staffEntries]);
-  const view = section === 'stats' ? statisticsView : section === 'finance' ? financeView : section === 'settings' ? settingsView
+  }), [canSection, financeEntries, requestEntries, menuEntries, warehouseEntries, staffEntries]);
+  const currentRequest = requestEntries.find((entry) => entry.key === requestView) ?? requestEntries[0];
+  const view = section === 'stats' ? statisticsView : section === 'finance' ? financeView
+    : section === 'requests' ? currentRequest?.key : section === 'settings' ? settingsView
     : section === 'warehouse' ? currentWarehouse?.key : section === 'staff' ? currentStaff?.key : currentMenu?.key;
   const activeWorkspace = workspaces[section as Group]?.find((entry) => entry.key === view);
   const currentFinanceView = financeEntries.find(({ key }) => key === financeView)?.key ?? financeEntries[0]?.key;
@@ -139,6 +157,7 @@ export function AdminNavigator() {
     setCollapsedGroup(null);
     const entry = workspaces[requested as Group]?.find(({ key }) => key === route.params?.view);
     if (entry?.section === 'menu') setMenuView(entry.key);
+    if (entry?.section === 'requests') setRequestView(entry.key);
     if (requested === 'staff') setStaffView(entry?.section === 'staff' ? entry.key : 'employees');
     if (entry?.section === 'warehouse') setWarehouseView(entry.key);
     if (entry?.section === 'settings') setSettingsView(entry.key);
@@ -148,6 +167,7 @@ export function AdminNavigator() {
 
   const invalidateReceipts = () => { void qc.invalidateQueries({ queryKey: ['admin', 'receipt-prints'] }); };
   useSocketEvent<ReceiptPrintRequest>('receipt_print_request_created', (request) => {
+    if (!canHandlePrintRequests) return;
     invalidateReceipts();
     if (AppState.currentState !== 'active' && (isRemotePushRegistered() || isPttBackgroundRuntimeActive())) return;
     const label = request.type === 'preliminary' ? 'счёта' : 'чека';
@@ -157,7 +177,7 @@ export function AdminNavigator() {
       void beep('notify');
     }
     announceReceiptRequest(request);
-  }, [qc, push]);
+  }, [qc, push, canHandlePrintRequests]);
   useSocketEvent('receipt_print_request_approved', invalidateReceipts, [qc]);
   useSocketEvent('receipt_print_request_printed', invalidateReceipts, [qc]);
   useSocketEvent('receipt_print_request_rejected', invalidateReceipts, [qc]);
@@ -208,8 +228,12 @@ export function AdminNavigator() {
       if (entry.section === 'menu') setMenuView(entry.key);
       if (entry.section === 'staff') setStaffView(entry.key);
       if (entry.section === 'stats') setStatisticsView(entry.key);
+      if (entry.section === 'requests') setRequestView(entry.key);
       if (entry.section === 'warehouse') setWarehouseView(entry.key);
-      if (entry.section === 'finance') setFinanceView(entry.key);
+      if (entry.section === 'finance') {
+        setCashHandover(undefined);
+        setFinanceView(entry.key);
+      }
       if (entry.section === 'settings') setSettingsView(entry.key);
       setCollapsedGroup(null);
       setDrawerOpen(false);
@@ -226,6 +250,13 @@ export function AdminNavigator() {
     })
     .onStart(() => { runOnJS(openDrawer)(); }), [drawerOpen, openDrawer, permanentMenu]);
 
+  const openCashHandover = React.useCallback((date: string, employeeId: string) => {
+    navigation.setParams({ section: undefined, view: undefined, orderId: undefined });
+    setCashHandover({ date, employeeId });
+    setSection('finance');
+    setFinanceView('cashHandover');
+    setCollapsedGroup(null);
+  }, [navigation]);
   const hasSection = !!current && current.key === section;
   const orderId = route.params?.orderId;
   const staffTab = route.params?.view === 'waiter-report' ? 'waiter' : 'current';
@@ -234,6 +265,9 @@ export function AdminNavigator() {
       statisticsView === 'taxes' ? <TaxReportScreen /> : <StatisticsScreen view={statisticsView} />
     ) : section === 'orders' ? (
       <OrdersScreen initialOrderId={orderId} />
+    ) : section === 'requests' ? (
+      currentRequest?.key === 'refunds' ? <RefundQueuePage />
+        : currentRequest?.key === 'cancellations' ? <ItemCancellationQueuePage /> : null
     ) : section === 'receipts' ? (
       <ReceiptPrintsScreen initialOrderId={orderId} />
     ) : section === 'tables' ? (
@@ -248,16 +282,16 @@ export function AdminNavigator() {
           <PositionsPanel />
         </ScrollView>
       ) : currentStaff?.key === 'stations' ? <PrepStationsPage />
-        : <StaffScreen key={staffTab} initialTab={staffTab} />
+        : <StaffScreen key={staffTab} initialTab={staffTab} onOpenCashHandover={openCashHandover} />
     ) : section === 'audit' ? (
       <AuditScreen />
     ) : section === 'finance' ? (
-      currentFinanceView ? <FinanceScreen view={currentFinanceView} /> : null
+      currentFinanceView ? <FinanceScreen view={currentFinanceView} handover={cashHandover} /> : null
     ) : section === 'settings' ? (
       settingsView === 'taxes' && canSection('settings') ? <TaxesScreen /> :
         <SettingsScreen key={settingsView} view={settingsView} navigationGuard={settingsGuard} />
     ) : null
-  ), [currentMenu?.key, currentWarehouse?.key, currentStaff?.key, staffTab, isOwner, hasSection, orderId, section, statisticsView, currentFinanceView, settingsView, canSection]);
+  ), [currentMenu?.key, currentWarehouse?.key, currentStaff?.key, staffTab, isOwner, hasSection, orderId, section, statisticsView, currentFinanceView, currentRequest?.key, settingsView, canSection, cashHandover, openCashHandover]);
 
   return (
     <GestureDetector gesture={edgeSwipe}>

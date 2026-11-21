@@ -91,6 +91,7 @@ export interface StockDocument {
   createdAt: string;
   submittedAt: string | null;
   postedAt: string | null;
+  reopenedAt?: string | null;
   countedAt: string | null;
   effectiveAt: string | null;
   destinationWarehouseId: string | null;

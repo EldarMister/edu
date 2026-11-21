@@ -97,11 +97,13 @@ export function PaymentSheet({
   visible,
   onClose,
   onPaid,
+  onSplitItems,
 }: {
   order: Order | null;
   visible: boolean;
   onClose: () => void;
   onPaid: () => void;
+  onSplitItems?: (order: Order) => void;
 }) {
   const settings = usePublicSettings();
   const { width } = useWindowDimensions();
@@ -358,6 +360,10 @@ export function PaymentSheet({
   // Один BottomSheet остаётся смонтированным на всём пути оплаты. Раньше лист
   // оплаты закрывался на показе успеха, а лист чека создавался заново — из-за
   // этого пользователь видел второй «въезд» снизу после оплаты.
+  const splitItems = onSplitItems && canAcceptPayment && !isPaymentComplete && !splitOpen && !pay.isPending
+    ? () => {
+      if (!paymentPendingRef.current && !printPendingRef.current) onSplitItems(activeOrder);
+    } : undefined;
   const showReceipt = !!currentReceipt && !showSuccess;
   const showReceiptError = isPaymentComplete && !showSuccess && !currentReceipt;
   const wide = width >= 768 && !isPaymentComplete;
@@ -423,7 +429,7 @@ export function PaymentSheet({
           <SheetScrollView keyboardShouldPersistTaps="always" contentContainerStyle={{ flexGrow: 1 }}>
             <WidePayment key={`${activeOrder.id}:${operationEpoch.current}`} order={activeOrder} enabled={enabled} qrConfigured={!!qrSrc}
               served={allActiveItemsServed} busy={pay.isPending || !canAcceptPayment} error={error}
-              onSplit={() => setSplitOpen(true)} onConfirm={confirmTender} />
+              onSplit={() => setSplitOpen(true)} onSplitItems={splitItems} onConfirm={confirmTender} />
           </SheetScrollView>
         ) : <SheetScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>{showReceipt && currentReceipt ? <ReceiptContent receipt={currentReceipt} error={error} location={orderLocation(activeOrder)} directPrint={!activeOrder.waiter && !canPrint} /> : showReceiptError ? <PaymentReceiptErrorContent error={error} /> : <>
         <Text style={styles.subtitle}>
@@ -434,6 +440,7 @@ export function PaymentSheet({
           <Text style={styles.totalLabel} translate>К оплате</Text>
           <Text style={styles.totalValue}>{money(total)}</Text>
         </View>
+        {splitItems && <Button title="Разделить по позициям" size="md" variant="secondary" onPress={splitItems} />}
 
         {!allActiveItemsServed ? (
           <View style={styles.warningBox}>

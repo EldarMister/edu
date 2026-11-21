@@ -32,7 +32,12 @@ function harness(canApprove = true) {
       if (name === '@/lib/i18n') return { useT: () => value => value };
       if (name === '@/services/api/stockDocuments') return { useStockDocumentMutations: () => ({
         save: { isPending: false, mutateAsync: async body => { saveBody = JSON.parse(JSON.stringify(body)); return { ...saved, revision: saved.revision + 1, status: body.finalize === 'post' ? 'posted' : body.finalize === 'submit' ? 'submitted' : 'draft', items: saved.items.map(row => ({ ...row, quantity: body.items.find(item => item.ingredientId === row.ingredientId).quantity })) }; } },
-        transition: { isPending: false, mutateAsync: async () => { transitionCount++; return saved; } },
+        transition: { isPending: false, mutateAsync: async ({ action }) => {
+          transitionCount++;
+          return action === 'reopen' && saved.status === 'posted'
+            ? { ...saved, status: 'draft', reopenedAt: '2026-11-03T10:00:00Z', revision: saved.revision + 1 }
+            : saved;
+        } },
       }) };
       if (name === '@/services/api/warehouse') return { useIngredients: () => ({ data: [] }), qty: (value, unit) => `${value} ${unit}` };
       if (name === '@/theme') return { colors: {}, spacing: {}, fontSize: {} };
@@ -102,6 +107,28 @@ test('staff without approval submits instead of posting', async () => {
   fields(h, tree)[1].props.onChangeText('1'); tree = h.render(document);
   button(h, tree, 'На утверждение').props.onPress(); await wait();
   assert.equal(h.body.finalize, 'submit'); assert.equal(h.transitionCount, 0);
+});
+
+test('posted inventory opens at the original date and corrects only the saved positions', async () => {
+  const h = harness();
+  const document = { ...doc(), status: 'posted', postedAt: '2026-11-02T10:00:00Z', countedAt: '2026-11-01T10:25:00Z' };
+  document.items[1].quantity = 1;
+  let tree = h.render(document);
+  button(h, tree, 'Открыть период и редактировать').props.onPress();
+  await wait();
+  tree = h.render(document);
+  assert.equal(h.transitionCount, 1);
+  assert.ok(!h.flatten(tree).some(node => node.type === 'WarehouseTimingField'
+    || node.type === 'Select' && node.props.title === 'Добавить продукт'));
+  fields(h, tree)[0].props.onChangeText('0');
+  tree = h.render(document);
+  button(h, tree, 'Провести повторно').props.onPress();
+  await wait();
+  assert.equal(h.body.revision, 8);
+  assert.equal(h.body.finalize, 'post');
+  assert.equal(h.body.countedAt, undefined);
+  assert.equal(h.body.recount, undefined);
+  assert.deepEqual(h.body.items, [{ ingredientId: 'rice', quantity: 0 }, { ingredientId: 'oil', quantity: 1 }]);
 });
 
 test('concurrent revision preserves typed values and blocks a stale save', () => {

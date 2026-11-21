@@ -1,4 +1,4 @@
-import type { ActionKey, EmployeePermissions, Role, SectionKey } from '@/types';
+import type { ActionKey, EmployeePermissions, OwnerOperations, Role, SectionKey } from '@/types';
 
 export const SECTION_KEYS: SectionKey[] = [
   'statistics',
@@ -142,7 +142,11 @@ function pick<T extends string>(keys: T[], src: unknown, fallback: Record<T, boo
 /** Итоговые права: дефолты по роли + сохранённое. Владелец — всегда полный доступ. */
 export function resolvePermissions(role: Role, stored: unknown): EmployeePermissions {
   const def = getDefaultPermissionsByRole(role);
-  if (role === 'OWNER') return def;
+  if (role === 'OWNER') {
+    const operations = stored && typeof stored === 'object' ? (stored as Partial<EmployeePermissions>).ownerOperations : undefined;
+    const defaults: OwnerOperations = { refunds: true, cancelOrders: true, cancelItems: true, printRequests: true };
+    return { ...def, ownerOperations: pick(Object.keys(defaults) as (keyof OwnerOperations)[], operations, defaults) };
+  }
   if (!stored || typeof stored !== 'object') return def;
   const s = stored as { sections?: unknown; actions?: unknown; readOnlySections?: unknown; terminalAccess?: unknown; adminAccess?: unknown; workShiftRequired?: unknown };
   const permissions: EmployeePermissions = {

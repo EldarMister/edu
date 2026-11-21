@@ -14,6 +14,8 @@ import { notificationDeduper, isRemotePushRegistered } from '@/services/push';
 import { useReceiptPrint } from '@/store/receiptPrint';
 import { displayOrderNumber } from '@/utils/format';
 import { applyOrderStatusToCache } from '@/utils/orderCache';
+import { invalidateItemCancellation, itemCancellationKey, type ItemCancellationEvent } from '@/features/requests/itemCancellations';
+import { workspacePermissions } from '@/lib/workspaces';
 import type { NotificationType } from '@/store/notifications';
 import type { Order, ReceiptPrintRequest } from '@/types';
 
@@ -92,6 +94,7 @@ export function useRealtimeSync() {
       void qc.refetchQueries({ queryKey: ['admin'], type: 'active' });
       void qc.refetchQueries({ queryKey: ['settings'], type: 'active' });
       void qc.refetchQueries({ queryKey: ['prep-stations'], type: 'active' });
+      void qc.refetchQueries({ queryKey: itemCancellationKey, type: 'active' });
     };
     const onNotificationNew = (n: RealtimeNotification) => {
       if (AppState.currentState !== 'active' && isRemotePushRegistered()) return;
@@ -172,6 +175,18 @@ export function useRealtimeSync() {
       speakWaiterOrder(order);
     };
 
+    const onItemCancellation = (event: ItemCancellationEvent) => {
+      void invalidateItemCancellation(qc, event.status);
+      const { user, workspace } = useAuth.getState();
+      if (!user || !workspace || workspace === 'production') return;
+      if ((workspace === 'admin') !== (event.status === 'pending')) return;
+      const permissions = workspacePermissions(user, workspace);
+      if (workspace === 'admin' && (!permissions.sections.orders || permissions.readOnlySections?.includes('orders'))) return;
+      const message = event.status === 'pending' ? 'Новая заявка на отмену блюда'
+        : event.status === 'approved' ? 'Блюдо отменено' : 'Заявка на отмену блюда отклонена';
+      push({ message: message + ' · ' + displayOrderNumber(event.orderNumber), orderId: event.orderId,
+        type: 'info', at: new Date().toISOString() });
+    };
     const handlers: Array<[string, () => void]> = [
       [SERVER_EVENTS.ORDER_NEW, invalidateOrders],
       [SERVER_EVENTS.KITCHEN_NEW_ORDER, invalidateOrders],
@@ -187,6 +202,7 @@ export function useRealtimeSync() {
     handlers.forEach(([event, fn]) => sock.on(event, fn));
     sock.on(SERVER_EVENTS.NOTIFICATION_NEW, onNotificationNew);
     sock.on(SERVER_EVENTS.ORDER_STATUS_CHANGED, onOrderStatusChanged);
+    sock.on(SERVER_EVENTS.ORDER_ITEM_CANCELLATION_UPDATED, onItemCancellation);
     sock.on(SERVER_EVENTS.WAITER_ORDER_READY, onWaiterOrderChanged);
     sock.on(SERVER_EVENTS.WAITER_ORDER_REJECTED, onWaiterOrderChanged);
     sock.on(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_APPROVED, onReceiptApproved);
@@ -205,6 +221,7 @@ export function useRealtimeSync() {
       handlers.forEach(([event, fn]) => sock.off(event, fn));
       sock.off(SERVER_EVENTS.NOTIFICATION_NEW, onNotificationNew);
       sock.off(SERVER_EVENTS.ORDER_STATUS_CHANGED, onOrderStatusChanged);
+      sock.off(SERVER_EVENTS.ORDER_ITEM_CANCELLATION_UPDATED, onItemCancellation);
       sock.off(SERVER_EVENTS.WAITER_ORDER_READY, onWaiterOrderChanged);
       sock.off(SERVER_EVENTS.WAITER_ORDER_REJECTED, onWaiterOrderChanged);
       sock.off(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_APPROVED, onReceiptApproved);

@@ -41,6 +41,16 @@ test('terminal permissions keep enabled payments and delivery without inheriting
   assert.equal(projected.sections.warehouse, false);
 });
 
+test('owner restrictions survive projection to admin and the terminal', () => {
+  const user = { role: 'OWNER', permissions: { ownerOperations: { cancelItems: false, printRequests: false } } };
+  for (const workspace of ['admin', 'terminal']) {
+    const projected = workspacePermissions(user, workspace);
+    assert.deepEqual(plain(projected.ownerOperations), { refunds: true, cancelOrders: true, cancelItems: false, printRequests: false });
+    assert.equal(projected.actions.acceptOrderPayments, true);
+  }
+  assert.equal(workspacePermissions(user, 'terminal').actions.requestReceiptPrints, false);
+});
+
 test('tablets convert cash overpayment to change and reject only excess non-cash payments', () => {
   assert.deepEqual(plain(tenderTotals(150, { cash: 200, card: 60, qr: 20 })), {
     amounts: { cash: 70, card: 60, qr: 20 }, remaining: 0, change: 130, over: false,

@@ -243,6 +243,8 @@ test('printed realtime updates and the visible receipt sheet play exactly one ac
     '@/services/push': { isRemotePushRegistered: () => false, notificationDeduper: { claim: () => true } },
     '@/store/receiptPrint': { useReceiptPrint: { getState: () => state } },
     '@/utils/format': { displayOrderNumber: String }, '@/utils/orderCache': {},
+    '@/features/requests/itemCancellations': { itemCancellationKey: ['item-cancellations'], invalidateItemCancellation: noop },
+    '@/lib/workspaces': {},
   });
   useRealtimeSync(); listeners.get(events.RECEIPT_PRINT_REQUEST_PRINTED)(request);
   const refs = [];

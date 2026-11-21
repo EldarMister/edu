@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, Card, Field } from '@/components/ui';
 import { BrandLogo } from '@/components/BrandLogo';
+import { PrivacyPolicyLink } from '@/components/PrivacyPolicyLink';
 import { colors, fontSize, spacing } from '@/theme';
 import { useLogin } from '@/services/api/auth';
 import { useAuth } from '@/store/auth';
@@ -90,6 +91,7 @@ export function LoginScreen() {
             <Button title="Войти" onPress={onSubmit} loading={login.isPending} fontWeight="600" />
           </Card>
 
+          <PrivacyPolicyLink />
           <Text style={styles.version}>v{Constants.expoConfig?.version ?? '0.1.1'}</Text>
         </ScrollView>
       </KeyboardAvoidingView>

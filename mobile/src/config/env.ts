@@ -12,4 +12,5 @@ export const API_BASE = `${API_URL}/api`;
 // Публичный веб-адрес PWA — база QR-меню столов (origin/menu/:token). В PWA это
 // window.location.origin. Переопределяется через EXPO_PUBLIC_WEB_URL.
 const DEFAULT_WEB_URL = 'https://edu-pos.up.railway.app';
+export const PRIVACY_POLICY_URL = `${DEFAULT_WEB_URL}/privacy.html`;
 export const WEB_URL = (process.env.EXPO_PUBLIC_WEB_URL ?? DEFAULT_WEB_URL).replace(/\/$/, '');

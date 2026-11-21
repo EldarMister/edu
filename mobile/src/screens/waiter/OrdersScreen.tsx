@@ -54,7 +54,9 @@ export function OrdersScreen() {
   const policies = settings.data?.waiterOrderPermissions;
   const dishes = useDishes();
   const selectTable = useCart((s) => s.selectTable);
-  const canCreateDelivery = usePermissions().canAction('createDeliveryOrders');
+  const { canAction, canOwnerOperation } = usePermissions();
+  const canCreateDelivery = canAction('createDeliveryOrders');
+  const canCancelOrder = canOwnerOperation('cancelOrders');
   const connected = useConnectionStatus();
   const deliveryPending = useCart((s) => !!s.pendingTables[NEW_DELIVERY_CART.id]);
   const startEditing = useCart((s) => s.startEditing);
@@ -150,6 +152,7 @@ export function OrdersScreen() {
     setPendingCancel((current) => (
       current?.order.id === pending.order.id && current.deadline === pending.deadline ? null : current
     ));
+    if (!canCancelOrder) return;
     const current = orders.data?.find((order) => order.id === pending.order.id);
     if (current && !canWaiterCancelOrder(current, policies)) {
       push({ message: waiterOrderPermission(current, 'cancel', policies).reason, type: 'error', at: new Date().toISOString() });
@@ -167,7 +170,7 @@ export function OrdersScreen() {
         },
       },
     );
-  }, [cancel, orders.data, policies, push]);
+  }, [canCancelOrder, cancel, orders.data, policies, push]);
 
   React.useEffect(() => {
     if (!pendingCancel) return undefined;
@@ -182,6 +185,7 @@ export function OrdersScreen() {
 
   const requestCancelOrder = React.useCallback((order: Order) => {
     closeMenu();
+    if (!canCancelOrder) return;
     if (!canWaiterCancelOrder(order, policies)) {
       push({ message: `${waiterOrderPermission(order, 'cancel', policies).reason} Отмените разрешённые позиции отдельно.`, type: 'error', at: new Date().toISOString() });
       return;
@@ -189,10 +193,10 @@ export function OrdersScreen() {
     setCancelReason(DEFAULT_CANCEL_REASON);
     setCancelOther('');
     setCancelTarget(order);
-  }, [closeMenu, policies, push]);
+  }, [canCancelOrder, closeMenu, policies, push]);
 
   const confirmCancelOrder = React.useCallback(() => {
-    if (!cancelTarget) return;
+    if (!cancelTarget || !canCancelOrder) return;
     if (pendingCancel) commitCancel(pendingCancel);
     const finalReason = cancelReason === 'Другое' ? cancelOther.trim() || 'Другое' : cancelReason;
     setPendingCancel({
@@ -203,7 +207,7 @@ export function OrdersScreen() {
     setCancelTarget(null);
     setCancelReason(DEFAULT_CANCEL_REASON);
     setCancelOther('');
-  }, [cancelOther, cancelReason, cancelTarget, commitCancel, pendingCancel]);
+  }, [canCancelOrder, cancelOther, cancelReason, cancelTarget, commitCancel, pendingCancel]);
 
   const undoCancel = React.useCallback(() => {
     setPendingCancel(null);
@@ -320,13 +324,13 @@ export function OrdersScreen() {
               </FastPressable>
             ) : null}
             <FastPressable
-              disabled={!canWaiterCancelOrder(menuRender.order, policies)}
+              disabled={!canCancelOrder || !canWaiterCancelOrder(menuRender.order, policies)}
               onPress={() => requestCancelOrder(menuRender.order)}
-              style={[styles.menuItem, !canWaiterCancelOrder(menuRender.order, policies) && { opacity: 0.4 }]}
+              style={[styles.menuItem, (!canCancelOrder || !canWaiterCancelOrder(menuRender.order, policies)) && { opacity: 0.4 }]}
             >
               <Text style={[styles.menuItemText, styles.menuDanger]} translate>Отменить заказ</Text>
             </FastPressable>
-            {!canWaiterCancelOrder(menuRender.order, policies) && !['paid', 'cancelled'].includes(menuRender.order.status) ? (
+            {(!canCancelOrder || !canWaiterCancelOrder(menuRender.order, policies)) && !['paid', 'cancelled'].includes(menuRender.order.status) ? (
               <FastPressable style={styles.menuItem} onPress={() => {
                 setAdministratorTarget(menuRender.order);
                 closeMenu();

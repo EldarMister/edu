@@ -39,27 +39,35 @@ import { useReplacement } from '@/store/replacement';
 import { usePublicSettings } from '@/services/api/settings';
 import { waiterItemPermission, waiterOrderPermission } from '@/lib/order-permissions';
 import { apiError } from '@/lib/api';
+import { useT } from '@/lib/i18n';
+import { isAxiosError } from 'axios';
 import { TerminalOrderRefunds } from '@/features/refunds/OrderRefunds';
+import { usePendingItemCancellations, useRequestItemCancellation } from '@/features/requests/itemCancellations';
+import { useAuth } from '@/store/auth';
 import { displayOrderNumber, money } from '@/utils/format';
 import { orderToCartLines } from '@/utils/orderCart';
 import { PaymentSheet } from './PaymentSheet';
-import { InsufficientPermissionsSheet } from './InsufficientPermissionsSheet';
+import { SplitOrderSheet } from './SplitOrderSheet';
+import { canSplitOrder, orderCheckFamily } from './splitOrderPlan';
+import type { OrdersStackParamList } from '@/navigation/types';
 import { canRequestPreliminaryBill, deliveryDetails, orderLocation } from './orderRules';
 import type { Order, OrderItem, OrderItemStatus, OrderSetComponent } from '@/types';
 
-type R = RouteProp<{ OrderDetail: { orderId: string } }, 'OrderDetail'>;
+type R = RouteProp<OrdersStackParamList, 'OrderDetail'>;
 const ITEM_CANCEL_REASONS = ['Клиент передумал', 'Ошибка официанта', 'Другое'] as const;
 const DEFAULT_ITEM_CANCEL_REASON = ITEM_CANCEL_REASONS[0];
 
 export function OrderDetailScreen() {
   const route = useRoute<R>();
+  const t = useT();
   const navigation = useNavigation<any>();
-  const { orderId } = route.params;
+  const { orderId, fromSplitFamily } = route.params;
   const orders = useActiveOrders();
   const dishes = useDishes();
   const settings = usePublicSettings();
   const policies = settings.data?.waiterOrderPermissions;
-  const { canAction } = usePermissions();
+  const { canAction, canOwnerOperation } = usePermissions();
+  const owner = useAuth((state) => state.user?.role === 'OWNER');
   const canAcceptPayment = canAction('acceptOrderPayments');
   const canPrint = canAction('printReceipts');
   const canRequestPrint = canAction('requestReceiptPrints');
@@ -78,17 +86,21 @@ export function OrderDetailScreen() {
   const claimQr = useClaimQrOrder();
   const print = useCreateReceiptPrintRequest();
   const administratorCall = useCallAdministrator();
+  const requestCancellation = useRequestItemCancellation();
+  const pendingCancellations = usePendingItemCancellations(order && !['paid', 'cancelled', 'rejected'].includes(order.status)
+    ? order.id : undefined);
   const selectTable = useCart((s) => s.selectTable);
   const startEditing = useCart((s) => s.startEditing);
   const beginPrint = useReceiptPrint((s) => s.begin);
   const setReplacementTarget = useReplacement((s) => s.setTarget);
   const [payOpen, setPayOpen] = useState(false);
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
+  const [splitOrder, setSplitOrder] = useState<Order | null>(null);
   const [billItem, setBillItem] = useState<OrderItem | null>(null);
   const [cancelReason, setCancelReason] = useState<string>(DEFAULT_ITEM_CANCEL_REASON);
   const [cancelOther, setCancelOther] = useState('');
   const [actionCooldown, setActionCooldown] = useState(0);
-  const [administratorOpen, setAdministratorOpen] = useState(false);
+  const [requestOnly, setRequestOnly] = useState(false);
   const push = useNotifications((s) => s.push);
   const latestOrderRef = React.useRef<Order | null>(null);
 
@@ -105,21 +117,21 @@ export function OrderDetailScreen() {
   }, [order]);
 
   React.useEffect(() => {
-    if (canAcceptPayment && order?.status === 'waiting_payment') {
+    if (canAcceptPayment && !fromSplitFamily && order?.status === 'waiting_payment') {
       setPaymentOrder(order);
       setPayOpen(true);
     }
-  }, [canAcceptPayment, order?.id, order?.status]);
+  }, [canAcceptPayment, fromSplitFamily, order?.id, order?.status]);
 
   useFocusEffect(
     React.useCallback(() => {
       const focusedOrder = latestOrderRef.current;
-      if (canAcceptPayment && focusedOrder?.status === 'waiting_payment') {
+      if (canAcceptPayment && !fromSplitFamily && focusedOrder?.status === 'waiting_payment') {
         setPaymentOrder(focusedOrder);
         setPayOpen(true);
       }
       return undefined;
-    }, [canAcceptPayment, orderId]),
+    }, [canAcceptPayment, fromSplitFamily, orderId]),
   );
 
   React.useEffect(() => {
@@ -130,22 +142,41 @@ export function OrderDetailScreen() {
 
   React.useEffect(() => {
     setActionCooldown(0);
-    setAdministratorOpen(false);
+    setRequestOnly(false);
     setBillItem(null);
+    setSplitOrder(null);
   }, [order?.id]);
+
+  function openSplitItems(target: Order) {
+    if (!canAcceptPayment || !canSplitOrder(target)) return;
+    setPayOpen(false);
+    setSplitOrder(target);
+  }
+
+  function openFamilyCheck(id: string) {
+    setPayOpen(false);
+    setPaymentOrder(null);
+    navigation.replace('OrderDetail', { orderId: id, fromSplitFamily: true });
+  }
+
+  const paymentTarget = paymentOrder ?? order;
 
   // После оплаты заказ сразу исчезает из active-запроса. Sheet должен
   // оставаться на той же позиции в дереве, иначе React размонтирует его в
   // момент показа экрана успеха и создаст заново обычный лист оплаты.
   const paymentSheet = (
     <PaymentSheet
-      order={paymentOrder ?? order}
+      order={paymentTarget}
       visible={payOpen && canAcceptPayment}
       onClose={() => setPayOpen(false)}
+      onSplitItems={paymentTarget && canSplitOrder(paymentTarget) ? openSplitItems : undefined}
       onPaid={() => {
         setPayOpen(false);
         setPaymentOrder(null);
-        navigation.getParent()?.navigate('Tables');
+        const next = paymentTarget && orderCheckFamily(paymentTarget, orders.data ?? [])
+          .find((candidate) => candidate.id !== paymentTarget.id);
+        if (next) openFamilyCheck(next.id);
+        else navigation.getParent()?.navigate('Tables');
       }}
     />
   );
@@ -164,15 +195,20 @@ export function OrderDetailScreen() {
   }
 
   const unclaimedQr = order.source === 'qr' && !order.waiter;
+  const family = orderCheckFamily(order, orders.data ?? []);
   const busy = pickedUp.isPending || served.isPending || toPayment.isPending || resolve.isPending || claimQr.isPending;
   const cooldownActive = actionCooldown > 0;
   const stationItems = order.items.filter((item) => item.prepStation !== 'none');
   const hasReadyStationItem = stationItems.some((item) => item.status === 'ready');
   const activeItems = order.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
   const allActiveItemsServed = activeItems.length > 0 && activeItems.every((item) => item.status === 'served');
-  const billCorrection = !['paid', 'cancelled', 'rejected'].includes(order.status);
+  const billCorrection = !unclaimedQr && !['paid', 'cancelled', 'rejected'].includes(order.status);
   const currentBillItem = order.items.find((item) => item.id === billItem?.id);
-  const cancelPermission = currentBillItem ? waiterItemPermission(order, currentBillItem, 'cancel', policies) : { allowed: false, reason: 'Позиция уже завершена.' };
+  const hasPendingRequest = pendingCancellations.data?.some(({ itemId }) => itemId === billItem?.id) ?? false;
+  const cancelPermission = currentBillItem && !['rejected', 'cancelled'].includes(currentBillItem.status)
+    ? requestOnly || !canOwnerOperation('cancelItems') ? { allowed: false, reason: 'Отмену блюда подтверждает администратор.' }
+      : owner ? { allowed: true, reason: '' } : waiterItemPermission(order, currentBillItem, 'cancel', policies)
+    : { allowed: false, reason: 'Позиция уже завершена.' };
   const canPrintPreliminary = (canPrint || canRequestPrint) && canRequestPreliminaryBill(order);
   const deliveryInfo = deliveryDetails(order);
 
@@ -195,35 +231,21 @@ export function OrderDetailScreen() {
       .catch(onError);
   };
 
+  const reason = cancelReason === 'Другое' ? cancelOther.trim() : cancelReason;
   const confirmCancelReadyItem = () => {
-    if (!billItem) return;
-    const currentItem = order.items.find((item) => item.id === billItem.id);
-    if (!currentItem || currentItem.status === 'cancelled' || currentItem.status === 'rejected') {
-      setBillItem(null);
-      return;
-    }
-    const permission = waiterItemPermission(order, currentItem, 'cancel', policies);
-    if (!permission.allowed) {
-      push({ message: permission.reason, type: 'error', at: new Date().toISOString() });
-      return;
-    }
-    const reason = cancelReason === 'Другое' ? cancelOther.trim() || 'Другое' : cancelReason;
+    if (!currentBillItem || !cancelPermission.allowed || reason.length < 2) return;
     cancelReadyItem.mutate(
-      { orderId: order.id, itemId: billItem.id, reason },
+      { orderId: order.id, itemId: currentBillItem.id, reason },
       {
         onSuccess: () => {
-          push({ message: `${orderItemName(billItem)} отменено`, type: 'success', at: new Date().toISOString() });
+          push({ message: `${orderItemName(currentBillItem)} отменено`, type: 'success', at: new Date().toISOString() });
           setBillItem(null);
           setCancelReason(DEFAULT_ITEM_CANCEL_REASON);
           setCancelOther('');
         },
         onError: (error) => {
-          // Статус может смениться между нажатием и ответом сервера.
-          const message = apiError(error);
-          if (message.includes('Недостаточно прав')) {
-            setBillItem(null);
-            setAdministratorOpen(true);
-          } else onError(error);
+          if (isAxiosError(error) && error.response?.status === 403) setRequestOnly(true);
+          else onError(error);
         },
       },
     );
@@ -231,11 +253,21 @@ export function OrderDetailScreen() {
 
   const callAdministrator = () => administratorCall.mutate(order.id, {
     onSuccess: () => {
-      setAdministratorOpen(false);
+      setBillItem(null);
       push({ message: 'Администратор вызван', type: 'success', at: new Date().toISOString() });
     },
     onError,
   });
+
+  const requestItemCancellation = () => {
+    if (!currentBillItem || hasPendingRequest || reason.length < 2 || requestCancellation.isPending) return;
+    requestCancellation.mutate({ orderId: order.id, itemId: currentBillItem.id, reason }, {
+      onSuccess: () => {
+        setBillItem(null);
+        push({ message: 'Заявка на отмену отправлена', type: 'success', at: new Date().toISOString() });
+      },
+    });
+  };
 
   if (order.status === 'partially_rejected' && order.requiresWaiterDecision) {
     return (
@@ -268,7 +300,7 @@ export function OrderDetailScreen() {
             onError,
           })
         }
-        onCancel={() => {
+        onCancel={canOwnerOperation('cancelOrders') ? () => {
           const draft = useCart.getState();
           cancelOrder.mutate(
             { orderId: order.id, reason: 'Клиент отменил заказ после частичного отказа кухни' },
@@ -282,7 +314,7 @@ export function OrderDetailScreen() {
               onError,
             },
           );
-        }}
+        } : undefined}
       />
     );
   }
@@ -461,6 +493,11 @@ export function OrderDetailScreen() {
           <OrderStatusBadges order={order} size="sm" align="start" />
         </View>
         {deliveryInfo ? <Text style={styles.orderComment}>{deliveryInfo}</Text> : null}
+        {family.length > 1 && <View style={styles.familyChecks}>
+          {family.map((check) => <Button key={check.id} title={`Чек ${displayOrderNumber(check.orderNumber)} · ${money(check.finalAmount)}`}
+            variant={check.id === order.id ? 'primary' : 'secondary'} size="md" disabled={check.id === order.id}
+            onPress={() => openFamilyCheck(check.id)} />)}
+        </View>}
       </View>
 
       <SheetScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
@@ -471,6 +508,8 @@ export function OrderDetailScreen() {
             billCorrection={billCorrection}
             disabled={cancelReadyItem.isPending}
             onCancel={() => {
+              requestCancellation.reset();
+              setRequestOnly(false);
               setBillItem(it);
               setCancelReason(DEFAULT_ITEM_CANCEL_REASON);
               setCancelOther('');
@@ -505,6 +544,8 @@ export function OrderDetailScreen() {
             </View>
           </>
         ) : null}
+        {canAcceptPayment && canSplitOrder(order) && <Button title="Разделить по позициям" size="md"
+          variant="secondary" disabled={busy} onPress={() => openSplitItems(order)} />}
         <View style={styles.actions}>
           {canPrintPreliminary && order.status !== 'served' ? (
             <FastPressable disabled={print.isPending} onPress={requestPreliminaryReceipt}
@@ -516,12 +557,24 @@ export function OrderDetailScreen() {
         </View>
       </View>
 
+      {splitOrder && <SplitOrderSheet key={splitOrder.id} order={splitOrder} onClose={() => setSplitOrder(null)}
+        onSplit={(source, next) => {
+          setSplitOrder(null);
+          setPaymentOrder(source);
+          push({ message: `${t('Создан чек')} ${displayOrderNumber(next.orderNumber)}`, type: 'success', at: new Date().toISOString() });
+        }} />}
+
       <CancelReadyItemSheet
         item={billItem}
         reason={cancelReason}
         other={cancelOther}
-        submitting={cancelReadyItem.isPending}
+        submitting={cancelReadyItem.isPending || requestCancellation.isPending || administratorCall.isPending}
         permission={cancelPermission}
+        requestPending={hasPendingRequest}
+        requestError={requestCancellation.error ? apiError(requestCancellation.error) : undefined}
+        canSubmit={reason.length >= 2 && billCorrection && !!currentBillItem && !['rejected', 'cancelled'].includes(currentBillItem.status)}
+        onRequest={pendingCancellations.isSuccess ? requestItemCancellation : undefined}
+        onCall={callAdministrator}
         onReasonChange={setCancelReason}
         onOtherChange={setCancelOther}
         onClose={() => {
@@ -531,8 +584,6 @@ export function OrderDetailScreen() {
         }}
         onConfirm={confirmCancelReadyItem}
       />
-      <InsufficientPermissionsSheet visible={administratorOpen} pending={administratorCall.isPending}
-        onClose={() => setAdministratorOpen(false)} onCall={callAdministrator} />
     </SafeAreaView>
   );
 }
@@ -680,6 +731,11 @@ function CancelReadyItemSheet({
   other,
   submitting,
   permission,
+  requestPending,
+  requestError,
+  canSubmit,
+  onRequest,
+  onCall,
   onReasonChange,
   onOtherChange,
   onClose,
@@ -690,6 +746,11 @@ function CancelReadyItemSheet({
   other: string;
   submitting: boolean;
   permission: { allowed: boolean; reason: string };
+  requestPending: boolean;
+  requestError?: string;
+  canSubmit: boolean;
+  onRequest?: () => void;
+  onCall: () => void;
   onReasonChange: (value: string) => void;
   onOtherChange: (value: string) => void;
   onClose: () => void;
@@ -699,20 +760,23 @@ function CancelReadyItemSheet({
     <BottomSheet
       visible={!!item}
       onClose={onClose}
+      dismissible={!submitting}
       title="Действие с блюдом"
       footer={
         <View style={styles.cancelReadyFooter}>
-          <Button
-            title="Отменить блюдо"
-            variant="danger"
-            disabled={!permission.allowed}
-            loading={submitting}
-            onPress={onConfirm}
-          />
+          {permission.allowed ? <Button title="Отменить блюдо" variant="danger"
+            disabled={!canSubmit} loading={submitting} onPress={onConfirm} /> : <>
+            {onRequest && <Button title="Отправить заявку на отмену" disabled={!canSubmit || requestPending}
+              loading={submitting} onPress={onRequest} />}
+            <Button title="Позвать администратора" variant="secondary" disabled={submitting} onPress={onCall} />
+          </>}
         </View>
       }
     >
-      {!permission.allowed ? <View style={styles.warningBox}><Text style={styles.warningText} translate>{permission.reason}</Text></View> : null}
+      {!permission.allowed ? <View style={styles.warningBox}><Text style={styles.warningText} translate>
+        {requestPending ? 'Заявка на отмену ожидает подтверждения' : permission.reason}
+      </Text></View> : null}
+      {requestError && <Text accessibilityRole="alert" style={styles.rejectedInfoText}>{requestError}</Text>}
       {item ? (
         <View style={styles.cancelReadyDish}>
           <Text style={styles.cancelReadyName}>{orderItemName(item)}</Text>
@@ -764,7 +828,7 @@ function PartialRejectionScreen({
   onReplacePress: (item: OrderItem) => void;
   onRemove: (item: OrderItem) => void;
   onContinue: () => void;
-  onCancel: () => void;
+  onCancel?: () => void;
 }) {
   const activeItems = order.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
   const rejectedItems = order.items.filter(
@@ -831,9 +895,9 @@ function PartialRejectionScreen({
           <Text style={styles.warningText} translate>Кухня отказала часть заказа. Решите по каждой отказанной позиции.</Text>
         </View>
         <Button title="Продолжить без отказанных блюд" onPress={onContinue} loading={busy} style={styles.partialContinueBtn} />
-        <FastPressable disabled={busy} onPress={onCancel} style={styles.cancelWholeBtn}>
+        {onCancel && <FastPressable disabled={busy} onPress={onCancel} style={styles.cancelWholeBtn}>
           <Text style={styles.cancelWholeText} translate>Отменить весь заказ</Text>
-        </FastPressable>
+        </FastPressable>}
       </SheetScrollView>
     </SafeAreaView>
   );
@@ -855,6 +919,7 @@ function WarningTriangleIcon() {
 }
 
 const styles = StyleSheet.create({
+  familyChecks: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm },
   safe: { flex: 1, backgroundColor: colors.white },
   titleBlock: {
     borderBottomWidth: 1,
