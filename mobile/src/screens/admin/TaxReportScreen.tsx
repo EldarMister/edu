@@ -46,10 +46,13 @@ export function TaxReportScreen() {
   const range = warehouseReportRange(period, new Date(), { from, to });
   const params = { ...range, kind: kind || undefined, sort, direction: desc ? 'desc' : 'asc' };
   const report = useTaxReport(params);
-  const rows = (report.data ?? []).map((row) => ({ id: `${row.taxId}:${row.kind}:${row.rate}`, cells: [
-    row.name, String(row.rate).replace('.', ',') + ' %', TAX_TYPE_LABELS[row.type], TAX_REPORT_LABELS[row.kind],
-    balanceMoney(Number(row.salesAmount)), balanceMoney(Number(row.amount)),
-  ] }));
+  const rows = (report.data ?? []).map((row) => {
+    const operation = row.operation ?? row.kind;
+    return { id: JSON.stringify([row.taxId, row.name, row.type, operation, row.rate]), cells: [
+      row.name, String(row.rate).replace('.', ',') + ' %', TAX_TYPE_LABELS[row.type], TAX_REPORT_LABELS[operation],
+      balanceMoney(Number(row.salesAmount)), balanceMoney(Number(row.amount)),
+    ] };
+  });
   const url = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => { if (value) url.set(key, value); });
   const columns: DirectoryColumn<typeof rows[number]>[] = columnList.map(({ label, sort: key, width }, index) => ({

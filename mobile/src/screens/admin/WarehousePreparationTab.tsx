@@ -13,12 +13,13 @@ import {
   type Ingredient, type PreparationProcessingMethod, type PreparationRecipe, type WarehouseLocation,
 } from '@/services/api/warehouse';
 import { useSavePreparationCard } from '@/services/api/warehouseProduction';
-import { ALL_UNITS, UNIT_OPTIONS, unitLabel, unitTypeOf, unitsForType, type UnitCode } from '@/services/api/warehouseUnits';
+import { ALL_UNITS, unitLabel, unitTypeOf, unitsForType, type UnitCode } from '@/services/api/warehouseUnits';
 import { colors, spacing } from '@/theme';
 import { money } from '@/utils/format';
 import { PreparationBatchSheet } from './PreparationBatchEditor';
 import { ProductionBatchPage } from './WarehouseProductionTab';
 import { WarehouseWorkspace } from './WarehouseWorkspace';
+import { CatalogueIngredientEditor } from './MenuStockCatalogue';
 
 type Editor = { kind: 'card'; id?: string } | { kind: 'produce'; item: Ingredient } | { kind: 'batch'; id: string };
 type RecipeLine = {
@@ -121,15 +122,20 @@ function PreparationCardForm({ recipe, onClose }: { recipe: PreparationRecipe; o
   const [name, setName] = useState(recipe.name);
   const [category, setCategory] = useState(recipe.category ?? '');
   const [instructions, setInstructions] = useState(recipe.instructions ?? '');
-  const [unit, setUnit] = useState(recipe.displayUnit);
+  const unit = recipe.displayUnit;
   const [mode, setMode] = useState<NonNullable<PreparationRecipe['mode']>>(recipe.mode ?? 'virtual');
-  const [output, setOutput] = useState(recipe.outputQuantity ? String(recipe.outputQuantity) : '');
+  const [enteredOutput, setEnteredOutput] = useState(recipe.id ? String(recipe.outputQuantity || '') : null);
   const [outputUnit, setOutputUnit] = useState(recipe.outputUnit);
+  const [addingIngredient, setAddingIngredient] = useState(false);
   const [lines, setLines] = useState((): RecipeLine[] => recipe.items.map((item) => ({
     key: item.ingredientId, ingredientId: item.ingredientId, gross: String(item.quantity), net: String(item.netAmount ?? item.quantity),
     unit: item.unit, method: item.processingMethod ?? '', lossPercent: item.lossPercent ?? 0,
   })));
   const [error, setError] = useState('');
+  const netGrams = lines.reduce((sum, line) => unitTypeOf(line.unit) === 'mass' && positive(line.net)
+    ? sum + amount(line.net) * unitFactor(line.unit) : sum, 0);
+  const output = enteredOutput ?? (recipe.unitType === 'mass' && netGrams > 0
+    ? recipeWeight(netGrams / unitFactor(outputUnit)) : '');
   const snapshot = JSON.stringify([name, category, instructions, unit, mode, output, outputUnit, lines]);
   const baseline = useRef(snapshot);
   const available = (query.data ?? []).filter((item) => item.isActive && item.id !== recipe.id);
@@ -212,14 +218,16 @@ function PreparationCardForm({ recipe, onClose }: { recipe: PreparationRecipe; o
             }} />
             <Select title="Метод приготовления" value={line.method} options={methods} disabled={locked} onChange={(method) => {
               const lossPercent = (method && ingredient?.processingLosses?.[method]) || 0;
-              patch(line.key, { method, lossPercent, net: netOf(line.gross, lossPercent) });
+              patch(line.key, { method, lossPercent, gross: convert(line.net, 1 / (1 - lossPercent / 100)) });
             }} />
             <View style={styles.row}>
               <Field label="Брутто" value={line.gross} editable={!locked} keyboardType="decimal-pad" containerStyle={styles.grow}
                 onChangeText={(gross) => patch(line.key, { gross, net: netOf(gross, line.lossPercent) })} />
               <Field label="Нетто" value={line.net} editable={!locked} keyboardType="decimal-pad" containerStyle={styles.grow}
-                onChangeText={(net) => patch(line.key, { net, lossPercent: positive(line.gross) && amount(net) >= 0 && amount(net) <= amount(line.gross)
-                  ? (1 - amount(net) / amount(line.gross)) * 100 : line.lossPercent })} />
+                onChangeText={(net) => patch(line.key, line.method && line.lossPercent < 100
+                  ? { net, gross: convert(net, 1 / (1 - line.lossPercent / 100)) }
+                  : { net, lossPercent: positive(line.gross) && amount(net) >= 0 && amount(net) <= amount(line.gross)
+                    ? (1 - amount(net) / amount(line.gross)) * 100 : line.lossPercent })} />
               <View style={styles.unit}><Select title="Единица" value={line.unit} options={unitsForType(ingredient?.unitType ?? unitTypeOf(line.unit))}
                 disabled={locked} onChange={(next) => {
                   const ratio = unitFactor(line.unit) / unitFactor(next);
@@ -232,20 +240,22 @@ function PreparationCardForm({ recipe, onClose }: { recipe: PreparationRecipe; o
             </View>
           </View>;
         })}
-        {!locked ? <Button title="Добавить" variant="secondary" onPress={() => setLines((previous) => [...previous, {
-          key: randomUUID(), ingredientId: '', gross: '', net: '', unit: 'kg', method: '', lossPercent: 0,
-        }])} /> : null}
+        {!locked && <View style={styles.actions}>
+          <Button title="Добавить ингредиент" variant="secondary" onPress={() => setLines((previous) => [...previous, {
+            key: randomUUID(), ingredientId: '', gross: '', net: '', unit: 'kg', method: '', lossPercent: 0,
+          }])} />
+          {canAction('warehouseReceive') && <Button title="Создать ингредиент" variant="secondary" onPress={() => setAddingIngredient(true)} />}
+        </View>}
       </Card>
       <Card style={styles.stack}>
         <View style={styles.row}>
-          <Field label="Выход" value={output} onChangeText={setOutput} editable={!locked} keyboardType="decimal-pad" containerStyle={styles.grow} />
+          <Field label="Выход" value={output} onChangeText={value => setEnteredOutput(value || null)} editable={!locked} keyboardType="decimal-pad" containerStyle={styles.grow} />
           <View style={styles.unit}><Select title="Единица выхода" value={outputUnit} options={unitsForType(unitTypeOf(unit))}
-            disabled={locked} onChange={(next) => { setOutput(convert(output, unitFactor(outputUnit) / unitFactor(next))); setOutputUnit(next); }} /></View>
+            disabled={locked} onChange={(next) => {
+              if (enteredOutput !== null) setEnteredOutput(convert(enteredOutput, unitFactor(outputUnit) / unitFactor(next)));
+              setOutputUnit(next);
+            }} /></View>
         </View>
-        {!recipe.id ? <Select title="Единица учёта" value={unit} options={UNIT_OPTIONS} disabled={locked} onChange={(next) => {
-          setUnit(next);
-          if (unitTypeOf(outputUnit) !== unitTypeOf(next)) setOutputUnit(next);
-        }} /> : null}
         <Field label="Категория ингредиентов" value={category} onChangeText={setCategory} maxLength={120} editable={!locked} />
         {canStock ? <Select title="Режим учёта" value={mode} disabled={locked} options={[
           { value: 'virtual', label: 'По рецепту' }, { value: 'stocked', label: 'Хранить на складе' },
@@ -253,6 +263,10 @@ function PreparationCardForm({ recipe, onClose }: { recipe: PreparationRecipe; o
       </Card>
       {error ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
     </ScrollView>
+    {addingIngredient && <CatalogueIngredientEditor item={null} onClose={() => setAddingIngredient(false)}
+      onSaved={(ingredient) => setLines((previous) => [...previous, {
+        key: randomUUID(), ingredientId: ingredient.id, unit: ingredient.displayUnit, gross: '', net: '', method: '', lossPercent: 0,
+      }])} />}
   </WarehouseWorkspace>;
 }
 
@@ -266,7 +280,8 @@ function QueryError({ error, retry }: { error: unknown; retry: () => void }) {
 const unitFactor = (unit: UnitCode) => ALL_UNITS.find(({ code }) => code === unit)?.factor ?? 1;
 const amount = (value: string) => value.trim() ? Number(value.trim().replace(',', '.')) : NaN;
 const positive = (value: string) => Number.isFinite(amount(value)) && amount(value) > 0;
-const convert = (value: string, ratio: number) => Number.isFinite(amount(value)) ? String(amount(value) * ratio) : value;
+const recipeWeight = (weight: number) => String(Number(weight.toFixed(6)));
+const convert = (value: string, ratio: number) => Number.isFinite(amount(value)) ? recipeWeight(amount(value) * ratio) : value;
 const netOf = (gross: string, loss: number) => convert(gross, 1 - loss / 100);
 
 const styles = StyleSheet.create({

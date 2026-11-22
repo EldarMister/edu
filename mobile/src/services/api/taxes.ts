@@ -42,11 +42,14 @@ export const TAX_REPORT_ENDPOINT = '/admin/statistics/taxes';
 export const TAX_REPORT_LABELS = {
   fiscal: 'Продажи с фискальным чеком',
   nonFiscal: 'Продажи без фискального чека',
-  reversal: 'Возвраты в EDU POS',
+  reversal: 'Все возвраты',
+  fiscalReversal: 'Возвраты с чеком ККМ',
+  nonFiscalReversal: 'Возвраты без чека ККМ',
 } as const;
 type TaxReportRow = Omit<MenuTax, 'id'> & {
   taxId: string;
   kind: keyof typeof TAX_REPORT_LABELS;
+  operation?: Exclude<keyof typeof TAX_REPORT_LABELS, 'reversal'>;
   salesAmount: string;
   amount: string;
 };

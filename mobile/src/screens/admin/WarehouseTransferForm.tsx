@@ -50,6 +50,7 @@ export function stockTransferInput({
 
 export interface WarehouseTransferFormProps {
   documentId?: string;
+  copyDocumentId?: string;
   initialIngredient?: Ingredient;
   source?: WarehouseLocation;
   locations: WarehouseLocation[];
@@ -67,28 +68,33 @@ export function WarehouseTransferSheet({ ingredient, from, locations, onClose }:
 
 export function WarehouseTransferForm(props: WarehouseTransferFormProps) {
   const [activeId, setActiveId] = useState(props.documentId);
-  const query = useStockDocument(activeId ?? '');
-  if (activeId && !query.data) return <WarehouseWorkspace title="Перемещение" onClose={props.onClose}>
+  const queryId = activeId ?? props.copyDocumentId;
+  const query = useStockDocument(queryId ?? '');
+  if (queryId && !query.data) return <WarehouseWorkspace title="Перемещение" onClose={props.onClose}>
     <View style={styles.content}>{query.isLoading ? <ActivityIndicator color={colors.primary} /> : <><Text style={styles.error}>{apiError(query.error)}</Text><Button title="Повторить" variant="secondary" onPress={() => void query.refetch()} /></>}</View>
   </WarehouseWorkspace>;
   if (query.data && query.data.kind !== 'transfer') return <WarehouseWorkspace title="Перемещение" onClose={props.onClose}><Text style={styles.error}>Документ не является перемещением.</Text></WarehouseWorkspace>;
-  return <TransferDocumentFields {...props} incoming={query.data} onSaved={(document) => { setActiveId(document.id); props.onSaved?.(document); }} />;
+  return <TransferDocumentFields {...props} incoming={activeId ? query.data : undefined} copy={activeId ? undefined : query.data}
+    onSaved={(document) => { setActiveId(document.id); props.onSaved?.(document); }} />;
 }
 
 const statusLabels = { draft: 'Черновик', submitted: 'На утверждении', posted: 'Проведён', reversed: 'Сторнирован' } as const;
 const emptyRow = (): TransferDraftRow => ({ key: randomUUID(), ingredientId: '', name: '', quantity: '', unit: 'pcs', documentUnit: 'pcs' });
 const formKey = (source: string, destination: string, rows: TransferDraftRow[], note: string, effectiveAt: string | null | undefined) => JSON.stringify({ source, destination, rows, note, effectiveAt });
 
-function TransferDocumentFields({ incoming, source, initialIngredient, locations, onClose, onSaved, closeAfterPost }: WarehouseTransferFormProps & { incoming?: StockDocument }) {
+function TransferDocumentFields({ incoming, copy, source, initialIngredient, locations, onClose, onSaved, closeAfterPost }: WarehouseTransferFormProps & {
+  incoming?: StockDocument; copy?: StockDocument;
+}) {
   const { canAction } = usePermissions();
   const canTransfer = canAction('warehouseTransfer');
   const canApprove = canAction('warehouseApprove');
   const showCost = canAction('warehouseCosts');
   const [document, setDocument] = useState(incoming);
-  const [sourceId, setSourceId] = useState(incoming?.warehouseId ?? source?.id ?? '');
-  const [destinationId, setDestinationId] = useState(incoming?.destinationWarehouseId ?? '');
-  const [rows, setRows] = useState<TransferDraftRow[]>(() => incoming ? transferDraftRows(incoming.items) : initialIngredient ? [{ key: randomUUID(), ingredientId: initialIngredient.id, name: initialIngredient.name, quantity: '', unit: initialIngredient.displayUnit, documentUnit: initialIngredient.displayUnit }] : [emptyRow()]);
-  const [note, setNote] = useState(incoming?.note ?? '');
+  const initial = incoming ?? copy;
+  const [sourceId, setSourceId] = useState(initial?.warehouseId ?? source?.id ?? '');
+  const [destinationId, setDestinationId] = useState(initial?.destinationWarehouseId ?? '');
+  const [rows, setRows] = useState<TransferDraftRow[]>(() => initial ? transferDraftRows(initial.items) : initialIngredient ? [{ key: randomUUID(), ingredientId: initialIngredient.id, name: initialIngredient.name, quantity: '', unit: initialIngredient.displayUnit, documentUnit: initialIngredient.displayUnit }] : [emptyRow()]);
+  const [note, setNote] = useState(initial?.note ?? '');
   const [timing, setTiming] = useState(() => warehouseTimingFor(incoming?.effectiveAt));
   const [savedKey, setSavedKey] = useState(() => formKey(sourceId, destinationId, rows, note, incoming?.effectiveAt ?? null));
   const [requestKey] = useState(() => randomUUID());
@@ -101,7 +107,11 @@ function TransferDocumentFields({ incoming, source, initialIngredient, locations
   const ingredients = useIngredients('', sourceId, editable && !!sourceId);
   const catalog = ingredients.data ?? [];
   const byId = new Map(catalog.map((item) => [item.id, item]));
-  const values = transferRowsInput(rows);
+  const rowsForSave = document ? rows : rows.map((row) => ({
+    ...row, documentUnit: byId.get(row.ingredientId)?.displayUnit ?? row.documentUnit,
+  }));
+  const values = transferRowsInput(rowsForSave);
+  const unavailable = !document && ingredients.isSuccess && rows.find(({ ingredientId }) => ingredientId && !byId.has(ingredientId));
   const effectiveAt = warehouseTimingValue(timing, document?.effectiveAt);
   const timingError = warehouseTimingError(timing);
   const dirty = formKey(sourceId, destinationId, rows, note, effectiveAt) !== savedKey;
@@ -109,7 +119,7 @@ function TransferDocumentFields({ incoming, source, initialIngredient, locations
   const sourceName = locations.find((location) => location.id === sourceId)?.name ?? 'Недоступный склад';
   const destinationName = locations.find((location) => location.id === destinationId)?.name ?? 'Недоступный склад';
   const locationValid = !!sourceId && !!destinationId && sourceId !== destinationId && locations.some((location) => location.id === sourceId) && locations.some((location) => location.id === destinationId);
-  const formValid = locationValid && !values.error && !timingError && effectiveAt !== undefined && (values.count === 0 || ingredients.isSuccess);
+  const formValid = locationValid && !values.error && !unavailable && !timingError && effectiveAt !== undefined && (values.count === 0 || ingredients.isSuccess);
   const historical = timing.mode === 'past';
   const totals = rows.filter((row) => row.ingredientId).map((row) => {
     const item = byId.get(row.ingredientId);
@@ -199,6 +209,7 @@ function TransferDocumentFields({ incoming, source, initialIngredient, locations
         onPress={() => setRows((current) => [...current, emptyRow()])}><Text style={styles.link} translate>+ Добавить</Text></FastPressable> : null}
       </Card>
       {editable && values.error ? <Text style={styles.error}>{values.error}</Text> : null}
+      {editable && unavailable ? <Text style={styles.error}>Позиция «{unavailable.name}» больше недоступна для перемещения.</Text> : null}
       {editable ? <Text style={styles.label} translate>«Сохранить» проведёт документ и изменит остатки. Черновик сохраняет данные без изменения остатков.</Text> : null}
       {showCost && !editable ? <Text style={styles.title}>Итого: {document?.varianceValue == null ? 'Стоимость неизвестна' : money(Math.abs(document.varianceValue))}</Text> : null}
       {document?.postedAt ? <Text style={styles.label}>Проведён: {warehouseTimeDisplay(document.postedAt)}{document.postedByName ? ` · ${document.postedByName}` : ''}</Text> : null}

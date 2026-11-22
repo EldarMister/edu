@@ -20,8 +20,11 @@ import { useNotifications } from '@/store/notifications';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { isAllowedDate, parseIsoDate } from '@/utils/calendarDate';
 import { allocatedProcessingShare, changeProcessingUnit, processingDraftRow, processingRowsInput, type ProcessingDraftRow } from '@/utils/warehouseProcessingForm';
-import { warehouseDateTimeIso, warehouseLocalTime, warehouseReportRange, warehouseTimeDisplay, type WarehousePeriod } from '@/utils/warehouseTiming';
-import { WarehouseDateTimeField } from './WarehouseTimingField';
+import { warehouseDateTimeIso, warehouseLocalTime, warehouseReportRange, warehouseTimeDisplay,
+  warehouseTimingError, warehouseTimingFor, warehouseTimingValue, type WarehousePeriod } from '@/utils/warehouseTiming';
+import { shareCsv } from './print';
+import { CatalogueIngredientEditor } from './MenuStockCatalogue';
+import { WarehouseTimingField } from './WarehouseTimingField';
 import { WarehouseWorkspace } from './WarehouseWorkspace';
 
 const periods: SelectOption<WarehousePeriod>[] = [
@@ -39,6 +42,7 @@ const formatPrice = (value: number | null | undefined) => value == null ? '—'
   : value.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' с';
 const rowSummary = (rows: ProcessingLine[]) =>
   rows.map((line) => line.name + ' · ' + qty(line.quantity, line.unitLabel)).join(', ') || '—';
+const registerColumns = ['Дата', 'Исходные продукты', 'Полученные продукты', 'Комментарий'];
 const pageSize = 25;
 
 type ProcessingScope = { warehouseId?: string; locations: WarehouseLocation[] };
@@ -52,7 +56,7 @@ export function WarehouseProcessingTab({ warehouseId, locations, warehouseFilter
   const [period, setPeriod] = useState<WarehousePeriod>('month');
   const [custom, setCustom] = useState({ from: '', to: '' });
   const [page, setPage] = useState(1);
-  const [editor, setEditor] = useState<{ id?: string } | null>(null);
+  const [editor, setEditor] = useState<{ id?: string; copy?: ProcessingDocument } | null>(null);
   const today = warehouseLocalTime().date;
   const validRange = period !== 'custom' || (isAllowedDate(custom.from, undefined, custom.to || today) && isAllowedDate(custom.to, custom.from, today));
   const range = warehouseReportRange(period, new Date(), custom);
@@ -63,6 +67,12 @@ export function WarehouseProcessingTab({ warehouseId, locations, warehouseFilter
   const documents = query.data ?? [];
   const pageCount = Math.max(1, Math.ceil(documents.length / pageSize));
   const currentPage = Math.min(page, pageCount);
+
+  function exportDocuments() {
+    void shareCsv('Переработки', [registerColumns, ...documents.map((document) => [
+      warehouseTimeDisplay(document.date), rowSummary(document.inputs), rowSummary(document.outputs), document.note ?? '',
+    ])]).catch((error) => Alert.alert('Экспорт переработок', apiError(error)));
+  }
 
   function choosePeriod(value: WarehousePeriod) {
     if (value === 'custom' && !custom.from && !custom.to) {
@@ -81,6 +91,7 @@ export function WarehouseProcessingTab({ warehouseId, locations, warehouseFilter
           onChangeText={(value) => { setSearch(value); setPage(1); }} />
         <Select title="Период" value={period} options={periods} onChange={choosePeriod} style={styles.select} />
         {warehouseFilter}
+        {canAction('exportReports') && <Button title="Экспорт CSV" size="md" variant="secondary" disabled={!documents.length} onPress={exportDocuments} />}
         {canAction('warehouseProduce') && <Button title="Добавить" size="md" disabled={!locations.length} onPress={() => setEditor({})} />}
       </View>
       {period === 'custom' && <View style={styles.toolbar}>
@@ -103,6 +114,7 @@ export function WarehouseProcessingTab({ warehouseId, locations, warehouseFilter
               <Text style={[styles.dateColumn, styles.muted]}>Дата</Text>
               <Text style={[styles.productsColumn, styles.muted]}>Исходные продукты</Text>
               <Text style={[styles.productsColumn, styles.muted]}>Полученные продукты</Text>
+              <Text style={[styles.productsColumn, styles.muted]}>Комментарий</Text>
             </View>
             {documents.slice((currentPage - 1) * pageSize, currentPage * pageSize).map((document) => (
               <View key={document.id} style={styles.registerRow}>
@@ -114,8 +126,12 @@ export function WarehouseProcessingTab({ warehouseId, locations, warehouseFilter
                 </View>
                 <Text style={styles.productsColumn}>{rowSummary(document.inputs)}</Text>
                 <Text style={styles.productsColumn}>{rowSummary(document.outputs)}</Text>
-                <InlineProcessingAction label={document.status === 'draft' ? 'Ред.' : 'Открыть'}
-                  onPress={() => setEditor({ id: document.id })} />
+                <Text style={styles.productsColumn}>{document.note || '—'}</Text>
+                <View>
+                  <InlineProcessingAction label={document.status === 'draft' ? 'Ред.' : 'Открыть'}
+                    onPress={() => setEditor({ id: document.id })} />
+                  {canAction('warehouseProduce') && <InlineProcessingAction label="Копировать" onPress={() => setEditor({ copy: document })} />}
+                </View>
               </View>
             ))}
           </View>
@@ -130,49 +146,63 @@ export function WarehouseProcessingTab({ warehouseId, locations, warehouseFilter
       <Text>{currentPage} / {pageCount}</Text>
       <Button title="Далее" size="md" variant="secondary" disabled={currentPage === pageCount} onPress={() => setPage(currentPage + 1)} />
     </View>}
-    {editor && <ProcessingEditor key={editor.id ?? 'new'} {...{ warehouseId, locations }} id={editor.id} onClose={() => setEditor(null)} />}
+    {editor && <ProcessingEditor key={editor.id ?? editor.copy?.id ?? 'new'} {...{ warehouseId, locations }}
+      id={editor.id} copy={editor.copy} onClose={() => setEditor(null)} />}
   </View>;
 }
 
-export function ProcessingEditor({ id, warehouseId, locations, onClose }: ProcessingScope & { id?: string; onClose: () => void }) {
+export function ProcessingEditor({ id, copy, warehouseId, locations, onClose }: ProcessingScope & {
+  id?: string; copy?: ProcessingDocument; onClose: () => void;
+}) {
   const query = useProcessingDocument(id ?? null);
   if (id && !query.data) return <WarehouseWorkspace title="Переработка" onClose={onClose} pending={query.isPending}>
     {query.isError ? <View style={styles.content}><QueryError error={query.error} retry={() => void query.refetch()} /></View> : null}
   </WarehouseWorkspace>;
-  return <ProcessingForm initialDocument={query.data} warehouseId={warehouseId} locations={locations} onClose={onClose} />;
+  return <ProcessingForm initialDocument={query.data} copy={copy} warehouseId={warehouseId} locations={locations} onClose={onClose} />;
 }
 
 const emptyRow = (warehouseId: string, share = ''): ProcessingDraftRow => ({
   key: randomUUID(), ingredientId: '', warehouseId, name: '', quantity: '', unit: 'kg', share,
 });
-const workingValues = (date: string | undefined, note: string, inputs: ProcessingDraftRow[], outputs: ProcessingDraftRow[]) =>
-  JSON.stringify([date, note, inputs.map(rowValues), outputs.map(rowValues)]);
+const workingValues = (effectiveAt: string | null | undefined, note: string, inputs: ProcessingDraftRow[], outputs: ProcessingDraftRow[]) =>
+  JSON.stringify([effectiveAt, note, inputs.map(rowValues), outputs.map(rowValues)]);
 const rowValues = ({ ingredientId, quantity, unit, warehouseId, share }: ProcessingDraftRow) =>
   [ingredientId, quantity, unit, warehouseId, share];
 
-function ProcessingForm({ initialDocument, warehouseId, locations, onClose }: ProcessingScope & {
-  initialDocument?: ProcessingDocument; onClose: () => void;
+function ProcessingForm({ initialDocument, copy, warehouseId, locations, onClose }: ProcessingScope & {
+  initialDocument?: ProcessingDocument; copy?: ProcessingDocument; onClose: () => void;
 }) {
   const { canAction } = usePermissions();
   const notify = useNotifications((state) => state.push);
   const defaultId = warehouseId ?? locations.find((location) => location.isDefault)?.id ?? locations[0]?.id ?? '';
   const [document, setDocument] = useState(initialDocument);
-  const [date, setDate] = useState(() => warehouseLocalTime(document?.date));
-  const [note, setNote] = useState(document?.note ?? '');
-  const [inputs, setInputs] = useState(() => document?.inputs.length ? document.inputs.map(processingDraftRow) : [emptyRow(defaultId)]);
-  const [outputs, setOutputs] = useState(() => document?.outputs.length ? document.outputs.map(processingDraftRow) : [emptyRow(defaultId, '100')]);
-  const [savedValues, setSavedValues] = useState(() => workingValues(warehouseDateTimeIso(date, document?.date), note, inputs, outputs));
+  const source = initialDocument ?? copy;
+  const initialRows = (output: boolean) => {
+    const lines = output ? source?.outputs : source?.inputs;
+    if (!lines?.length) return [emptyRow(defaultId, output ? '100' : '')];
+    return lines.map((line) => {
+      const row = processingDraftRow(line);
+      return copy ? { ...row, savedLine: undefined } : row;
+    });
+  };
+  const [timing, setTiming] = useState(() => warehouseTimingFor(initialDocument?.effectiveAt));
+  const [note, setNote] = useState(source?.note ?? '');
+  const [inputs, setInputs] = useState(() => initialRows(false));
+  const [outputs, setOutputs] = useState(() => initialRows(true));
+  const [savedValues, setSavedValues] = useState(() => workingValues(initialDocument?.effectiveAt ?? null, note, inputs, outputs));
   const [requestKey] = useState(() => randomUUID());
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const [reason, setReason] = useState('');
+  const [ingredientTarget, setIngredientTarget] = useState<{ key: string; output: boolean }>();
   const busy = useRef(false);
   const { save, transition } = useProcessingMutations();
   const editable = (!document || document.status === 'draft') && canAction('warehouseProduce');
   const catalogue = useIngredients('', undefined, editable);
   const eligible = useMemo(() => (catalogue.data ?? []).filter((item) => item.isActive && item.preparationMode !== 'virtual'), [catalogue.data]);
-  const timestamp = warehouseDateTimeIso(date, document?.date);
-  const values = workingValues(timestamp, note, inputs, outputs);
+  const effectiveAt = warehouseTimingValue(timing, document?.effectiveAt);
+  const timingError = warehouseTimingError(timing);
+  const values = workingValues(effectiveAt, note, inputs, outputs);
   const dirty = editable && values !== savedValues;
   const stale = !!document && !!initialDocument && document.revision < initialDocument.revision;
   const share = allocatedProcessingShare(outputs);
@@ -182,11 +212,11 @@ function ProcessingForm({ initialDocument, warehouseId, locations, onClose }: Pr
     const nextInputs = saved.inputs.length ? saved.inputs.map(processingDraftRow) : [emptyRow(defaultId)];
     const nextOutputs = saved.outputs.length ? saved.outputs.map(processingDraftRow) : [emptyRow(defaultId, '100')];
     setDocument(saved);
-    setDate(warehouseLocalTime(saved.date));
+    setTiming(warehouseTimingFor(saved.effectiveAt));
     setNote(saved.note ?? '');
     setInputs(nextInputs);
     setOutputs(nextOutputs);
-    setSavedValues(workingValues(saved.date, saved.note ?? '', nextInputs, nextOutputs));
+    setSavedValues(workingValues(saved.effectiveAt ?? null, saved.note ?? '', nextInputs, nextOutputs));
   }
 
   function close() {
@@ -200,15 +230,14 @@ function ProcessingForm({ initialDocument, warehouseId, locations, onClose }: Pr
 
   async function saveDocument(complete: boolean) {
     if (busy.current || !editable || stale) return;
-    if (!timestamp) { setError('Укажите дату и время переработки.'); return; }
+    if (effectiveAt === undefined || timingError) { setError(timingError || 'Укажите дату и время переработки.'); return; }
     const input = processingRowsInput(inputs, false);
     const output = processingRowsInput(outputs, true);
     const validation = input.error || output.error || (complete && (!input.lines.length || !output.lines.length)
       ? 'Добавьте исходный и полученный продукт.'
       : complete && share !== 100 ? 'Распределите 100% себестоимости между полученными продуктами.' : '');
     if (validation) { setError(validation); return; }
-    const payload: ProcessingValues = { date: timestamp, note: note.trim(), inputs: input.lines, outputs: output.lines };
-    let draftSaved = false;
+    const payload: ProcessingValues = { effectiveAt, note: note.trim(), inputs: input.lines, outputs: output.lines };
     busy.current = true;
     setPending(true);
     setError('');
@@ -217,9 +246,7 @@ function ProcessingForm({ initialDocument, warehouseId, locations, onClose }: Pr
       if (!saved) {
         saved = await save.mutateAsync({ ...payload, complete, requestKey });
       } else if (dirty) {
-        saved = await save.mutateAsync({ ...payload, id: saved.id, revision: saved.revision });
-        adopt(saved);
-        draftSaved = true;
+        saved = await save.mutateAsync({ ...payload, id: saved.id, revision: saved.revision, complete });
       }
       if (complete && saved.status === 'draft') {
         saved = await transition.mutateAsync({ id: saved.id, revision: saved.revision, action: 'post' });
@@ -228,7 +255,7 @@ function ProcessingForm({ initialDocument, warehouseId, locations, onClose }: Pr
       notify({ message: complete ? 'Переработка проведена' : 'Черновик переработки сохранён', at: new Date().toISOString() });
       onClose();
     } catch (failure) {
-      setError((draftSaved ? 'Изменения черновика сохранены. ' : '') + apiError(failure));
+      setError(apiError(failure));
     } finally {
       busy.current = false;
       setPending(false);
@@ -236,7 +263,7 @@ function ProcessingForm({ initialDocument, warehouseId, locations, onClose }: Pr
   }
 
   async function reverse() {
-    if (busy.current || document?.status !== 'posted' || !reason.trim() || stale || !canAction('warehouseApprove')) return;
+    if (busy.current || document?.status !== 'posted' || document.reversalBlockedReason || !reason.trim() || stale || !canAction('warehouseApprove')) return;
     busy.current = true;
     setPending(true);
     setError('');
@@ -256,8 +283,8 @@ function ProcessingForm({ initialDocument, warehouseId, locations, onClose }: Pr
   const showCost = canAction('warehouseCosts');
   const footer = <View style={styles.footer}>
     {editable ? <View style={styles.actions}>
-      <Button title="Сохранить" size="md" disabled={pending || stale || !timestamp || !catalogue.isSuccess} onPress={() => void saveDocument(true)} />
-      <Button title="Сохранить черновик" size="md" variant="secondary" disabled={pending || stale || !timestamp || !catalogue.isSuccess}
+      <Button title="Сохранить" size="md" disabled={pending || stale || !!timingError || !catalogue.isSuccess} onPress={() => void saveDocument(true)} />
+      <Button title="Сохранить черновик" size="md" variant="secondary" disabled={pending || stale || !!timingError || !catalogue.isSuccess}
         onPress={() => void saveDocument(false)} />
     </View> : document && <Text style={styles.muted} translate>{statuses[document.status]}</Text>}
     {showCost && <Text style={styles.heading}>
@@ -269,7 +296,7 @@ function ProcessingForm({ initialDocument, warehouseId, locations, onClose }: Pr
     <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Card style={styles.metadata}>
         {editable ? <>
-          <WarehouseDateTimeField label="Дата и время" value={date} onChange={setDate} disabled={pending || stale} />
+          <WarehouseTimingField label="Дата и время" value={timing} onChange={setTiming} disabled={pending || stale} />
           <Field label="Комментарий" value={note} onChangeText={setNote} maxLength={1000} multiline
             style={styles.note} editable={!pending && !stale} />
         </> : <>
@@ -293,13 +320,16 @@ function ProcessingForm({ initialDocument, warehouseId, locations, onClose }: Pr
       {editable && catalogue.isPending && <ActivityIndicator color={colors.primary} />}
       {editable && catalogue.isError && <QueryError error={catalogue.error} retry={() => void catalogue.refetch()} />}
       <LineGroup title="Исходные продукты" rows={inputs} onChange={setInputs} {...{ defaultId, eligible, locationOptions, editable, showCost }}
+        onCreateIngredient={canAction('warehouseReceive') ? (key) => setIngredientTarget({ key, output: false }) : undefined}
         disabled={pending || stale || (editable && !catalogue.isSuccess)} />
       <LineGroup title="Полученные продукты" output rows={outputs} onChange={setOutputs} {...{ defaultId, eligible, locationOptions, editable, showCost }}
+        onCreateIngredient={canAction('warehouseReceive') ? (key) => setIngredientTarget({ key, output: true }) : undefined}
         disabled={pending || stale || (editable && !catalogue.isSuccess)} />
       {editable && <Text style={styles.muted}>Распределено {share.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}% себестоимости. «Сохранить» проведёт переработку и изменит остатки. Черновик сохранит данные без изменения остатков.</Text>}
       {document?.status === 'posted' && canAction('warehouseApprove') && <Card style={styles.stack}>
+        {document.reversalBlockedReason && <Text style={styles.error}>{document.reversalBlockedReason}</Text>}
         <Field label="Причина отмены" value={reason} onChangeText={setReason} editable={!pending && !stale} maxLength={2000} multiline />
-        <Button title="Отменить проведение" variant="danger" disabled={pending || stale || !reason.trim()} onPress={() => {
+        <Button title="Отменить проведение" variant="danger" disabled={pending || stale || !!document.reversalBlockedReason || !reason.trim()} onPress={() => {
           Alert.alert('Отменить проведение переработки?', 'Полученные продукты будут списаны, исходные продукты вернутся на склад.', [
             { text: 'Назад', style: 'cancel' },
             { text: 'Отменить проведение', style: 'destructive', onPress: () => void reverse() },
@@ -308,13 +338,18 @@ function ProcessingForm({ initialDocument, warehouseId, locations, onClose }: Pr
       </Card>}
       {error ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
     </ScrollView>
+    {ingredientTarget && <CatalogueIngredientEditor item={null} onClose={() => setIngredientTarget(undefined)}
+      onSaved={(ingredient) => (ingredientTarget.output ? setOutputs : setInputs)((rows) => rows.map((row) =>
+        row.key === ingredientTarget.key ? { ...row, ingredientId: ingredient.id, name: ingredient.name,
+          unit: ingredient.displayUnit, savedLine: undefined } : row))} />}
   </WarehouseWorkspace>;
 }
 
-function LineGroup({ title, rows, onChange, defaultId, eligible, locationOptions, editable, disabled, showCost, output = false }: {
+function LineGroup({ title, rows, onChange, defaultId, eligible, locationOptions, editable, disabled, showCost, output = false, onCreateIngredient }: {
   title: string; rows: ProcessingDraftRow[]; onChange: (rows: ProcessingDraftRow[]) => void;
   defaultId: string; eligible: Ingredient[]; locationOptions: SelectOption<string>[];
   editable: boolean; disabled: boolean; showCost: boolean; output?: boolean;
+  onCreateIngredient?: (key: string) => void;
 }) {
   const productLabel = output ? 'Полученный продукт' : 'Исходный продукт';
   const productOptions = eligible.map((item) => ({
@@ -338,6 +373,8 @@ function LineGroup({ title, rows, onChange, defaultId, eligible, locationOptions
                   const item = eligible.find((entry) => entry.id === id);
                   if (item && id !== row.ingredientId) patch({ ingredientId: id, name: item.name, unit: item.displayUnit });
                 }} />
+              {onCreateIngredient && !row.ingredientId && <InlineProcessingAction label="Создать ингредиент" disabled={disabled}
+                onPress={() => onCreateIngredient(row.key)} />}
             </View>
             <FastPressable style={styles.remove} accessibilityRole="button" accessibilityLabel="Удалить строку" disabled={disabled}
               onPress={() => onChange(rows.length > 1 ? rows.filter((line) => line.key !== row.key) : [emptyRow(defaultId, output ? '100' : '')])}>

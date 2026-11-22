@@ -57,16 +57,16 @@ function editorHarness() {
     return { id, ingredientId, name, quantity: 1, warehouseId: 'main', unit: 'kg', costSharePercent };
   }
   const initialDocument = {
-    id: 'processing', revision: 4, status: 'draft', date: '2026-11-14T17:00:00.765Z',
+    id: 'processing', revision: 4, status: 'draft', date: '2023-11-14T17:00:00.765Z', effectiveAt: '2023-11-14T17:00:00.765Z',
     note: null, inputs: [line('in', 'flour', 'Мука', 100)], outputs: [line('out', 'dough', 'Тесто', 100)],
   };
   const save = { mutateAsync: async (payload) => {
     calls.push(['save', payload]);
-    return { ...initialDocument, revision: 5, note: payload.note };
+    if (failPost) { failPost = false; throw new Error('Проведение не выполнено'); }
+    return { ...initialDocument, revision: 5, status: payload.complete ? 'posted' : 'draft', note: payload.note };
   } };
   const transition = { mutateAsync: async (payload) => {
     calls.push(['transition', payload]);
-    if (failPost) { failPost = false; throw new Error('Проведение не выполнено'); }
     return { ...initialDocument, revision: 6, status: 'posted' };
   } };
   const { ProcessingForm } = load('screens/admin/WarehouseProcessingTab.tsx', {
@@ -89,7 +89,9 @@ function editorHarness() {
     '@/store/notifications': { useNotifications: () => () => {} },
     '@/theme': { colors: {}, fontSize: {}, spacing: {}, radius: {} },
     './WarehouseWorkspace': { WarehouseWorkspace: 'Workspace' },
-    './WarehouseTimingField': { WarehouseDateTimeField: 'Timing' },
+    './WarehouseTimingField': { WarehouseTimingField: 'Timing' },
+    './MenuStockCatalogue': { CatalogueIngredientEditor: 'IngredientEditor' },
+    './print': { shareCsv: async () => {} },
   });
   function render() {
     cursor = 0;
@@ -109,16 +111,18 @@ function editorHarness() {
   return { render, find, calls };
 }
 
-test('posting a changed processing draft uses its new revision and retries only posting after failure', async () => {
+test('posting a changed processing draft keeps its date and retries the same atomic update', async () => {
   const editor = editorHarness();
   editor.find(editor.render(), 'Field', 'label', 'Комментарий').props.onChangeText('Проверка');
   editor.find(editor.render(), 'Button', 'title', 'Сохранить').props.onPress();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(editor.calls[0][1].revision, 4);
-  assert.equal(editor.calls[0][1].date, '2026-11-14T17:00:00.765Z');
-  assert.deepEqual(editor.calls[1], ['transition', { id: 'processing', revision: 5, action: 'post' }]);
-  assert.ok(editor.find(editor.render(), 'Text', 'accessibilityRole', 'alert').props.children[0].startsWith('Изменения черновика сохранены.'));
+  assert.deepEqual(editor.calls.map(([action]) => action), ['save']);
+  const saved = editor.calls[0][1];
+  assert.equal(saved.revision, 4);
+  assert.equal(saved.complete, true);
+  assert.equal(saved.effectiveAt, '2023-11-14T17:00:00.765Z');
+  assert.equal(editor.find(editor.render(), 'Text', 'accessibilityRole', 'alert').props.children[0], 'Проведение не выполнено');
   editor.find(editor.render(), 'Button', 'title', 'Сохранить').props.onPress();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(editor.calls.slice(2), [['transition', { id: 'processing', revision: 5, action: 'post' }], ['close']]);
+  assert.deepEqual(editor.calls.slice(1), [['save', saved], ['close']]);
 });

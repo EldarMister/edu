@@ -531,6 +531,8 @@ export interface IngredientInput {
   unit: string;
   stock?: number;
   avgCost?: number;
+  initialSupply?: { quantity: number; unitPrice: number; warehouseId: string; requestKey: string };
+  processingLosses?: Partial<Record<PreparationProcessingMethod, number>>;
   lowStockThreshold?: number;
   isActive?: boolean;
 }

@@ -52,8 +52,9 @@ export const initialMenuFilters = {
 };
 export type MenuFilters = typeof initialMenuFilters;
 
-export function goodsWorkbookUrl(columns: MenuColumn[], search: string, filters: MenuFilters, sort: 'asc' | 'desc') {
+export function goodsWorkbookUrl(columns: MenuColumn[], search: string, filters: MenuFilters, sort: 'asc' | 'desc', taxSort?: 'asc' | 'desc') {
   const params = new URLSearchParams({ columns: ['name', ...columns].join(','), sort });
+  if (taxSort) params.set('taxSort', taxSort);
   for (const [key, value] of Object.entries({ search, name: filters.name, weighted: filters.weighted, availability: filters.availability, tax: filters.tax })) {
     if (value.trim()) params.set(key, value.trim());
   }

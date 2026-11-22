@@ -25,6 +25,7 @@ export interface ProcessingDocument {
   status: 'draft' | 'posted' | 'reversed';
   revision: number;
   date: string;
+  effectiveAt?: string | null;
   note: string | null;
   totalCost: number | null;
   inputs: ProcessingLine[];
@@ -36,10 +37,11 @@ export interface ProcessingDocument {
   reversedAt: string | null;
   reversedByName: string | null;
   reverseReason: string | null;
+  reversalBlockedReason?: string;
 }
 
 export interface ProcessingValues {
-  date: string;
+  effectiveAt?: string | null;
   note: string;
   inputs: ProcessingLineInput[];
   outputs: ProcessingLineInput[];
@@ -47,7 +49,7 @@ export interface ProcessingValues {
 
 type ListParams = { from?: string; to?: string; warehouseId?: string; search?: string };
 type SaveInput = ProcessingValues & (
-  { id: string; revision: number; complete?: never; requestKey?: never } |
+  { id: string; revision: number; complete?: boolean; requestKey?: never } |
   { id?: undefined; revision?: never; complete: boolean; requestKey: string }
 );
 type TransitionInput = { id: string; revision: number } & (

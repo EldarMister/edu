@@ -86,6 +86,7 @@ function MenuCategoriesPage() {
 function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
   const [filters, setFilters] = useState(initialMenuFilters);
   const [sort, setSort] = useState<'asc' | 'desc'>('asc');
+  const [taxSort, setTaxSort] = useState<'asc' | 'desc'>();
   const [columnsOpen, setColumnsOpen] = useState(false);
   const particles = useDeletionParticles();
   const updateFilters = (patch: Partial<MenuFilters>) => setFilters((current) => ({ ...current, ...patch }));
@@ -117,6 +118,7 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
   const dishStation = (d: AdminDish) => goodsById.get(d.id)?.goodsStation ?? d.prepStation ?? stationByCat.get(d.categoryId) ?? 'none';
   const stationOptions = prepStationOptions(stations);
   const taxNames = new Map(taxes.map((tax) => [tax.id, menuTaxLabel(tax)]));
+  const taxName = (dish: AdminDish) => taxNames.get(effectiveMenuTaxId(dish) ?? '');
   const units = [...new Set((goodsQ.data ?? []).flatMap((good) => good.goodsUnits))].sort((left, right) => left.localeCompare(right, 'ru'));
   const nameFilter = filters.name.trim().toLocaleLowerCase('ru');
   const searchTerm = search.trim().toLocaleLowerCase('ru');
@@ -130,6 +132,7 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
       && (!filters.units.length || goodsById.get(dish.id)?.goodsUnits.some((unit) => filters.units.includes(unit)));
   });
   if (sort === 'desc') rows.reverse();
+  if (taxSort) rows.sort((a, b) => (taxName(a) ?? '').localeCompare(taxName(b) ?? '', 'ru') * (taxSort === 'desc' ? -1 : 1));
 
   const onDelete = (d: AdminDish) => {
     const play = particles.capture(d.id);
@@ -182,7 +185,7 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
         <View style={styles.filterRow}>
           {isGoods ? <Button title="Столбцы" variant="secondary" size="md" onPress={() => setColumnsOpen(true)} /> : null}
           {isGoods && canAction('exportReports') ? <WarehouseWorkbook filename="Товары.xlsx" disabled={!goodsQ.isSuccess}
-            url={goodsWorkbookUrl(savedColumns.columns, search, filters, sort)} /> : null}
+            url={goodsWorkbookUrl(savedColumns.columns, search, filters, sort, taxSort)} /> : null}
           {editable && !isGoods ? <Button title="Добавить сет" size="md" variant="secondary" onPress={() => setSetModal('new')} /> : null}
           {editable ? <Button title={isGoods ? 'Добавить товар' : 'Добавить техкарту'} size="md" onPress={() => setDishModal('new')} /> : null}
         </View>
@@ -198,14 +201,19 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
                 <View style={styles.tableHead}>{tableColumns.map((key) => {
                   const column = menuColumns[key];
                   const style = [styles.tableHeading, { width: column.width, textAlign: 'right' in column && column.right ? 'right' as const : 'left' as const }];
-                  return key === 'name' ? <FastPressable key={key} accessibilityRole="button" accessibilityLabel="Сортировать по названию"
-                    onPress={() => setSort((value) => value === 'asc' ? 'desc' : 'asc')}>
-                    <Text style={style} translate>Название {sort === 'asc' ? '↑' : '↓'}</Text>
-                  </FastPressable> : <Text key={key} style={style} translate>{column.label}</Text>;
+                  if (key === 'name') return <FastPressable key={key} accessibilityRole="button" accessibilityLabel="Сортировать по названию"
+                    onPress={() => { setSort(taxSort || sort === 'desc' ? 'asc' : 'desc'); setTaxSort(undefined); }}>
+                    <Text style={style} translate>Название{taxSort ? '' : sort === 'asc' ? ' ↑' : ' ↓'}</Text>
+                  </FastPressable>;
+                  if (key === 'tax') return <FastPressable key={key} accessibilityRole="button" accessibilityLabel="Сортировать по налогу"
+                    onPress={() => setTaxSort((value) => value === 'asc' ? 'desc' : 'asc')}>
+                    <Text style={style} translate>Налог{taxSort === 'asc' ? ' ↑' : taxSort === 'desc' ? ' ↓' : ''}</Text>
+                  </FastPressable>;
+                  return <Text key={key} style={style} translate>{column.label}</Text>;
                 })}</View>
                 {rows.map(dish => {
                   const station = dishStation(dish);
-                  return <DishRow key={dish.id} rowRef={(row) => particles.register(dish.id, row)} dish={dish} good={goodsById.get(dish.id)} columns={visibleColumns} taxName={taxNames.get(effectiveMenuTaxId(dish) ?? '')} station={station} stationName={stationNames.get(station)} editable={editable} onEdit={() => openEdit(dish)} onDelete={() => onDelete(dish)} />;
+                  return <DishRow key={dish.id} rowRef={(row) => particles.register(dish.id, row)} dish={dish} good={goodsById.get(dish.id)} columns={visibleColumns} taxName={taxName(dish)} station={station} stationName={stationNames.get(station)} editable={editable} onEdit={() => openEdit(dish)} onDelete={() => onDelete(dish)} />;
                 })}
               </View>
             </SheetScrollView>
@@ -1071,10 +1079,8 @@ function CategoryEditor({ category, categoryCount, position, onClose }: { catego
     {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
   </View>;
   const footer = <Button title="Сохранить" disabled={!name.trim()} loading={busy} onPress={() => void save()} />;
-  return category ? <BottomSheet visible title="Редактирование категории" onClose={onClose} footer={footer}>{fields}</BottomSheet>
-    : <WarehouseWorkspace title="Новая категория" onClose={() => { if (!busy) onClose(); }} footer={footer}>
-        <SheetScrollView contentContainerStyle={styles.listContent} keyboardShouldPersistTaps="handled">{fields}</SheetScrollView>
-      </WarehouseWorkspace>;
+  return <BottomSheet visible title={category ? 'Редактирование категории' : 'Добавление категории'}
+    dismissible={!busy} onClose={onClose} footer={footer}>{fields}</BottomSheet>;
 }
 
 function DeleteCategorySheet({ category, categories, onRemoved, onDone }: {

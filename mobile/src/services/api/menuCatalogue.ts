@@ -12,7 +12,8 @@ export function useCatalogueIngredientMutations() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'warehouse'] });
   const save = useMutation({
     mutationFn: async ({ id, ...body }: IngredientInput & { id?: string; category: string | null }) =>
-      (await (id ? api.patch(`/admin/warehouse/ingredients/${encodeURIComponent(id)}`, body) : api.post('/admin/warehouse/ingredients', { ...body, kind: 'raw' }))).data,
+      (await (id ? api.patch<CatalogueIngredient>(`/admin/warehouse/ingredients/${encodeURIComponent(id)}`, body)
+        : api.post<CatalogueIngredient>('/admin/warehouse/ingredients', { ...body, kind: 'raw' }))).data,
     onSuccess: invalidate,
   });
   const renameCategory = useMutation({

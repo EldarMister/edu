@@ -90,7 +90,7 @@ export function AdminNavigator() {
   const isAdmin = effectiveRole === 'ADMIN' || isOwner;
   const canHandlePrintRequests = canSection('checks') && canOwnerOperation('printRequests');
   const canManageRefunds = useCanManageOrderRefunds();
-  const canManageCancellations = isAdmin && canEditSection('orders');
+  const canManageCancellations = isAdmin && canEditSection('orders') && canOwnerOperation('cancelItems');
   const requestEntries = React.useMemo(() => requestsNavigation.filter(({ key }) =>
     key === 'refunds' ? canManageRefunds : canManageCancellations), [canManageRefunds, canManageCancellations]);
 

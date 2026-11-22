@@ -12,6 +12,7 @@ export interface FinanceAccount {
   type: AccountType;
   isDefault: boolean;
   isCollection?: boolean;
+  hasCashShifts?: boolean;
   openingBalance: number | null;
   createdAt: string;
   balance: number | null;
@@ -186,6 +187,8 @@ export function useCashHandoverWrites() {
 }
 
 type AccountInput = { name: string; type: AccountType; openingBalance?: number; isDefault?: boolean };
+type SaveAccountInput = { id?: undefined; values: AccountInput }
+  | { id: string; values: Partial<AccountInput> };
 interface TrashedAccount extends Pick<FinanceAccount, 'id' | 'name' | 'type'> {
   archivedAt: string;
   balance: number;
@@ -245,12 +248,10 @@ export function useFinanceWrites() {
   ]);
   return {
     saveAccount: useMutation({
-      mutationFn: async ({ id, values }: { id?: string; values: AccountInput }) => {
-        if (!id) return (await api.post<FinanceAccount>(financeEndpoint + '/accounts', values)).data;
-        return (await api.patch<FinanceAccount>(financeEndpoint + '/accounts/' + id, {
-          name: values.name, isDefault: values.isDefault, openingBalance: values.openingBalance,
-        })).data;
-      }, onSuccess: () => Promise.all([onSuccess(), cache.invalidateQueries({ queryKey: cashShiftKey })]),
+      mutationFn: async ({ id, values }: SaveAccountInput) => (id
+        ? await api.patch<FinanceAccount>(financeEndpoint + '/accounts/' + id, values)
+        : await api.post<FinanceAccount>(financeEndpoint + '/accounts', values)).data,
+      onSuccess: () => Promise.all([onSuccess(), cache.invalidateQueries({ queryKey: cashShiftKey })]),
     }),
     archiveAccount: useMutation({
       mutationFn: (id: string) => api.delete(financeEndpoint + '/accounts/' + id),

@@ -80,7 +80,7 @@ export function TaxesScreen() {
 function TaxEditor({ tax, onClose }: { tax?: MenuTax; onClose: () => void }) {
   const [name, setName] = React.useState(tax?.name ?? '');
   const [rate, setRate] = React.useState(tax ? String(tax.rate) : '');
-  const [type, setType] = React.useState<MenuTaxType>(tax?.type ?? 'vat');
+  const [type, setType] = React.useState<MenuTaxType>(tax?.type ?? 'turnover');
   const { save } = useTaxMutations();
   const normalized = rate.trim().replace(',', '.');
   const valid = !!name.trim() && /^\d+(\.\d{1,2})?$/.test(normalized) && Number(normalized) <= 100;

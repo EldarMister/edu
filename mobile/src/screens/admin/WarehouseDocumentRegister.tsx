@@ -5,7 +5,7 @@ import { DateField } from '@/components/DateField';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { Select } from '@/components/Select';
-import { Text, TextInput } from '@/components/typography';
+import { Alert, Text, TextInput } from '@/components/typography';
 import { Button } from '@/components/ui';
 import { apiError } from '@/lib/api';
 import { useStockDocuments, type StockDocument, type StockDocumentReason } from '@/services/api/stockDocuments';
@@ -15,6 +15,7 @@ import { balanceMoney } from '@/utils/warehouseBalance';
 import { documentDisplayStatus, documentOperationDate, STOCK_DOCUMENT_STATUS } from '@/utils/warehouseDocumentForm';
 import { warehouseLocalTime, warehouseReportRange, warehouseTimeDisplay, type WarehousePeriod } from '@/utils/warehouseTiming';
 import { WarehouseMultiSelect } from './WarehouseMultiSelect';
+import { shareCsv } from './print';
 
 
 export const WRITEOFF_REASONS: { value: StockDocumentReason; label: string }[] = [
@@ -56,10 +57,11 @@ export interface DocumentRegisterScope {
 }
 
 export function WarehouseDocumentRegister({
-  kind, warehouseId, locations, warehouseFilter, onResetWarehouse, showCost, canCreate, onCreate, onOpen,
+  kind, warehouseId, locations, warehouseFilter, onResetWarehouse, showCost, canCreate, onCreate, onOpen, onCopy, canExport,
 }: DocumentRegisterScope & {
   kind: 'inventory' | 'transfer' | 'writeoff'; showCost: boolean; canCreate: boolean;
   onCreate?: () => void; onOpen: (id: string) => void;
+  onCopy?: (id: string) => void; canExport?: boolean;
 }) {
   const inventory = kind === 'inventory';
   const transfer = kind === 'transfer';
@@ -70,6 +72,8 @@ export function WarehouseDocumentRegister({
   const [status, setStatus] = useState('');
   const [reason, setReason] = useState('');
   const [categories, setCategories] = useState<string[]>([]);
+  const [transferLocations, setTransferLocations] = useState<string[]>([]);
+  const [employees, setEmployees] = useState<string[]>([]);
   const [period, setPeriod] = useState<WarehousePeriod>(defaultPeriod);
   const [custom, setCustom] = useState({ from: '', to: '' });
   const [ascending, setAscending] = useState(false);
@@ -83,22 +87,28 @@ export function WarehouseDocumentRegister({
     + (document.destinationWarehouseId ? ' → ' + (names.get(document.destinationWarehouseId) ?? 'Склад') : '');
   const options = [...new Set([...categories, ...(query.data ?? []).flatMap((document) => document.categories ?? [])])]
     .sort((a, b) => a.localeCompare(b, 'ru')).map((value) => ({ value, label: value, translate: false }));
+  const employeeOptions = [...new Set([...employees, ...(query.data ?? []).map(actor).filter((name) => name !== '—')])]
+    .sort((a, b) => a.localeCompare(b, 'ru')).map((value) => ({ value, label: value, translate: false }));
   const rows = validDates ? (query.data ?? []).filter((document) => {
     const date = warehouseLocalTime(documentOperationDate(document)).date;
     return (!status || documentDisplayStatus(document) === status) && (!reason || document.reason === reason)
       && (!categories.length || document.categories?.some((category) => categories.includes(category)))
+      && (!employees.length || employees.includes(actor(document)))
+      && (!transferLocations.length || transferLocations.includes(document.warehouseId)
+        || (!!document.destinationWarehouseId && transferLocations.includes(document.destinationWarehouseId)))
       && (!range.from || date >= range.from) && (!range.to || date <= range.to);
   }).sort((a, b) => (Date.parse(documentOperationDate(a)) - Date.parse(documentOperationDate(b))) * (ascending ? 1 : -1)) : [];
   const pages = Math.ceil(rows.length / PAGE_SIZE);
   const currentPage = Math.min(page, Math.max(1, pages));
   const visible = inventory ? rows : rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  const filtered = !!(search || status || reason || categories.length || warehouseId || period !== 'all');
+  const filtered = !!(search || status || reason || categories.length || employees.length || transferLocations.length || warehouseId || period !== 'all');
   const amount = (value: number | null) => value == null ? '—' : (inventory ? sign(value) : '') + balanceMoney(Math.abs(value));
   const total = rows.some((document) => document.varianceValue == null) ? null
     : rows.reduce((sum, document) => sum + (inventory ? document.varianceValue! : Math.abs(document.varianceValue!)), 0);
   const filter = <T,>(setter: (value: T) => void) => (value: T) => { setter(value); setPage(1); };
   const reset = () => {
     setSearch(''); setStatus(''); setReason(''); setCategories([]); setPeriod('all');
+    setEmployees([]); setTransferLocations([]);
     setCustom({ from: '', to: '' }); setPage(1); onResetWarehouse?.();
   };
   const columns = inventory
@@ -115,12 +125,18 @@ export function WarehouseDocumentRegister({
       ...(showCost ? [amount(document.varianceValue)] : []), actor(document), transfer ? warehouseName(document) : reasonLabel(document.reason)];
   const periodControl = <Select title="Период" value={period} options={PERIODS} onChange={filter(setPeriod)} style={styles.filter} />;
   const canAdd = canCreate && !!onCreate;
+  const copyButton = (document: StockDocument) => onCopy && <FastPressable style={[styles.textAction, styles.copyButton]}
+    accessibilityRole="button" onPress={() => onCopy(document.id)}><Text style={styles.link} translate>Копировать</Text></FastPressable>;
 
   return <View style={[styles.surface, { backgroundColor: palette.card, borderColor: palette.border }]}>
-    {(inventory || canCreate) && <View style={[styles.toolbar, styles.actions]}>
+    {(inventory || canCreate || canExport) && <View style={[styles.toolbar, styles.actions]}>
       <View style={styles.wrap}>
         {inventory && query.isSuccess ? <Text style={styles.muted}>Всего: {rows.length}</Text> : null}
         {inventory ? periodControl : null}
+        {canExport && <Button title="Экспорт CSV" variant="secondary" size="md" disabled={!rows.length} onPress={() => {
+          void shareCsv('Перемещения', [columns.slice(0, -1), ...rows.map(cells)])
+            .catch((error) => Alert.alert('Экспорт перемещений', apiError(error)));
+        }} />}
       </View>
       {canCreate ? <Button title="Добавить" size="md" disabled={!canAdd} onPress={() => onCreate?.()} /> : null}
     </View>}
@@ -132,7 +148,11 @@ export function WarehouseDocumentRegister({
       </View>
       <View style={styles.wrap}>
         {!inventory ? periodControl : null}
-        {warehouseFilter}
+        {transfer ? <>
+          <WarehouseMultiSelect label="Склады" value={transferLocations} options={locations.map(({ id, name }) => ({ value: id, label: name, translate: false }))}
+            style={styles.filter} onChange={filter(setTransferLocations)} />
+          <WarehouseMultiSelect label="Сотрудник" value={employees} options={employeeOptions} style={styles.filter} onChange={filter(setEmployees)} />
+        </> : warehouseFilter}
         {kind === 'writeoff' ? <>
           <WarehouseMultiSelect label="Категории" value={categories} options={options} style={styles.filter} onChange={filter(setCategories)} />
           <Select title="Причина списания" value={reason} options={[{ value: '', label: 'Причина' }, ...WRITEOFF_REASONS]} onChange={filter(setReason)} style={styles.filter} />
@@ -164,12 +184,16 @@ export function WarehouseDocumentRegister({
               </FastPressable>
               : <Text key={column} style={[styles.muted, styles.cell, { width: columnWidth(index) }]} translate>{column}</Text>)}
           </View>
-          {visible.map((document) => <FastPressable key={document.id} accessibilityRole="button" style={styles.tableRow} onPress={() => onOpen(document.id)}>
-            {[...cells(document), document.status === 'draft' ? 'Ред.' : 'Открыть'].map((value, index) =>
-              <Text key={index} numberOfLines={2} style={[styles.cell, { width: columnWidth(index) }, (index === 0 || index === columns.length - 1) && styles.link]}>{value}</Text>)}
-          </FastPressable>)}
+          {visible.map((document) => <View key={document.id} style={styles.tableRow}>
+            <FastPressable accessibilityRole="button" style={styles.tableCells} onPress={() => onOpen(document.id)}>
+              {[...cells(document), document.status === 'draft' ? 'Ред.' : 'Открыть'].map((value, index) =>
+                <Text key={index} numberOfLines={2} style={[styles.cell, { width: columnWidth(index) }, (index === 0 || index === columns.length - 1) && styles.link]}>{value}</Text>)}
+            </FastPressable>
+            {copyButton(document)}
+          </View>)}
         </View>
-      </ScrollView> : visible.map((document) => <FastPressable key={document.id} accessibilityRole="button" style={styles.entry} onPress={() => onOpen(document.id)}>
+      </ScrollView> : visible.map((document) => <View key={document.id} style={styles.entry}>
+        <FastPressable accessibilityRole="button" style={styles.entryContent} onPress={() => onOpen(document.id)}>
         <View style={styles.actions}>
           <Text style={[styles.link, styles.entryTitle]}>{inventory ? warehouseName(document) : products(document)}</Text>
           {showCost ? <Text>{amount(document.varianceValue)}</Text> : null}
@@ -180,7 +204,9 @@ export function WarehouseDocumentRegister({
           <Text style={[styles.status, document.status === 'posted' && styles.posted]} translate>{STOCK_DOCUMENT_STATUS[documentDisplayStatus(document)]}</Text>
           <Text style={styles.muted}>{inventory && document.postedAt && !document.reopenedAt ? 'Проведена ' + warehouseTimeDisplay(document.postedAt) : actor(document)}</Text>
         </View>
-      </FastPressable>)}
+        </FastPressable>
+        {copyButton(document)}
+      </View>)}
     {rows.length > 0 && <View style={[styles.footer, styles.wrap]}>
       {!inventory ? <>
         <PageButton label="Первая страница" caption="«" disabled={currentPage <= 1} onPress={() => setPage(1)} />
@@ -209,6 +235,7 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, fontSize: 14, color: colors.textPrimary, paddingVertical: 4 },
   dateField: { flex: 1, minWidth: 120 },
   entry: { gap: 8, paddingHorizontal: 14, paddingVertical: 12, borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth },
+  entryContent: { gap: 8 },
   entryTitle: { flexShrink: 1, fontWeight: '500' },
   link: { color: colors.primary },
   muted: { color: colors.textMuted, fontSize: 12 },
@@ -216,6 +243,8 @@ const styles = StyleSheet.create({
   posted: { color: colors.success },
   error: { color: colors.danger },
   tableRow: { flexDirection: 'row', alignItems: 'center', borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth },
+  tableCells: { flexDirection: 'row', alignItems: 'center' },
+  copyButton: { paddingHorizontal: 10, alignSelf: 'center' },
   cell: { paddingHorizontal: 10, paddingVertical: 11, fontSize: 13 },
   empty: { padding: spacing.lg, textAlign: 'center', color: colors.textMuted },
   textAction: { alignSelf: 'flex-start', minHeight: 30, justifyContent: 'center' },

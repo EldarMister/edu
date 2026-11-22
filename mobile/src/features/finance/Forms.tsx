@@ -30,13 +30,20 @@ export function AccountForm({ account, onClose }: { account?: FinanceAccount; on
   const [type, setType] = useState<AccountType>(account?.type ?? 'cash');
   const [balance, setBalance] = useState(String(account?.openingBalance ?? 0));
   const [isDefault, setDefault] = useState(account?.isDefault ?? false);
+  const boundType = account?.isDefault || account?.isCollection || account?.hasCashShifts;
   const openingBalance = parseMoney(balance);
   return (
     <FinanceForm title={account ? 'Редактирование счёта' : 'Добавление счёта'} onClose={onClose}
       disabled={!name.trim() || openingBalance === null}
-      submit={() => saveAccount.mutateAsync({ id: account?.id, values: { name: name.trim(), type, openingBalance: openingBalance!, isDefault } })}>
+      submit={() => {
+        const values = { name: name.trim(), type, openingBalance: openingBalance!, isDefault };
+        return saveAccount.mutateAsync(account
+          ? { id: account.id, values: { ...values, type: type === account.type ? undefined : type } }
+          : { values });
+      }}>
       <Field label="Название" value={name} onChangeText={setName} maxLength={120} />
-      <SelectField label="Тип счёта" value={type} options={accountTypes} onChange={setType} disabled={!!account} />
+      <SelectField label="Тип счёта" value={type} options={accountTypes} onChange={setType} disabled={boundType} />
+      {boundType && <Text style={financeStyles.muted} translate>Тип зафиксирован привязкой счёта к оплатам, инкассации или кассовым сменам.</Text>}
       <MoneyField label="Начальный баланс" value={balance} onChange={setBalance} />
       {account?.isCollection ? <Text style={financeStyles.muted} translate>Сейф для инкассаций</Text> : (
         <SwitchField label="Счёт по умолчанию" checked={isDefault} onChange={setDefault} disabled={account?.isDefault} />

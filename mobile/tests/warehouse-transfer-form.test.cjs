@@ -65,7 +65,11 @@ function harness(permissions = {}) {
     '@/theme': { colors: {}, spacing: {}, fontSize: {} }, '@/utils/format': { money: String },
     './WarehouseTimingField': { WarehouseTimingField: 'Timing' }, './WarehouseWorkspace': { WarehouseWorkspace: 'Workspace' },
   }, true);
-  function render(incoming) { cursor = 0; latest = incoming ?? doc(); return component.TransferDocumentFields({ incoming, initialIngredient: incoming ? undefined : catalog[0], source: locations[0], locations, onClose() {} }); }
+  function render(incoming, copy) {
+    cursor = 0;
+    latest = incoming ?? doc();
+    return component.TransferDocumentFields({ incoming, copy, initialIngredient: incoming || copy ? undefined : catalog[0], source: locations[0], locations, onClose() {} });
+  }
   function flatten(tree, out = []) { if (!tree || typeof tree !== 'object') return out; if (Array.isArray(tree)) { tree.forEach(value => flatten(value, out)); return out; } out.push(tree); flatten(tree.props?.children, out); flatten(tree.props?.footer, out); return out; }
   const find = (tree, type, key, value) => flatten(tree).find(node => node.type === type && node.props[key] === value);
   return { render, find, flatten, calls, fail() { failNext = true; } };
@@ -96,6 +100,20 @@ test('saved draft retains immutable warehouses and serializes quantity in saved 
   assert.equal(h.calls[0].method, 'save'); assert.equal(h.calls[0].body.revision, 4);
   assert.deepEqual(h.calls[0].body.items, [{ ingredientId: 'rice', quantity: 2000 }]);
   assert.equal(h.calls[0].body.warehouseId, undefined); assert.equal(h.calls[0].body.destinationWarehouseId, undefined);
+});
+test('copying a transfer preserves quantities across catalogue unit changes and creates at the current date', async () => {
+  const h = harness();
+  const copy = { ...doc(), status: 'posted', effectiveAt: '2020-01-01T06:30:00Z', note: 'Пополнение бара' };
+  const tree = h.render(undefined, copy);
+  h.find(tree, 'Button', 'title', 'Сохранить').props.onPress();
+  await wait();
+  const [{ method, body }] = h.calls;
+  assert.equal(method, 'create');
+  assert.equal(body.warehouseId, 'main');
+  assert.equal(body.destinationWarehouseId, 'bar');
+  assert.equal(body.note, copy.note);
+  assert.equal(body.effectiveAt, null);
+  assert.deepEqual(body.items, [{ ingredientId: 'rice', quantity: 1 }]);
 });
 test('posted transfer is read only; reverse requires a reason and approval permission', async () => {
   const h = harness(); const document = { ...doc(), status: 'posted' }; let tree = h.render(document);
