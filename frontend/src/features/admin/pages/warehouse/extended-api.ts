@@ -48,6 +48,7 @@ export interface ProcessingRow {
 export interface ProcessingDocument {
   id: string;
   date: string;
+  effectiveAt?: string | null;
   note: string | null;
   status: 'draft' | 'posted' | 'reversed';
   revision: number;
@@ -61,7 +62,7 @@ export interface ProcessingDocument {
   reversalBlockedReason?: string | null;
 }
 export interface ProcessingBody {
-  date: string;
+  effectiveAt?: string | null;
   note: string;
   inputs: ProcessingRow[];
   outputs: ProcessingRow[];

@@ -16,7 +16,7 @@ const columnOptions = Object.keys(menuGoodsColumns) as Column[];
 const defaults: Column[] = ['name', 'category', 'price'];
 
 export const menuListFilters = {
-  search: '', category: '', station: '', availability: '', goodsName: '', goodsUnit: '', goodsWeighted: '', tax: '', nameSort: 'asc',
+  search: '', category: '', station: '', availability: '', goodsName: '', goodsUnit: '', goodsWeighted: '', tax: '', nameSort: 'asc', taxSort: '',
 };
 type Filters = typeof menuListFilters;
 type Option = { value: string; label: string };
@@ -76,6 +76,7 @@ export function MenuGoodsActions({ filters, columns, saveColumns, ready, canExpo
     setError('');
     try {
       const params = new URLSearchParams({ columns: columns.join(','), sort: filters.nameSort === 'desc' ? 'desc' : 'asc' });
+      if (filters.taxSort === 'asc' || filters.taxSort === 'desc') params.set('taxSort', filters.taxSort);
       const values = { search: filters.search, name: filters.goodsName,
         weighted: filters.goodsWeighted, availability: filters.availability, tax: filters.tax };
       Object.entries(values).forEach(([key, value]) => { if (value.trim()) params.set(key, value.trim()); });

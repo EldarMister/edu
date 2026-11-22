@@ -153,10 +153,11 @@ function TaxEditor({ tax, onClose }: { tax?: MenuTax; onClose: () => void }) {
   const { save } = useTaxMutations();
   const [name, setName] = useState(tax?.name ?? '');
   const [rate, setRate] = useState(tax ? String(tax.rate) : '');
-  const [type, setType] = useState<MenuTaxType>(tax?.type ?? 'vat');
+  const initialType = tax?.type ?? 'turnover';
+  const [type, setType] = useState<MenuTaxType>(initialType);
   const percent = parseRate(rate);
   const close = () => { if (!save.isPending) onClose(); };
-  const dirty = name !== (tax?.name ?? '') || rate !== (tax ? String(tax.rate) : '') || type !== (tax?.type ?? 'vat');
+  const dirty = name !== (tax?.name ?? '') || rate !== (tax ? String(tax.rate) : '') || type !== initialType;
   const { markSaved } = useEditorDirty(dirty, saveTax);
 
   async function saveTax() {
@@ -211,7 +212,7 @@ export function TaxReportPage() {
   const query = useTaxReport(params);
   const rows = query.data ?? [];
   const table = { title: 'Налоги с продаж', headers: reportHeaders, rows: rows.map((row) =>
-    [row.name, taxRateLabel(row.rate), TAX_TYPE_LABELS[row.type], TAX_REPORT_LABELS[row.kind],
+    [row.name, taxRateLabel(row.rate), TAX_TYPE_LABELS[row.type], TAX_REPORT_LABELS[row.operation ?? row.kind],
       balanceMoney(Number(row.salesAmount)), balanceMoney(Number(row.amount))]) };
   return <div className="space-y-3">
     <WorkspaceHeaderActions>

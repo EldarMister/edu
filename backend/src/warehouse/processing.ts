@@ -10,6 +10,8 @@ import { getCafeId } from '../tenant/tenant-context';
 import { assertWarehousePermission } from './warehouse-permissions';
 import { lockIngredients } from './stock-lock';
 import { postStockMovement } from './stock-posting';
+import { parseStockEffectiveAt } from './stock-effective-time';
+import { replayHistoricalStock } from './historical-stock-replay';
 import { inventoryReversalBlockedReason } from './closed-inventory-period';
 import { purchaseDateRange } from './purchases-query.dto';
 import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, unitLabel } from './units';
@@ -42,6 +44,7 @@ class ProcessingRowDto {
 }
 class ProcessingSaveDto {
   @IsOptional() @IsString() @MaxLength(40) date?: string;
+  @IsOptional() @IsString() @MaxLength(40) effectiveAt?: string | null;
   @IsOptional() @IsString() @MaxLength(2000) note?: string;
   @IsArray() @ArrayMaxSize(200) @ValidateNested({ each: true }) @Type(() => ProcessingRowDto) inputs: ProcessingRowDto[];
   @IsArray() @ArrayMaxSize(200) @ValidateNested({ each: true }) @Type(() => ProcessingRowDto) outputs: ProcessingRowDto[];
@@ -78,6 +81,7 @@ export class ProcessingService {
     const cafeId = tenant(actor);
     assertWarehousePermission(actor, 'warehouseProduce');
     const requestKey = dto.requestKey?.trim() || null;
+    const effectiveAt = parseStockEffectiveAt(dto.effectiveAt);
     return this.prisma.$transaction(async (tx) => {
       if (requestKey) {
         await tx.$queryRaw`SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtext(${`processing:${cafeId}:${requestKey}`}))) AS request_lock`;
@@ -87,7 +91,9 @@ export class ProcessingService {
           // revalue its already posted historical lines at today's average cost.
           const incoming = this.fingerprintInput(dto);
           const saved = this.fingerprint(existing.lines);
-          if (incoming !== saved || (dto.note?.trim() || null) !== existing.note || (dto.date && dateValue(dto.date).getTime() !== existing.date.getTime())) {
+          if (incoming !== saved || (dto.note?.trim() || null) !== existing.note
+            || effectiveAt?.getTime() !== existing.effectiveAt?.getTime()
+            || (!effectiveAt && dto.date && dateValue(dto.date).getTime() !== existing.date.getTime())) {
             throw new ConflictException('Этот запрос уже использован для другой переработки');
           }
           return this.serialize(existing);
@@ -95,7 +101,8 @@ export class ProcessingService {
       }
       const rows = await this.normalize(tx, dto);
       const valued = await this.value(tx, rows, dto.complete === true);
-      const created = await tx.processingDocument.create({ data: { cafeId, requestKey, date: dateValue(dto.date), note: dto.note?.trim() || null,
+      const created = await tx.processingDocument.create({ data: { cafeId, requestKey,
+        date: effectiveAt ?? dateValue(dto.date), effectiveAt, note: dto.note?.trim() || null,
         createdById: actor.id, createdByName: actor.name, totalCost: valued.totalCost, hasUnknownCost: valued.hasUnknownCost,
       } });
       if (rows.length) await tx.processingLine.createMany({ data: rows.map((line) => ({ ...line, cafeId, documentId: created.id })) });
@@ -110,12 +117,16 @@ export class ProcessingService {
       const current = await this.load(tx, id, true);
       this.revision(current, dto.revision);
       if (current.status !== 'draft') throw new ConflictException('Проведённая переработка неизменяема. Создайте обратную операцию');
+      const effectiveAt = parseStockEffectiveAt(dto.effectiveAt);
+      const stockDate = effectiveAt === undefined ? current.effectiveAt : effectiveAt;
+      const clearedDate = effectiveAt === null && !!current.effectiveAt;
+      const date = stockDate ?? (dto.date || clearedDate ? dateValue(dto.date) : undefined);
       const rows = await this.normalize(tx, dto);
       const valued = await this.value(tx, rows, false);
       await tx.processingLine.deleteMany({ where: { documentId: id, cafeId: current.cafeId } });
       if (rows.length) await tx.processingLine.createMany({ data: rows.map((line) => ({ ...line, cafeId: current.cafeId, documentId: id })) });
       const saved = await tx.processingDocument.update({ where: { id, cafeId: current.cafeId }, data: {
-        date: dto.date ? dateValue(dto.date) : undefined, note: dto.note?.trim() || null,
+        date, effectiveAt, note: dto.note?.trim() || null,
         revision: { increment: 1 }, totalCost: valued.totalCost, hasUnknownCost: valued.hasUnknownCost,
       }, include });
       return this.serialize(dto.complete ? await this.postWithin(tx, actor, saved) : saved);
@@ -167,28 +178,42 @@ export class ProcessingService {
     if (current.status !== 'draft') throw new ConflictException('Переработка уже проведена или отменена');
     if (current.date.getTime() > Date.now()) throw new BadRequestException('Дата и время переработки не могут быть в будущем. Сохраните черновик или измените дату');
     await lockIngredients(tx, current.lines.map((line) => line.ingredientId));
+    const { cafeId, effectiveAt } = current;
+    const recordedAt = new Date();
+    const insertedMovementIds: string[] = [];
     const rows: Line[] = current.lines.map(({ id: _id, cafeId: _cafeId, documentId: _documentId, ...line }) => ({ ...line }));
     const valued = await this.value(tx, rows, true);
     for (let index = 0; index < rows.length; index++) {
       const row = rows[index], warehouse = await resolveWarehouse(tx, row.warehouseId);
       await tx.processingLine.update({ where: { id: current.lines[index].id }, data: { unitCost: row.unitCost, lineCost: row.lineCost, costSharePercent: row.costSharePercent, costKnown: row.costKnown } });
-      await postStockMovement(tx, { ingredientId: row.ingredientId, warehouse, change: row.direction === 'input' ? row.quantity.negated() : row.quantity,
+      const { movement } = await postStockMovement(tx, { ingredientId: row.ingredientId, warehouse, change: row.direction === 'input' ? row.quantity.negated() : row.quantity,
         cost: row.unitCost, costKnown: row.costKnown, value: row.direction === 'output' ? row.lineCost : undefined,
         valuation: row.direction === 'output' ? 'average' : 'preserve',
-        movement: { type: 'processing', sourceType: 'processing', sourceId: current.id, actorId: actor.id, actorName: actor.name,
+        allowNegative: effectiveAt ? true : undefined,
+        movement: { ...(effectiveAt ? { createdAt: effectiveAt, recordedAt } : {}),
+          type: 'processing', sourceType: 'processing', sourceId: current.id, actorId: actor.id, actorName: actor.name,
           reason: 'processing', comment: current.note ?? 'Переработка', recipeSnapshot: { direction: row.direction, processingLineId: current.lines[index].id,
             costSharePercent: Number(row.costSharePercent), costKnown: row.costKnown === true } },
       });
+      if (effectiveAt) insertedMovementIds.push(movement.id);
     }
-    return tx.processingDocument.update({ where: { id: current.id, cafeId: current.cafeId }, data: {
-      status: 'posted', postedAt: new Date(), postedById: actor.id, postedByName: actor.name, revision: { increment: 1 },
+    const posted = await tx.processingDocument.update({ where: { id: current.id, cafeId }, data: {
+      status: 'posted', postedAt: effectiveAt ? recordedAt : new Date(), postedById: actor.id, postedByName: actor.name, revision: { increment: 1 },
       totalCost: valued.totalCost, hasUnknownCost: valued.hasUnknownCost,
     }, include });
+    if (!effectiveAt) return posted;
+    await replayHistoricalStock(tx, { cafeId, effectiveAt, insertedMovementIds });
+    await tx.auditLog.create({ data: { cafeId, userId: actor.id, userName: actor.name, userRole: actor.role,
+      actionType: 'WAREHOUSE_PROCESSING_POSTED_RETROSPECTIVELY', entityType: 'PROCESSING_DOCUMENT', entityId: current.id,
+      description: 'Переработка проведена с пересчётом себестоимости',
+      metadata: { effectiveAt: effectiveAt.toISOString(), recordedAt: recordedAt.toISOString(), movementIds: insertedMovementIds },
+    } });
+    return this.load(tx, posted.id);
   }
 
   private reversalBlockedReason(tx: Prisma.TransactionClient, document: Document) {
     if (document.status !== 'posted' || !document.postedAt) return Promise.resolve(null);
-    return inventoryReversalBlockedReason(tx, document.cafeId, document.postedAt, document.lines);
+    return inventoryReversalBlockedReason(tx, document.cafeId, document.effectiveAt ?? document.postedAt, document.lines);
   }
 
   private async normalize(tx: Prisma.TransactionClient, dto: ProcessingSaveDto): Promise<Line[]> {

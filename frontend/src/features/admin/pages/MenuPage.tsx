@@ -12,7 +12,6 @@ import { resolveApiImage } from '@/lib/image';
 import { useT } from '@/lib/i18n';
 import { WorkspaceHeaderCount } from './WorkspaceHeader';
 import { WorkspaceSearch } from './WorkspaceSearch';
-import { DocumentField } from './warehouse/WarehouseUi';
 import { apiError } from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
@@ -59,6 +58,7 @@ function MenuDishList({ view }: { view: MenuView }) {
   const isGoods = view === 'goods';
   const [filters, updateFilters] = usePageFilters(menuListFilters);
   const { category: categoryId, search, availability, station: stationId, nameSort } = filters;
+  const taxSort = filters.taxSort === 'asc' || filters.taxSort === 'desc' ? filters.taxSort : '';
   const [compositionId, setCompositionId] = useState<string | null>(null);
   const location = useLocation();
   const { editor, openEditor, closeEditor } = useEditorRoute();
@@ -70,7 +70,8 @@ function MenuDishList({ view }: { view: MenuView }) {
   const displayTax = !isGoods && (taxes.length > 0 || !!filters.tax);
   const taxNames = new Map(taxes.map((tax) => [tax.id, `${tax.name} · ${taxRateLabel(tax.rate)}`]));
   const taxFilters = [{ value: 'none', label: 'Без налога' }, ...[...taxNames].map(([value, label]) => ({ value, label }))];
-  const taxCell = (item: AdminDish) => taxNames.get(effectiveMenuTaxId(item) ?? '') ?? '—';
+  const menuTaxName = (item: AdminDish) => taxNames.get(effectiveMenuTaxId(item) ?? '') ?? '';
+  const taxCell = (item: AdminDish) => menuTaxName(item) || '—';
   const dishesQ = useAdminDishes('', search, !isGoods);
   const goodsQ = useAdminGoods(isGoods);
   const listQ = isGoods ? goodsQ : dishesQ;
@@ -80,9 +81,9 @@ function MenuDishList({ view }: { view: MenuView }) {
   const push = useNotifications((state) => state.push);
   const { can } = usePermissions();
   const editable = can('actions.editMenu');
-  const filtered = Object.entries(filters).some(([key, value]) => key !== 'nameSort' && value);
+  const filtered = Object.entries(filters).some(([key, value]) => key !== 'nameSort' && key !== 'taxSort' && value);
   function clearFilters() {
-    updateFilters({ ...menuListFilters, nameSort });
+    updateFilters({ ...menuListFilters, nameSort, taxSort });
   }
   const categoryStations = new Map((categoriesQ.data ?? []).map((category) => [category.id, category.prepStation]));
   const dishStation = (dish: AdminDish) => dish.prepStation ?? categoryStations.get(dish.categoryId) ?? 'none';
@@ -95,7 +96,15 @@ function MenuDishList({ view }: { view: MenuView }) {
       (!selectedStations.length || selectedStations.includes(dishStation(dish))) &&
       (!filters.tax || (effectiveMenuTaxId(dish) ?? 'none') === filters.tax) &&
       (!availability || (availability === 'visible' ? dish.isAvailable && dish.isActive : !dish.isAvailable || !dish.isActive)),
-  )).sort((a, b) => a.name.localeCompare(b.name, 'ru') * (nameSort === 'desc' ? -1 : 1));
+  )).sort((a, b) => {
+    const byTax = taxSort ? menuTaxName(a).localeCompare(menuTaxName(b), 'ru') * (taxSort === 'desc' ? -1 : 1) : 0;
+    return byTax || a.name.localeCompare(b.name, 'ru') * (nameSort === 'desc' ? -1 : 1);
+  });
+  const taxHeader = <button type="button" className="flex items-center gap-2"
+    onClick={() => updateFilters({ taxSort: taxSort === 'asc' ? 'desc' : 'asc' })}>
+    Налог {taxSort && <span aria-hidden>{taxSort === 'desc' ? '↓' : '↑'}</span>}
+  </button>;
+  const taxAriaSort = taxSort ? taxSort === 'asc' ? 'ascending' : 'descending' : undefined;
   const stationOptions = [...stations.map((station) => ({ value: station.id, label: station.name })), { value: 'none', label: 'Без цеха' }];
   const unitOptions = [...new Set(goodsQ.data?.flatMap((item) => item.goodsUnits))].sort((a, b) => a.localeCompare(b, 'ru'))
     .map((unit) => ({ value: unit, label: unit }));
@@ -197,16 +206,17 @@ function MenuDishList({ view }: { view: MenuView }) {
             style={isGoods ? { minWidth: Math.max(560, 310 + dataColumns.length * 125) } : undefined}>
             <thead>
               <tr className="border-b border-border text-left text-xs text-text-muted">
-                <th className="py-3 pr-4 font-normal" aria-sort={nameSort === 'desc' ? 'descending' : 'ascending'}>
-                  <button type="button" className="flex items-center gap-2" onClick={() => updateFilters({ nameSort: nameSort === 'desc' ? 'asc' : 'desc' })}>
-                    Название <span aria-hidden>{nameSort === 'desc' ? '↓' : '↑'}</span>
+                <th className="py-3 pr-4 font-normal" aria-sort={taxSort ? undefined : nameSort === 'desc' ? 'descending' : 'ascending'}>
+                  <button type="button" className="flex items-center gap-2"
+                    onClick={() => updateFilters({ nameSort: !taxSort && nameSort === 'asc' ? 'desc' : 'asc', taxSort: '' })}>
+                    Название {!taxSort && <span aria-hidden>{nameSort === 'desc' ? '↓' : '↑'}</span>}
                   </button>
                 </th>
-                {isGoods ? dataColumns.map((column) => <th key={column} scope="col"
-                  className={`px-4 py-3 font-normal ${column === 'price' ? 'text-right' : ''}`}>{menuGoodsColumns[column]}</th>)
+                {isGoods ? dataColumns.map((column) => <th key={column} scope="col" aria-sort={column === 'tax' ? taxAriaSort : undefined}
+                  className={`px-4 py-3 font-normal ${column === 'price' ? 'text-right' : ''}`}>{column === 'tax' ? taxHeader : menuGoodsColumns[column]}</th>)
                   : <>
                     <th className="px-4 py-3 font-normal">Категория</th>
-                    {displayTax && <th className="px-4 py-3 font-normal">Налог</th>}
+                    {displayTax && <th scope="col" className="px-4 py-3 font-normal" aria-sort={taxAriaSort}>{taxHeader}</th>}
                     <th className="px-4 py-3 text-right font-normal">Выход</th>
                     <th className="px-4 py-3 text-right font-normal">Цена</th>
                   </>}
@@ -433,9 +443,7 @@ export function MenuCategoriesPage() {
   }
   const editingCategory = editor?.type === 'category' && !!editor.id;
   const categoryIndex = editingCategory ? sorted.findIndex((category) => category.id === editor.id) : -1;
-  if (editor?.type === 'category' && !editor.id && categoriesQ.isSuccess) {
-    return <MenuCategoryForm stations={stations} onClose={closeEditor} />;
-  }
+  const creatingCategory = editor?.type === 'category' && !editor.id && editable;
   return (
     <div className="min-w-0">
       <WorkspaceHeaderCount count={categoriesQ.isSuccess ? rows.length : undefined} />
@@ -543,6 +551,7 @@ export function MenuCategoriesPage() {
           )}
         </div>
       )}
+      {creatingCategory && <MenuCategoryForm key="new" stations={stations} onClose={closeEditor} />}
       {editingCategory && (categoryIndex >= 0 ? (
         <MenuCategoryForm key={editor.id} category={sorted[categoryIndex]} position={categoryIndex + 1}
           categoryCount={sorted.length} stations={stations} onClose={closeEditor} />
@@ -582,15 +591,13 @@ function MenuCategoryForm({
   const editable = can('actions.editMenu');
   const [name, setName] = useState(category?.name ?? '');
   const [tax, setTax] = useState(category?.taxId ?? '');
-  const [prepStation, setPrepStation] = useState(
-    category?.prepStation ?? stations.find((station) => station.isActive)?.id ?? 'none',
-  );
+  const [selectedStation, setSelectedStation] = useState(category?.prepStation);
+  const prepStation = selectedStation ?? stations.find((station) => station.isActive)?.id ?? 'none';
   const [initialPosition] = useState(position);
   const [newPosition, setNewPosition] = useState(String(position));
   const [error, setError] = useState('');
   const push = useNotifications((state) => state.push);
   const pending = create.isPending || update.isPending;
-  const Field = category ? CategoryModalField : DocumentField;
   const close = () => { if (!pending) onClose(); };
   async function save(event: React.FormEvent) {
     event.preventDefault();
@@ -620,31 +627,31 @@ function MenuCategoryForm({
   const fields = (
     <form id={formId} onSubmit={save}>
       <fieldset disabled={!editable || pending} className="min-w-0 space-y-4">
-        <Field label="Название">
+        <CategoryModalField label="Название">
           <input aria-label="Название категории" className="input" value={name} maxLength={60}
             onChange={(event) => setName(event.target.value)} required autoFocus={editable} />
-        </Field>
-        <Field label="Станция">
+        </CategoryModalField>
+        <CategoryModalField label="Станция">
           <Select ariaLabel="Станция категории" className="h-11 w-full" value={prepStation}
-            onChange={setPrepStation} options={routingOptions(stations, prepStation)} disabled={!editable || pending} />
-        </Field>
-        <Field label="Налог">
+            onChange={setSelectedStation} options={routingOptions(stations, prepStation)} disabled={!editable || pending} />
+        </CategoryModalField>
+        <CategoryModalField label="Налог">
           <MenuTaxSelect value={tax} onChange={setTax} disabled={!editable || pending} />
-        </Field>
-        {category && <Field label="Позиция в списке">
+        </CategoryModalField>
+        {category && <CategoryModalField label="Позиция в списке">
           <div className="flex items-center gap-3">
             <input aria-label="Позиция в списке" className="input max-w-24" type="number" inputMode="numeric"
               min={1} max={categoryCount} step={1} required value={newPosition}
               onChange={(event) => setNewPosition(event.target.value)} />
             <span className="text-text-muted">из {categoryCount}</span>
           </div>
-        </Field>}
+        </CategoryModalField>}
       </fieldset>
       {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
     </form>
   );
   const footer = (
-    <div className={category ? 'flex justify-end gap-2' : 'flex gap-2'}>
+    <div className="flex justify-end gap-2">
       <button type="button" className="btn-secondary btn-md" onClick={close} disabled={pending}>
         {editable ? 'Отмена' : 'Закрыть'}
       </button>
@@ -653,14 +660,8 @@ function MenuCategoryForm({
       </button>}
     </div>
   );
-  if (category) {
-    return (
-      <Modal open title={editable ? 'Редактирование категории' : 'Категория'} onClose={close} footer={footer}>
-        {fields}
-      </Modal>
-    );
-  }
-  return <EditorPage title="Добавление категории" onClose={close} footer={footer}>{fields}</EditorPage>;
+  const title = category ? (editable ? 'Редактирование категории' : 'Категория') : 'Добавление категории';
+  return <Modal open title={title} onClose={close} footer={footer}>{fields}</Modal>;
 }
 
 function CategoryModalField({ label, children }: { label: string; children: React.ReactNode }) {

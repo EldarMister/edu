@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Ingredient, IngredientKind, IngredientUnitType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateIngredientDto, UpdateIngredientDto } from './dto';
@@ -8,6 +8,7 @@ import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { resolveWarehouseSupplier } from './suppliers';
 import { purchaseUnitsFor, validatePurchaseUnits } from './purchase-units';
 import { postStockMovement } from './stock-posting';
+import { PurchasesService } from './purchases.service';
 import { lockIngredients, lockWarehouseCatalog } from './stock-lock';
 import { getWarehouseBalance, resolveWarehouse, setWarehouseBalance, warehouseBalances, warehouseDocumentFilter } from './warehouse-location';
 import { getCafeId } from '../tenant/tenant-context';
@@ -35,7 +36,7 @@ type IngredientRow = Ingredient & { supplierRecord?: { name: string } | null };
  */
 @Injectable()
 export class IngredientsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private purchases: PurchasesService = new PurchasesService(prisma)) {}
 
   async renameCategory(from: string, to: string) {
     const name = to.trim();
@@ -255,18 +256,40 @@ export class IngredientsService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
-  async create(dto: CreateIngredientDto, actor?: Pick<AuthUser, 'id' | 'name'>) {
+  async create(dto: CreateIngredientDto, actor?: Pick<AuthUser, 'id' | 'name' | 'role'>) {
     if (!dto.name?.trim()) throw new BadRequestException('Укажите название товара');
+    const opening = dto.initialSupply;
+    if (opening && (dto.stock !== undefined || dto.avgCost !== undefined || dto.warehouseId !== undefined)) {
+      throw new BadRequestException('Укажите данные начальной поставки одним способом');
+    }
     const unit = normalizeUnit(dto.unit);
     const type = unitTypeOf(unit);
-    const warehouse = await resolveWarehouse(this.prisma, dto.warehouseId);
     const balance = {
       stock: new Prisma.Decimal(toBase(dto.stock ?? 0, unit)).toDecimalPlaces(3),
       avgCost: new Prisma.Decimal(costToBase(dto.avgCost ?? 0, unit)).toDecimalPlaces(8),
       valuationKnown: (dto.stock ?? 0) > 0 && (dto.avgCost ?? 0) > 0,
     };
-    const ingredient = await this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx) => {
       await lockWarehouseCatalog(tx);
+      const warehouse = await resolveWarehouse(tx, opening?.warehouseId ?? dto.warehouseId);
+      const requestKey = opening ? `ingredient-opening:${opening.requestKey}` : undefined;
+      const cafeId = getCafeId();
+      const previous = requestKey && cafeId ? await tx.purchase.findUnique({
+        where: { cafeId_requestKey: { cafeId, requestKey } },
+        include: { items: { include: { ingredient: true } } },
+      }) : null;
+      const previousIngredient = previous?.items[0]?.ingredient;
+      if (previous && (!previousIngredient || previous.items.length !== 1 || previousIngredient.name !== dto.name.trim()
+          || previousIngredient.displayUnit !== unit || previousIngredient.category !== (dto.category?.trim() || null))) {
+        throw new ConflictException('Начальная поставка уже создана для другого ингредиента');
+      }
+      if (previousIngredient && opening) {
+        await this.purchases.createInTransaction(tx, { requestKey, complete: true, warehouseId: opening.warehouseId,
+          supplier: dto.supplier?.trim() || undefined, supplierId: dto.supplierId,
+          items: [{ ingredientId: previousIngredient.id, unit, quantity: opening.quantity, purchasePrice: opening.unitPrice }],
+        }, actor, { allowMissingSupplier: true });
+        return this.serialize({ ...previousIngredient, ...await getWarehouseBalance(tx, warehouse, previousIngredient) });
+      }
       const supplier = await resolveWarehouseSupplier(tx, dto);
       const created = await tx.ingredient.create({
         data: {
@@ -279,14 +302,21 @@ export class IngredientsService {
         },
       });
       await syncIngredientPackages(tx, created);
+      if (opening) {
+        await this.purchases.createInTransaction(tx, { requestKey, complete: true, warehouseId: opening.warehouseId,
+          supplier: supplier.supplier ?? undefined, supplierId: supplier.supplierId, note: 'Начальный остаток',
+          items: [{ ingredientId: created.id, unit, quantity: opening.quantity, purchasePrice: opening.unitPrice }],
+        }, actor, { allowMissingSupplier: true });
+        const received = await this.ensure(created.id, tx);
+        return this.serialize({ ...received, ...await getWarehouseBalance(tx, warehouse, received) });
+      }
       if (!balance.stock.isZero() || !balance.avgCost.isZero()) {
         await postStockMovement(tx, { ingredientId: created.id, warehouse, change: balance.stock, cost: balance.avgCost, costKnown: (dto.avgCost ?? 0) > 0,
           valuation: 'average', movement: { type: 'correction', sourceType: 'manual', sourceId: created.id, actorId: actor?.id, actorName: actor?.name, comment: 'Начальный остаток' } });
         if (balance.stock.isZero()) await setWarehouseBalance(tx, warehouse, created.id, balance);
       }
-      return created;
-    });
-    return this.serialize({ ...ingredient, ...balance });
+      return this.serialize({ ...created, ...balance });
+    }, { timeout: 30_000 });
   }
 
   async update(id: string, dto: UpdateIngredientDto) {

@@ -61,6 +61,37 @@ test('purchase query: Bishkek calendar bounds and explicit ISO instants are inde
   }
 });
 
+test('PostgreSQL: opening ingredient stock is one editable supply and rolls back on invalid input', { skip: !url }, async () => fixture(async ({ db, cafe, ingredients, purchases, locations }) => {
+  const warehouse = await locations.save(cafe.id, 'Склад начальной поставки');
+  const dto = { name: 'Мука для начальной поставки', unit: 'kg', processingLosses: { baking: 10 },
+    initialSupply: { quantity: 2.5, unitPrice: 40, warehouseId: warehouse.id, requestKey: randomUUID() } };
+  const [ingredient, retry] = await Promise.all([ingredients.create(dto), ingredients.create(dto)]);
+  assert.equal(retry.id, ingredient.id);
+  assert.equal(ingredient.stock, 2.5);
+  assert.equal(ingredient.avgCost, 40);
+  const [purchase] = await purchases.findAll({ warehouseId: warehouse.id, status: 'completed' });
+  assert.ok(purchase);
+  assert.equal(purchase.totalAmount, 100);
+  const history = await ingredients.supplies(ingredient.id, { warehouseId: warehouse.id });
+  assert.equal(history.total, 1);
+  assert.equal(history.rows[0].purchaseId, purchase.id);
+  assert.equal(history.rows[0].quantity, 2.5);
+  const movement = await db.stockMovement.findMany({ where: { ingredientId: ingredient.id } });
+  assert.equal(movement.length, 1);
+  assert.equal(movement[0].type, 'purchase');
+  assert.equal(movement[0].sourceId, purchase.id);
+  assert.equal(await db.warehouseSupplier.count(), 0);
+
+  const detail = await purchases.findOne(purchase.id);
+  await purchases.update(purchase.id, { expectedUpdatedAt: detail.updatedAt.toISOString(), note: 'Проверено' });
+  assert.equal((await purchases.findOne(purchase.id)).note, 'Проверено');
+  await assert.rejects(ingredients.create({ ...dto, initialSupply: { ...dto.initialSupply, quantity: 3 } }), /Ключ повторного запроса/);
+  await assert.rejects(ingredients.create({ name: 'Ошибочное сырьё', unit: 'kg',
+    initialSupply: { ...dto.initialSupply, requestKey: randomUUID(), unitPrice: -1 } }), /цену/);
+  assert.equal(await db.ingredient.count(), 1);
+  assert.equal(await db.purchase.count(), 1);
+}));
+
 test('PostgreSQL: legacy invoice date stays intact while supply list, period, overview and XLSX use the physical receipt date', { skip: !url }, async () => fixture(async ({ db, ingredients, purchases }) => {
   const item = await ingredients.create({ name: 'Поставка с отдельной накладной', unit: 'kg' });
   const invoiceDate = '2025-07-01T03:04:05.123Z';

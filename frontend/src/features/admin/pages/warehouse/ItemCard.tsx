@@ -13,6 +13,7 @@ import {
   qty,
   useIngredient,
   useIngredientMutations,
+  useWarehouseLocations,
   type Ingredient,
   type IngredientDetails,
   type ItemKind,
@@ -24,6 +25,7 @@ import { UNIT_OPTIONS, unitLabel, type UnitCode } from './units';
 export function ItemCard({
   id,
   defaultKind,
+  initialName,
   onClose,
   onSaved,
   onHistory,
@@ -33,12 +35,16 @@ export function ItemCard({
   compact?: boolean;
   id?: string;
   defaultKind?: ItemKind;
+  initialName?: string;
   onClose: () => void;
   onSaved?: (item: Ingredient) => void;
   onHistory?: (id: string) => void;
   onRecipe?: (item: Ingredient) => void;
 }) {
   const query = useIngredient(id ?? null);
+  const mutations = useIngredientMutations();
+  const pending = mutations.create.isPending || mutations.update.isPending;
+  const close = () => { if (!pending) onClose(); };
   const title = id
     ? 'Редактирование ингредиента'
     : defaultKind === 'goods'
@@ -47,7 +53,7 @@ export function ItemCard({
   const Container = compact ? Modal : EditorPage;
   return (
     <EditorFooterTarget.Provider value={null}>
-      <Container open onClose={onClose} title={title} panelClassName="max-w-2xl">
+      <Container open onClose={close} title={title} panelClassName="max-w-2xl">
         {id && query.isPending && (
           <div className="flex justify-center p-8">
             <Spinner />
@@ -63,11 +69,14 @@ export function ItemCard({
             key={id ?? 'new'}
             item={query.data}
             defaultKind={defaultKind}
+            initialName={initialName}
             onClose={onClose}
             onSaved={onSaved}
             onHistory={onHistory}
             onRecipe={onRecipe}
             compact={compact}
+            mutations={mutations}
+            pending={pending}
           />
         )}
       </Container>
@@ -78,26 +87,31 @@ export function ItemCard({
 function ItemForm({
   item,
   defaultKind,
+  initialName,
   onClose,
   onSaved,
   onHistory,
   onRecipe,
   compact,
+  mutations,
+  pending,
 }: {
   item?: IngredientDetails;
   defaultKind?: ItemKind;
+  initialName?: string;
   onClose: () => void;
   onSaved?: (item: Ingredient) => void;
   onHistory?: (id: string) => void;
   onRecipe?: (item: Ingredient) => void;
   compact: boolean;
+  mutations: ReturnType<typeof useIngredientMutations>;
+  pending: boolean;
 }) {
   const formId = useId();
-  const mutations = useIngredientMutations();
   const { can } = usePermissions();
   const editable = can(item ? 'actions.warehouseSettings' : 'actions.warehouseReceive');
   const costs = can('actions.warehouseCosts');
-  const [name, setName] = useState(item?.name ?? '');
+  const [name, setName] = useState(item?.name ?? initialName ?? '');
   const kind: ItemKind = item?.kind ?? defaultKind ?? 'raw';
   const [unit, setUnit] = useState<UnitCode>(item?.displayUnit ?? (defaultKind === 'goods' ? 'pcs' : 'kg'));
   const [category, setCategory] = useState(item?.category ?? '');
@@ -109,14 +123,29 @@ function ItemForm({
     item?.processingLosses ?? {},
   );
   const [error, setError] = useState('');
-  const pending = mutations.create.isPending || mutations.update.isPending;
   const prepared = kind === 'preparation' || kind === 'prepared_dish';
+  const showOpening = !item && !compact && !prepared && editable && costs && can('actions.warehouseApprove');
+  const locations = useWarehouseLocations(showOpening);
+  const warehouses = locations.data?.locations ?? [];
+  const [warehouseId, setWarehouseId] = useState('');
+  const openingWarehouse = warehouseId || (warehouses.find((location) => location.isDefault) ?? warehouses[0])?.id || '';
+  const [openingQuantity, setOpeningQuantity] = useState('');
+  const [openingPrice, setOpeningPrice] = useState('');
+  const [openingRequestKey] = useState(() => crypto.randomUUID());
   async function save(event: React.FormEvent) {
     event.preventDefault();
     event.stopPropagation();
     if (pending || !editable) return;
     if (!name.trim() || !Number.isFinite(Number(threshold)) || Number(threshold) < 0) {
       setError('Проверьте название и минимальный остаток.');
+      return;
+    }
+    const hasOpening = showOpening && (openingQuantity !== '' || openingPrice !== '');
+    const quantity = Number(openingQuantity);
+    const unitPrice = Number(openingPrice);
+    if (hasOpening && (!Number.isFinite(quantity) || quantity < 0.001 || !openingPrice
+      || !Number.isFinite(unitPrice) || unitPrice < 0 || !openingWarehouse)) {
+      setError('Для начальной поставки укажите количество, цену за единицу и склад.');
       return;
     }
     setError('');
@@ -137,7 +166,10 @@ function ItemForm({
       };
       const saved = item
         ? await mutations.update.mutateAsync({ ...body, id: item.id })
-        : await mutations.create.mutateAsync(body);
+        : await mutations.create.mutateAsync({
+          ...body,
+          ...(hasOpening && { initialSupply: { quantity, unitPrice, warehouseId: openingWarehouse, requestKey: openingRequestKey } }),
+        });
       onClose();
       onSaved?.(saved);
     } catch (err) {
@@ -153,7 +185,7 @@ function ItemForm({
   };
   return (
     <form id={formId} onSubmit={save} className="poster-form poster-form--ingredient">
-      <fieldset disabled={!editable} className="space-y-4">
+      <fieldset disabled={!editable || pending} className="space-y-4">
         <DocumentField label="Название">
           <input
             aria-label="Название ингредиента"
@@ -254,6 +286,32 @@ function ItemForm({
             )}
           </div>
         </details>
+        {showOpening && <section className="mt-8 space-y-4 border-t border-border pt-5">
+          <h2 className="text-lg font-semibold">Складской учёт</h2>
+          <p className="max-w-3xl text-sm text-text-secondary">
+            Если ингредиент уже есть в наличии, укажите количество, цену и склад. При сохранении будет проведена поставка.
+          </p>
+          <DocumentField label="Количество в наличии">
+            <div className="poster-number-unit w-52 max-w-full">
+              <input aria-label="Количество в наличии" className="input" type="number" inputMode="decimal"
+                min="0.001" step="0.001" value={openingQuantity} onChange={(event) => setOpeningQuantity(event.target.value)} />
+              <span>{unitLabel(unit)}</span>
+            </div>
+          </DocumentField>
+          <DocumentField label={`Цена за ${unitLabel(unit)}`}>
+            <div className="poster-number-unit w-52 max-w-full">
+              <input aria-label={`Цена за ${unitLabel(unit)}`} className="input" type="number" inputMode="decimal"
+                min="0" step="any" value={openingPrice} onChange={(event) => setOpeningPrice(event.target.value)} />
+              <span>с</span>
+            </div>
+          </DocumentField>
+          <DocumentField label="Склад">
+            <Select ariaLabel="Склад начальной поставки" className="h-10 w-52 max-w-full" value={openingWarehouse}
+              onChange={setWarehouseId} disabled={pending || !warehouses.length}
+              options={warehouses.map((warehouse) => ({ value: warehouse.id, label: warehouse.name }))} />
+          </DocumentField>
+          {locations.isError && <p role="alert" className="text-sm text-danger">{apiError(locations.error)}</p>}
+        </section>}
       </fieldset>
       {item && (
         <details className="poster-advanced mt-5">
@@ -331,7 +389,7 @@ function ItemForm({
           >
             {pending ? <Spinner /> : 'Сохранить'}
           </button>
-          {compact && <button type="button" className="btn-ghost btn-md" onClick={onClose}>
+          {compact && <button type="button" className="btn-ghost btn-md" disabled={pending} onClick={onClose}>
             Отмена
           </button>}
         </DocumentFooter>

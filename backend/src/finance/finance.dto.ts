@@ -30,6 +30,7 @@ export class CashHandoverSettingsDto {
 
 export class FinanceAccountUpdateDto {
   @IsOptional() @IsString() @Length(1, 120) name?: string;
+  @IsOptional() @IsIn(['cash', 'noncash']) type?: 'cash' | 'noncash';
   @IsOptional() @IsBoolean() isDefault?: boolean;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(-MAX_MONEY) @Max(MAX_MONEY) openingBalance?: number;
 }

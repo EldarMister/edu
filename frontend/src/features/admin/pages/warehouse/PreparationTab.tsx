@@ -148,6 +148,7 @@ const blankRow = (): RecipeDraft => ({
   processingMethod: '',
 });
 const unitFactor = (unit: UnitCode) => (unit === 'kg' || unit === 'l' ? 1000 : 1);
+const recipeWeight = (amount: number) => String(Number(amount.toFixed(6)));
 
 function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () => void }) {
   const formId = useId();
@@ -163,11 +164,10 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
   const [expectedUpdatedAt] = useState(recipe.updatedAt);
   const [name, setName] = useState(recipe.name);
   const [category, setCategory] = useState(recipe.category ?? '');
-  const [unit, setUnit] = useState(recipe.displayUnit);
   const [mode, setMode] = useState(recipe.mode ?? 'virtual');
   const [instructions, setInstructions] = useState(recipe.instructions ?? '');
   const push = useNotifications((state) => state.push);
-  const [outputQuantity, setOutputQuantity] = useState(String(recipe.outputQuantity));
+  const [enteredOutput, setEnteredOutput] = useState(recipe.id ? String(recipe.outputQuantity) : null);
   const [outputUnit, setOutputUnit] = useState(recipe.outputUnit);
   const [requestKey] = useState(() => crypto.randomUUID());
   const [quickIngredient, setQuickIngredient] = useState(false);
@@ -190,6 +190,10 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
   const byId = new Map(options.map((item) => [item.id, item]));
   const savedItems = new Map(recipe.items.map((item) => [item.ingredientId, item]));
   const selected = new Set(rows.map((row) => row.ingredientId));
+  const netGrams = rows.reduce((total, row) =>
+    row.unit && unitTypeOf(row.unit) === 'mass' ? total + Number(row.netAmount) * unitFactor(row.unit) : total, 0);
+  const outputQuantity = enteredOutput ?? (recipe.unitType === 'mass' && netGrams > 0
+    ? recipeWeight(netGrams / unitFactor(outputUnit)) : '');
   const canSave =
     name.trim() &&
     isPositive(outputQuantity) &&
@@ -242,7 +246,7 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
         expectedUpdatedAt,
         name: name.trim(),
         category: category.trim() || null,
-        unit,
+        unit: recipe.displayUnit,
         requestKey,
         outputQuantity: Number(outputQuantity),
         outputUnit,
@@ -355,7 +359,7 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
                             update(row.key, {
                               processingMethod: v as ProcessingMethod | '',
                               lossPercent: String(loss),
-                              netAmount: String(Number(row.quantity) * (1 - loss / 100)),
+                              quantity: row.netAmount ? recipeWeight(Number(row.netAmount) / (1 - loss / 100)) : '',
                             });
                           }}
                         />
@@ -410,21 +414,21 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
                             className="input h-9 w-[88px]"
                             type="number"
                             min="0"
-                            max={row.quantity || undefined}
+                            max={row.processingMethod ? undefined : row.quantity || undefined}
                             step="any"
                             value={row.netAmount}
                             disabled={!row.ingredientId}
                             required
-                            onChange={(e) =>
-                              update(row.key, {
-                                netAmount: e.target.value,
-                                lossPercent: String(
-                                  Number(row.quantity) > 0
-                                    ? (1 - Number(e.target.value) / Number(row.quantity)) * 100
-                                    : 0,
-                                ),
-                              })
-                            }
+                            onChange={(e) => {
+                              const netAmount = e.target.value;
+                              if (row.processingMethod && Number(row.lossPercent) < 100) {
+                                const quantity = netAmount ? recipeWeight(Number(netAmount) / (1 - Number(row.lossPercent) / 100)) : '';
+                                update(row.key, { netAmount, quantity });
+                              } else {
+                                update(row.key, { netAmount, lossPercent: String(Number(row.quantity) > 0
+                                  ? (1 - Number(netAmount) / Number(row.quantity)) * 100 : 0) });
+                              }
+                            }}
                           />
                           <span className="text-xs">{row.unit ? unitLabel(row.unit) : ''}</span>
                         </div>
@@ -480,7 +484,7 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
                         min="0.000001"
                         step="any"
                         value={outputQuantity}
-                        onChange={(e) => setOutputQuantity(e.target.value)}
+                        onChange={(e) => setEnteredOutput(e.target.value || null)}
                         required
                       />
                       <select
@@ -489,15 +493,14 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
                         value={outputUnit}
                         onChange={(e) => {
                           const next = e.target.value as UnitCode;
-                          if (unitTypeOf(next) === unitTypeOf(outputUnit))
-                            setOutputQuantity(
-                              String((Number(outputQuantity) * unitFactor(outputUnit)) / unitFactor(next)),
+                          if (enteredOutput !== null)
+                            setEnteredOutput(
+                              recipeWeight((Number(enteredOutput) * unitFactor(outputUnit)) / unitFactor(next)),
                             );
                           setOutputUnit(next);
-                          if (!recipe.id) setUnit(next);
                         }}
                       >
-                        {(recipe.id ? unitsForType(recipe.unitType) : UNIT_OPTIONS).map((option) => (
+                        {unitsForType(recipe.unitType).map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>

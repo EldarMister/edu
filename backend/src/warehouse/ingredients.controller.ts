@@ -83,8 +83,8 @@ export class IngredientsController {
   @Roles(Role.ADMIN, Role.OWNER)
   @RequirePermission('actions.warehouseReceive')
   create(@Body() dto: CreateIngredientDto, @CurrentUser() actor: AuthUser) {
-    if (dto.stock) assertWarehousePermission(actor, 'warehouseApprove');
-    if (dto.avgCost) assertWarehousePermission(actor, 'warehouseCosts');
+    if (dto.stock || dto.initialSupply) assertWarehousePermission(actor, 'warehouseApprove');
+    if (dto.avgCost || dto.initialSupply) assertWarehousePermission(actor, 'warehouseCosts');
     return this.ingredients.create(dto, actor);
   }
 

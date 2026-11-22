@@ -195,7 +195,8 @@ export function AdminApp() {
   const isAdmin = permissions.effectiveRole === 'ADMIN';
   const canHandlePrintRequests = canSection('checks') && permissions.canOwnerOperation('printRequests');
   const canManageRefunds = useCanManageOrderRefunds();
-  const canManageCancellations = (isAdmin || isOwner) && permissions.canEditSection('orders');
+  const canManageCancellations = (isAdmin || isOwner) && permissions.canEditSection('orders')
+    && permissions.canOwnerOperation('cancelItems');
   const requestsNav = [
     ...(canManageRefunds ? [{ key: 'refunds', label: 'Заявки на возврат' }] : []),
     ...(canManageCancellations ? [{ key: 'cancellations', label: 'Отмены блюд' }] : []),

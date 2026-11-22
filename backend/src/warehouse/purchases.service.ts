@@ -251,47 +251,50 @@ export class PurchasesService {
   }
 
   async create(dto: CreatePurchaseDto, actor?: AuthUser) {
+    const purchaseId = await this.prisma.$transaction((tx) => this.createInTransaction(tx, dto, actor), postingTransaction);
+    return this.findOne(purchaseId);
+  }
+
+  async createInTransaction(tx: Prisma.TransactionClient, dto: CreatePurchaseDto, actor?: Pick<AuthUser, 'id' | 'name' | 'role'>,
+    { allowMissingSupplier = false } = {}) {
     const discount = new Prisma.Decimal(dto.discount ?? 0).toDecimalPlaces(2);
     this.validateDate(dto.date, dto.complete === true);
     this.validateAttachments(dto.attachments);
     const effectiveAt = parseStockEffectiveAt(dto.effectiveAt);
-    const warehouse = await resolveWarehouse(this.prisma, dto.warehouseId);
-    const purchaseId = await this.prisma.$transaction(async (tx) => {
-      const cafeId = getCafeId();
-      if (!cafeId) throw new BadRequestException('Заведение не назначено');
-      if (dto.requestKey) {
-        await tx.$queryRaw`SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtext(${`purchase-request:${cafeId}:${dto.requestKey}`}))) AS request_lock`;
-        const previous = await tx.purchase.findUnique({ where: { cafeId_requestKey: { cafeId, requestKey: dto.requestKey } }, include: { items: true } });
-        if (previous) {
-          const lineKey = (item: { ingredientId: string; quantityBase: Prisma.Decimal; grossTotal: Prisma.Decimal }) => `${item.ingredientId}:${item.quantityBase}:${item.grossTotal}`;
-          if (previous.warehouseId !== (warehouse?.id ?? null) || !previous.discount.eq(discount)
-            || previous.effectiveAt?.getTime() !== effectiveAt?.getTime()
-            || (dto.supplierId ? previous.supplierId !== dto.supplierId : previous.supplier.trim().toLocaleLowerCase() !== dto.supplier?.trim().toLocaleLowerCase())
-            || JSON.stringify(previous.items.map(lineKey).sort()) !== JSON.stringify(this.retryItems(dto.items, previous.items).map(lineKey).sort())) {
-            throw new ConflictException('Ключ повторного запроса уже использован для другого прихода');
-          }
-          return previous.id;
+    const warehouse = await resolveWarehouse(tx, dto.warehouseId);
+    const cafeId = getCafeId();
+    if (!cafeId) throw new BadRequestException('Заведение не назначено');
+    if (dto.requestKey) {
+      await tx.$queryRaw`SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtext(${`purchase-request:${cafeId}:${dto.requestKey}`}))) AS request_lock`;
+      const previous = await tx.purchase.findUnique({ where: { cafeId_requestKey: { cafeId, requestKey: dto.requestKey } }, include: { items: true } });
+      if (previous) {
+        const lineKey = (item: { ingredientId: string; quantityBase: Prisma.Decimal; grossTotal: Prisma.Decimal }) => `${item.ingredientId}:${item.quantityBase}:${item.grossTotal}`;
+        if (previous.warehouseId !== (warehouse?.id ?? null) || !previous.discount.eq(discount)
+          || previous.effectiveAt?.getTime() !== effectiveAt?.getTime()
+          || (dto.supplierId ? previous.supplierId !== dto.supplierId : previous.supplier.trim().toLocaleLowerCase() !== (dto.supplier?.trim() || (allowMissingSupplier ? 'Без поставщика' : '')).toLocaleLowerCase())
+          || JSON.stringify(previous.items.map(lineKey).sort()) !== JSON.stringify(this.retryItems(dto.items, previous.items).map(lineKey).sort())) {
+          throw new ConflictException('Ключ повторного запроса уже использован для другого прихода');
         }
+        return previous.id;
       }
-      const items = this.discountItems(await this.normalizeItems(dto.items, tx), discount);
-      const total = items.reduce((acc, item) => acc.add(item.total), new Prisma.Decimal(0));
-      const supplier = await resolveWarehouseSupplier(tx, { ...dto, required: true });
-      if (dto.complete) await lockIngredients(tx, items.map((item) => item.ingredientId));
-      const purchase = await tx.purchase.create({
-        data: {
-          date: dto.date ? new Date(dto.date) : new Date(),
-          effectiveAt,
-          supplier: supplier.supplier!, supplierId: supplier.supplierId, requestKey: dto.requestKey, note: dto.note?.trim() || null, attachments: dto.attachments ?? [], discount,
-          warehouseId: warehouse?.id ?? null,
-          totalAmount: new Prisma.Decimal(total),
-          items: { create: items.map((item) => this.itemCreateData(item)) },
-        },
-        include: { items: true },
-      });
-      if (dto.complete) await this.completePurchase(tx, purchase, actor);
-      return purchase.id;
-    }, postingTransaction);
-    return this.findOne(purchaseId);
+    }
+    const items = this.discountItems(await this.normalizeItems(dto.items, tx), discount);
+    const total = items.reduce((acc, item) => acc.add(item.total), new Prisma.Decimal(0));
+    const supplier = await resolveWarehouseSupplier(tx, { ...dto, required: !allowMissingSupplier });
+    if (dto.complete) await lockIngredients(tx, items.map((item) => item.ingredientId));
+    const purchase = await tx.purchase.create({
+      data: {
+        date: dto.date ? new Date(dto.date) : new Date(),
+        effectiveAt,
+        supplier: supplier.supplier ?? 'Без поставщика', supplierId: supplier.supplierId, requestKey: dto.requestKey, note: dto.note?.trim() || null, attachments: dto.attachments ?? [], discount,
+        warehouseId: warehouse?.id ?? null,
+        totalAmount: new Prisma.Decimal(total),
+        items: { create: items.map((item) => this.itemCreateData(item)) },
+      },
+      include: { items: true },
+    });
+    if (dto.complete) await this.completePurchase(tx, purchase, actor);
+    return purchase.id;
   }
 
   /** A retry is interpreted using the original unit snapshot, even after a
@@ -492,7 +495,7 @@ export class PurchasesService {
     await tx.$queryRaw`SELECT id FROM purchases WHERE id = ${id}${tenant} FOR UPDATE`;
   }
 
-  private async completePurchase(tx: Prisma.TransactionClient, purchase: Prisma.PurchaseGetPayload<{ include: { items: true } }>, actor?: AuthUser) {
+  private async completePurchase(tx: Prisma.TransactionClient, purchase: Prisma.PurchaseGetPayload<{ include: { items: true } }>, actor?: Pick<AuthUser, 'id' | 'name' | 'role'>) {
     if (purchase.status === PurchaseStatus.completed) throw new ConflictException('Закупка уже проведена');
     if (purchase.status === PurchaseStatus.cancelled) throw new BadRequestException('Отменённую закупку нельзя провести');
     if (!purchase.items.length) throw new BadRequestException('В закупке нет позиций');

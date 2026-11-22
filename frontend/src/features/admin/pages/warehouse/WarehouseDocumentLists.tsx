@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
+import { exportCsv } from '@/lib/report-output';
 import {
   qty,
   useProductionJournal,
@@ -19,7 +20,7 @@ import { warehouseDay } from './warehouse-period';
 import { WarehouseMultiFilter, warehouseMultiFilterValues } from './WarehouseMultiFilter';
 
 export function DocumentList({
-  kind, warehouseId, filters, locations, onOpen, onCreate,
+  kind, warehouseId, filters, locations, onOpen, onCreate, onCopy,
 }: {
   kind: StockDocumentKind;
   warehouseId?: string;
@@ -27,34 +28,45 @@ export function DocumentList({
   filters?: ReactNode;
   onOpen: (id: string) => void;
   onCreate: () => void;
+  onCopy?: (id: string) => void;
 }) {
   const [conditions, updateConditions] = usePageFilters({
-    [kind + 'Search']: '', [kind + 'Status']: '', [kind + 'Reason']: '', [kind + 'Category']: '',
+    [kind + 'Search']: '', [kind + 'Status']: '', [kind + 'Reason']: '', [kind + 'Category']: '', [kind + 'Employee']: '',
+    transferWarehouses: '',
     [kind + 'Page']: '1', [kind + 'Sort']: 'desc', warehouse: '',
     [kind + 'Period']: kind === 'transfer' ? 'month' : 'all', [kind + 'From']: '', [kind + 'To']: '',
   });
   const search = conditions[kind + 'Search'];
   const status = conditions[kind + 'Status'];
   const reason = conditions[kind + 'Reason'];
+  const employeeFilter = conditions[kind + 'Employee'];
+  const transfer = kind === 'transfer';
+  const warehouseSelection = conditions.transferWarehouses || (transfer ? warehouseId ?? '' : '');
+  const selectedWarehouses = transfer ? warehouseMultiFilterValues(warehouseSelection) : [];
   const categories = kind === 'writeoff' ? warehouseMultiFilterValues(conditions[kind + 'Category']) : [];
   const ascending = conditions[kind + 'Sort'] === 'asc';
-  const changeFilter = (name: 'Search' | 'Status' | 'Reason', value: string) => updateConditions({ [kind + name]: value, [kind + 'Page']: '1' });
+  const changeFilter = (name: 'Search' | 'Status' | 'Reason' | 'Employee', value: string) => updateConditions({ [kind + name]: value, [kind + 'Page']: '1' });
   const period = useListPeriod(kind, kind === 'transfer' ? 'month' : 'all');
-  const query = useStockDocuments(warehouseId, kind, search);
+  const query = useStockDocuments(transfer ? undefined : warehouseId, kind, search);
   const categoryOptions = [...new Set([...categories, ...(query.data ?? []).flatMap((document) => document.categories ?? [])])]
     .sort((a, b) => a.localeCompare(b, 'ru'));
   const { can } = usePermissions();
   const costs = can('actions.warehouseCosts');
   const canCreate = can(`actions.${kind === 'inventory' ? 'warehouseCount' : kind === 'writeoff' ? 'warehouseWriteoff' : 'warehouseTransfer'}`);
   const inventory = kind === 'inventory';
-  const transfer = kind === 'transfer';
   const statuses: StockDocumentDisplayStatus[] = inventory
     ? ['draft', 'submitted', 'posted', 'reopened', 'reversed'] : ['draft', 'submitted', 'posted', 'reversed'];
   const operationDate = (document: StockDocument) => document.countedAt ?? document.effectiveAt ?? document.postedAt ?? document.createdAt;
+  const documentEmployee = (document: StockDocument) => document.postedByName ?? document.createdByName;
+  const employees = transfer ? [...new Set((query.data ?? []).map(documentEmployee).filter((name): name is string => !!name))]
+    .sort((a, b) => a.localeCompare(b, 'ru')) : [];
   const names = new Map(locations.map((location) => [location.id, location.name]));
   const rows = (query.data ?? []).filter((document) =>
     (!status || documentDisplayStatus(document) === status) &&
     (!reason || document.reason === reason) &&
+    (!transfer || !employeeFilter || documentEmployee(document) === employeeFilter) &&
+    (!selectedWarehouses.length || selectedWarehouses.includes(document.warehouseId) ||
+      selectedWarehouses.includes(document.destinationWarehouseId ?? '')) &&
     (!categories.length || document.categories?.some((category) => categories.includes(category))) &&
     period.includes(operationDate(document)),
   ).sort((a, b) => (new Date(operationDate(a)).getTime() - new Date(operationDate(b)).getTime()) * (ascending ? 1 : -1));
@@ -67,14 +79,14 @@ export function DocumentList({
     : transfer
       ? ['Дата', 'Наименование', ...(costs ? ['Сумма'] : []), 'Сотрудник', 'Склады', '']
       : ['Дата', 'Склад', 'Товары', ...(costs ? ['Сумма'] : []), 'Сотрудник', 'Причина', ''];
-  const filtered = !!(search || status || reason || categories.length || period.active || warehouseId);
+  const filtered = !!(search || status || reason || employeeFilter || categories.length || period.active || warehouseId || selectedWarehouses.length);
   const resetFilters = () => updateConditions({ [kind + 'Search']: '', [kind + 'Status']: '', [kind + 'Reason']: '',
-    [kind + 'Page']: '1', [kind + 'Period']: 'all', [kind + 'From']: '', [kind + 'To']: '', [kind + 'Category']: '', warehouse: '' });
+    [kind + 'Page']: '1', [kind + 'Period']: 'all', [kind + 'From']: '', [kind + 'To']: '', [kind + 'Category']: '', [kind + 'Employee']: '', warehouse: '', transferWarehouses: '' });
   const products = (document: StockDocument) => document.productNames?.length
     ? document.productNames.join(', ') + (document.itemsCount > document.productNames.length ? '…' : '')
     : document.itemsCount ? document.itemsCount + ' позиций' : 'Без продуктов';
   const writeoffReason = (document: StockDocument) => WRITEOFF_REASONS.find((item) => item.value === document.reason)?.label ?? '—';
-  const employee = (document: StockDocument) => document.postedByName ?? document.createdByName ?? '—';
+  const employee = (document: StockDocument) => documentEmployee(document) ?? '—';
   const warehouses = (document: StockDocument) =>
     (names.get(document.warehouseId) ?? 'Склад') + (document.destinationWarehouseId ? ' → ' + (names.get(document.destinationWarehouseId) ?? 'Склад') : '');
   const amount = (document: StockDocument) => document.varianceValue == null
@@ -85,6 +97,11 @@ export function DocumentList({
     : <span className="text-text-muted">—</span>;
   const dateColumn = inventory ? 1 : 0;
   const countTime = (document: StockDocument) => document.countedAt ?? document.postedAt;
+  function exportTransfers() {
+    exportCsv('Перемещения', columns.filter(Boolean), rows.map((document) => [
+      formatDocumentDate(operationDate(document)), products(document), ...(costs ? [amount(document)] : []), employee(document), warehouses(document),
+    ]));
+  }
   const statusCell = (document: StockDocument) => {
     const state = documentDisplayStatus(document);
     return <span className="document-status" data-status={state}>{documentStatus(state)}</span>;
@@ -103,22 +120,31 @@ export function DocumentList({
         <WorkspaceSearch label="Поиск документов" placeholder={inventory ? 'Быстрый поиск' : 'Поиск...'} value={search} onChange={(value) => changeFilter('Search', value)} />
         {!inventory && period.filter}
         {filters}
-        {canCreate && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
+        {transfer && <WarehouseMultiFilter label="Склады" value={warehouseSelection}
+          options={locations.map(({ id, name }) => ({ value: id, label: name }))}
+          onChange={(value) => updateConditions({ transferWarehouses: value, warehouse: '', transferPage: '1' })} />}
         {kind === 'writeoff' && <WarehouseMultiFilter label="Категории" value={conditions[kind + 'Category']}
           options={categoryOptions.map((category) => ({ value: category, label: category }))}
           onChange={(value) => updateConditions({ [kind + 'Category']: value, [kind + 'Page']: '1' })} />}
         {kind === 'writeoff' && <Select ariaLabel="Причина списания" value={reason} onChange={(value) => changeFilter('Reason', value)}
           options={[{ value: '', label: 'Причина' }, ...WRITEOFF_REASONS]} />}
         <details className="poster-list-filter">
-          <summary>+ Фильтр{status ? ' · 1' : ''}</summary>
+          <summary>+ Фильтр{status || employeeFilter ? ' · ' + (Number(!!status) + Number(!!employeeFilter)) : ''}</summary>
           <div className="poster-list-filter-content">
             <Select ariaLabel="Статус документа" value={status} onChange={(value) => changeFilter('Status', value)} className="w-48"
               options={[{ value: '', label: 'Все статусы' }, ...statuses.map((value) => ({
                 value, label: documentStatus(value),
               }))]} />
+            {transfer && <Select ariaLabel="Сотрудник" value={employeeFilter} className="mt-2 w-48"
+              onChange={(value) => changeFilter('Employee', value)} options={[
+                { value: '', label: 'Все сотрудники' }, ...employees.map((name) => ({ value: name, label: name })),
+              ]} />}
           </div>
         </details>
         {filtered && <button type="button" className="text-sm text-text-muted" onClick={resetFilters}>Сбросить всё</button>}
+        {transfer && can('actions.exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!rows.length}
+          onClick={exportTransfers}>Экспорт CSV</button>}
+        {canCreate && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
       </div>
       <QueryState pending={query.isPending} error={query.error}>
         <div className="hidden overflow-x-auto md:block">
@@ -131,7 +157,7 @@ export function DocumentList({
                 {costs && <col style={{ width: '10%' }} />}
                 <col style={{ width: transfer ? '16%' : '14%' }} />
                 <col />
-                <col style={{ width: 88 }} />
+                <col style={{ width: transfer && canCreate && onCopy ? 164 : 88 }} />
               </colgroup>
             )}
             <thead><tr>{columns.map((heading, index) => <th key={index} className={['Сумма', 'Результат'].includes(heading) ? 'text-right' : ''}
@@ -169,7 +195,10 @@ export function DocumentList({
                     </span>
                   </td>
                 </>}
-                <td><div className="poster-row-actions"><button onClick={() => onOpen(document.id)}>{document.status === 'draft' ? 'Ред.' : inventory ? 'Посмотреть' : 'Открыть'}</button></div></td>
+                <td><div className="poster-row-actions">
+                  <button type="button" onClick={() => onOpen(document.id)}>{document.status === 'draft' ? 'Ред.' : inventory ? 'Посмотреть' : 'Открыть'}</button>
+                  {transfer && canCreate && onCopy && <button type="button" onClick={() => onCopy(document.id)}>Копировать</button>}
+                </div></td>
               </tr>)}
             </tbody>
           </table>

@@ -1,14 +1,16 @@
 import { useState, type ReactNode } from 'react';
 import { EditorPage, useEditorDirty } from './EditorPage';
 import { DocumentProductPicker } from './DocumentProductPicker';
+import { ItemCard } from './ItemCard';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { formatDocumentListDate } from './WarehouseDocumentLists';
 import { usePageFilter } from './workspace-route';
 import { Select } from '@/components/Select';
-import { DateTimePicker } from '@/components/DatePicker';
+import { StockOperationDateField } from './StockOperationDateField';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
+import { exportCsv } from '@/lib/report-output';
 import { qty, useIngredients, type WarehouseLocation } from './api';
 import { ALL_UNITS, unitLabel, unitsForType, type UnitCode } from './units';
 import {
@@ -21,22 +23,31 @@ import {
 import { DocumentField, DocumentFooter, QueryState } from './WarehouseUi';
 import { useListPeriod } from './ListPeriodFilter';
 import { balanceMoney, balanceQuantity } from './balance-format';
-import { inventoryLocalTime, inventoryTimeDisplay, inventoryTimingValue } from './inventory-time';
+import { inventoryTimeDisplay, inventoryTimingFor, inventoryTimingValue } from './inventory-time';
+
+const processingColumns = ['Дата', 'Исходные продукты', 'Полученные продукты', 'Комментарий'];
+
+function productSummary(rows: ProcessingRow[]) {
+  return rows.map((row) => `${row.ingredientName ?? row.name ?? 'Продукт'} · ${qty(row.quantity, unitLabel(row.unit))}`).join(', ');
+}
 
 export function ProcessingPage({
   warehouseId,
   filters,
   onOpen,
   onCreate,
+  onCopy,
 }: {
   warehouseId?: string;
   filters?: ReactNode;
   onOpen: (id: string) => void;
   onCreate: () => void;
+  onCopy: (id: string) => void;
 }) {
   const [search, setSearch] = usePageFilter('processingSearch');
   const period = useListPeriod('processing', 'month');
   const { can } = usePermissions();
+  const canProduce = can('actions.warehouseProduce');
   const q = useProcessing({ warehouseId, search, from: period.range.dateFrom, to: period.range.dateTo });
   const documents = q.data ?? [];
   return (
@@ -45,23 +56,25 @@ export function ProcessingPage({
         <WorkspaceSearch label="Поиск переработок" value={search} onChange={setSearch} />
         {period.filter}
         {filters}
-        {can('actions.warehouseProduce') && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
+        {can('actions.exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!documents.length}
+          onClick={() => exportCsv('Переработки', processingColumns, documents.map((document) => [
+            inventoryTimeDisplay(document.date), productSummary(document.inputs), productSummary(document.outputs), document.note ?? '',
+          ]))}>Экспорт CSV</button>}
+        {canProduce && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
       </div>
       <QueryState pending={q.isPending} error={q.error}>
         <div className="overflow-x-auto">
           <table className="poster-table poster-register-table w-full min-w-[800px] text-left text-sm">
             <thead>
               <tr>
-                <th>Дата</th>
-                <th>Исходные продукты</th>
-                <th>Полученные продукты</th>
+                {processingColumns.map((column) => <th key={column} scope="col">{column}</th>)}
                 <th />
               </tr>
             </thead>
             <tbody>
               {!documents.length && (
                 <tr>
-                  <td colSpan={4}>
+                  <td colSpan={5}>
                     <div className="poster-list-empty">
                       <svg aria-hidden viewBox="0 0 40 40" fill="none">
                         <path d="M11 11h18l6 16v6H5v-6l6-16Z" stroke="currentColor" strokeWidth="2.5" />
@@ -95,27 +108,15 @@ export function ProcessingPage({
                       </div>
                     )}
                   </td>
-                  <td>
-                    {d.inputs
-                      .map(
-                        (r) =>
-                          `${r.ingredientName ?? r.name ?? 'Продукт'} · ${qty(r.quantity, unitLabel(r.unit))}`,
-                      )
-                      .join(', ')}
-                  </td>
-                  <td>
-                    {d.outputs
-                      .map(
-                        (r) =>
-                          `${r.ingredientName ?? r.name ?? 'Продукт'} · ${qty(r.quantity, unitLabel(r.unit))}`,
-                      )
-                      .join(', ')}
-                  </td>
+                  <td>{productSummary(d.inputs)}</td>
+                  <td>{productSummary(d.outputs)}</td>
+                  <td className="whitespace-pre-wrap">{d.note || '—'}</td>
                   <td>
                     <div className="poster-row-actions">
-                      <button onClick={() => onOpen(d.id)}>
+                      <button type="button" onClick={() => onOpen(d.id)}>
                         {d.status === 'draft' ? 'Ред.' : 'Открыть'}
                       </button>
+                      {canProduce && <button type="button" onClick={() => onCopy(d.id)}>Копировать</button>}
                     </div>
                   </td>
                 </tr>
@@ -129,16 +130,19 @@ export function ProcessingPage({
 }
 export function ProcessingModal({
   id,
+  copyFromId,
   warehouseId,
   locations,
   onClose,
 }: {
   id?: string;
+  copyFromId?: string;
   warehouseId: string;
   locations: WarehouseLocation[];
   onClose: () => void;
 }) {
-  const q = useProcessingDocument(id);
+  const sourceId = id ?? copyFromId;
+  const q = useProcessingDocument(sourceId);
   return (
     <EditorPage
       open
@@ -146,11 +150,12 @@ export function ProcessingModal({
       title={id ? 'Переработка' : 'Новая переработка'}
       panelClassName="max-w-6xl"
     >
-      <QueryState pending={!!id && q.isPending} error={q.error}>
-        {(!id || q.data) && (
+      <QueryState pending={!!sourceId && q.isPending} error={q.error}>
+        {(!sourceId || q.data) && (
           <ProcessingForm
-            key={id ?? 'new'}
-            document={q.data}
+            key={sourceId ?? 'new'}
+            document={id ? q.data : undefined}
+            copyFrom={copyFromId ? q.data : undefined}
             warehouseId={warehouseId}
             locations={locations}
             onClose={onClose}
@@ -161,18 +166,20 @@ export function ProcessingModal({
   );
 }
 type DraftRow = ProcessingRow & { key: string };
-function processingValues(date: string, note: string, inputs: ProcessingRow[], outputs: ProcessingRow[]) {
+function processingValues(effectiveAt: string | null | undefined, note: string, inputs: ProcessingRow[], outputs: ProcessingRow[]) {
   const lines = (rows: ProcessingRow[]) => rows.filter((row) => row.ingredientId || row.quantity)
     .map(({ ingredientId, warehouseId, quantity, unit, costSharePercent }) => ({ ingredientId, warehouseId, quantity, unit, costSharePercent }));
-  return JSON.stringify({ date, note: note.trim(), inputs: lines(inputs), outputs: lines(outputs) });
+  return JSON.stringify({ effectiveAt, note: note.trim(), inputs: lines(inputs), outputs: lines(outputs) });
 }
 function ProcessingForm({
   document,
+  copyFrom,
   warehouseId,
   locations,
   onClose,
 }: {
   document?: ProcessingDocument;
+  copyFrom?: ProcessingDocument;
   warehouseId: string;
   locations: WarehouseLocation[];
   onClose: () => void;
@@ -181,10 +188,11 @@ function ProcessingForm({
   const mutations = useProcessingMutations();
   const push = useNotifications((state) => state.push);
   const { can } = usePermissions();
+  const canSeeCosts = can('actions.warehouseCosts');
   const [requestKey] = useState(() => crypto.randomUUID());
-  const [date, setDate] = useState(inventoryLocalTime(document?.date));
+  const [timing, setTiming] = useState(() => inventoryTimingFor(document?.effectiveAt));
   const [dateValid, setDateValid] = useState(true);
-  const [note, setNote] = useState(document?.note ?? '');
+  const [note, setNote] = useState(document?.note ?? copyFrom?.note ?? '');
   const emptyRow = (output: boolean): DraftRow => ({
     key: crypto.randomUUID(),
     ingredientId: '',
@@ -193,20 +201,21 @@ function ProcessingForm({
     unit: 'kg',
     ...(output ? { costSharePercent: 100 } : {}),
   });
-  const [inputs, setInputs] = useState<DraftRow[]>(() =>
-    document?.inputs.length
-      ? document.inputs.map((r) => ({ ...r, key: crypto.randomUUID() }))
-      : [emptyRow(false)],
-  );
-  const [outputs, setOutputs] = useState<DraftRow[]>(() =>
-    document?.outputs.length
-      ? document.outputs.map((r) => ({ ...r, key: crypto.randomUUID() }))
-      : [emptyRow(true)],
-  );
+  const initialRows = (output: boolean): DraftRow[] => {
+    const source = document ?? copyFrom;
+    const rows = output ? source?.outputs : source?.inputs;
+    return rows?.length ? rows.map((row) => ({ ...row, key: crypto.randomUUID(),
+      ...(copyFrom ? { unitCost: undefined, lineCost: undefined } : {}),
+    })) : [emptyRow(output)];
+  };
+  const [inputs, setInputs] = useState(() => initialRows(false));
+  const [outputs, setOutputs] = useState(() => initialRows(true));
+  const [newIngredient, setNewIngredient] = useState<{ rowKey: string; output: boolean; name: string }>();
   const [error, setError] = useState('');
-  const [rowsChanged, setRowsChanged] = useState(false);
+  const [rowsChanged, setRowsChanged] = useState(!!copyFrom);
   const editable = (!document || document.status === 'draft') && can('actions.warehouseProduce');
-  const signature = processingValues(date, note, inputs, outputs);
+  const effectiveAt = inventoryTimingValue(timing, document?.effectiveAt);
+  const signature = processingValues(effectiveAt, note, inputs, outputs);
   const [savedValues, setSavedValues] = useState(signature);
   const { markSaved } = useEditorDirty(editable && (!dateValid || signature !== savedValues));
   const busy = mutations.save.isPending || mutations.reverse.isPending;
@@ -215,13 +224,8 @@ function ProcessingForm({
   const allocatedPercent = enteredOutputs.reduce((sum, row) => sum + Math.round((row.costSharePercent ?? 0) * 10000), 0) / 10000;
   async function save(complete: boolean) {
     if (busy || !editable || !dateValid) return;
-    const documentDate = inventoryTimingValue({ mode: 'past', local: date }, document?.date);
-    if (!documentDate) {
+    if (effectiveAt === undefined) {
       setError('Укажите дату и время переработки.');
-      return;
-    }
-    if (complete && Date.parse(documentDate) > Date.now()) {
-      setError('Дата и время переработки не могут быть в будущем. Сохраните черновик или измените дату.');
       return;
     }
     for (const [label, rows] of [['Исходные продукты', inputs], ['Полученные продукты', outputs]] as const) {
@@ -257,7 +261,7 @@ function ProcessingForm({
         revision: document?.revision,
         requestKey,
         complete,
-        date: documentDate,
+        effectiveAt,
         note,
         inputs: enteredInputs.map(({ ingredientId, warehouseId, quantity, unit }) => ({
           ingredientId,
@@ -297,6 +301,18 @@ function ProcessingForm({
     } catch (e) {
       setError(apiError(e));
     }
+  }
+  function exportDocument(saved: ProcessingDocument) {
+    const values = (lines: ProcessingRow[], group: string) => lines.map((line) => [
+      group, line.ingredientName ?? line.name ?? '', line.warehouseName ?? locations.find(({ id }) => id === line.warehouseId)?.name ?? '',
+      qty(line.quantity, unitLabel(line.unit)), `${line.costSharePercent ?? 0}%`,
+      ...(canSeeCosts ? [line.unitCost == null ? '—' : balanceMoney(line.unitCost), line.lineCost == null ? '—' : balanceMoney(line.lineCost)] : []),
+    ]);
+    exportCsv('Акт переработки', ['Дата', 'Комментарий', 'Операция', 'Продукт', 'Склад', 'Количество', 'Доля себестоимости',
+      ...(canSeeCosts ? ['Себестоимость за единицу', 'Итого'] : []),
+    ], [...values(saved.inputs, 'Исходные продукты'), ...values(saved.outputs, 'Полученные продукты')].map((row) => [
+      inventoryTimeDisplay(saved.date), saved.note ?? '', ...row,
+    ]));
   }
   const renderRows = (rows: DraftRow[], setRows: (rows: DraftRow[]) => void, output: boolean) => (
     <section className="poster-document-panel poster-document-products space-y-3">
@@ -341,6 +357,7 @@ function ProcessingForm({
                           (item) => item.preparationMode !== 'virtual',
                         )}
                         fallbackName={r.ingredientName ?? r.name}
+                        onCreate={can('actions.warehouseReceive') ? (name) => setNewIngredient({ rowKey: r.key, output, name }) : undefined}
                         onChange={(id) => {
                           const selected = ingredients.data?.find((item) => item.id === id);
                           change({
@@ -371,7 +388,7 @@ function ProcessingForm({
                         options={locations.map((item) => ({ value: item.id, label: item.name }))}
                       />
                     ) : (
-                      <span>{locations.find((entry) => entry.id === r.warehouseId)?.name ?? '—'}</span>
+                      <span>{locations.find((entry) => entry.id === r.warehouseId)?.name ?? r.warehouseName ?? '—'}</span>
                     )}
                   </td>
                   <td className="px-2 py-2">
@@ -490,16 +507,10 @@ function ProcessingForm({
   return (
     <div className="poster-form poster-form--document poster-document--modern space-y-7">
       <div className="poster-document-panel poster-document-fields space-y-3">
-        <DocumentField label="Дата документа">
-          {editable ? (
-            <div className="w-[250px] max-w-full">
-              <DateTimePicker className="input h-9" value={date} onChange={setDate} onValidityChange={setDateValid} required disabled={busy} />
-              <p className="mt-1 text-xs text-text-muted">Время Бишкека</p>
-            </div>
-          ) : (
-            <span className="poster-readonly">{inventoryTimeDisplay(document?.date ?? inventoryTimingValue({ mode: 'past', local: date })!)}</span>
-          )}
-        </DocumentField>
+        {editable ? <StockOperationDateField label="Дата и время переработки" value={timing} onChange={setTiming}
+          onValidityChange={setDateValid} disabled={busy} /> : document && <DocumentField label="Дата и время переработки">
+            <span className="poster-readonly">{inventoryTimeDisplay(document.date)}</span>
+          </DocumentField>}
         <DocumentField label="Комментарий">
           {editable ? (
             <textarea
@@ -517,7 +528,7 @@ function ProcessingForm({
           <span className="poster-readonly"><span className="document-status" data-status={document.status}>{status(document.status)}</span></span>
         </DocumentField>}
         {document?.postedAt && <DocumentField label="Проведено">
-          <span className="poster-readonly">{inventoryTimeDisplay(document.postedAt)} · время изменения остатков</span>
+          <span className="poster-readonly">{inventoryTimeDisplay(document.postedAt)}</span>
         </DocumentField>}
         {document?.status === 'reversed' && document.reversedAt && <DocumentField label="Проведение отменено">
           <span className="poster-readonly">{inventoryTimeDisplay(document.reversedAt)}</span>
@@ -528,12 +539,22 @@ function ProcessingForm({
       </div>
       {renderRows(inputs, (rows) => { setInputs(rows); setRowsChanged(true); }, false)}
       {renderRows(outputs, (rows) => { setOutputs(rows); setRowsChanged(true); }, true)}
+      {newIngredient && <ItemCard compact defaultKind="raw" initialName={newIngredient.name}
+        onClose={() => setNewIngredient(undefined)}
+        onSaved={(item) => {
+          const setRows = newIngredient.output ? setOutputs : setInputs;
+          setRows((rows) => rows.map((row) => row.key === newIngredient.rowKey ? {
+            ...row, ingredientId: item.id, ingredientName: item.name, unit: item.displayUnit,
+            unitCost: undefined, lineCost: undefined,
+          } : row));
+          setRowsChanged(true);
+        }} />}
       {editable && (
         <p className="text-xs text-text-muted">
-          Стоимость исходных продуктов определяется по выбранным складам при проведении. Распределите её между
+          Стоимость исходных продуктов определяется по остаткам на дату переработки. Распределите её между
           полученными продуктами. Сейчас распределено: {allocatedPercent.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}%.
           {' '}«Сохранить» проведёт переработку и изменит остатки. Черновик сохраняет данные без изменения остатков.
-          {' '}Дата документа нужна для поиска; складские движения и себестоимость фиксируются на момент проведения.
+          {' '}Если указали прошедшую дату, система пересчитает связанные складские движения.
         </p>
       )}
       {(error || ingredients.isError) && (
@@ -553,6 +574,8 @@ function ProcessingForm({
             : undefined
         }
       >
+        {document && !editable && can('actions.exportReports') && <button type="button" className="btn-secondary btn-md"
+          onClick={() => exportDocument(document)}>Экспорт акта</button>}
         {editable ? (
           <>
             <button className="btn-primary btn-md" disabled={busy || !dateValid} onClick={() => void save(true)}>

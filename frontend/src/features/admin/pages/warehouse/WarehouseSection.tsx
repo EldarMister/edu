@@ -166,17 +166,19 @@ export function WarehouseSection({
                       warehouseId={scopedWarehouse}
                       onOpen={(id) => setActive({ type: 'processing', id })}
                       onCreate={() => setActive({ type: 'processing' })}
+                      onCopy={(id) => setActive({ type: 'processing', id, action: 'copy' })}
                     />
                   )}
                   {['transfers', 'writeoffs', 'inventory'].includes(view) && (
                     <DocumentList
-                      filters={warehouseFilter}
+                      filters={view === 'transfers' ? undefined : warehouseFilter}
                       kind={
                         view === 'transfers' ? 'transfer' : view === 'writeoffs' ? 'writeoff' : 'inventory'
                       }
                       warehouseId={scopedWarehouse}
                       locations={locations}
                       onOpen={(id) => setActive({ type: 'document', id })}
+                      onCopy={view === 'transfers' ? (id) => setActive({ type: 'start', action: 'transfer', id }) : undefined}
                       onCreate={() =>
                         setActive({
                           type: 'start',
@@ -283,7 +285,8 @@ export function WarehouseSection({
             )}
             {active?.type === 'processing' && (
               <ProcessingModal
-                id={active.id}
+                id={active.action === 'copy' ? undefined : active.id}
+                copyFromId={active.action === 'copy' ? active.id : undefined}
                 warehouseId={warehouse.id}
                 locations={locations}
                 onClose={close}

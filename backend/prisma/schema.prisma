@@ -1725,6 +1725,7 @@ model ProcessingDocument {
   id String @id @default(uuid())
   cafeId String @map("cafe_id")
   date DateTime @default(now())
+  effectiveAt DateTime? @map("effective_at")
   note String?
   requestKey String? @map("request_key")
   status String @default("draft")

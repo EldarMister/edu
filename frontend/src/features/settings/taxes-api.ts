@@ -9,12 +9,15 @@ export const TAX_TYPE_LABELS: Record<MenuTaxType, string> = {
 export const TAX_REPORT_LABELS = {
   fiscal: 'Продажи с фискальным чеком',
   nonFiscal: 'Продажи без фискального чека',
-  reversal: 'Возвраты в EDU POS',
+  reversal: 'Все возвраты',
+  fiscalReversal: 'Возвраты с чеком ККМ',
+  nonFiscalReversal: 'Возвраты без чека ККМ',
 } as const;
 export type TaxReportKind = keyof typeof TAX_REPORT_LABELS;
 export type TaxReportRow = Omit<MenuTax, 'id'> & {
   taxId: string;
   kind: TaxReportKind;
+  operation?: Exclude<TaxReportKind, 'reversal'>;
   salesAmount: string;
   amount: string;
 };

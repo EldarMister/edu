@@ -49,7 +49,24 @@ export class IngredientMetadataDto {
   preparationMode?: 'stocked' | 'virtual';
 }
 
+class IngredientOpeningSupplyDto {
+  @IsString() @IsNotEmpty() @MaxLength(160)
+  warehouseId: string;
+
+  @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001)
+  quantity: number;
+
+  @IsNumber() @Min(0)
+  unitPrice: number;
+
+  @IsString() @IsNotEmpty() @MaxLength(80)
+  requestKey: string;
+}
+
 export class CreateIngredientDto extends IngredientMetadataDto {
+  @IsOptional() @IsObject() @ValidateNested() @Type(() => IngredientOpeningSupplyDto)
+  initialSupply?: IngredientOpeningSupplyDto;
+
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
   warehouseId?: string;
 

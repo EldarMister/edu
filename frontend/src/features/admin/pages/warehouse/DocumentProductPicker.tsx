@@ -20,6 +20,7 @@ export function DocumentProductPicker({
   placeholder,
   autoFocus = false,
   onSelected,
+  onCreate,
   id,
 }: {
   value: string;
@@ -37,6 +38,7 @@ export function DocumentProductPicker({
   placeholder?: string;
   autoFocus?: boolean;
   onSelected?: () => void;
+  onCreate?: (name: string) => void;
   id?: string;
 }) {
   const listId = useId();
@@ -54,7 +56,9 @@ export function DocumentProductPicker({
   const matches = unavailable ? [] : options.filter((option) =>
     `${option.name} ${option.group ?? ''} ${option.detail ?? ''}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
   );
-  const activeIndex = Math.min(active, Math.max(0, matches.length - 1));
+  const canCreate = !unavailable && !!onCreate;
+  const optionCount = matches.length + Number(canCreate);
+  const activeIndex = Math.min(active, Math.max(0, optionCount - 1));
 
   useEffect(() => {
     setText(selectedName);
@@ -134,6 +138,11 @@ export function DocumentProductPicker({
     setText(selectedName);
   }
 
+  function create() {
+    close();
+    onCreate?.(search.trim());
+  }
+
   return (
     <div ref={field} className="relative min-w-0">
       <div className="relative">
@@ -144,7 +153,7 @@ export function DocumentProductPicker({
         aria-autocomplete="list"
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
-        aria-activedescendant={open && matches.length ? `${listId}-${activeIndex}` : undefined}
+        aria-activedescendant={open && optionCount ? `${listId}-${activeIndex}` : undefined}
         aria-busy={loading || undefined}
         aria-invalid={!!error || undefined}
         aria-describedby={error ? `${listId}-error` : undefined}
@@ -182,11 +191,12 @@ export function DocumentProductPicker({
             if (!open) show();
             else
               setActive((current) =>
-                Math.max(0, Math.min(matches.length - 1, current + (event.key === 'ArrowDown' ? 1 : -1))),
+                Math.max(0, Math.min(optionCount - 1, current + (event.key === 'ArrowDown' ? 1 : -1))),
               );
           } else if (event.key === 'Enter') {
             event.preventDefault();
             if (open && matches[activeIndex]) choose(matches[activeIndex]);
+            else if (open && canCreate) create();
             else show();
           } else if (event.key === 'Escape' && open) {
             event.preventDefault();
@@ -250,6 +260,14 @@ export function DocumentProductPicker({
               ))
             ) : (
               <p role="status" className="px-3 py-3 text-text-muted">{allowCustomValue ? search.trim() ? 'Это название сохранится в документе.' : 'Выберите из списка или введите название.' : search.trim() ? 'Продукты не найдены. Попробуйте другое название.' : 'Нет доступных продуктов'}</p>
+            )}
+            {canCreate && (
+              <button id={`${listId}-${matches.length}`} data-index={matches.length}
+                type="button" role="option" aria-selected={false} tabIndex={-1}
+                className={`min-h-9 w-full border-t border-border px-3 py-2 text-left text-primary ${activeIndex === matches.length ? 'bg-primary/10' : 'hover:bg-background'}`}
+                onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setActive(matches.length)} onClick={create}>
+                + Добавить ингредиент
+              </button>
             )}
           </div>,
           document.body,

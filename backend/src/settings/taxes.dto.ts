@@ -18,11 +18,13 @@ export class TaxListQuery {
 
 export const TAX_REPORT_KINDS = ['fiscal', 'nonFiscal', 'reversal'] as const;
 export type TaxReportKind = typeof TAX_REPORT_KINDS[number];
+const TAX_REPORT_OPERATIONS = ['fiscal', 'nonFiscal', 'fiscalReversal', 'nonFiscalReversal'] as const;
+export type TaxReportOperation = typeof TAX_REPORT_OPERATIONS[number];
 
 export class TaxReportQuery {
   @IsOptional() @IsString() @MaxLength(10) from?: string;
   @IsOptional() @IsString() @MaxLength(10) to?: string;
-  @IsOptional() @IsIn(TAX_REPORT_KINDS) kind?: TaxReportKind;
+  @IsOptional() @IsIn([...TAX_REPORT_OPERATIONS, 'reversal']) kind?: TaxReportOperation | 'reversal';
   @IsOptional() @IsIn(['name', 'rate', 'salesAmount', 'amount']) sort?: 'name' | 'rate' | 'salesAmount' | 'amount';
   @IsOptional() @IsIn(['asc', 'desc']) direction?: 'asc' | 'desc';
 }

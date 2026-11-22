@@ -19,7 +19,7 @@ test('PostgreSQL: shared packages and multi-output processing preserve quantitie
   const foreign = await db.cafe.create({ data: { name: 'Isolated ' + randomUUID() } });
   try {
     await runWithTenant({ cafeId: cafe.id }, async () => {
-      const actor = { id: randomUUID(), name: 'Владелец', role: 'OWNER', cafeId: cafe.id };
+      const actor = await db.user.create({ data: { name: 'Владелец', role: 'OWNER', phone: randomUUID(), passwordHash: 'unused' } });
       const ingredients = new IngredientsService(db), purchases = new PurchasesService(db), packages = new WarehousePackagesService(db), processing = new ProcessingService(db);
       const locations = new WarehouseLocationsService(db, { emitBroadcast() {} });
       const main = (await locations.list(cafe.id)).locations.find(x => x.isDefault);
@@ -137,6 +137,48 @@ test('PostgreSQL: shared packages and multi-output processing preserve quantitie
         await assert.rejects(processing.create(actor, { ...dto, requestKey, date, complete: true }), /в будущем/);
         assert.equal(await db.processingDocument.count({ where: { requestKey } }), 0);
       });
+      await t.test('an explicitly dated processing uses the historical cost, persists the posting time and rolls back shortages', async () => {
+        const input = await ingredients.create({ name: 'Сырьё для исторической переработки', unit: 'pcs' });
+        const output = await ingredients.create({ name: 'Результат исторической переработки', unit: 'pcs' });
+        const now = Date.now();
+        const at = (minutes) => new Date(now - minutes * 60_000).toISOString();
+        const receive = (effectiveAt, purchasePrice) => purchases.create({ supplier: 'Историческая поставка',
+          complete: true, effectiveAt, items: [{ ingredientId: input.id, unit: 'pcs', quantity: 10, purchasePrice }],
+        });
+        await receive(at(12), 50);
+        await receive(at(8), 150);
+        const data = {
+          requestKey: randomUUID(), complete: true,
+          inputs: [{ ingredientId: input.id, warehouseId: main.id, quantity: 4, unit: 'pcs' }],
+          outputs: [{ ingredientId: output.id, warehouseId: bar.id, quantity: 2, unit: 'pcs' }],
+        };
+        const saved = await processing.create(actor, { ...data, effectiveAt: at(10) });
+        assert.equal(saved.effectiveAt.toISOString(), at(10));
+        assert.equal(saved.date.toISOString(), at(10));
+        assert.ok(saved.postedAt > saved.effectiveAt);
+        assert.equal(saved.totalCost, 200);
+        assert.equal(saved.outputs[0].unitCost, 100);
+        assert.deepEqual([(await stock(input.id)).stock, (await stock(input.id)).avgCost], [16, 112.5]);
+        const moves = await db.stockMovement.findMany({ where: { sourceId: saved.id } });
+        assert.equal(moves.length, 2);
+        assert.ok(moves.every((move) => move.createdAt.toISOString() === at(10) && +move.recordedAt === +saved.postedAt));
+        assert.equal((await processing.create(actor, { ...data, effectiveAt: at(10) })).id, saved.id);
+        await assert.rejects(processing.create(actor, { ...data, effectiveAt: at(9) }), /уже использован/);
+        const failedKey = randomUUID();
+        await assert.rejects(processing.create(actor, { ...data, requestKey: failedKey, effectiveAt: at(14) }), /недостаточно/);
+        assert.equal(await db.processingDocument.count({ where: { requestKey: failedKey } }), 0);
+        assert.deepEqual([(await stock(input.id)).stock, (await stock(output.id, bar.id)).stock], [16, 2]);
+        const reversed = await processing.reverse(actor, saved.id, { revision: saved.revision, note: 'Проверка исторического сторно' });
+        assert.equal(reversed.status, 'reversed');
+        assert.deepEqual([(await stock(input.id)).stock, (await stock(input.id)).avgCost, (await stock(output.id, bar.id)).stock], [20, 100, 0]);
+        const documents = new WarehouseDocumentsService(db);
+        await documents.create(actor, { kind: 'inventory', mode: 'partial', warehouseId: main.id,
+          items: [{ ingredientId: input.id, quantity: 20 }], finalize: 'post' });
+        const lockedDraft = await processing.create(actor, { ...data, requestKey: randomUUID(), complete: false, effectiveAt: at(7) });
+        await assert.rejects(processing.post(actor, lockedDraft.id, lockedDraft.revision), /проведена инвентаризация/);
+        assert.deepEqual(await processing.findOne(lockedDraft.id), lockedDraft);
+        assert.equal(await db.stockMovement.count({ where: { sourceId: lockedDraft.id } }), 0);
+      });
       await t.test('immutable movement quantities and adjusted values reconcile to every warehouse balance', async () => {
         for (const id of [flour.id, water.id, bread.id, crumbs.id]) for (const location of [main, bar]) {
           const row = await stock(id, location.id);
@@ -182,11 +224,13 @@ test('PostgreSQL: shared packages and multi-output processing preserve quantitie
       });
     });
   } finally {
+    await db.auditLog.deleteMany({ where: { cafeId: cafe.id } });
     await db.warehouseDocument.deleteMany({ where: { cafeId: cafe.id } });
     await db.processingDocument.deleteMany({ where: { cafeId: cafe.id } });
     await db.stockMovement.deleteMany({ where: { cafeId: cafe.id } });
     await db.purchase.deleteMany({ where: { cafeId: cafe.id } });
     await db.ingredient.deleteMany({ where: { cafeId: cafe.id } });
+    await db.user.deleteMany({ where: { cafeId: cafe.id } });
     await db.cafe.deleteMany({ where: { id: { in: [cafe.id, foreign.id] } } });
     await db.$disconnect();
   }

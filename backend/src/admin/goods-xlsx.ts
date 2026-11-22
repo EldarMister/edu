@@ -30,6 +30,7 @@ export class GoodsExportQuery {
   @IsOptional() @IsIn(['visible', 'hidden']) availability?: 'visible' | 'hidden';
   @IsOptional() @IsString() @MaxLength(80) tax?: string;
   @IsOptional() @IsIn(['asc', 'desc']) sort?: 'asc' | 'desc';
+  @IsOptional() @IsIn(['asc', 'desc']) taxSort?: 'asc' | 'desc';
   @IsOptional() @Transform(repeated) @IsArray() @IsString({ each: true }) categories?: string[];
   @IsOptional() @Transform(repeated) @IsArray() @IsString({ each: true }) stations?: string[];
 }
@@ -49,6 +50,7 @@ export function writeGoodsWorkbook(goods: GoodsRow[], query: GoodsExportQuery, s
   const name = query.name?.trim().toLocaleLowerCase();
   const units = query.units ?? [];
   const taxId = (item: GoodsRow) => item.taxExempt ? null : item.taxId ?? item.category.taxId;
+  const taxName = (item: GoodsRow) => taxNames.get(taxId(item) ?? '') ?? '';
   const rows = goods.filter((item) => {
     const itemName = item.name.toLocaleLowerCase();
     return (!search || itemName.includes(search)) && (!name || itemName.includes(name))
@@ -58,7 +60,10 @@ export function writeGoodsWorkbook(goods: GoodsRow[], query: GoodsExportQuery, s
       && (!query.tax || (taxId(item) ?? 'none') === query.tax)
       && (!query.weighted || item.isWeighted === (query.weighted === 'yes'))
       && (!query.availability || (item.isAvailable && item.isActive) === (query.availability === 'visible'));
-  }).sort((left, right) => left.name.localeCompare(right.name, 'ru') * (query.sort === 'desc' ? -1 : 1));
+  }).sort((left, right) => {
+    const byTax = query.taxSort ? taxName(left).localeCompare(taxName(right), 'ru') * (query.taxSort === 'desc' ? -1 : 1) : 0;
+    return byTax || left.name.localeCompare(right.name, 'ru') * (query.sort === 'desc' ? -1 : 1);
+  });
   const sheet = XLSX.utils.aoa_to_sheet([selected.map((key) => columns[key])]);
   sheet['!cols'] = selected.map((key) => ({ wch: key === 'name' ? 42 : 23 }));
   for (const [index, item] of rows.entries()) {
@@ -67,7 +72,7 @@ export function writeGoodsWorkbook(goods: GoodsRow[], query: GoodsExportQuery, s
       station: item.goodsStation === 'none' ? 'Без цеха' : stations.get(item.goodsStation) ?? item.goodsStation,
       unit: item.goodsUnits.join(', '), weighted: item.isWeighted ? 'Да' : 'Нет',
       availability: item.isAvailable && item.isActive ? 'Доступен в меню' : 'Скрыт',
-      tax: taxNames.get(taxId(item) ?? '') ?? '',
+      tax: taxName(item),
     };
     const r = index + 1;
     XLSX.utils.sheet_add_aoa(sheet, [selected.map((key) => values[key])], { origin: { r, c: 0 } });

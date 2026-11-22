@@ -312,6 +312,7 @@ export class FinanceService {
         positions: positions.filter((position) => resolvePositionPermissions(position).adminAccess).map(({ id, name }) => ({ id, name })),
         accounts: accounts.map((account) => ({
           ...account, openingBalance: Number(account.openingBalance),
+          hasCashShifts: shifts.has(account.id),
           balance: Number(account.openingBalance.add(byAccount.get(account.id) ?? zero)),
         })),
         payroll: payroll.map(({ payments, ...line }) => ({
@@ -345,10 +346,17 @@ export class FinanceService {
       await lockFinance(db, cafeId);
       const account = await findAccount(db, cafeId, id);
       const name = input.name == null ? account.name : title(input.name);
+      const type = input.type ?? account.type;
       await this.accountName(db, cafeId, name, id);
+      if (type !== account.type) {
+        const linkedShift = await db.cashShift.findFirst({ where: { cafeId, accountId: id }, select: { id: true } });
+        if (account.isDefault || account.isCollection || linkedShift) {
+          throw new ConflictException('Нельзя изменить тип счёта, связанного с оплатами, инкассацией или кассовыми сменами');
+        }
+      }
       if (input.isDefault && account.isCollection) throw new BadRequestException('Сейф для инкассаций нельзя использовать как счёт для оплат');
       if (input.isDefault === false && account.isDefault) throw new BadRequestException('Назначьте другой счёт этого типа основным');
-      if (input.isDefault && !account.isDefault) await this.clearDefault(db, cafeId, account.type);
+      if (input.isDefault && !account.isDefault) await this.clearDefault(db, cafeId, type);
       const openingBalance = input.openingBalance == null ? account.openingBalance : money(input.openingBalance);
       const openingDelta = openingBalance.sub(account.openingBalance);
       if (!openingDelta.isZero()) {
@@ -370,7 +378,7 @@ export class FinanceService {
         }
       }
       return db.financeAccount.update({ where: { cafeId, id }, data: {
-        name, isDefault: input.isDefault ?? account.isDefault, openingBalance,
+        name, type, isDefault: input.isDefault ?? account.isDefault, openingBalance,
       } });
     });
   }

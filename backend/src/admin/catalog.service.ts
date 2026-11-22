@@ -446,7 +446,8 @@ export class CatalogService {
     const [goods, stations, taxes] = await Promise.all([
       this.goodsAll(),
       cafeId ? this.prisma.preparationStation.findMany({ where: { cafeId }, select: { id: true, name: true, isActive: true } }) : [],
-      columns.includes('tax') ? this.prisma.menuTax.findMany({ where: { cafeId: cafeId ?? null }, select: { id: true, name: true, rate: true } }) : [],
+      columns.includes('tax') || query.taxSort
+        ? this.prisma.menuTax.findMany({ where: { cafeId: cafeId ?? null }, select: { id: true, name: true, rate: true } }) : [],
     ]);
     const names = new Map((cafeId ? stationCatalog(stations, cafeId) : BUILTIN_STATIONS).map((station) => [station.id, station.name]));
     return writeGoodsWorkbook(goods, query, columns, names,

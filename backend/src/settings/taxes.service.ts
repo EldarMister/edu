@@ -7,15 +7,17 @@ import { PrismaService } from '../prisma/prisma.service';
 import type { RefundTaxReversal } from '../orders/order-refund-plan';
 import { getCafeId } from '../tenant/tenant-context';
 import { warehouseDateRange } from '../warehouse/report-range';
-import { SaveTaxDto, TaxListQuery, type TaxReportKind, TaxReportQuery } from './taxes.dto';
+import { SaveTaxDto, TaxListQuery, type TaxReportKind, type TaxReportOperation, TaxReportQuery } from './taxes.dto';
 
 const typeLabels: Record<MenuTaxType, string> = { vat: 'Добавленная стоимость', turnover: 'С оборота' };
-const kindLabels: Record<TaxReportKind, string> = {
-  fiscal: 'Продажа с фискальным чеком', nonFiscal: 'Продажа без фискального чека', reversal: 'Возврат в EDU POS',
+const operationLabels: Record<TaxReportOperation, string> = {
+  fiscal: 'Продажа с фискальным чеком', nonFiscal: 'Продажа без фискального чека',
+  fiscalReversal: 'Возврат с чеком ККМ', nonFiscalReversal: 'Возврат без чека ККМ',
 };
 const columns = { name: 'Название', rate: 'Процент', type: 'Тип' } as const;
 type ReportRow = {
   taxId: string; name: string; rate: number; type: MenuTaxType; kind: TaxReportKind;
+  operation: TaxReportOperation;
   salesAmount: Prisma.Decimal; amount: Prisma.Decimal;
 };
 
@@ -88,40 +90,45 @@ export class TaxesService {
     const cafeId = getCafeId() ?? null;
     const where: Prisma.OrderTaxWhereInput = { cafeId };
     if (range) where.OR = [{ soldAt: range }, { reversedAt: range }];
+    const includesRefunds = query.kind !== 'fiscal' && query.kind !== 'nonFiscal';
     const [entries, refunds] = await Promise.all([
       this.prisma.orderTax.findMany({
         where, select: { taxId: true, name: true, rate: true, type: true, salesAmount: true, amount: true,
           fiscalizedAt: true, soldAt: true, reversedAt: true },
       }),
-      !query.kind || query.kind === 'reversal' ? this.prisma.orderRefund.findMany({
+      includesRefunds ? this.prisma.orderRefund.findMany({
         where: { cafeId, status: 'approved', decidedAt: range },
-        select: { taxReversals: true },
+        select: { taxReversals: true, fiscalRefundReference: true },
       }) : [],
     ]);
     const inRange = (date: Date | null) => date != null
       && (!range?.gte || date >= range.gte) && (!range?.lte || date <= range.lte);
     const grouped = new Map<string, ReportRow>();
-    function add(entry: Omit<ReportRow, 'kind' | 'rate'> & { rate: Prisma.Decimal }, kind: TaxReportKind, sign: 1 | -1) {
-      if (query.kind && query.kind !== kind) return;
+    function add(entry: Omit<ReportRow, 'kind' | 'operation' | 'rate'> & { rate: Prisma.Decimal }, operation: TaxReportOperation) {
+      const kind = operation === 'fiscal' || operation === 'nonFiscal' ? operation : 'reversal';
+      if (query.kind && query.kind !== kind && query.kind !== operation) return;
+      const sign = kind === 'reversal' ? -1 : 1;
       const rate = entry.rate.toNumber();
-      const key = JSON.stringify([entry.taxId, entry.name, rate, entry.type, kind]);
+      const key = JSON.stringify([entry.taxId, entry.name, rate, entry.type, operation]);
       const row = grouped.get(key);
       const salesAmount = entry.salesAmount.mul(sign);
       const amount = entry.amount.mul(sign);
       grouped.set(key, {
-        taxId: entry.taxId, name: entry.name, rate, type: entry.type, kind,
+        taxId: entry.taxId, name: entry.name, rate, type: entry.type, kind, operation,
         salesAmount: row ? row.salesAmount.add(salesAmount) : salesAmount,
         amount: row ? row.amount.add(amount) : amount,
       });
     }
     for (const entry of entries) {
-      if (inRange(entry.soldAt)) add(entry, entry.fiscalizedAt ? 'fiscal' : 'nonFiscal', 1);
-      if (inRange(entry.reversedAt)) add(entry, 'reversal', -1);
+      if (inRange(entry.soldAt)) add(entry, entry.fiscalizedAt ? 'fiscal' : 'nonFiscal');
+      if (inRange(entry.reversedAt)) add(entry, 'nonFiscalReversal');
     }
     for (const refund of refunds) {
+      const reference = refund.fiscalRefundReference?.trim();
+      const operation = reference && !reference.startsWith('MOCK-') ? 'fiscalReversal' : 'nonFiscalReversal';
       for (const entry of refund.taxReversals as RefundTaxReversal[]) {
         add({ ...entry, rate: new Prisma.Decimal(entry.rate), salesAmount: new Prisma.Decimal(entry.salesAmount),
-          amount: new Prisma.Decimal(entry.amount) }, 'reversal', -1);
+          amount: new Prisma.Decimal(entry.amount) }, operation);
       }
     }
     const sort = query.sort ?? 'name';
@@ -135,7 +142,7 @@ export class TaxesService {
   async exportReport(query: TaxReportQuery) {
     const rows = await this.report(query);
     return workbook('Налоги с продаж', ['Название', 'Процент', 'Тип', 'Операция', 'Сумма продаж', 'Сумма налога'],
-      rows.map((row) => [row.name, row.rate, typeLabels[row.type], kindLabels[row.kind], row.salesAmount.toNumber(), row.amount.toNumber()]),
+      rows.map((row) => [row.name, row.rate, typeLabels[row.type], operationLabels[row.operation], row.salesAmount.toNumber(), row.amount.toNumber()]),
       [28, 14, 25, 31, 18, 18]);
   }
 

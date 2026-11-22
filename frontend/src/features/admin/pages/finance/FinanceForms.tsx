@@ -132,13 +132,21 @@ export function AccountForm({ account, onClose }: { account?: FinanceAccount; on
   const [type, setType] = useState<AccountType>(account?.type ?? 'noncash');
   const [opening, setOpening] = useState(() => (account?.openingBalance ?? 0).toFixed(2).replace('.', ','));
   const [isDefault, setDefault] = useState(account?.isDefault ?? false);
+  const boundType = account?.isDefault || account?.isCollection || account?.hasCashShifts;
   const openingBalance = parseMoney(opening);
   return <FormPage title={account ? 'Редактирование счёта' : 'Добавление счёта'} onClose={onClose}
     disabled={!name.trim() || openingBalance == null}
-    onSubmit={() => saveAccount.mutateAsync({ id: account?.id, values: { name: name.trim(), type, openingBalance: openingBalance!, isDefault } })}>
+    onSubmit={() => {
+      const values = { name: name.trim(), type, openingBalance: openingBalance!, isDefault };
+      return saveAccount.mutateAsync(account
+        ? { id: account.id, values: { ...values, type: type === account.type ? undefined : type } }
+        : { values });
+    }}>
     <DocumentField label="Название"><input className="input w-full" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required /></DocumentField>
     <DocumentField label="Валюта"><input className="input w-full" value="Кыргызский сом (KGS)" readOnly /></DocumentField>
-    {account ? <DocumentField label="Тип"><input className="input w-full" value={accountTypes.find((entry) => entry.value === type)?.label ?? ''} readOnly /></DocumentField>
+    {boundType ? <DocumentField label="Тип"><input className="input w-full" value={accountTypes.find((entry) => entry.value === type)?.label ?? ''} readOnly />
+      <small className="mt-1.5 block text-text-muted">Тип зафиксирован привязкой счёта к оплатам, инкассации или кассовым сменам.</small>
+    </DocumentField>
       : <Choice label="Тип" value={type} onChange={setType} options={accountTypes} />}
     <Amount label="Начальный баланс" value={opening} onChange={setOpening}
       hint="Остаток до первых операций. Для уже сверенной кассы исправится актуализация при первом открытии; фактические остатки смен сохранятся." />

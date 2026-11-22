@@ -2,8 +2,10 @@ require('ts-node/register/transpile-only');
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { Prisma } = require('@prisma/client');
+const XLSX = require('xlsx');
 const { calculateSaleTaxes, recordOrderTaxes, dishTaxFields } = require('../src/settings/order-taxes.ts');
 const { TaxesService } = require('../src/settings/taxes.service.ts');
+const { writeGoodsWorkbook } = require('../src/admin/goods-xlsx.ts');
 const { runWithTenant } = require('../src/tenant/tenant-context.ts');
 
 const decimal = (value) => new Prisma.Decimal(value);
@@ -85,4 +87,45 @@ test('a reversal belongs to its own business day and uses the original rate and 
     assert.deepEqual(sale.map((row) => [row.kind, row.rate, String(row.amount)]), [['fiscal', 12, '12']]);
     assert.deepEqual(reversal.map((row) => [row.kind, row.rate, String(row.amount)]), [['reversal', 12, '-12']]);
   });
+});
+
+function workbookRows(buffer) {
+  const book = XLSX.read(buffer, { type: 'buffer' });
+  return XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]], { header: 1 });
+}
+
+test('tax statistics separate refunds backed by a KKM receipt from ordinary and test refunds', async () => {
+  const reversal = { taxId: vat.id, name: vat.name, rate: '12', type: vat.type, salesAmount: '56', amount: '6' };
+  const service = new TaxesService({
+    orderTax: { findMany: async () => [] },
+    orderRefund: { findMany: async ({ where, select }) => {
+      assert.equal(where.cafeId, 'cafe');
+      assert.equal(where.status, 'approved');
+      assert.equal(select.fiscalRefundReference, true);
+      return ['123', null, 'MOCK-123'].map((fiscalRefundReference) => ({ fiscalRefundReference, taxReversals: [reversal] }));
+    } },
+  }, {});
+  const summary = (rows) => rows.map(({ kind, operation, amount }) => [kind, operation, String(amount)]);
+  await runWithTenant({ cafeId: 'cafe' }, async () => {
+    assert.deepEqual(summary(await service.report({ kind: 'reversal' })), [
+      ['reversal', 'fiscalReversal', '-6'], ['reversal', 'nonFiscalReversal', '-12'],
+    ]);
+    assert.deepEqual(summary(await service.report({ kind: 'fiscalReversal' })), [['reversal', 'fiscalReversal', '-6']]);
+    assert.deepEqual(summary(await service.report({ kind: 'nonFiscalReversal' })), [['reversal', 'nonFiscalReversal', '-12']]);
+    const [, reportRow] = workbookRows(await service.exportReport({ kind: 'fiscalReversal' }));
+    assert.deepEqual(reportRow.slice(3), ['Возврат с чеком ККМ', -56, -6]);
+  });
+});
+
+test('goods export matches tax sorting, with no-tax and exempt products before taxed products', () => {
+  const item = (name, taxId, inheritedTax, taxExempt = false) => ({
+    name, taxId, taxExempt, category: { name: 'Категория', taxId: inheritedTax },
+    goodsUnits: [], variants: [],
+  });
+  const goods = [item('Абрикос', 'vat', null), item('Банан', null, 'vat'), item('Вода', null, null), item('Груша', null, 'vat', true)];
+  const taxes = new Map([[vat.id, vat.name]]);
+  const order = (taxSort) => workbookRows(writeGoodsWorkbook(goods, { taxSort }, ['name', 'tax'], new Map(), taxes))
+    .slice(1).map(([name]) => name);
+  assert.deepEqual(order('asc'), ['Вода', 'Груша', 'Абрикос', 'Банан']);
+  assert.deepEqual(order('desc'), ['Абрикос', 'Банан', 'Вода', 'Груша']);
 });
