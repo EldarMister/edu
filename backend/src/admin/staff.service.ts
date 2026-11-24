@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { OrderItemStatus, OrderStatus, PaymentMethod, PaymentStatus, Prisma, Role, WaiterShiftStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
@@ -13,7 +13,10 @@ import { assertNoActiveWorkShifts, assertStaffWorkspaceChange, canManagePosition
 import { syncEmployeeSalary } from '../finance/employee-salary';
 import { payrollWorkTime } from '../finance/payroll';
 import { warehouseDateRange, warehouseDay } from '../warehouse/report-range';
-import { CLOSED_ORDER_STATUSES, WORK_SHIFT_ROLES } from '../waiter-shifts/waiter-shifts.service';
+import { CLOSED_ORDER_STATUSES, MAX_WORK_SHIFT_MS, WORK_SHIFT_ROLES } from '../waiter-shifts/waiter-shifts.service';
+import { recordWorkShiftChange, type WorkShiftChange } from '../waiter-shifts/work-shift-history';
+import { EventsGateway } from '../realtime/events.gateway';
+import { SERVER_EVENTS } from '../realtime/events';
 import {
   CreateStaffDto,
   ShiftHistoryQueryDto,
@@ -24,6 +27,8 @@ import {
 import {
   ACTION_KEYS,
   getDefaultPermissionsByRole,
+  hasPermission,
+  resolvePermissions,
   resolvePositionPermissions,
   resolveUserPermissions,
   SECTION_KEYS,
@@ -60,6 +65,7 @@ export class StaffService {
   constructor(
     private prisma: PrismaService,
     private audit: AuditService,
+    @Optional() private readonly events?: EventsGateway,
   ) {}
 
   private isOwner(actor: AuditActor) {
@@ -783,7 +789,7 @@ export class StaffService {
 
   private shiftStatus(startedAt: Date, endedAt: Date | null, now = new Date()) {
     if (endedAt) return 'closed';
-    return warehouseDay(startedAt) < warehouseDay(now) ? 'unclosed' : 'active';
+    return now.getTime() - startedAt.getTime() >= MAX_WORK_SHIFT_MS ? 'unclosed' : 'active';
   }
 
   async shiftHistory(params: ShiftHistoryQueryDto, actor: AuditActor) {
@@ -794,27 +800,50 @@ export class StaffService {
       ...(params.role ? { role: params.role } : {}),
     };
 
-    const shifts = await this.prisma.waiterShift.findMany({
-      where: {
-        startedAt: { lt: to },
-        OR: [{ endedAt: null }, { endedAt: { gt: from } }],
-        waiter: userWhere,
-      },
-      orderBy: { startedAt: 'desc' },
-      include: {
-        waiter: { select: { id: true, name: true, role: true } },
-        orders: {
-          where: { status: OrderStatus.paid },
-          select: { id: true, orderNumber: true, finalAmount: true, refundedAmount: true },
+    const { shifts, revisions } = await this.prisma.$transaction(async (tx) => {
+      const shifts = await tx.waiterShift.findMany({
+        where: {
+          startedAt: { lt: to },
+          OR: [{ endedAt: null }, { endedAt: { gt: from } }],
+          waiter: userWhere,
         },
-      },
-    });
-
+        orderBy: { startedAt: 'desc' },
+        include: {
+          waiter: { select: { id: true, name: true, role: true } },
+          orders: {
+            where: { status: OrderStatus.paid },
+            select: { id: true, orderNumber: true, finalAmount: true, refundedAmount: true },
+          },
+        },
+      });
+      const revisions = shifts.length ? await tx.auditLog.findMany({
+        where: { entityType: AuditEntity.STAFF_SHIFT, actionType: AuditAction.STAFF_SHIFT_CHANGED, entityId: { in: shifts.map(({ id }) => id) } },
+        select: { id: true, entityId: true, userName: true, metadata: true, oldValue: true, newValue: true, createdAt: true },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      }) : [];
+      return { shifts, revisions };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    const history = new Map<string, typeof revisions>();
+    for (const revision of revisions) {
+      if (!revision.entityId) continue;
+      const entries = history.get(revision.entityId) ?? [];
+      entries.push(revision);
+      history.set(revision.entityId, entries);
+    }
     const now = new Date();
     const rows = shifts.map((s) => {
       const effectiveEnd = s.endedAt ?? now;
       const durationMin = Math.max(0, Math.round((Math.min(effectiveEnd.getTime(), to.getTime()) - Math.max(s.startedAt.getTime(), from.getTime())) / 60000));
       const turnover = s.orders.reduce((sum, o) => sum + Number(netOrderAmount(o)), 0);
+      let closedBy: string | null = null;
+      const changes = (history.get(s.id) ?? []).map((revision) => {
+        const oldTime = revision.oldValue as { startedAt: string; endedAt: string | null };
+        const newTime = revision.newValue as { startedAt: string; endedAt: string | null };
+        const { kind, reason } = revision.metadata as { kind: WorkShiftChange; reason: string | null };
+        if (!newTime.endedAt) closedBy = null;
+        else if (!oldTime.endedAt) closedBy = kind === 'auto-close' ? 'Автоматически' : revision.userName;
+        return { id: revision.id, at: revision.createdAt.toISOString(), actorName: revision.userName, kind, reason, oldTime, newTime };
+      }).reverse();
       return {
         id: s.id,
         employeeId: s.waiterId,
@@ -822,10 +851,12 @@ export class StaffService {
         role: s.waiter.role,
         startedAt: s.startedAt.toISOString(),
         endedAt: s.endedAt ? s.endedAt.toISOString() : null,
+        updatedAt: s.updatedAt.toISOString(),
         durationMin,
         status: this.shiftStatus(s.startedAt, s.endedAt, now),
-        closedBy: null,
-        adminComment: null,
+        closedBy: s.endedAt ? closedBy : null,
+        adminComment: changes.find(({ reason }) => !!reason)?.reason ?? null,
+        changes,
         ordersCount: s.orders.length,
         turnover,
         orders: s.orders.map((o) => ({
@@ -842,6 +873,7 @@ export class StaffService {
         shiftsCount: rows.length,
         totalDurationMin: rows.reduce((sum, r) => sum + r.durationMin, 0),
         activeCount: rows.filter((r) => r.status === 'active').length,
+        unclosedCount: rows.filter((r) => r.status === 'unclosed').length,
       },
       range: { from: from.toISOString(), to: to.toISOString() },
     };
@@ -946,14 +978,26 @@ export class StaffService {
     };
   }
 
-  async updateShiftHistory(id: string, dto: UpdateShiftHistoryDto, actor: AuditActor) {
-    const { shift, updated } = await this.prisma.$transaction(async (tx) => {
+  async updateShiftHistory(id: string, dto: UpdateShiftHistoryDto, actor: AuditActor & Partial<Pick<AuthUser, 'permissions'>>) {
+    const change = await this.prisma.$transaction(async (tx) => {
       const shift = await this.lockStaffShift(tx, id, actor);
-      const parseTime = (value: string) => new Date(/(?:Z|[+-]\d\d:\d\d)$/i.test(value) ? value : value + '+06:00');
+      const parseTime = (value: string) => {
+        if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(value)) throw new BadRequestException('Некорректное время смены');
+        warehouseDateRange(value.slice(0, 10), value.slice(0, 10));
+        return new Date(/(?:Z|[+-]\d\d:\d\d)$/i.test(value) ? value : value + '+06:00');
+      };
       const startedAt = dto.startedAt !== undefined ? parseTime(dto.startedAt) : shift.startedAt;
       const endedAt = dto.endedAt !== undefined ? dto.endedAt ? parseTime(dto.endedAt) : null : shift.endedAt;
       if (!Number.isFinite(startedAt.getTime()) || (endedAt && !Number.isFinite(endedAt.getTime()))) {
         throw new BadRequestException('Некорректное время смены');
+      }
+      if (+startedAt === +shift.startedAt && (endedAt?.getTime() ?? null) === (shift.endedAt?.getTime() ?? null)) return null;
+      if (dto.expectedUpdatedAt && dto.expectedUpdatedAt !== shift.updatedAt.toISOString()) {
+        throw new ConflictException('Рабочая смена уже изменена. Обновите список и повторите действие');
+      }
+      if (!!endedAt !== !!shift.endedAt && !this.isOwner(actor)
+          && !hasPermission(actor.permissions ?? resolvePermissions(actor.role as Role, null), 'actions.closeShift')) {
+        throw new ForbiddenException('Нет права закрывать или повторно открывать рабочую смену');
       }
       if (endedAt && endedAt < startedAt) throw new BadRequestException('Время окончания не может быть раньше начала');
       const now = new Date();
@@ -970,23 +1014,15 @@ export class StaffService {
       const updated = await tx.waiterShift.update({ where: { id }, data: {
         startedAt, endedAt, status: endedAt ? WaiterShiftStatus.closed : WaiterShiftStatus.active,
       } });
+      await recordWorkShiftChange(tx, shift, updated, 'correction', actor, dto.reason);
       return { shift, updated };
     });
-    await this.audit.log({
-      actor,
-      actionType: AuditAction.STAFF_UPDATED,
-      entityType: AuditEntity.STAFF,
-      entityId: shift.waiterId,
-      description: `${actor.name ?? 'Администратор'} изменил время смены сотрудника ${shift.waiter.name}`,
-      oldValue: {
-        startedAt: shift.startedAt.toISOString(),
-        endedAt: shift.endedAt ? shift.endedAt.toISOString() : null,
-      },
-      newValue: {
-        startedAt: updated.startedAt.toISOString(),
-        endedAt: updated.endedAt ? updated.endedAt.toISOString() : null,
-      },
-    });
+    if (change) {
+      const { shift, updated } = change;
+      this.events?.emitToAdmin(SERVER_EVENTS.WAITER_SHIFT_UPDATED, updated);
+      if (!updated.endedAt || !shift.endedAt) this.events?.emitToWaiter(updated.waiterId,
+        updated.endedAt ? SERVER_EVENTS.WAITER_SHIFT_ENDED : SERVER_EVENTS.WAITER_SHIFT_STARTED, updated);
+    }
     return { ok: true };
   }
 
@@ -997,20 +1033,13 @@ export class StaffService {
       const endedAt = new Date();
       if (endedAt < shift.startedAt) throw new BadRequestException('Нельзя закрыть смену раньше начала');
       await this.assertCanCloseStaffShift(tx, shift.waiterId);
-      await tx.waiterShift.update({ where: { id }, data: { endedAt, status: WaiterShiftStatus.closed } });
-      return { shift, endedAt };
+      const updated = await tx.waiterShift.update({ where: { id }, data: { endedAt, status: WaiterShiftStatus.closed } });
+      await recordWorkShiftChange(tx, shift, updated, 'manual-close', actor);
+      return updated;
     });
     if (!change) return { ok: true };
-    const { shift, endedAt } = change;
-    await this.audit.log({
-      actor,
-      actionType: AuditAction.STAFF_UPDATED,
-      entityType: AuditEntity.STAFF,
-      entityId: shift.waiterId,
-      description: `${actor.name ?? 'Администратор'} вручную закрыл смену сотрудника ${shift.waiter.name}`,
-      oldValue: { endedAt: null, status: shift.status },
-      newValue: { endedAt: endedAt.toISOString(), status: WaiterShiftStatus.closed },
-    });
+    this.events?.emitToWaiter(change.waiterId, SERVER_EVENTS.WAITER_SHIFT_ENDED, change);
+    this.events?.emitToAdmin(SERVER_EVENTS.WAITER_SHIFT_ENDED, change);
     return { ok: true };
   }
 

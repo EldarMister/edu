@@ -177,6 +177,7 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
       categoryId={selectedCategories.length === 1 ? selectedCategories[0] : ''}
       initialTab={editor.action === 'recipe' ? 'recipe' : 'main'}
       initialVariantId={editor.itemId}
+      copy={editor.action === 'copy' && !isGoods && editable && can('actions.warehouseRecipes')}
       onClose={closeEditor}
     />;
   }
@@ -340,8 +341,12 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
                           disabled={remove.isPending}
                           onChange={(action) => {
                             if (action === 'delete') void onDelete(dish);
+                            if (action === 'copy') openEditor({ type: 'entry', id: dish.id, action: 'copy' });
                           }}
-                          options={[{ value: 'delete', label: 'Удалить' }]}
+                          options={[
+                            ...(!isGoods && !dish.isSet && can('actions.warehouseRecipes') ? [{ value: 'copy', label: 'Копировать техкарту' }] : []),
+                            { value: 'delete', label: 'Удалить' },
+                          ]}
                         />
                       )}
                     </div>

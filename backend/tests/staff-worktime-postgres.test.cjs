@@ -7,6 +7,7 @@ const { Reflector } = require('@nestjs/core');
 const { RolesGuard } = require('../src/common/guards/roles.guard.ts');
 const { PermissionsGuard } = require('../src/common/guards/permissions.guard.ts');
 const { StaffService } = require('../src/admin/staff.service.ts');
+const { StaffController } = require('../src/admin/staff.controller.ts');
 const { PositionsController } = require('../src/admin/positions.controller.ts');
 const { StaffShiftsController } = require('../src/waiter-shifts/staff-shifts.controller.ts');
 const { WaiterShiftsController } = require('../src/waiter-shifts/waiter-shifts.controller.ts');
@@ -102,6 +103,10 @@ test('work-time routes allow each employee to manage their own shift without sta
   controller.start({ id: 'self' });
   controller.end({ id: 'self' });
   assert.deepEqual(captured, ['self', 'self']);
+  const readOnlyManager = { id: 'manager', role: 'ADMIN', permissions: { ...getDefaultPermissionsByRole('ADMIN'),
+    actions: { ...getDefaultPermissionsByRole('ADMIN').actions, manageStaff: false, closeShift: false } } };
+  assert.throws(() => permissions.canActivate(call(StaffController, 'updateShiftHistory', readOnlyManager)), { status: 403 });
+  assert.throws(() => permissions.canActivate(call(StaffController, 'closeShiftHistory', readOnlyManager)), { status: 403 });
 });
 
 test('PostgreSQL: work time for every position feeds payroll, reports and safe lifecycle handling', { skip: !databaseUrl }, async (t) => {
@@ -111,8 +116,9 @@ test('PostgreSQL: work time for every position feeds payroll, reports and safe l
   const foreignCafe = await db.cafe.create({ data: { name: 'Worktime foreign ' + randomUUID() } });
   const audit = { log: async () => {} };
   const eventLog = [];
-  const events = { emitToWaiter: (id, event, shift) => eventLog.push({ id, event, shift }), emitToAdmin: () => {} };
-  const staff = new StaffService(db, audit);
+  const events = { emitToWaiter: (id, event, shift) => eventLog.push({ id, event, shift }),
+    emitToAdmin: (event, shift) => eventLog.push({ event, shift }) };
+  const staff = new StaffService(db, audit, events);
   const positions = new PositionsController(db, audit);
   const shifts = new WaiterShiftsService(db, events);
   const createInput = (positionId) => ({ name: 'Worktime employee', positionId, phone: '+996' + randomInt(100000000, 999999999), password: 'test-password' });
@@ -142,14 +148,19 @@ test('PostgreSQL: work time for every position feeds payroll, reports and safe l
           assert.equal((await shifts.currentWithStats(employee.id)).stats.ordersCount, 0);
           await assert.rejects(shifts.startStaff(employee.id), { status: 400 });
           await assert.rejects(shifts.start(employee.id), { status: 403 }, 'legacy waiter route remains waiter-only');
-          await db.waiterShift.update({ where: { id: opened.id }, data: { startedAt: new Date(now.getTime() - 2 * 3600000) } });
+          const startedAt = new Date(now.getTime() - 2 * 3600000);
+          await db.waiterShift.update({ where: { id: opened.id }, data: { startedAt } });
           const closed = await shifts.endStaff(employee.id);
           assert.equal(closed.status, 'closed');
           assert.equal(closed.autoCloseAt, null);
           assert.equal(closed.stats.ordersCount, 0);
+          const recorded = (await staff.shiftHistory({ employeeId: employee.id }, ownerActor)).items.find(({ id }) => id === closed.id);
+          assert.equal(recorded.closedBy, employee.name);
+          assert.equal(recorded.changes[0].kind, 'self-close');
           const row = (await payrollReport(db, cafe.id, currentPayrollMonth())).staff.find(({ userId }) => userId === employee.id);
           assert.ok(Math.abs(row.hours - 2) < 0.02);
-          assert.ok(Math.abs(row.hourlyPay - 240) < 0.1);
+          const workedHours = (closed.endedAt.getTime() - startedAt.getTime()) / 3600000;
+          assert.equal(row.hourlyPay, Math.round(workedHours * 120 * 100) / 100);
           assert.equal(row.shiftPay, 50);
           assert.equal(row.personalCommission, 0, 'team turnover must not become personal sales');
           assert.equal(row.shiftCommission, 5);
@@ -193,20 +204,61 @@ test('PostgreSQL: work time for every position feeds payroll, reports and safe l
         assert.equal(history.range.to, '2026-01-15T18:00:00.000Z');
         assert.equal(history.items.length, 2);
         assert.equal(history.summary.totalDurationMin, 90);
+        assert.equal(staff.shiftStatus(new Date('2026-01-14T23:30:00+06:00'), null, new Date('2026-01-15T00:30:00+06:00')), 'active');
       });
 
       await t.test('manual corrections reject overlapping/future work and cannot reopen inactive employees', async () => {
         const employee = await staff.create(createInput(members.KITCHEN.position.id), ownerActor);
         const first = await db.waiterShift.create({ data: { waiterId: employee.id, status: 'closed',
-          startedAt: new Date('2026-01-10T09:00:00+06:00'), endedAt: new Date('2026-01-10T10:00:00+06:00') } });
+          startedAt: new Date('2026-01-10T09:00:42+06:00'), endedAt: new Date('2026-01-10T10:00:18+06:00') } });
         await db.waiterShift.create({ data: { waiterId: employee.id, status: 'closed',
           startedAt: new Date('2026-01-10T11:00:00+06:00'), endedAt: new Date('2026-01-10T12:00:00+06:00') } });
         await assert.rejects(staff.updateShiftHistory(first.id, { endedAt: '2026-01-10T11:30:00+06:00' }, ownerActor), { status: 409 });
         await assert.rejects(staff.updateShiftHistory(first.id, { endedAt: new Date(Date.now() + 86400000).toISOString() }, ownerActor), { status: 400 });
-        await staff.updateShiftHistory(first.id, { startedAt: '2026-01-10T08:30', endedAt: '2026-01-10T10:00' }, ownerActor);
-        assert.equal((await db.waiterShift.findUniqueOrThrow({ where: { id: first.id } })).startedAt.toISOString(), '2026-01-10T02:30:00.000Z');
+        const correction = { startedAt: '2026-01-10T08:30', expectedUpdatedAt: first.updatedAt.toISOString(), reason: 'Уточнили по табелю' };
+        await staff.updateShiftHistory(first.id, correction, ownerActor);
+        await staff.updateShiftHistory(first.id, correction, ownerActor);
+        await assert.rejects(staff.updateShiftHistory(first.id, { ...correction, startedAt: '2026-01-10T08:45' }, ownerActor), { status: 409 });
+        await assert.rejects(staff.updateShiftHistory(first.id, { startedAt: '2026-02-30T08:30' }, ownerActor), { status: 400 });
+        const history = await staff.shiftHistory({ period: 'custom', from: '2026-01-10', to: '2026-01-10', employeeId: employee.id }, ownerActor);
+        const corrected = history.items.find(({ id }) => id === first.id);
+        assert.equal(corrected.startedAt, '2026-01-10T02:30:00.000Z');
+        assert.equal(corrected.endedAt, '2026-01-10T04:00:18.000Z', 'editing the start should preserve seconds in the end');
+        assert.equal(corrected.closedBy, null, 'do not infer an actor for an older shift');
+        assert.equal(corrected.adminComment, correction.reason);
+        assert.equal(corrected.changes.length, 1);
+        assert.deepEqual(corrected.changes[0].oldTime, {
+          startedAt: '2026-01-10T03:00:42.000Z', endedAt: '2026-01-10T04:00:18.000Z',
+        });
+        assert.deepEqual(corrected.changes[0].newTime, { startedAt: corrected.startedAt, endedAt: corrected.endedAt });
+        assert.equal(corrected.changes[0].actorName, owner.name);
+        assert.ok(eventLog.some(({ event, shift }) => event === 'waiter:shift_updated' && shift.id === first.id));
         await staff.update(employee.id, { isActive: false }, ownerActor);
         await assert.rejects(staff.updateShiftHistory(first.id, { endedAt: null }, ownerActor), { status: 400 });
+      });
+
+      await t.test('manual shift closure requires its own permission, is repeatable and keeps the closing author', async () => {
+        const { employee } = members.KITCHEN;
+        const closer = members.ADMIN.employee;
+        const allowed = getDefaultPermissionsByRole('ADMIN');
+        const manageOnly = { ...closer, permissions: { ...allowed, actions: { ...allowed.actions, manageStaff: true, closeShift: false } } };
+        const opened = await shifts.startStaff(employee.id);
+        await assert.rejects(staff.updateShiftHistory(opened.id, { endedAt: new Date().toISOString() }, manageOnly), { status: 403 });
+        await staff.closeShiftHistory(opened.id, ownerActor);
+        await staff.closeShiftHistory(opened.id, ownerActor);
+        await assert.rejects(staff.updateShiftHistory(opened.id, { endedAt: null }, manageOnly), { status: 403 });
+        const closed = (await staff.shiftHistory({ employeeId: employee.id }, ownerActor)).items.find(({ id }) => id === opened.id);
+        assert.equal(closed.closedBy, owner.name);
+        assert.equal(closed.status, 'closed');
+        assert.equal(closed.changes.length, 1);
+        assert.equal(closed.changes[0].kind, 'manual-close');
+        assert.equal(closed.changes[0].actorName, owner.name);
+        assert.equal(closed.changes[0].oldTime.endedAt, null);
+        assert.equal(closed.changes[0].newTime.endedAt, closed.endedAt);
+        await db.auditLog.update({ where: { id: closed.changes[0].id }, data: { createdAt: new Date(Date.now() - 10 * 86400000) } });
+        const { AuditService } = require('../src/audit/audit.service.ts');
+        await new AuditService(db).purgeExpiredLogs();
+        assert.ok(await db.auditLog.findUnique({ where: { id: closed.changes[0].id } }));
       });
 
       await t.test('waiter shifts retain unpaid-order barriers and generic time tracking does not assign other roles to orders', async () => {
@@ -237,6 +289,12 @@ test('PostgreSQL: work time for every position feeds payroll, reports and safe l
         const row = await db.waiterShift.findUniqueOrThrow({ where: { id: expired.id } });
         assert.equal(row.status, 'closed');
         assert.equal(row.endedAt.getTime() - staleStart.getTime(), MAX_WORK_SHIFT_MS);
+        const from = warehouseDay(staleStart);
+        const to = warehouseDay(new Date());
+        const history = await staff.shiftHistory({ period: 'custom', from, to, employeeId: row.waiterId }, ownerActor);
+        const audit = history.items.find(({ id }) => id === row.id);
+        assert.equal(audit.closedBy, 'Автоматически');
+        assert.equal(audit.changes[0].kind, 'auto-close');
         assert.equal((await db.waiterShift.findUniqueOrThrow({ where: { id: waiterShift.id } })).status, 'active');
         assert.equal((await db.waiterShift.findUniqueOrThrow({ where: { id: closed.id } })).endedAt.getTime(), endedAt.getTime());
         await db.order.update({ where: { id: order.id }, data: { status: 'cancelled' } });
@@ -271,6 +329,7 @@ test('PostgreSQL: work time for every position feeds payroll, reports and safe l
     });
   } finally {
     const ids = [cafe.id, foreignCafe.id];
+    await db.auditLog.deleteMany({ where: { cafeId: { in: ids } } });
     await db.order.deleteMany({ where: { cafeId: { in: ids } } });
     await db.table.deleteMany({ where: { cafeId: { in: ids } } });
     await db.hall.deleteMany({ where: { cafeId: { in: ids } } });

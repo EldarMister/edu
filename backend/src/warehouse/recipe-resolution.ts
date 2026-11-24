@@ -2,10 +2,12 @@ import { BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { getCafeId } from '../tenant/tenant-context';
 import { createHash } from 'node:crypto';
+import { processingSnapshot } from './recipe-processing';
 
 type PreparationSnapshot = {
   ingredientId: string; outputAmount: string; outputUnit: string; signature: string; instructions: string | null;
-  items: { ingredientId: string; amount: string; unit: string; netAmount: string | null; lossPercent: string; processingMethod: string | null }[];
+  items: ({ ingredientId: string; amount: string; unit: string; netAmount: string | null; lossPercent: string; processingMethod: string | null }
+    & ReturnType<typeof processingSnapshot>)[];
 };
 
 export type ResolvedRecipePart = {
@@ -41,7 +43,9 @@ export class RecipeResolver {
     if (!recipe?.items.length || recipe.outputAmount.lte(0)) throw new BadRequestException(`Не настроена рецептура заготовки «${ingredient.name}»`);
     const parts: ResolvedRecipePart[] = [];
     const recipeSnapshot = { ingredientId, outputAmount: recipe.outputAmount.toString(), outputUnit: recipe.outputUnit, instructions: recipe.instructions,
-      items: recipe.items.map((item) => ({ ingredientId: item.ingredientId, amount: item.amount.toString(), unit: item.unit, netAmount: item.netAmount?.toString() ?? null, lossPercent: item.lossPercent.toString(), processingMethod: item.processingMethod })).sort((a, b) => a.ingredientId.localeCompare(b.ingredientId)) };
+      items: recipe.items.map((item) => ({ ingredientId: item.ingredientId, amount: item.amount.toString(), unit: item.unit,
+        netAmount: item.netAmount?.toString() ?? null, lossPercent: item.lossPercent.toString(), processingMethod: item.processingMethod,
+        ...processingSnapshot(item) })).sort((a, b) => a.ingredientId.localeCompare(b.ingredientId)) };
     const signature = createHash('sha256').update(JSON.stringify(recipeSnapshot)).digest('hex');
     const snapshot = { ...recipeSnapshot, signature };
     for (const item of recipe.items) parts.push(...await this.expand(item.ingredientId, item.amount.mul(amount).div(recipe.outputAmount), warehouse, nextPath, [...preparations, snapshot]));

@@ -15,6 +15,7 @@ export function Modal({
   suspended = false,
   bottomSheet = false,
   fullScreen = false,
+  manageFocus = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -26,9 +27,22 @@ export function Modal({
   suspended?: boolean;
   bottomSheet?: boolean;
   fullScreen?: boolean;
+  manageFocus?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   useDialogEscape(panel, open && !suspended, onClose);
+  useEffect(() => {
+    if (!open || !manageFocus) return;
+    const opener = document.activeElement;
+    const frame = window.requestAnimationFrame(() => {
+      const target = panel.current?.querySelector<HTMLElement>('[data-dialog-initial-focus]:not(:disabled)');
+      (target ?? focusable(panel.current)[0] ?? panel.current)?.focus({ preventScroll: true });
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus({ preventScroll: true });
+    };
+  }, [open, manageFocus]);
   useEffect(() => {
     if (!open) return;
     openModalCount += 1;
@@ -56,6 +70,18 @@ export function Modal({
         role="dialog"
         aria-modal={!suspended}
         aria-label={title}
+        tabIndex={manageFocus ? -1 : undefined}
+        onKeyDown={manageFocus && !suspended ? (event) => {
+          if (event.key !== 'Tab' || event.defaultPrevented ||
+            event.currentTarget !== Array.from(document.querySelectorAll('[data-modal-panel]')).at(-1)) return;
+          const targets = focusable(event.currentTarget);
+          const first = targets[0];
+          const last = targets.at(-1);
+          if (!first || (event.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+            event.preventDefault();
+            ((event.shiftKey ? last : first) ?? event.currentTarget).focus();
+          }
+        } : undefined}
         className={fullScreen
           ? 'relative z-10 flex h-dvh w-full flex-col overflow-hidden bg-white'
           : `card relative z-10 flex w-full flex-col rounded-b-none ${bottomSheet ? 'motion-safe:animate-panel-open' : 'max-sm:motion-safe:animate-panel-open sm:rounded-2xl'} ${panelClassName}`}
@@ -67,7 +93,7 @@ export function Modal({
         {title && (
           <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
             <h3 className="text-base font-semibold text-text-primary">{title}</h3>
-            <button onClick={onClose} className="text-text-light hover:text-text-secondary" aria-label="Закрыть">
+            <button type="button" onClick={onClose} className="text-text-light hover:text-text-secondary" aria-label="Закрыть">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M18 6 6 18M6 6l12 12" />
               </svg>
@@ -84,4 +110,10 @@ export function Modal({
       </div>
     </div>
   );
+}
+
+function focusable(panel: HTMLElement | null) {
+  return panel ? Array.from(panel.querySelectorAll<HTMLElement>(
+    'a[href], button, input:not([type="hidden"]), select, textarea, summary, [tabindex]',
+  )).filter((element) => element.tabIndex >= 0 && !element.matches(':disabled') && element.getClientRects().length > 0) : [];
 }

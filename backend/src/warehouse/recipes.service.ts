@@ -8,7 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RecipeCostsQuery, RecipeDraftDto, RecipeItemInputDto, RecipeItemUpdateDto, RecipePreviewDto, RecipeSettingsDto } from './recipes.dto';
 import { MenuModifiersService } from './menu-modifiers';
 import { lockRecipeGraph } from './recipe-resolution';
-import { nonMassProcessing } from './recipe-processing';
+import { massProcessing, nonMassProcessing, readProcessingStages } from './recipe-processing';
 import { addRecipeValue, RecipeCalculator, recipeMetrics, recipeOutput, type RecipeCostRow } from './recipe-calculation';
 import { assertUnitMatchesType, normalizeUnit, toBase, type UnitCode } from './units';
 
@@ -112,6 +112,7 @@ export class RecipesService {
         const data = await this.rowData(tx, dish?.id, ingredient.unitType, ingredient.displayUnit, item, previous, ingredient.processingLosses, variantIds);
         composition.push({ ...data, id: previous?.id, ingredient, ingredientId: ingredient.id,
           fromCommonWarehouse: data.fromCommonWarehouse ?? previous?.fromCommonWarehouse ?? false, warehouseId: data.warehouseId ?? null,
+          processingStages: readProcessingStages(data.processingStages),
           variantAmounts: data.variantAmounts === undefined ? previous?.variantAmounts ?? null : data.variantAmounts as Prisma.JsonValue });
       }
       const calculator = await RecipeCalculator.create(tx);
@@ -141,6 +142,7 @@ export class RecipesService {
       return { ...metrics, items: recipe.items, stockItem: direct?.stockItem ?? null,
         output: recipeOutput(dto.metadata ?? dish?.recipeMetadata, recipe.output, composition, dto.variantId),
         compositionFoodCost: recipeMetrics(null, recipe.value, recipe.items.length > 0).foodCost, compositionMissingCosts: [...recipe.value.missing],
+        compositionCostForScaling: recipe.items.length && !recipe.value.missing.size ? Number(recipe.value.cost) : null,
         productionCost: direct ? metrics.foodCost : null, productionMissingCosts: direct ? [...direct.value.missing] : [] };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
@@ -346,14 +348,9 @@ export class RecipesService {
       if (entries.some(([id, value]) => !ids.has(id) || typeof value !== 'number' || !Number.isFinite(value) || value < 0)) throw new BadRequestException('Укажите допустимые нормы существующих вариантов блюда');
       variantAmounts = Object.fromEntries(entries.map(([id, value]) => [id, this.quantity(value, unit).toString()]));
     }
-    if (unitType !== 'mass') return { ...nonMassProcessing(amount, unit, dto, previous), amount, amountUnit: unit,
-      fromCommonWarehouse: dto.fromCommonWarehouse, warehouseId, variantAmounts };
-    const processingMethod = dto.processingMethod === undefined ? previous?.processingMethod ?? null : dto.processingMethod;
-    const defaults = (processingLosses ?? {}) as Record<string, number>;
-    const lossPercent = dto.lossPercent ?? (processingMethod && dto.processingMethod !== undefined ? Number(defaults[processingMethod] ?? 0) : Number(previous?.lossPercent ?? 0));
-    if (!Number.isFinite(lossPercent) || lossPercent < 0 || lossPercent > 100) throw new BadRequestException('Потери должны быть от 0 до 100%');
-    const netAmount = dto.netAmount === null ? null : dto.netAmount === undefined ? amount.mul(new Prisma.Decimal(100).sub(lossPercent)).div(100).toDecimalPlaces(3) : this.quantity(dto.netAmount, unit);
-    if (netAmount?.gt(amount)) throw new BadRequestException('Нетто не может превышать брутто');
-    return { processingMethod, amount, amountUnit: unit, fromCommonWarehouse: dto.fromCommonWarehouse, warehouseId, netAmount, lossPercent: dto.netAmount != null && amount.gt(0) ? new Prisma.Decimal(100).sub(netAmount!.mul(100).div(amount)).toDecimalPlaces(2) : new Prisma.Decimal(lossPercent), variantAmounts };
+    const processing = unitType === 'mass' ? massProcessing(amount, unit, dto, previous, processingLosses)
+      : { amount, ...nonMassProcessing(amount, unit, dto, previous), processingStages: [], processingBasis: null };
+    return { ...processing, processingStages: processing.processingStages.length ? processing.processingStages : Prisma.DbNull,
+      amountUnit: unit, fromCommonWarehouse: dto.fromCommonWarehouse, warehouseId, variantAmounts };
   }
 }

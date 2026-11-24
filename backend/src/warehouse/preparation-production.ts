@@ -13,7 +13,8 @@ import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, u
 import { getWarehouseBalance, resolveWarehouse, warehouseBalances } from './warehouse-location';
 import { IngredientsService } from './ingredients.service';
 import { lockRecipeGraph, RecipeResolver, warehouseKey } from './recipe-resolution';
-import { nonMassProcessing } from './recipe-processing';
+import { massProcessing, nonMassProcessing, processingSnapshot, processingStageResults, readProcessingStages } from './recipe-processing';
+import { ProcessingOptionsDto } from './recipe-processing.dto';
 import { postStockMovement } from './stock-posting';
 import { inventoryReversalBlockedReason } from './closed-inventory-period';
 import { warehouseDateRange } from './report-range';
@@ -22,13 +23,10 @@ class CreatePreparationDto {
   @IsString() @IsNotEmpty() @MaxLength(120) name: string;
   @IsString() @MaxLength(16) unit: string;
 }
-class PreparationInputDto {
+class PreparationInputDto extends ProcessingOptionsDto {
   @IsString() @IsNotEmpty() ingredientId: string;
   @IsNumber() @Min(0.000001) quantity: number;
   @IsString() @MaxLength(16) unit: string;
-  @IsOptional() @IsNumber() @Min(0) netAmount?: number;
-  @IsOptional() @IsNumber() @Min(0) @Max(100) lossPercent?: number;
-  @IsOptional() @IsIn(['cleaning', 'boiling', 'frying', 'stewing', 'baking']) processingMethod?: string | null;
 }
 class PreparationRecipeDto {
   @IsNumber() @Min(0.000001) outputQuantity: number;
@@ -114,7 +112,16 @@ export class PreparationProductionService {
     return { id, updatedAt: ingredient.updatedAt.toISOString(), name: ingredient.name, category: ingredient.category, displayUnit: ingredient.displayUnit,
       unitType: ingredient.unitType, mode: ingredient.preparationMode, kind: ingredient.kind === 'prepared_dish' ? 'prepared_dish' as const : 'preparation' as const,
       instructions: recipe?.instructions ?? '', outputQuantity: recipe ? fromBase(Number(recipe.outputAmount), outputUnit) : 1, outputUnit, totalCost: missingCosts.size || !recipe?.items.length ? null : Number(totalCost.toDecimalPlaces(2)), costKnown: !missingCosts.size && !!recipe?.items.length, missingCosts: [...missingCosts],
-      items: recipe?.items.map((item) => ({ ingredientId: item.ingredientId, name: item.ingredient.name, lineCost: itemCosts.get(item.ingredientId)?.known ? Number(itemCosts.get(item.ingredientId)!.cost.toDecimalPlaces(2)) : null, costKnown: itemCosts.get(item.ingredientId)?.known ?? false, quantity: fromBase(Number(item.amount), item.unit as UnitCode), netAmount: item.netAmount == null ? null : fromBase(Number(item.netAmount), item.unit as UnitCode), lossPercent: Number(item.lossPercent), processingMethod: item.processingMethod, unit: item.unit })) ?? [] };
+      items: recipe?.items.map((item) => {
+        const unit = item.unit as UnitCode;
+        const stages = readProcessingStages(item.processingStages);
+        const cost = itemCosts.get(item.ingredientId);
+        return { ingredientId: item.ingredientId, name: item.ingredient.name, lineCost: cost?.known ? Number(cost.cost.toDecimalPlaces(2)) : null,
+          costKnown: cost?.known ?? false, quantity: fromBase(Number(item.amount), unit),
+          netAmount: item.netAmount == null ? null : fromBase(Number(item.netAmount), unit), lossPercent: Number(item.lossPercent),
+          processingMethod: item.processingMethod, processingStages: stages, processingBasis: item.processingBasis,
+          processingStageResults: processingStageResults(stages, item.amount, unit), unit: item.unit };
+      }) ?? [] };
   }
 
   async saveRecipe(id: string, dto: PreparationRecipeDto) {
@@ -169,15 +176,21 @@ export class PreparationProductionService {
       (recipe.instructions ?? '') === (dto.instructions ?? '') && recipe.items.length === dto.items.length;
     for (const input of dto.items) {
       const saved = recipe?.items.find((item) => item.ingredientId === input.ingredientId);
-      const gross = amount(input.quantity, input.unit);
-      const legacy = saved && saved.ingredient.unitType !== 'mass' ? nonMassProcessing(gross, normalizeUnit(input.unit), input, saved) : null;
-      const loss = input.lossPercent ?? Number((saved?.ingredient.processingLosses as Record<string, number> | null)?.[input.processingMethod ?? ''] ?? 0);
-      const net = legacy ? legacy.netAmount : input.netAmount === undefined ? gross.mul(100 - loss).div(100).toDecimalPlaces(3) : amount(input.netAmount, input.unit);
-      const method = legacy ? legacy.processingMethod : input.processingMethod ?? null;
-      matches = matches && !!saved && saved.unit === normalizeUnit(input.unit) && saved.amount.eq(gross) &&
-        (net == null ? saved.netAmount == null : saved.netAmount?.eq(net) === true) && saved.processingMethod === method;
+      if (!saved) { matches = false; break; }
+      const gross = this.amount(input.quantity, input.unit, saved.ingredient.unitType);
+      const processing = this.inputProcessing(input, gross, saved.ingredient, saved);
+      matches = matches && saved.unit === gross.unit && saved.amount.eq(processing.amount) &&
+        (processing.netAmount == null ? saved.netAmount == null : saved.netAmount?.eq(processing.netAmount) === true) &&
+        saved.processingMethod === processing.processingMethod && saved.processingBasis === processing.processingBasis &&
+        JSON.stringify(readProcessingStages(saved.processingStages)) === JSON.stringify(processing.processingStages);
     }
     if (!matches) throw new BadRequestException('Ключ создания уже использован с другим названием или составом полуфабриката');
+  }
+
+  private inputProcessing(input: PreparationInputDto, gross: { amount: Prisma.Decimal; unit: UnitCode },
+    ingredient: Prisma.IngredientGetPayload<{}>, previous?: Prisma.PreparationRecipeItemGetPayload<{}>) {
+    return ingredient.unitType === 'mass' ? massProcessing(gross.amount, gross.unit, input, previous, ingredient.processingLosses)
+      : { amount: gross.amount, ...nonMassProcessing(gross.amount, gross.unit, input, previous), processingStages: [], processingBasis: null };
   }
 
   private async writeRecipe(tx: Prisma.TransactionClient, id: string, dto: PreparationRecipeDto) {
@@ -205,13 +218,10 @@ export class PreparationProductionService {
       const ingredient = byId.get(item.ingredientId);
       if (!ingredient || !ingredient.isActive && !previous.has(item.ingredientId)) throw new NotFoundException('Ингредиент техкарты не найден');
       const gross = this.amount(item.quantity, item.unit, ingredient.unitType);
-      if (ingredient.unitType !== 'mass') return { cafeId, recipeId: id, ingredientId: item.ingredientId, ...gross,
-        ...nonMassProcessing(gross.amount, gross.unit, item, previous.get(item.ingredientId)) };
-      const lossPercent = item.lossPercent ?? Number((ingredient.processingLosses as Record<string, number> | null)?.[item.processingMethod ?? ''] ?? 0);
-      if (!Number.isFinite(lossPercent) || lossPercent < 0 || lossPercent > 100) throw new BadRequestException('Проверьте процент потерь');
-      const netAmount = item.netAmount === undefined ? gross.amount.mul(100 - lossPercent).div(100).toDecimalPlaces(3) : new Prisma.Decimal(item.netAmount).mul(toBase(1, gross.unit)).toDecimalPlaces(3);
-      if (netAmount.lt(0) || netAmount.gt(gross.amount)) throw new BadRequestException('Нетто должно быть от нуля до брутто');
-      return { cafeId, recipeId: id, ingredientId: item.ingredientId, ...gross, netAmount, lossPercent: item.netAmount !== undefined ? new Prisma.Decimal(100).sub(netAmount.mul(100).div(gross.amount)).toDecimalPlaces(2) : lossPercent, processingMethod: item.processingMethod };
+      const processing = this.inputProcessing(item, gross, ingredient, previous.get(item.ingredientId));
+      if (!processing.amount.gt(0)) throw new BadRequestException('Брутто ингредиента должно быть больше нуля');
+      return { cafeId, recipeId: id, ingredientId: item.ingredientId, unit: gross.unit, ...processing,
+        processingStages: processing.processingStages.length ? processing.processingStages : Prisma.DbNull };
     });
     const edges = await tx.preparationRecipeItem.findMany({ where: { cafeId }, select: { recipeId: true, ingredientId: true } });
     const graph = new Map<string, string[]>();
@@ -300,7 +310,8 @@ export class PreparationProductionService {
           comment: 'Производство ' + (dto.batchNumber ?? batchId) + ': выпуск «' + output.name + '»' } });
       const batch = await tx.preparationBatch.create({ data: { id: batchId, cafeId, warehouseId: warehouse.id, ingredientId: id, requestKey,
         plannedQuantity: planned, actualQuantity: amount, totalCost: totalCost.toDecimalPlaces(2), costKnown, items: { requestFingerprint, actual: actualItems,
-          recipe: recipe.items.map((item) => ({ ingredientId: item.ingredientId, amount: item.amount.toString(), unit: item.unit, netAmount: item.netAmount?.toString() ?? null, lossPercent: item.lossPercent.toString(), processingMethod: item.processingMethod })),
+          recipe: recipe.items.map((item) => ({ ingredientId: item.ingredientId, amount: item.amount.toString(), unit: item.unit,
+            netAmount: item.netAmount?.toString() ?? null, lossPercent: item.lossPercent.toString(), processingMethod: item.processingMethod, ...processingSnapshot(item) })),
           recipeInstructions: recipe.instructions, recipeOutputAmount: recipe.outputAmount.toString(), preparationRecipes: [...new Map(parts.flatMap((part) => part.preparations).map((snapshot) => [snapshot.signature, snapshot])).values()],
           actorId: actor?.id ?? null, actorName: actor?.name ?? null, ingredientName: output.name, warehouseName: warehouse.name },
         producedAt, expiresAt, batchNumber: dto.batchNumber?.trim() || null, comment: dto.comment?.trim() || null } });

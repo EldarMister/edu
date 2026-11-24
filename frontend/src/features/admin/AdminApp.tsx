@@ -167,7 +167,6 @@ const SECTIONS: {
   perm?: SectionKey;
 }[] = [
   { key: 'stats', label: 'Статистика', icon: IconStats, perm: 'statistics' },
-  { key: 'finance', label: 'Финансы', icon: IconMoney },
   { key: 'orders', label: 'Заказы', icon: IconOrders, perm: 'orders' },
   { key: 'requests', label: 'Заявки', icon: IconJournal },
   { key: 'receipts', label: 'Печать чека', icon: IconPrinter, perm: 'checks' },
@@ -175,6 +174,7 @@ const SECTIONS: {
   { key: 'menu', label: 'Меню', icon: IconMenu, perm: 'menu' },
   { key: 'warehouse', label: 'Склад', icon: IconWarehouse, perm: 'warehouse' },
   { key: 'staff', label: 'Персонал', icon: IconStaff, perm: 'staff' },
+  { key: 'finance', label: 'Финансы', icon: IconMoney },
   { key: 'audit', label: 'Журнал', icon: IconJournal, perm: 'journal' },
   { key: 'settings', label: 'Настройки', icon: IconSettings, perm: 'settings' },
 ];
@@ -262,7 +262,16 @@ export function AdminApp() {
   const settingsTab = SETTINGS_NAV.find(({ key }) => key === route.get('view')) ?? SETTINGS_NAV[0];
   const settingsView = settingsTab.key;
   const posterWorkspace = ['menu', 'warehouse', 'finance', 'staff'].includes(section) || (section === 'settings' && settingsView === 'taxes');
-  function setStatsView(view: StatisticsView) { setRoute({ section: 'stats', view }); }
+  function setStatsView(view: StatisticsView) {
+    const next = new URLSearchParams({ section: 'stats', view });
+    if (section === 'stats') {
+      for (const key of ['statsPeriod', 'statsFrom', 'statsTo']) {
+        const value = route.get(key);
+        if (value) next.set(key, value);
+      }
+    }
+    setRoute(next);
+  }
   function setWarehouseView(view: WarehouseView) { setRoute({ section: 'warehouse', view }); }
   function setMenuView(view: MenuView) { setRoute({ section: 'menu', view }); }
   const edgeSwipe = useRef<{ x: number; y: number } | null>(null);

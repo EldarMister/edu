@@ -4,7 +4,7 @@ import { OrderStatusBadges } from '@/components/StatusBadge';
 import { Spinner } from '@/components/Spinner';
 import { WorkspacePending } from './WorkspacePending';
 import { usePermissions } from '@/hooks/usePermissions';
-import { displayOrderNumber, money, orderPlaceLabel, paymentCell, timeHM } from '@/lib/format';
+import { displayOrderNumber, money, orderPlaceLabel, paymentCell } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { IconEdit, IconX } from './icons';
 
@@ -13,6 +13,7 @@ const CANCELLABLE = new Set([
   'draft', 'sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready',
   'picked_up', 'served', 'waiting_payment', 'partially_rejected',
 ]);
+const businessDateTime = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Asia/Bishkek', dateStyle: 'short', timeStyle: 'short' });
 
 const orderColumns = {
   number: { label: '№ заказа', width: 92, className: 'font-medium text-text-primary' },
@@ -36,6 +37,7 @@ export function orderTableWidth(columns: OrderColumn[]) {
 
 type Props = {
   items: Order[];
+  byClose?: boolean;
   isLoading: boolean;
   error: string | null;
   columns: OrderColumn[];
@@ -47,18 +49,19 @@ type Props = {
   onCancel: (order: Order) => void;
 };
 
-export function OrdersTable({ items, isLoading, error, columns, loadMoreRef, isFetchingNextPage, hasNextPage, onOpen, onEdit, onCancel }: Props) {
+export function OrdersTable({ items, byClose = false, isLoading, error, columns, loadMoreRef, isFetchingNextPage, hasNextPage, onOpen, onEdit, onCancel }: Props) {
   const tr = useT();
   const { canEditSection, canOwnerOperation } = usePermissions();
   const editable = canEditSection('orders');
   const minWidth = orderTableWidth(columns);
 
   function renderRow(order: Order) {
+    const date = byClose ? order.closedAt : order.createdAt;
     const cells: Record<OrderColumn, ReactNode> = {
       number: <button type="button" className="rounded-sm text-left hover:text-primary hover:underline focus-visible:outline-primary">
         {displayOrderNumber(order.orderNumber)}
       </button>,
-      date: <>{new Date(order.createdAt).toLocaleDateString('ru-RU')} {timeHM(order.createdAt)}</>,
+      date: date ? businessDateTime.format(new Date(date)) : '—',
       table: order.source === 'delivery'
         ? <span className="inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">{tr('Доставка')}</span>
         : orderPlaceLabel(order, tr),
@@ -96,7 +99,7 @@ export function OrdersTable({ items, isLoading, error, columns, loadMoreRef, isF
               {columns.map((key) => <col key={key} style={{ width: (orderColumns[key].width / minWidth) * 100 + '%' }} />)}
             </colgroup>
             <thead><tr>
-              {columns.map((key) => <Th key={key} className={orderColumnClass(key)}>{tr(orderColumnLabel(key))}</Th>)}
+              {columns.map((key) => <Th key={key} className={orderColumnClass(key)}>{tr(key === 'date' && byClose ? 'Дата закрытия' : orderColumnLabel(key))}</Th>)}
             </tr></thead>
             <tbody>{items.map(renderRow)}</tbody>
           </table>

@@ -14,6 +14,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SERVER_EVENTS } from '../realtime/events';
 import { EventsGateway } from '../realtime/events.gateway';
 import { CLOSED_ORDER_STATUSES } from '../waiter-shifts/waiter-shifts.service';
+import { recordWorkShiftChange } from '../waiter-shifts/work-shift-history';
 import { warehouseDateRange } from '../warehouse/report-range';
 
 class OpenCashShiftDto {
@@ -132,10 +133,9 @@ function serialize(shift: CashShift, expected = shift.expectedAmount ?? shift.op
 type Db = Prisma.TransactionClient;
 type CashOperation = CashOperationDto;
 
-async function closeStaffShifts(db: Db, cafeId: string, endedAt: Date) {
+async function closeStaffShifts(db: Db, cafeId: string, actorId: string, endedAt: Date) {
   const active = await db.waiterShift.findMany({
     where: { cafeId, status: WaiterShiftStatus.active, startedAt: { lte: endedAt }, waiter: { cafeId } },
-    select: { id: true },
   });
   if (!active.length) return [];
   const ids = active.map(({ id }) => id);
@@ -149,7 +149,13 @@ async function closeStaffShifts(db: Db, cafeId: string, endedAt: Date) {
   if (updated.count !== ids.length) {
     throw new ConflictException('Сначала закройте открытые заказы сотрудников или снимите галочку «Закрыть смены сотрудников».');
   }
-  return db.waiterShift.findMany({ where: { cafeId, id: { in: ids } } });
+  const [closed, actor] = await Promise.all([
+    db.waiterShift.findMany({ where: { cafeId, id: { in: ids } } }),
+    db.user.findFirstOrThrow({ where: { cafeId, id: actorId }, select: { id: true, name: true, role: true } }),
+  ]);
+  const previous = new Map(active.map((shift) => [shift.id, shift]));
+  for (const shift of closed) await recordWorkShiftChange(db, previous.get(shift.id)!, shift, 'cash-close', actor);
+  return closed;
 }
 
 async function findShift(db: Db, cafeId: string, id: string) {
@@ -534,7 +540,7 @@ export class CashShiftsService {
       }
       const difference = actualAmount.sub(expectedAmount);
       const closedAt = new Date();
-      const closedShifts = closeEmployeeShifts ? await closeStaffShifts(tx, cafeId, closedAt) : [];
+      const closedShifts = closeEmployeeShifts ? await closeStaffShifts(tx, cafeId, actorId, closedAt) : [];
       const updated = await tx.cashShift.update({ where: { id: shift.id },
         data: { closedAt, closedById: actorId, expectedAmount, actualAmount, difference, closingComment, closeEmployeeShifts } });
       await saveAdjustment(tx, updated, actorId, 'close', difference);

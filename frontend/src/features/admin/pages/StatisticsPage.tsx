@@ -11,9 +11,11 @@ import { useStatistics, useStatisticsReports, type StatsPeriod } from '../api';
 import { StatisticsReport } from './StatisticsReport';
 import type { StatisticsView } from './statisticsViews';
 import { WorkspaceHeaderActions } from './WorkspaceHeader';
+import { usePageFilters } from './warehouse/workspace-route';
 
 const PERIODS: { value: StatsPeriod; label: string }[] = [
   { value: 'today', label: 'Сегодня' },
+  { value: 'yesterday', label: 'Вчера' },
   { value: 'week', label: 'Неделя' },
   { value: 'month', label: 'Месяц' },
   { value: 'all', label: 'Всё время' },
@@ -23,6 +25,7 @@ const PERIODS: { value: StatsPeriod; label: string }[] = [
 // Подпись KPI заказов зависит от выбранного периода вверху.
 const ORDERS_LABEL: Record<StatsPeriod, string> = {
   today: 'Заказов сегодня',
+  yesterday: 'Заказов вчера',
   week: 'Заказов за неделю',
   month: 'Заказов за месяц',
   all: 'Заказов за всё время',
@@ -32,6 +35,7 @@ const ORDERS_LABEL: Record<StatsPeriod, string> = {
 // Заголовок карточки приготовленных блюд зависит от выбранного периода.
 const PREPARED_LABEL: Record<StatsPeriod, string> = {
   today: 'Приготовлено сегодня',
+  yesterday: 'Приготовлено вчера',
   week: 'Приготовлено за неделю',
   month: 'Приготовлено за месяц',
   all: 'Приготовлено за всё время',
@@ -45,9 +49,10 @@ export function StatisticsPage({ view }: { view: Exclude<StatisticsView, 'taxes'
   const t = useT();
   const today = useMemo(() => bishkekDay.format(new Date()), []);
   const weekAgo = useMemo(() => bishkekDay.format(new Date(Date.now() - 6 * 86_400_000)), []);
-  const [period, setPeriod] = useState<StatsPeriod>('week');
-  const [from, setFrom] = useState(weekAgo);
-  const [to, setTo] = useState(today);
+  const [{ statsPeriod, statsFrom: from, statsTo: to }, updatePeriod] = usePageFilters({
+    statsPeriod: 'week', statsFrom: weekAgo, statsTo: today,
+  });
+  const period = PERIODS.find(({ value }) => value === statsPeriod)?.value ?? 'week';
   const [viewAll, setViewAll] = useState<{ title: string; columns: Col[]; rows: string[][] } | null>(null);
   const params = {
     period,
@@ -58,16 +63,16 @@ export function StatisticsPage({ view }: { view: Exclude<StatisticsView, 'taxes'
   const reportsQ = useStatisticsReports(params, view !== 'overview');
   const d = statsQ.data;
   const activeQuery = view === 'overview' ? statsQ : reportsQ;
-  const periodControl = <Select className="h-10" ariaLabel={t('Период')} value={period} onChange={(value) => setPeriod(value as StatsPeriod)}
+  const periodControl = <Select className="h-10" ariaLabel={t('Период')} value={period} onChange={(value) => updatePeriod({ statsPeriod: value })}
     options={PERIODS.map(({ value, label }) => ({ value, label: t(label) }))} />;
 
   return (
     <div className="space-y-4 overflow-x-hidden">
       {(view === 'overview' || !reportsQ.data) && <WorkspaceHeaderActions>{periodControl}</WorkspaceHeaderActions>}
       {period === 'custom' && <div className="flex flex-wrap items-center gap-2">
-        <DatePicker aria-label={t('С даты')} className="input h-10 w-[150px]" value={from} max={to} onChange={setFrom} />
+        <DatePicker aria-label={t('С даты')} className="input h-10 w-[150px]" value={from} max={to} onChange={(value) => updatePeriod({ statsFrom: value })} />
         <span className="text-sm text-text-muted">—</span>
-        <DatePicker aria-label={t('По дату')} className="input h-10 w-[150px]" value={to} min={from} max={today} onChange={setTo} />
+        <DatePicker aria-label={t('По дату')} className="input h-10 w-[150px]" value={to} min={from} max={today} onChange={(value) => updatePeriod({ statsTo: value })} />
       </div>}
 
       {activeQuery.isError ? <div className="card space-y-3 p-5">
@@ -86,13 +91,13 @@ export function StatisticsPage({ view }: { view: Exclude<StatisticsView, 'taxes'
         <div key={view} className="workspace-stagger space-y-4">
           {/* Метрики: десктоп — две карточки */}
           <div className="hidden gap-4 lg:grid lg:grid-cols-2">
-            <MetricCard icon={<IconOrders />} label={ORDERS_LABEL[period]} value={String(d.cards.ordersPeriod)} delta={d.trends.orders} />
+            <MetricCard icon={<IconOrders />} label={t(ORDERS_LABEL[period])} value={String(d.cards.ordersPeriod)} delta={d.trends.orders} />
             <MetricCard icon={<IconCheck />} label="Средний чек" value={money(d.cards.avgCheck)} delta={d.trends.avgCheck} />
           </div>
 
           {/* Метрики: мобильный — единый сплит-блок (2 показателя) */}
           <div className="card flex divide-x divide-border lg:hidden">
-            <SplitMetric icon={<IconOrders />} label={ORDERS_LABEL[period]} value={String(d.cards.ordersPeriod)} delta={d.trends.orders} />
+            <SplitMetric icon={<IconOrders />} label={t(ORDERS_LABEL[period])} value={String(d.cards.ordersPeriod)} delta={d.trends.orders} />
             <SplitMetric icon={<IconCheck />} label="Средний чек" value={money(d.cards.avgCheck)} delta={d.trends.avgCheck} />
           </div>
 
@@ -134,7 +139,7 @@ export function StatisticsPage({ view }: { view: Exclude<StatisticsView, 'taxes'
               </table>
             </Panel>
             <ListCard
-              title={PREPARED_LABEL[period]}
+              title={t(PREPARED_LABEL[period])}
               columns={[{ label: 'Блюдо' }, { label: 'Кол-во', align: 'right' }]}
               rows={d.prepared.dishes.map((x) => [x.name, `${x.count} шт`])}
               empty="Нет приготовленных блюд за период"

@@ -18,7 +18,7 @@ test('kitchen events reach kitchen, bar and admins only inside the order cafe',a
 test('QR orders, receipt speech and table changes reach only the appropriate cafe rooms', async () => {
   const users = [
     ['a-waiter', 'WAITER', 'a'], ['a-kitchen', 'KITCHEN', 'a'],
-    ['a-admin', 'ADMIN', 'a'], ['a-owner', 'OWNER', 'a'],
+    ['a-admin', 'ADMIN', 'a'], ['a-owner', 'OWNER', 'a'], ['a-owner-disabled', 'OWNER', 'a'],
     ['a-cashier', 'WAITER', 'a'], ['b-cashier', 'WAITER', 'b'], ['b-admin', 'ADMIN', 'b'],
   ];
   const clients = [...users, ['guest']].map(([id, role]) => ({
@@ -31,7 +31,8 @@ test('QR orders, receipt speech and table changes reach only the appropriate caf
     user: { findUnique: async ({ where }) => {
       const [id, role, cafeId] = users.find(([id]) => id === where.id);
       return { id, role, cafeId, isActive: true,
-        ...(id.endsWith('-cashier') ? { permissions: { actions: { printReceipts: true } } } : {}) };
+        ...(id.endsWith('-cashier') ? { permissions: { actions: { printReceipts: true } } } : {}),
+        ...(id === 'a-owner-disabled' ? { permissions: { ownerOperations: { printRequests: false } } } : {}) };
     } },
     cafe: { findUnique: async () => ({ status: 'active' }) },
   });
@@ -48,6 +49,7 @@ test('QR orders, receipt speech and table changes reach only the appropriate caf
   assert.deepEqual(clients.map(({ events }) => events), [
     ['notification:new', 'table:status_changed'],
     ['table:status_changed'],
+    ['order:status_changed', 'receipt_print_request_created', 'table:status_changed'],
     ['order:status_changed', 'receipt_print_request_created', 'table:status_changed'],
     ['order:status_changed', 'table:status_changed'],
     ['notification:new', 'receipt_print_request_created', 'table:status_changed'],

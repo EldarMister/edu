@@ -11,7 +11,8 @@ import { recipeDraftPayload, recipeDraftRows, recipePreviewItems, validRecipeRow
 import { RecipeCostSummary } from './RecipeCostSummary';
 import { useRecipePreview, type RecipePreview } from './recipe-preview-api';
 import type { ModifierDraft } from './ModifierDraftFields';
-import { PROCESSING_METHODS, type Recipe, type RecipeMetadata, qty } from './api';
+import { type Recipe, type RecipeMetadata, qty } from './api';
+import { recipeProcessingLabel } from './RecipeProcessingFields';
 import { costLabel } from './cost-format';
 import { unitLabel } from './units';
 
@@ -104,7 +105,7 @@ function StaffRecipeForm({
     event.preventDefault();
     if (!editable || submitting.current) return;
     if (!validRows) {
-      setError('Проверьте нормы техкарты. Брутто должно быть больше нуля, нетто не больше брутто, а потери от 0 до 100%.');
+      setError('Проверьте количество и этапы обработки. Для расчёта от нетто нужен положительный выход.');
       return;
     }
     setError('');
@@ -318,8 +319,7 @@ function RecipeReadOnly({ recipe, costs, preview }: { recipe: Recipe; costs: boo
                 </td>
                 <td className="px-3">{source?.warehouseName ?? '—'}</td>
                 <td className="px-3">
-                  {PROCESSING_METHODS.find((method) => method.value === row.processingMethod)
-                    ?.label ?? 'Без обработки'}
+                  {recipeProcessingLabel(row) || 'Без обработки'}
                 </td>
                 <td className="px-3">{qty(gross, unit)}</td>
                 <td className="px-3">{net == null ? '—' : qty(net, unit)}</td>

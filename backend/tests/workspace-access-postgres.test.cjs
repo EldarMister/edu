@@ -577,6 +577,7 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
     });
   } finally {
     await app.close();
+    await db.auditLog.deleteMany({ where: { cafeId: cafe.id } });
     await db.order.deleteMany({ where: { cafeId: cafe.id } });
     await db.table.deleteMany({ where: { cafeId: cafe.id } });
     await db.hall.deleteMany({ where: { cafeId: cafe.id } });

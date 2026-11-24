@@ -114,6 +114,20 @@ test('PostgreSQL: supplier settlement preserves stock, reconciles old invoices, 
       assert.equal(Number(stock.stock), 20000);
       assert.equal(Number(stock.avgCost), 0.15);
       assert.deepEqual(await suppliers.settlements(), [{ supplierId: supplier.id, purchaseTotal: 3000, knownDebt: 1500, missingSettlementCount: 0 }]);
+
+      const invoice = await receipt(300);
+      const unpaid = await purchases.findOne(invoice.id, true);
+      assert.deepEqual([unpaid.debtAmount, unpaid.payments.length], [3000, 0]);
+      const firstInstallment = batch([bank.id, 1000]);
+      const secondInstallment = batch([bank.id, 2000]);
+      await settlement.pay(owner, invoice.id, firstInstallment);
+      assert.equal((await purchases.findOne(invoice.id)).debtAmount, 2000);
+      await settlement.pay(owner, invoice.id, secondInstallment);
+      await settlement.pay(owner, invoice.id, secondInstallment);
+      const paid = await purchases.findOne(invoice.id, true);
+      assert.deepEqual([paid.debtAmount, paid.payments.length], [0, 2]);
+      assert.equal(await db.stockMovement.count({ where: { sourceType: 'purchase', sourceId: invoice.id } }), 1);
+      assert.equal(Number((await db.ingredient.findUniqueOrThrow({ where: { id: flour.id } })).stock), 30000);
     });
   } finally {
     await db.financeEntry.deleteMany({ where: { cafeId } });

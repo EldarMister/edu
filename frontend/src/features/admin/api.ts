@@ -213,7 +213,7 @@ function useInvalidate(keys: string[][]) {
 }
 
 // ========== СТАТИСТИКА ==========
-export type StatsPeriod = 'today' | 'week' | 'month' | 'all' | 'custom';
+export type StatsPeriod = 'today' | 'yesterday' | 'week' | 'month' | 'all' | 'custom';
 
 type StatsPeriodParams = { period: StatsPeriod; from?: string; to?: string };
 
@@ -240,7 +240,7 @@ type ProductStats = {
 
 export interface StatisticsReports {
   range: { from: string | null; to: string };
-  sales: { date: string; revenue: number; orders: number; avgCheck: number; discount: number }[];
+  sales: { date: string; paidAmount: number; refundedAmount: number; revenue: number; orders: number; avgCheck: number; discount: number }[];
   products: ProductStats[];
   categories: { id: string; name: string; quantity: number; revenue: number; cost: number | null; tax: number | null; profit: number | null }[];
   staff: { id: string; name: string; revenue: number; orders: number; avgCheck: number; avgSeconds: number | null; profit: number | null }[];
@@ -273,6 +273,7 @@ export interface OrdersFilter {
   sortDirection?: 'asc' | 'desc';
   dateFrom?: string;
   dateTo?: string;
+  dateField?: 'closed';
   paymentMethod?: string;
   waiterId?: string;
 }
@@ -285,6 +286,7 @@ function ordersQueryString(params: Partial<OrdersFilter>) {
   if (params.sortDirection) q.set('sortDirection', params.sortDirection);
   if (params.dateFrom) q.set('dateFrom', params.dateFrom);
   if (params.dateTo) q.set('dateTo', params.dateTo);
+  if (params.dateField) q.set('dateField', params.dateField);
   if (params.paymentMethod) q.set('paymentMethod', params.paymentMethod);
   if (params.waiterId) q.set('waiterId', params.waiterId);
   return q;
@@ -800,10 +802,20 @@ export interface ShiftHistoryRow {
   role: Role;
   startedAt: string;
   endedAt: string | null;
+  updatedAt: string;
   durationMin: number;
   status: ShiftHistoryStatus;
   closedBy: string | null;
   adminComment: string | null;
+  changes?: {
+    id: string;
+    at: string;
+    actorName: string | null;
+    kind: 'correction' | 'manual-close' | 'self-close' | 'auto-close' | 'cash-close';
+    reason: string | null;
+    oldTime: { startedAt: string; endedAt: string | null };
+    newTime: { startedAt: string; endedAt: string | null };
+  }[];
   ordersCount: number;
   turnover: number;
   orders: ShiftHistoryOrder[];
@@ -814,6 +826,7 @@ export interface ShiftHistoryResponse {
     shiftsCount: number;
     totalDurationMin: number;
     activeCount: number;
+    unclosedCount?: number;
   };
   range: { from: string; to: string };
 }
@@ -835,7 +848,7 @@ export function useShiftHistory(filters: ShiftHistoryFilters, enabled = true) {
 export function useShiftHistoryActions() {
   const invalidate = useInvalidate([['admin', 'staff'], ['admin', 'finance']]);
   const update = useMutation({
-    mutationFn: ({ id, ...body }: { id: string; startedAt?: string; endedAt?: string | null }) =>
+    mutationFn: ({ id, ...body }: { id: string; startedAt?: string; endedAt?: string | null; expectedUpdatedAt?: string; reason?: string }) =>
       api.patch(`/admin/staff/shift-history/${id}`, body).then((r) => r.data),
     onSuccess: invalidate,
   });

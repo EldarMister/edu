@@ -2,7 +2,7 @@ import { ReportPeriodFilter, REPORT_PERIODS, type PeriodPreset } from './ReportP
 import { usePageFilters } from './workspace-route';
 import { calendarDate, warehouseDay, warehousePeriodRange } from './warehouse-period';
 
-export function useListPeriod(name: string, defaultPeriod: PeriodPreset = 'all') {
+export function useListPeriod(name: string, defaultPeriod: PeriodPreset = 'all', label = 'Период') {
   const periodKey = `${name}Period`;
   const fromKey = `${name}From`;
   const toKey = `${name}To`;
@@ -23,7 +23,7 @@ export function useListPeriod(name: string, defaultPeriod: PeriodPreset = 'all')
       const day = calendarDate(warehouseDay(parsed));
       return (!range.dateFrom || day >= range.dateFrom) && (!range.dateTo || day <= range.dateTo);
     },
-    filter: <ReportPeriodFilter preset={preset} today={today} range={range} label="Период" allCaption="За всё время"
+    filter: <ReportPeriodFilter preset={preset} today={today} range={range} label={label} allCaption="За всё время"
       onPreset={(value) => update({ [periodKey]: value, [fromKey]: '', [toKey]: '', [pageKey]: '1', [expandedKey]: '' })}
       onRange={(from, to) => update({ [periodKey]: 'custom', [fromKey]: from, [toKey]: to, [pageKey]: '1', [expandedKey]: '' })} />,
   };

@@ -24,6 +24,7 @@ export const SERVER_EVENTS = {
   WAITER_ORDER_REJECTED: 'waiter:order_rejected',
   WAITER_SHIFT_STARTED: 'waiter:shift_started',
   WAITER_SHIFT_ENDED: 'waiter:shift_ended',
+  WAITER_SHIFT_UPDATED: 'waiter:shift_updated',
   TABLE_STATUS_CHANGED: 'table:status_changed',
   TABLES_UPDATED: 'tables:updated',
   MENU_UPDATED: 'menu:updated',

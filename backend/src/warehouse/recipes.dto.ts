@@ -1,28 +1,18 @@
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { MenuModifiersDto } from './menu-modifiers';
+import { ProcessingOptionsDto } from './recipe-processing.dto';
 
-export class RecipeItemInputDto {
-  @IsString() ingredientId: string;
+export class RecipeItemUpdateDto extends ProcessingOptionsDto {
   @IsNumber() @Min(0) amount: number;
   @IsOptional() @IsString() @MaxLength(16) unit?: string;
   @IsOptional() @IsBoolean() fromCommonWarehouse?: boolean;
   @IsOptional() @IsString() warehouseId?: string | null;
-  @IsOptional() @IsNumber() @Min(0) netAmount?: number | null;
-  @IsOptional() @IsNumber() @Min(0) @Max(100) lossPercent?: number;
-  @IsOptional() @IsIn(['cleaning', 'boiling', 'frying', 'stewing', 'baking']) processingMethod?: string | null;
   @IsOptional() @IsObject() variantAmounts?: Record<string, number>;
 }
 
-export class RecipeItemUpdateDto {
-  @IsNumber() @Min(0) amount: number;
-  @IsOptional() @IsString() @MaxLength(16) unit?: string;
-  @IsOptional() @IsBoolean() fromCommonWarehouse?: boolean;
-  @IsOptional() @IsString() warehouseId?: string | null;
-  @IsOptional() @IsNumber() @Min(0) netAmount?: number | null;
-  @IsOptional() @IsNumber() @Min(0) @Max(100) lossPercent?: number;
-  @IsOptional() @IsIn(['cleaning', 'boiling', 'frying', 'stewing', 'baking']) processingMethod?: string | null;
-  @IsOptional() @IsObject() variantAmounts?: Record<string, number>;
+export class RecipeItemInputDto extends RecipeItemUpdateDto {
+  @IsString() ingredientId: string;
 }
 
 export class RecipeMetadataDto {

@@ -5,6 +5,8 @@ const { Prisma } = require('@prisma/client');
 const { buildStatisticsReports } = require('../src/admin/statistics-reports.ts');
 const { StatisticsService } = require('../src/admin/statistics.service.ts');
 const { StatisticsController } = require('../src/admin/statistics.controller.ts');
+const { AdminOrdersService } = require('../src/admin/admin-orders.service.ts');
+const { warehouseDay } = require('../src/warehouse/report-range.ts');
 
 const item = {
   id: 'espresso', dishId: 'coffee', dishVariantId: 'double', dishNameSnapshot: 'Эспрессо',
@@ -29,7 +31,7 @@ const movement = {
 
 test('daily sales, payment splits and report dimensions aggregate the same closed check in Bishkek', () => {
   const result = buildStatisticsReports([order], [movement], true);
-  assert.deepEqual(result.sales, [{ date: '2026-11-16', orders: 1, revenue: 60, discount: 5, avgCheck: 60 }]);
+  assert.deepEqual(result.sales, [{ date: '2026-11-16', orders: 1, paidAmount: 60, refundedAmount: 0, revenue: 60, discount: 5, avgCheck: 60 }]);
   assert.deepEqual(result.payments, [{ date: '2026-11-16', orders: 1, cash: 20, card: 40, qr: 0, other: 0, total: 60 }]);
   const [product] = result.products;
   assert.deepEqual({ ...product, id: undefined }, { id: undefined, name: 'Эспрессо · Двойной',
@@ -86,7 +88,7 @@ test('split check rounding and partial mixed refund reconcile across payment met
   };
   const result = buildStatisticsReports([check], [], false);
   assert.deepEqual(result.products.map(({ name, revenue }) => [name, revenue]), [['Торт', 33], ['Эспрессо · Двойной', 32.99]]);
-  assert.equal(result.sales[0].revenue, 65.99);
+  assert.deepEqual([result.sales[0].paidAmount, result.sales[0].refundedAmount, result.sales[0].revenue], [98.99, 33, 65.99]);
   assert.equal(result.categories[0].revenue, 65.99);
   assert.equal(result.staff[0].revenue, 65.99);
   assert.equal(result.payments[0].total, 65.99);
@@ -139,4 +141,24 @@ test('cost fields require warehouse report access for delegated administrators',
   assert.equal(controller.reports({}, { ...admin, permissions: { ...admin.permissions,
     actions: { warehouseCosts: true, warehouseReports: false } } }), false);
   assert.equal(controller.reports({}, { role: 'OWNER' }), true);
+});
+
+test('yesterday uses Bishkek business days and receipt drill-down uses the same closing date', async () => {
+  const today = new Date(warehouseDay(new Date()) + 'T00:00:00+06:00');
+  const yesterday = new Date(+today - 86_400_000);
+  let reportWhere;
+  const reportService = new StatisticsService({
+    $transaction: (callback) => callback({ order: { findMany: async ({ where }) => { reportWhere = where; return []; } } }),
+  }, {});
+  await reportService.reports({ period: 'yesterday' }, false);
+  assert.deepEqual(reportWhere, { status: 'paid', closedAt: { gte: yesterday, lt: today } });
+
+  let receiptQuery;
+  const orders = new AdminOrdersService({ order: {
+    findMany: async (query) => { receiptQuery = query; return []; }, count: async () => 0,
+  } });
+  const day = warehouseDay(yesterday);
+  await orders.list({ tab: 'paid', dateField: 'closed', dateFrom: day, dateTo: day });
+  assert.deepEqual(receiptQuery.where, { status: 'paid', closedAt: { gte: yesterday, lte: new Date(+today - 1) } });
+  assert.deepEqual(receiptQuery.orderBy, { closedAt: 'desc' });
 });

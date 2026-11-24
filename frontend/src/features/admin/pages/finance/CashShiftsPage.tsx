@@ -1,5 +1,6 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
 import { Modal } from '@/components/Modal';
+import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { CashShiftForm, useCashShiftAccess } from '@/features/settings/CashShiftControls';
@@ -261,19 +262,35 @@ function CountDialog({ endpoint, field, amount, onClose, onSuccess }: {
   onSuccess: () => Promise<unknown>;
 }) {
   const [value, setValue] = useState(String(amount));
+  const submitted = useRef(false);
   const formId = useId();
   const parsed = parseMoney(value);
+  const dirty = value !== String(amount);
+  const { markSaved } = useEditorDirty(dirty);
   const save = useMutation({
     mutationFn: () => api.patch(endpoint + '/counts', { [field]: parsed }),
-    onSuccess: async () => { await onSuccess(); onClose(); },
+    onSuccess: async () => { await onSuccess(); markSaved(); onClose(); },
+    onSettled: () => { submitted.current = false; },
   });
   const title = field === 'openingAmount' ? 'Открытие смены' : 'Фактический баланс';
   const disabled = parsed == null || parsed < 0 || save.isPending;
-  return <Modal open title={title} onClose={() => { if (!save.isPending) onClose(); }}
-    footer={<button form={formId} type="submit" className="btn-primary btn-md" disabled={disabled}>Сохранить</button>}>
-    <form id={formId} onSubmit={(event) => { event.preventDefault(); if (!disabled) save.mutate(); }}>
+  const close = () => {
+    if (!submitted.current && (!dirty || window.confirm('Закрыть форму без сохранения?'))) onClose();
+  };
+  return <Modal open manageFocus title={title} onClose={close}
+    footer={<div className="flex gap-2">
+      <button type="button" className="btn-secondary btn-md" onClick={close} disabled={save.isPending}>Отмена</button>
+      <button form={formId} type="submit" className="btn-primary btn-md" disabled={disabled}>Сохранить</button>
+    </div>}>
+    <form id={formId} onSubmit={(event) => {
+      event.preventDefault();
+      if (disabled || submitted.current) return;
+      submitted.current = true;
+      save.mutate();
+    }}>
       <label className="grid gap-2">Наличные в кассе
-        <input autoFocus className="input" inputMode="decimal" value={value} onChange={(event) => setValue(event.target.value)} />
+        <input data-dialog-initial-focus className="input" inputMode="decimal" disabled={save.isPending}
+          value={value} onChange={(event) => setValue(event.target.value)} />
       </label>
       {save.error && <p role="alert" className="mt-2 text-danger">{apiError(save.error)}</p>}
     </form>

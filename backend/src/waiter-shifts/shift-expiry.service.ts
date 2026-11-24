@@ -6,6 +6,7 @@ import { SERVER_EVENTS } from '../realtime/events';
 import { WaiterShiftStatus } from '@prisma/client';
 import { lockFinance } from '../finance/finance-ledger';
 import { CLOSED_ORDER_STATUSES, MAX_WORK_SHIFT_MS } from './waiter-shifts.service';
+import { recordWorkShiftChange } from './work-shift-history';
 
 /**
  * Каждый час проверяет все активные смены.
@@ -50,10 +51,12 @@ export class ShiftExpiryService {
             waiterId: current.waiterId, status: { notIn: CLOSED_ORDER_STATUSES },
           } });
           if (activeOrders) return null;
-          return tx.waiterShift.update({
+          const updated = await tx.waiterShift.update({
             where: { id: current.id },
             data: { status: WaiterShiftStatus.closed, endedAt: new Date(current.startedAt.getTime() + MAX_WORK_SHIFT_MS) },
           });
+          await recordWorkShiftChange(tx, current, updated, 'auto-close');
+          return updated;
         });
         if (!closed) continue;
 

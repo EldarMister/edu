@@ -7,7 +7,7 @@ import { SettingsService } from '../settings/settings.service';
 import { warehouseDay } from '../warehouse/report-range';
 import { buildStatisticsReports, statisticsMovementSelect, statisticsOrderSelect } from './statistics-reports';
 
-type StatsPeriod = 'today' | 'week' | 'month' | 'all' | 'custom';
+type StatsPeriod = NonNullable<StatsQueryDto['period']>;
 
 const HOUR = 3_600_000;
 const BISHKEK_OFFSET = 6 * HOUR;
@@ -237,6 +237,7 @@ export class StatisticsService {
   private async resolveRange(period: StatsPeriod, query: StatsQueryDto) {
     const today = startOfDay();
     if (period === 'today') return { from: today, to: endExclusive(today) };
+    if (period === 'yesterday') return { from: addDays(today, -1), to: today };
     if (period === 'week') return { from: addDays(today, -6), to: endExclusive(today) };
     if (period === 'month') return { from: addDays(today, -29), to: endExclusive(today) };
     if (period === 'custom') {
@@ -267,7 +268,7 @@ export class StatisticsService {
     to: Date,
     period: StatsPeriod,
   ) {
-    if (period === 'today') {
+    if (period === 'today' || period === 'yesterday') {
       const points = Array.from({ length: 24 }, (_, hour) => ({
         label: `${String(hour).padStart(2, '0')}:00`,
         amount: 0,

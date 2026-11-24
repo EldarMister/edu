@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { calculateSaleTaxes } from '../settings/order-taxes';
 import { getCafeId } from '../tenant/tenant-context';
 import { recipeAmount, RecipeResolver } from './recipe-resolution';
+import { processingStageResults, readProcessingStages, stagedNetAmount } from './recipe-processing';
 import { assertUnitMatchesType, baseUnitForType, costUnitLabel, normalizeUnit, toBase, unitLabel, type UnitCode } from './units';
 import { getWarehouseBalance, type WarehouseLocation } from './warehouse-location';
 
@@ -18,6 +19,8 @@ export type RecipeCostRow = {
   amountUnit: string;
   lossPercent: Prisma.Decimal;
   processingMethod: string | null;
+  processingStages?: Prisma.JsonValue | null;
+  processingBasis?: string | null;
   variantAmounts: Prisma.JsonValue | null;
 };
 
@@ -140,10 +143,16 @@ export class RecipeCalculator {
         if (!(error instanceof BadRequestException)) throw error;
         invalidVariant = true;
       }
-      const net = !amount.gt(0) ? zero : row.netAmount != null && row.amount.gt(0)
-        ? amount.mul(row.netAmount).div(row.amount).toDecimalPlaces(3)
-        : row.netAmount == null && amount.eq(row.amount) ? null : amount.mul(hundred.sub(row.lossPercent)).div(hundred).toDecimalPlaces(3);
-      const yieldAmount = net ?? amount.mul(hundred.sub(row.lossPercent)).div(hundred).toDecimalPlaces(3);
+      const stages = readProcessingStages(row.processingStages);
+      const configuredNet = () => stages.length ? stagedNetAmount(stages, amount) : amount.mul(hundred.sub(row.lossPercent)).div(hundred).toDecimalPlaces(3);
+      let net: Prisma.Decimal | null = zero;
+      if (amount.gt(0)) {
+        if (amount.eq(row.amount)) net = row.netAmount;
+        else if (stages.length && row.processingBasis !== 'manual') net = configuredNet();
+        else if (row.netAmount != null && row.amount.gt(0)) net = amount.mul(row.netAmount).div(row.amount).toDecimalPlaces(3);
+        else net = configuredNet();
+      }
+      const yieldAmount = net ?? configuredNet();
       const pieceWeight = ingredient.unitType === 'count' ? ingredient.pieceWeightGrams : null;
       const pieceNetWeight = pieceWeight?.mul(yieldAmount) ?? null;
       if (yieldAmount.gt(0) && ingredient.kind !== 'consumable') {
@@ -167,7 +176,8 @@ export class RecipeCalculator {
         amountUnit: unit, unitType: ingredient.unitType, ingredientDisplayUnit: ingredient.displayUnit, amount: quantity(amount, unit),
         baseAmount: quantity(row.amount, unit), netAmount: net == null ? null : quantity(net, unit), lossPercent: Number(row.lossPercent),
         pieceWeightGrams: pieceWeight == null ? null : Number(pieceWeight), netWeightGrams: pieceNetWeight == null ? null : quantity(pieceNetWeight, 'g'),
-        processingMethod: row.processingMethod, variantAmounts: Object.fromEntries(
+        processingMethod: row.processingMethod, processingStages: stages, processingBasis: row.processingBasis ?? null,
+        processingStageResults: processingStageResults(stages, amount, unit), variantAmounts: Object.fromEntries(
           Object.entries((row.variantAmounts ?? {}) as Record<string, unknown>).flatMap(([id, amount]) => {
             if (!(typeof amount === 'number' || typeof amount === 'string' && amount.trim()) || !Number.isFinite(Number(amount)) || Number(amount) < 0) return [];
             return [[id, quantity(new Prisma.Decimal(amount), unit)]];

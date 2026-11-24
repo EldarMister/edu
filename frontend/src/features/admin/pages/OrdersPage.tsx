@@ -18,6 +18,7 @@ import { useAdminOrderDetails, useAdminOrdersInfinite, useOrdersSummary, useCanc
 import { WorkspaceHeaderActions } from './WorkspaceHeader';
 import { useListPeriod } from './warehouse/ListPeriodFilter';
 import { visibleWarehouseColumns, WarehouseColumnSettings } from './warehouse/WarehouseColumnSettings';
+import { usePageFilters } from './warehouse/workspace-route';
 import './orders-redesign.css';
 
 const MANUAL_STATUS_OPTIONS: { value: OrderStatus; label: string }[] = [
@@ -38,10 +39,12 @@ function sortRequest(sort: OrderSort): { sort: 'default' | 'date' | 'amount'; so
 }
 
 export function OrdersPage() {
-  const [tab, setTab] = useState('all');
+  const tr = useT();
+  const [{ ordersTab: tab, ordersDateField }, updateView] = usePageFilters({ ordersTab: 'all', ordersDateField: '' });
+  const byClose = tab === 'paid' && ordersDateField === 'closed';
   const [paymentMethod, setPaymentMethod] = useState('');
   const [waiterId, setWaiterId] = useState('');
-  const period = useListPeriod('orders');
+  const period = useListPeriod('orders', 'all', tr(byClose ? 'Дата закрытия' : 'Период'));
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<OrderSort>('default');
   const [columnsOpen, setColumnsOpen] = useState(false);
@@ -58,7 +61,6 @@ export function OrdersPage() {
   const [manualReason, setManualReason] = useState('');
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
-  const tr = useT();
   const push = useNotifications((s) => s.push);
   const cancelOrder = useCancelOrder();
   const updateStatus = useUpdateOrderStatus();
@@ -69,7 +71,7 @@ export function OrdersPage() {
     ...(waiters.data ?? []).map((w) => ({ value: w.id, label: w.name })),
   ];
 
-  const filters = { search, paymentMethod, waiterId, ...period.range };
+  const filters = { search, paymentMethod, waiterId, ...period.range, ...(byClose && { dateField: 'closed' as const }) };
   const requestSort = sortRequest(sort);
 
   const ordersQ = useAdminOrdersInfinite({ tab, ...requestSort, ...filters });
@@ -80,7 +82,7 @@ export function OrdersPage() {
       ? loadedItems
       : [...loadedItems].sort((a, b) => {
           const comparison = sort.startsWith('date')
-            ? new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+            ? new Date((byClose ? a.closedAt : a.createdAt) ?? a.createdAt).getTime() - new Date((byClose ? b.closedAt : b.createdAt) ?? b.createdAt).getTime()
             : Number(a.finalAmount) - Number(b.finalAmount);
           return sort.endsWith('_asc') ? comparison : -comparison;
         });
@@ -167,7 +169,7 @@ export function OrdersPage() {
           waiterOptions={waiterOptions}
           sort={sort}
           search={search}
-          onTabChange={setTab}
+          onTabChange={(ordersTab) => updateView({ ordersTab, ordersDateField: ordersTab === 'paid' ? ordersDateField : '' })}
           onPaymentMethodChange={setPaymentMethod}
           onWaiterChange={setWaiterId}
           onSortChange={setSort}
@@ -177,6 +179,7 @@ export function OrdersPage() {
 
       <OrdersTable
         columns={columns}
+        byClose={byClose}
         items={items}
         isLoading={ordersQ.isLoading}
         error={ordersError}

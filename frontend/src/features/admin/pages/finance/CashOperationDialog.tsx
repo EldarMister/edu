@@ -75,7 +75,7 @@ export function CashOperationDialog({ shiftId, operation, cashier = false, onClo
   const close = () => {
     if (!submitted.current && (!dirty || window.confirm('Закрыть форму без сохранения?'))) onClose();
   };
-  return <Modal open title={operation ? 'Редактирование транзакции' : 'Создать транзакцию'} onClose={close}
+  return <Modal open manageFocus title={operation ? 'Редактирование транзакции' : 'Создать транзакцию'} onClose={close}
     footer={<div className="flex flex-wrap gap-2">
       <button type="submit" form={formId} className="btn-primary btn-md" disabled={disabled}>{label}</button>
       <button type="button" className="btn-secondary btn-md" onClick={close} disabled={save.isPending}>Отмена</button>
@@ -96,7 +96,7 @@ export function CashOperationDialog({ shiftId, operation, cashier = false, onClo
           </label>)}
         </fieldset>
         <label className="grid gap-1.5 text-sm">Сумма
-          <input inputMode="decimal" autoFocus className="input w-full" value={amount} placeholder="0,00" maxLength={17}
+          <input inputMode="decimal" data-dialog-initial-focus className="input w-full" value={amount} placeholder="0,00" maxLength={17}
             onChange={(event) => setAmount(event.target.value)} />
         </label>
         {kind === 'collection' ? <p className="text-sm text-text-muted">Наличные будут переведены из кассы в сейф.</p>

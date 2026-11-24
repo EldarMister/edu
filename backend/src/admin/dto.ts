@@ -430,6 +430,12 @@ export class UpdateShiftHistoryDto {
 
   @IsOptional() @IsString()
   endedAt?: string | null;
+
+  @IsOptional() @IsString() @MaxLength(40)
+  expectedUpdatedAt?: string;
+
+  @IsOptional() @IsString() @MaxLength(500)
+  reason?: string;
 }
 
 // ---------- Заказы (фильтр/пагинация) ----------
@@ -451,6 +457,9 @@ export class OrderQueryDto {
 
   @IsOptional() @IsString()
   dateTo?: string;
+
+  @IsOptional() @IsIn(['closed'])
+  dateField?: 'closed';
 
   // Фильтр по способу оплаты (qr|cash|card|mixed).
   @IsOptional() @IsString()
@@ -478,7 +487,7 @@ export class UpdateOrderStatusDto {
 // ---------- Статистика ----------
 export class StatsQueryDto {
   @IsOptional() @IsString()
-  period?: 'today' | 'week' | 'month' | 'all' | 'custom';
+  period?: 'today' | 'yesterday' | 'week' | 'month' | 'all' | 'custom';
 
   @IsOptional() @IsString()
   from?: string;

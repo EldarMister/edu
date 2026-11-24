@@ -4,6 +4,7 @@ const { randomUUID } = require('node:crypto');
 const { test } = require('node:test');
 const { PrismaClient } = require('@prisma/client');
 const { CashShiftsService } = require('../src/cash-shifts/cash-shifts.module.ts');
+const { AuditAction } = require('../src/audit/audit.constants.ts');
 const { FinanceService } = require('../src/finance/finance.service.ts');
 const { recordOrderReceipts, reverseOrderReceipts } = require('../src/finance/order-receipts.ts');
 
@@ -100,6 +101,12 @@ test('PostgreSQL: shift settlement posts sales and both collection legs once and
       [undefined, 'waiter:shift_ended', employeeShift.id, 'closed'],
     ]);
     assert.deepEqual(staffEvents[0].shift.endedAt, closed.closedAt);
+    const closureJournal = await db.auditLog.findMany({ where: { cafeId, entityId: employeeShift.id, actionType: AuditAction.STAFF_SHIFT_CHANGED } });
+    assert.equal(closureJournal.length, 1, 'retry should not duplicate the employee shift history');
+    assert.equal(closureJournal[0].userId, waiter.id);
+    assert.equal(closureJournal[0].metadata.kind, 'cash-close');
+    assert.equal(closureJournal[0].oldValue.endedAt, null);
+    assert.equal(closureJournal[0].newValue.endedAt, closed.closedAt.toISOString());
     await assert.rejects(shifts.close(cafeId, waiter.id, { ...request, closeEmployeeShifts: false }), { status: 409 });
     assert.deepEqual(await balance(), { cash: 135, card: 80, safe: 100 });
     const removedCollection = await shifts.createOperation(cafeId, owner, shift.id, operation('collection', 12, { note: 'Удалённая инкассация' }));
@@ -153,7 +160,7 @@ test('PostgreSQL: shift settlement posts sales and both collection legs once and
 
     const arithmetic = await shifts.open(cafeId, waiter.id, 1000);
     assert.equal((await shifts.list(cafeId, true)).current.collectionAmount, 0);
-    await pay([['cash', 4500], ['card', 250]]);
+    await pay([['cash', 4500], ['card', 250], ['qr', 50]]);
     const refunded = await pay([['cash', 500]]);
     await db.$transaction((tx) => reverseOrderReceipts(tx, cafeId, refunded.id, waiter.id));
     await shifts.createOperation(cafeId, waiter, arithmetic.id, operation('income', 200));
@@ -161,13 +168,14 @@ test('PostgreSQL: shift settlement posts sales and both collection legs once and
     await shifts.createOperation(cafeId, waiter, arithmetic.id, operation('collection', 4000));
     const { summary } = await shifts.details(cafeId, arithmetic.id);
     assert.deepEqual(summary, {
-      openingAmount: 1000, cashSales: 5000, cashRefunds: 500, noncashSales: 250, noncashRefunds: 0,
+      openingAmount: 1000, cashSales: 5000, cashRefunds: 500, noncashSales: 300, noncashRefunds: 0,
       deposits: 200, expenses: 700, collections: 4000, otherTransfers: 0, adjustments: 0,
       expectedAmount: 1000, actualAmount: null, difference: null,
     });
     await shifts.close(cafeId, waiter.id, { shiftId: arithmetic.id, amount: 1000, expectedAmount: 1000 });
     assert.deepEqual((await shifts.details(cafeId, arithmetic.id)).summary, { ...summary, actualAmount: 1000, difference: 0 });
   } finally {
+    await db.auditLog.deleteMany({ where: { cafeId } });
     await db.financeEntry.deleteMany({ where: { cafeId } });
     await db.cashShift.deleteMany({ where: { cafeId } });
     await db.payment.deleteMany({ where: { cafeId } });

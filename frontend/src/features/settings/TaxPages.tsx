@@ -182,14 +182,14 @@ function TaxEditor({ tax, onClose }: { tax?: MenuTax; onClose: () => void }) {
     event.preventDefault();
     void saveTax();
   }
-  return <Modal open title={tax ? 'Редактирование налога' : 'Добавление налога'} onClose={close}
+  return <Modal open manageFocus title={tax ? 'Редактирование налога' : 'Добавление налога'} onClose={close}
     footer={<div className="flex justify-end gap-2">
       <button type="button" className="btn-secondary btn-md" onClick={close} disabled={save.isPending}>Отмена</button>
       <button type="submit" form={id} className="btn-primary btn-md" disabled={!name.trim() || percent === undefined || save.isPending}>Сохранить</button>
     </div>}>
     <form id={id} onSubmit={submit}>
       <fieldset disabled={save.isPending} className="grid gap-4 text-sm">
-        <label className="grid gap-1">Название<input className="input" autoFocus required maxLength={80} value={name}
+        <label className="grid gap-1">Название<input className="input" data-dialog-initial-focus required maxLength={80} value={name}
           onChange={(event) => setName(event.target.value)} /></label>
         <label className="grid gap-1">Процент<input className="input" inputMode="decimal" required maxLength={6} value={rate}
           onChange={(event) => setRate(event.target.value)} /></label>

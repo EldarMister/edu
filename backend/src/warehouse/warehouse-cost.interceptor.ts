@@ -5,7 +5,7 @@ import { hasPermission, resolvePermissions } from '../common/permissions';
 
 const costFields = new Set(['recipeTotalCost', 'recipeUnitCost', 'avgCost', 'avgCostBase', 'costAtMoment', 'stockValue', 'foodCost', 'totalCost',
   'lineCost', 'cost', 'margin', 'marginAmount', 'marginPercent', 'foodCostPercent', 'directCost', 'ingredientCost', 'packagingCost',
-  'compositionFoodCost', 'productionCost', 'profit', 'markupPercent', 'taxAmount',
+  'compositionFoodCost', 'compositionCostForScaling', 'productionCost', 'profit', 'markupPercent', 'taxAmount',
   'netRevenue', 'actualCost', 'grossMargin',
   'valuationAdjustment', 'totalValuationAdjustment',
   'openingAvgCost', 'openingValue', 'closingAvgCost', 'closingValue',

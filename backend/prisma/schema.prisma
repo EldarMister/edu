@@ -1401,9 +1401,11 @@ model RecipeItem {
   warehouseId String? @map("warehouse_id")
   warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
   processingMethod String? @map("processing_method")
+  processingStages Json? @map("processing_stages")
+  processingBasis String? @map("processing_basis")
   variantAmounts Json? @map("variant_amounts")
   netAmount Decimal? @map("net_amount") @db.Decimal(14, 3)
-  lossPercent Decimal @default(0) @map("loss_percent") @db.Decimal(5, 2)
+  lossPercent Decimal @default(0) @map("loss_percent") @db.Decimal(20, 2)
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
@@ -1542,8 +1544,10 @@ model PreparationRecipeItem {
   amount Decimal @db.Decimal(14, 3)
   unit String
   netAmount Decimal? @map("net_amount") @db.Decimal(14, 3)
-  lossPercent Decimal @default(0) @map("loss_percent") @db.Decimal(5, 2)
+  lossPercent Decimal @default(0) @map("loss_percent") @db.Decimal(20, 2)
   processingMethod String? @map("processing_method")
+  processingStages Json? @map("processing_stages")
+  processingBasis String? @map("processing_basis")
   recipe PreparationRecipe @relation(fields: [recipeId], references: [ingredientId], onDelete: Cascade)
   ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
 

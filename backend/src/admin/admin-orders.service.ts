@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { OrderStatus, PaymentMethod, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { orderInclude } from '../orders/order.helpers';
+import { warehouseDateRange } from '../warehouse/report-range';
 import { OrderQueryDto } from './dto';
 
 const ACTIVE_STATUSES: OrderStatus[] = [
@@ -81,7 +82,14 @@ export class AdminOrdersService {
       ];
     }
 
-    if (query.dateFrom || query.dateTo) {
+    if (query.dateField === 'closed') {
+      where.closedAt = warehouseDateRange(query.dateFrom, query.dateTo) ?? { not: null };
+    } else if (query.dateFrom || query.dateTo) {
+      const calendarDate = /^\d{4}-\d{2}-\d{2}$/;
+      if ((!query.dateFrom || calendarDate.test(query.dateFrom)) && (!query.dateTo || calendarDate.test(query.dateTo))) {
+        where.createdAt = warehouseDateRange(query.dateFrom, query.dateTo);
+        return where;
+      }
       where.createdAt = {};
       if (query.dateFrom) (where.createdAt as Prisma.DateTimeFilter).gte = new Date(query.dateFrom);
       if (query.dateTo) {
@@ -98,14 +106,15 @@ export class AdminOrdersService {
     const page = query.page ?? 1;
     const pageSize = Math.min(query.pageSize ?? 10, 50);
     const where = this.buildWhere(query);
+    const dateField = query.dateField === 'closed' ? 'closedAt' : 'createdAt';
     const orderBy: Prisma.OrderOrderByWithRelationInput =
       query.sort === 'amount_desc' || (query.sort === 'amount' && query.sortDirection !== 'asc')
         ? { finalAmount: 'desc' }
         : query.sort === 'amount_asc' || (query.sort === 'amount' && query.sortDirection === 'asc')
           ? { finalAmount: 'asc' }
           : query.sort === 'date_asc' || (query.sort === 'date' && query.sortDirection === 'asc')
-            ? { createdAt: 'asc' }
-            : { createdAt: 'desc' };
+            ? { [dateField]: 'asc' }
+            : { [dateField]: 'desc' };
 
     const [items, total] = await Promise.all([
       this.prisma.order.findMany({

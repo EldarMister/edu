@@ -1,6 +1,7 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Modal } from '@/components/Modal';
-import { EditorPage, EditorFooterTarget } from './EditorPage';
+import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
@@ -20,7 +21,7 @@ import {
   type ItemKind,
 } from './api';
 import { useSuppliers } from './settings-api';
-import { DocumentField, DocumentFooter } from './WarehouseUi';
+import { DocumentField } from './WarehouseUi';
 import { UNIT_OPTIONS, unitConversionFactor, unitLabel, unitTypeOf, unitsForType, type UnitCode } from './units';
 import { IngredientUsageTable } from './CatalogueDetails';
 import { parsePieceWeightGrams } from './recipe-draft-values';
@@ -47,16 +48,17 @@ export function ItemCard({
   const query = useIngredient(id ?? null);
   const mutations = useIngredientMutations();
   const pending = mutations.create.isPending || mutations.update.isPending;
-  const close = () => { if (!pending) onClose(); };
   const title = id
     ? 'Редактирование ингредиента'
     : defaultKind === 'goods'
       ? 'Добавление товара'
       : 'Добавление ингредиента';
-  const Container = compact ? Modal : EditorPage;
-  return (
-    <EditorFooterTarget.Provider value={null}>
-      <Container open onClose={close} title={title} panelClassName="max-w-2xl">
+  return createPortal(!id || query.data ? (
+    <ItemForm key={id ?? 'new'} title={title} item={query.data} defaultKind={defaultKind} initialName={initialName}
+      onClose={onClose} onSaved={onSaved} onHistory={onHistory} onRecipe={onRecipe} compact={compact}
+      mutations={mutations} pending={pending} />
+  ) : (
+    <Modal open manageFocus onClose={onClose} title={title} panelClassName="max-w-lg">
         {id && query.isPending && (
           <div className="flex justify-center p-8">
             <Spinner />
@@ -67,27 +69,12 @@ export function ItemCard({
             {apiError(query.error)}
           </p>
         )}
-        {(!id || query.data) && (
-          <ItemForm
-            key={id ?? 'new'}
-            item={query.data}
-            defaultKind={defaultKind}
-            initialName={initialName}
-            onClose={onClose}
-            onSaved={onSaved}
-            onHistory={onHistory}
-            onRecipe={onRecipe}
-            compact={compact}
-            mutations={mutations}
-            pending={pending}
-          />
-        )}
-      </Container>
-    </EditorFooterTarget.Provider>
-  );
+    </Modal>
+  ), document.body);
 }
 
 function ItemForm({
+  title,
   item,
   defaultKind,
   initialName,
@@ -99,6 +86,7 @@ function ItemForm({
   mutations,
   pending,
 }: {
+  title: string;
   item?: IngredientDetails;
   defaultKind?: ItemKind;
   initialName?: string;
@@ -111,6 +99,9 @@ function ItemForm({
   pending: boolean;
 }) {
   const formId = useId();
+  const pieceWeightErrorId = useId();
+  const saving = useRef(false);
+  const openingDetails = useRef<HTMLDetailsElement>(null);
   const { can } = usePermissions();
   const editable = can(item ? 'actions.warehouseSettings' : 'actions.warehouseReceive');
   const costs = can('actions.warehouseCosts');
@@ -133,6 +124,7 @@ function ItemForm({
   );
   const [pieceWeight, setPieceWeight] = useState(item?.pieceWeightGrams == null ? '' : String(item.pieceWeightGrams));
   const [error, setError] = useState('');
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const prepared = kind === 'preparation' || kind === 'prepared_dish';
   const showOpening = !item && !compact && !prepared && editable && costs && can('actions.warehouseApprove');
   const locations = useWarehouseLocations(showOpening);
@@ -147,6 +139,17 @@ function ItemForm({
   const pieces = unitTypeOf(unit) === 'count';
   const pieceWeightGrams = parsePieceWeightGrams(pieceWeight);
   const unitOptions = item ? unitsForType(item.unitType) : UNIT_OPTIONS;
+  const values = JSON.stringify([name, unit, category, supplier, threshold, mode, losses, pieceWeight,
+    warehouseId, openingQuantity, openingPrice]);
+  const initialValues = useRef(values);
+  const dirty = editable && initialValues.current !== values;
+  const { markSaved } = useEditorDirty(dirty);
+
+  function requestClose() {
+    if (pending || saving.current) return;
+    if (dirty) setConfirmDiscard(true);
+    else onClose();
+  }
 
   function changeUnit(next: UnitCode) {
     if (next === unit) return;
@@ -171,24 +174,23 @@ function ItemForm({
   async function save(event: React.FormEvent) {
     event.preventDefault();
     event.stopPropagation();
-    if (pending || !editable) return;
+    if (pending || saving.current || !editable) return;
     if (!name.trim() || !Number.isFinite(Number(threshold)) || Number(threshold) < 0) {
       setError('Проверьте название и минимальный остаток.');
       return;
     }
-    if (pieces && pieceWeightGrams === undefined) {
-      setError('Укажите положительный вес в граммах с точностью до трёх знаков после запятой.');
-      return;
-    }
+    if (pieces && pieceWeightGrams === undefined) return;
     const hasOpening = showOpening && (openingQuantity !== '' || openingPrice !== '');
     const quantity = Number(openingQuantity);
     const unitPrice = Number(openingPrice);
     if (hasOpening && (!Number.isFinite(quantity) || quantity < 0.001 || !openingPrice
       || !Number.isFinite(unitPrice) || unitPrice < 0 || !openingWarehouse)) {
+      if (openingDetails.current) openingDetails.current.open = true;
       setError('Для начальной поставки укажите количество, цену за единицу и склад.');
       return;
     }
     setError('');
+    saving.current = true;
     try {
       const body = {
         name: name.trim(),
@@ -211,10 +213,13 @@ function ItemForm({
           ...body,
           ...(hasOpening && { initialSupply: { quantity, unitPrice, warehouseId: openingWarehouse, requestKey: openingRequestKey } }),
         });
+      markSaved();
       onClose();
       onSaved?.(saved);
     } catch (err) {
       setError(apiError(err));
+    } finally {
+      saving.current = false;
     }
   }
   const lossLabels: Record<ProcessingMethod, string> = {
@@ -225,12 +230,23 @@ function ItemForm({
     baking: '% потерь при запекании',
   };
   return (
+    <>
+    <Modal open manageFocus onClose={requestClose} title={title} panelClassName="max-w-lg"
+      footer={<div className="flex flex-wrap justify-end gap-2">
+        <button type="button" className="btn-ghost btn-md" disabled={pending} onClick={requestClose}>
+          {editable ? 'Отмена' : 'Закрыть'}
+        </button>
+        {editable && <button type="submit" form={formId} className="btn-primary btn-md"
+          disabled={pending || !name.trim() || (pieces && pieceWeightGrams === undefined)}>
+          {pending ? 'Сохранение…' : 'Сохранить'}
+        </button>}
+      </div>}>
     <form id={formId} onSubmit={save} className="poster-form poster-form--ingredient">
       <fieldset disabled={!editable || pending} className="space-y-4">
         <DocumentField label="Название">
           <input
             aria-label="Название ингредиента"
-            autoFocus={!item}
+            data-dialog-initial-focus
             className="input w-full"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -252,10 +268,14 @@ function ItemForm({
         {pieces && <DocumentField label="Вес одной штуки">
           <div className="poster-number-unit w-[136px]">
             <input aria-label="Вес одной штуки, г" aria-invalid={pieceWeightGrams === undefined || undefined}
+              aria-describedby={pieceWeightGrams === undefined ? pieceWeightErrorId : undefined}
               className="input min-w-0 w-full" inputMode="decimal" maxLength={15} placeholder="—"
               value={pieceWeight} onChange={(event) => setPieceWeight(event.target.value)} />
             <span>г</span>
           </div>
+          {pieceWeightGrams === undefined && <span id={pieceWeightErrorId} className="mt-1 block text-xs text-danger">
+            Укажите положительный вес с точностью до трёх знаков после запятой.
+          </span>}
         </DocumentField>}
         <DocumentField label="Категория">
           <input
@@ -277,9 +297,9 @@ function ItemForm({
                     aria-label={lossLabels[method.value]}
                     className="input min-w-0 w-full"
                     type="number"
-                    min="0"
+                    min="-999.99"
                     max="99.99"
-                    step="any"
+                    step="0.01"
                     value={losses[method.value] ?? 0}
                     onChange={(e) => setLosses({ ...losses, [method.value]: Number(e.target.value) })}
                   />
@@ -287,6 +307,7 @@ function ItemForm({
                 </div>
               </DocumentField>
             ))}
+            {mass && <p className="text-xs text-text-muted">Отрицательный процент обозначает увеличение веса после обработки.</p>}
             <DocumentField label="Минимальный остаток">
               <div className="poster-number-unit w-[220px]">
                 <input
@@ -332,8 +353,9 @@ function ItemForm({
             )}
           </div>
         </details>
-        {showOpening && <section className="mt-8 space-y-4 border-t border-border pt-5">
-          <h2 className="text-lg font-semibold">Складской учёт</h2>
+        {showOpening && <details ref={openingDetails} className="border-t border-border pt-3">
+          <summary className="cursor-pointer text-sm font-medium text-primary">Начальная поставка</summary>
+          <div className="mt-3 space-y-4">
           <p className="max-w-3xl text-sm text-text-secondary">
             Если ингредиент уже есть в наличии, укажите количество, цену и склад. При сохранении будет проведена поставка.
           </p>
@@ -358,7 +380,8 @@ function ItemForm({
               options={warehouses.map((warehouse) => ({ value: warehouse.id, label: warehouse.name }))} />
           </DocumentField>
           {locations.isError && <p role="alert" className="text-sm text-danger">{apiError(locations.error)}</p>}
-        </section>}
+          </div>
+        </details>}
       </fieldset>
       {item && (
         <details className="poster-advanced mt-5">
@@ -422,22 +445,17 @@ function ItemForm({
           {error}
         </p>
       )}
-      {editable && (
-        <DocumentFooter>
-          <button
-            type="submit"
-            form={formId}
-            className="btn-primary btn-md"
-            disabled={pending || !name.trim()}
-          >
-            {pending ? <Spinner /> : 'Сохранить'}
-          </button>
-          {compact && <button type="button" className="btn-ghost btn-md" disabled={pending} onClick={onClose}>
-            Отмена
-          </button>}
-        </DocumentFooter>
-      )}
     </form>
+    </Modal>
+    {confirmDiscard && <Modal open manageFocus title="Есть несохранённые изменения" onClose={() => setConfirmDiscard(false)}
+      footer={<div className="flex flex-wrap justify-end gap-2">
+        <button type="button" className="btn-secondary btn-md" data-dialog-initial-focus
+          onClick={() => setConfirmDiscard(false)}>Продолжить редактирование</button>
+        <button type="button" className="btn-danger btn-md" onClick={() => { markSaved(); onClose(); }}>Выйти без сохранения</button>
+      </div>}>
+      <p className="text-sm text-text-secondary">Изменения в карточке ингредиента ещё не сохранены.</p>
+    </Modal>}
+    </>
   );
 }
 

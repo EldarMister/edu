@@ -5,6 +5,7 @@ import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
 import { lockFinance } from '../finance/finance-ledger';
 import { resolveUserPermissions } from '../common/permissions';
+import { recordWorkShiftChange } from './work-shift-history';
 
 export const CLOSED_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.paid,
@@ -143,13 +144,15 @@ export class WaiterShiftsService {
         throw new BadRequestException('Нельзя завершить смену, пока есть активные заказы.');
       }
 
-      return tx.waiterShift.update({
+      const closed = await tx.waiterShift.update({
         where: { id: active.id },
         data: {
           status: WaiterShiftStatus.closed,
           endedAt: new Date(),
         },
       });
+      await recordWorkShiftChange(tx, active, closed, 'self-close', currentEmployee);
+      return closed;
     });
 
     // Итоги смены: сколько заказов официант закрыл (оплачено) и на какую сумму.

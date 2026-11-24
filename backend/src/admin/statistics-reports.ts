@@ -37,7 +37,7 @@ type Product = { id: string; name: string; categoryId: string; category: string;
   quantity: number; gross: number; discount: number; revenue: number; cost: number | null; tax: number | null };
 type Category = { id: string; name: string; quantity: number; revenue: number; cost: number | null; tax: number | null };
 type Staff = { id: string; name: string; orders: number; revenue: number; seconds: number; cost: number | null; tax: number };
-type Sale = { date: string; orders: number; revenue: number; discount: number };
+type Sale = { date: string; orders: number; paidAmount: number; refundedAmount: number; discount: number };
 type Payments = { date: string; orders: number; cash: number; card: number; qr: number; other: number };
 
 const money = (value: number) => Number(new Prisma.Decimal(value).toDecimalPlaces(2));
@@ -169,9 +169,10 @@ export function buildStatisticsReports(orders: Order[], movements: Movement[], s
   for (const order of orders) {
     if (!order.closedAt) continue;
     const date = warehouseDay(order.closedAt);
-    const sale = sales.get(date) ?? { date, orders: 0, revenue: 0, discount: 0 };
+    const sale = sales.get(date) ?? { date, orders: 0, paidAmount: 0, refundedAmount: 0, discount: 0 };
     sale.orders++;
-    sale.revenue += Number(netOrderAmount(order));
+    sale.paidAmount += Number(order.finalAmount);
+    sale.refundedAmount += Number(order.refundedAmount ?? 0);
     sale.discount += Number(order.discountAmount);
     sales.set(date, sale);
     const payment = payments.get(date) ?? { date, orders: 0, cash: 0, card: 0, qr: 0, other: 0 };
@@ -222,8 +223,12 @@ export function buildStatisticsReports(orders: Order[], movements: Movement[], s
   }
 
   return {
-    sales: [...sales.values()].sort(byDate).map((row) => ({ ...row, revenue: money(row.revenue), avgCheck: money(row.revenue / row.orders),
-      discount: money(row.discount) })),
+    sales: [...sales.values()].sort(byDate).map((row) => {
+      const paidAmount = money(row.paidAmount);
+      const refundedAmount = money(row.refundedAmount);
+      const revenue = money(paidAmount - refundedAmount);
+      return { ...row, paidAmount, refundedAmount, revenue, avgCheck: money(revenue / row.orders), discount: money(row.discount) };
+    }),
     payments: [...payments.values()].sort(byDate).map((row) => ({ ...row, cash: money(row.cash), card: money(row.card),
       qr: money(row.qr), other: money(row.other), total: money(row.cash + row.card + row.qr + row.other) })),
     staff: [...staff.values()].sort(byRevenue).map(({ tax, cost, seconds, ...row }) => ({ ...row, revenue: money(row.revenue),

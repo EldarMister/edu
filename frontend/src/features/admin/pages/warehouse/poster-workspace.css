@@ -93,9 +93,11 @@ div.poster-select-menu { border-radius: 8px; padding: 3px; box-shadow: 0 3px 10p
 .poster-workspace .poster-recipe-panel > h3 { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
 .poster-workspace .poster-recipe-panel table thead,
 .poster-workspace .poster-recipe-panel table tfoot { background: transparent; }
-.poster-workspace .poster-number-unit { display: inline-flex; align-items: center; gap: 0; }
-.poster-workspace .poster-number-unit .input { width: 100px; border-top-right-radius: 0; border-bottom-right-radius: 0; }
-.poster-workspace .poster-number-unit > span { display: flex; align-items: center; justify-content: center; height: 36px; min-width: 36px; border: 1px solid rgb(var(--edu-border)); border-left: 0; background: light-dark(#f1f5f9, var(--edu-raised)); border-radius: 0 3px 3px 0; }
+:is(.poster-workspace, .poster-form--ingredient) .poster-number-unit { display: inline-flex; align-items: center; gap: 0; }
+:is(.poster-workspace, .poster-form--ingredient) .poster-number-unit .input { width: 100px; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+:is(.poster-workspace, .poster-form--ingredient) .poster-number-unit > span { display: flex; align-items: center; justify-content: center; height: 36px; min-width: 36px; border: 1px solid rgb(var(--edu-border)); border-left: 0; background: light-dark(#f1f5f9, var(--edu-raised)); border-radius: 0 3px 3px 0; }
+.poster-form--ingredient .poster-number-unit { align-items: stretch; }
+.poster-form--ingredient .poster-number-unit > span { height: auto; }
 .poster-workspace .poster-recipe-panel tfoot .poster-row-actions { justify-content: flex-start; }
 .poster-workspace .poster-filter { min-height: 32px; border-color: transparent; background: transparent; color: rgb(var(--edu-link)); }
 .poster-workspace [data-editor-page]:has(.poster-form--ingredient) > .editor-footer { padding-left: 278px; }

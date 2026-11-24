@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Select } from '@/components/Select';
+import { useSocketEvent } from '@/lib/socket';
 import { IconTrash } from '../../components/icons';
 import { WorkspaceHeaderCount } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
@@ -8,7 +10,7 @@ import { EditorPage } from '../warehouse/EditorPage';
 import { QueryState } from '../warehouse/WarehouseUi';
 import { useEditorRoute, usePageFilters } from '../warehouse/workspace-route';
 import { useListPeriod } from '../warehouse/ListPeriodFilter';
-import { useFinance, useFinanceWrites, usePayroll, type FinanceAccount, type FinanceEntry } from './api';
+import { financeKey, useFinance, useFinanceWrites, usePayroll, type FinanceAccount, type FinanceEntry } from './api';
 import { AccountTrashPage, ArchiveAccountDialog } from './AccountTrashPage';
 import { CashShiftsPage } from './CashShiftsPage';
 import { CashHandoverPage } from './CashHandoverPage';
@@ -44,11 +46,11 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts' | 'ca
   start.setUTCMonth(start.getUTCMonth() - 2);
   const [{
     financeFrom: from, financeTo: to, financeSearch: search, financeScope: scope,
-    financeKind: kind, financeCategory: categoryId, payrollPosition, payrollMonth, payrollFrom, payrollTo,
+    financeKind: kind, financeCategory: categoryId, payrollPosition, payrollMonth, payrollFrom, payrollTo, payrollEmployee,
   }, setFilters] = usePageFilters({
     financeFrom: view === 'cashFlow' ? start.toISOString().slice(0, 10) : today.slice(0, 7) + '-01', financeTo: today, financeSearch: '',
     financeScope: '', financeKind: '', financeCategory: '', payrollPosition: '',
-    payrollMonth: today.slice(0, 7), payrollFrom: '', payrollTo: '',
+    payrollMonth: today.slice(0, 7), payrollFrom: '', payrollTo: '', payrollEmployee: '',
   });
   const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(payrollMonth) && payrollMonth <= today.slice(0, 7) ? payrollMonth : today.slice(0, 7);
   const transactionPeriod = useListPeriod('financeTransaction', 'all');
@@ -66,7 +68,12 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts' | 'ca
   }, rangeValid);
   const payrollRange = payrollFrom && payrollTo && payrollFrom <= payrollTo ? { from: payrollFrom, to: payrollTo } : undefined;
   const salary = usePayroll(payrollRange ?? month, view === 'payroll');
-  const [salaryHistoryId, setSalaryHistory] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const refreshPayroll = () => {
+    if (view === 'payroll') void queryClient.invalidateQueries({ queryKey: [...financeKey, 'payroll'] });
+  };
+  useSocketEvent('waiter:shift_ended', refreshPayroll, [view, queryClient]);
+  useSocketEvent('waiter:shift_updated', refreshPayroll, [view, queryClient]);
   const [reversingEntryId, setReversingEntryId] = useState<string | null>(null);
   const [archivingAccount, setArchivingAccount] = useState<FinanceAccount | null>(null);
   const data = finance.data;
@@ -185,11 +192,11 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts' | 'ca
 
   if (view === 'payroll') return <PayrollRegister report={salary} month={month} range={payrollRange}
     periodPicker={<FinancePeriod from={payrollFrom || month + '-01'} to={payrollTo || today}
-      onApply={({ from, to }) => { setFilters({ payrollFrom: from, payrollTo: to }); setSalaryHistory(null); }} />}
-    changeMonth={(value) => { setFilters({ payrollMonth: value, payrollFrom: '', payrollTo: '' }); setSalaryHistory(null); }}
+      onApply={({ from, to }) => setFilters({ payrollFrom: from, payrollTo: to, payrollEmployee: '' })} />}
+    changeMonth={(value) => setFilters({ payrollMonth: value, payrollFrom: '', payrollTo: '', payrollEmployee: '' })}
     search={search} changeSearch={setSearch} position={payrollPosition}
     changePosition={(value) => setFilters({ payrollPosition: value })}
-    historyId={salaryHistoryId} changeHistory={setSalaryHistory}
+    historyId={payrollEmployee || null} changeHistory={(id) => setFilters({ payrollEmployee: id ?? '' })}
     canAccrue={!payrollRange && data.canManage && (data.employees.length > 0 || (salary.data?.staff.length ?? 0) > 0)}
     canPay={!payrollRange && data.canManage && data.accounts.length > 0}
     accounts={data.accounts} openEditor={openEditor} />;

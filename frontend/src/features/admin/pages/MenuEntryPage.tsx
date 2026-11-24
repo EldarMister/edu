@@ -39,6 +39,8 @@ type VariantDraft = {
   unit: string;
 };
 
+const emptyModifiers: ModifierDraft = { allowIngredientExclusions: false, groups: [] };
+
 function newVariant(): VariantDraft {
   return { key: crypto.randomUUID(), name: '', price: '', unit: 'шт' };
 }
@@ -49,13 +51,14 @@ function salePrice(value: string): number | null {
   return Number(normalized);
 }
 
-export function MenuEntryPage({ id, kind, categoryId, onClose, initialTab = 'main', initialVariantId }: {
+export function MenuEntryPage({ id, kind, categoryId, onClose, initialTab = 'main', initialVariantId, copy = false }: {
   id?: string;
   kind: 'goods' | 'recipe';
   categoryId?: string;
   onClose: () => void;
   initialTab?: 'main' | 'recipe';
   initialVariantId?: string;
+  copy?: boolean;
 }) {
   const [next, setNext] = useState<{ count: number; categoryId: string }>();
   const query = useQuery({
@@ -72,26 +75,29 @@ export function MenuEntryPage({ id, kind, categoryId, onClose, initialTab = 'mai
       <button type="button" className="btn-secondary btn-md mt-4" onClick={() => query.refetch()}>Повторить</button>
     </EditorPage>;
   }
-  return <MenuEntryForm key={id ?? next?.count ?? 'new'} incoming={query.data} kind={kind}
+  return <MenuEntryForm key={next?.count ?? `${id ?? 'new'}:${copy}`} incoming={next ? undefined : query.data} kind={kind}
+    copy={copy && !next}
     categoryId={next?.categoryId ?? categoryId} onClose={onClose} initialTab={initialTab} initialVariantId={initialVariantId}
     onCreateAnother={(selectedCategory) => setNext((current) => ({ count: (current?.count ?? 0) + 1, categoryId: selectedCategory }))} />;
 }
 
-function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initialVariantId, onCreateAnother }: {
+function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initialVariantId, copy, onCreateAnother }: {
   incoming?: MenuEntry;
   kind: 'goods' | 'recipe';
   categoryId?: string;
   onClose: () => void;
   initialTab: 'main' | 'recipe';
   initialVariantId?: string;
+  copy: boolean;
   onCreateAnother: (categoryId: string) => void;
 }) {
   // The loaded version belongs to the current draft even if the query refreshes in the background.
   const [initial] = useState(incoming);
-  const dish = initial?.dish;
-  const catalogKind = dish?.catalogKind ?? kind;
+  const source = initial?.dish;
+  const dish = copy ? undefined : source;
+  const catalogKind = source?.catalogKind ?? kind;
   const isGoods = catalogKind === 'goods';
-  const title = dish ? (isGoods ? 'Редактирование товара' : 'Редактирование блюда')
+  const title = copy ? 'Копирование техкарты' : dish ? (isGoods ? 'Редактирование товара' : 'Редактирование блюда')
     : (isGoods ? 'Добавление товара' : 'Добавление блюда');
   const categories = useAdminCategories().data ?? [];
   const stations = usePreparationStations().data ?? [];
@@ -112,24 +118,24 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
   const recipeRef = useRef<HTMLFieldSetElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const draggedVariant = useRef<number | null>(null);
-  const [tax, setTax] = useState(() => dishTaxValue(dish));
+  const [tax, setTax] = useState(() => dishTaxValue(source));
   const [form, setForm] = useState(() => ({
-    name: dish?.name ?? '',
-    categoryId: dish?.categoryId ?? categoryId ?? '',
-    price: dish ? String(Number(dish.price)) : '',
-    description: dish?.description ?? '',
-    voiceName: dish?.voiceName ?? '',
-    prepStation: dish?.prepStation ?? '',
-    imageUrl: dish?.imageUrl ?? '',
-    isAvailable: dish?.isAvailable ?? true,
-    isWeighted: dish?.isWeighted ?? false,
-    weightedMeasure: dish?.weightedMeasure ?? 'weight',
-    weightedPriceBase: dish?.weightedPriceBase ?? 100,
-    unit: normalizeUnitLabel(dish?.unit),
+    name: copy && source ? `${source.name.slice(0, 112).trimEnd()} (копия)` : source?.name ?? '',
+    categoryId: source?.categoryId ?? categoryId ?? '',
+    price: source ? String(Number(source.price)) : '',
+    description: source?.description ?? '',
+    voiceName: source?.voiceName ?? '',
+    prepStation: source?.prepStation ?? '',
+    imageUrl: source?.imageUrl ?? '',
+    isAvailable: copy ? false : source?.isAvailable ?? true,
+    isWeighted: source?.isWeighted ?? false,
+    weightedMeasure: source?.weightedMeasure ?? 'weight',
+    weightedPriceBase: source?.weightedPriceBase ?? 100,
+    unit: normalizeUnitLabel(source?.unit),
   }));
-  const [variants, setVariants] = useState<VariantDraft[]>(() => (dish?.variants ?? []).map((variant) => ({
+  const [variants, setVariants] = useState<VariantDraft[]>(() => (source?.variants ?? []).map((variant) => ({
     key: variant.id,
-    id: variant.id,
+    id: copy ? undefined : variant.id,
     name: variant.name,
     price: String(Number(variant.price)),
     unit: normalizeUnitLabel(variant.unit),
@@ -138,16 +144,20 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
   const activeVariants = !isGoods || withVariants ? variants : [];
   const [costVariantKey, setCostVariantKey] = useState(initialVariantId ?? '');
   const costVariant = activeVariants.find((variant) => variant.key === costVariantKey) ?? (isGoods ? activeVariants[0] : undefined);
-  const [rows, setRows] = useState(() => recipeDraftRows(initial?.recipe.items ?? []));
+  const [rows, setRows] = useState(() => recipeDraftRows(initial?.recipe.items ?? [], copy));
   const [metadata, setMetadata] = useState<RecipeMetadata>(() => initial?.recipe.metadata ?? {});
-  const [producedStockId, setProducedStockId] = useState(() => initial?.recipe.stockIngredientId ?? '');
-  const savedStockId = initial?.recipe.stockIngredientId ?? '';
+  const savedStockId = copy ? '' : initial?.recipe.stockIngredientId ?? '';
+  const [producedStockId, setProducedStockId] = useState(savedStockId);
   const producedStock = stock?.find((item) => item.id === producedStockId && item.isPrepared);
   const canBindProducedStock = !!productionEnabled && !isGoods && canWarehouse && canRecipe
     && (!savedStockId || !!stock?.find((item) => item.id === savedStockId && item.isPrepared));
-  const [modifiers, setModifiers] = useState<ModifierDraft>(
-    () => initial?.modifiers ?? { allowIngredientExclusions: false, groups: [] },
-  );
+  const [initialModifiers] = useState<ModifierDraft>(() => {
+    const { allowIngredientExclusions, groups } = initial?.modifiers ?? emptyModifiers;
+    return { allowIngredientExclusions, groups: copy ? groups.map(({ id: _id, options, ...group }) => ({
+      ...group, options: options.map(({ id: _id, ...option }) => option),
+    })) : groups };
+  });
+  const [modifiers, setModifiers] = useState(initialModifiers);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -227,7 +237,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
     }
     if (canRecipe && !isGoods && !validRows) {
       recipeRef.current?.scrollIntoView({ block: 'start' });
-      setError('Проверьте нормы техкарты. Брутто должно быть больше нуля, нетто не больше брутто, а потери от 0 до 100%.');
+      setError('Проверьте количество и этапы обработки. Для расчёта от нетто нужен положительный выход.');
       return;
     }
     const typedPhotoUrl = photoUrl.trim();
@@ -239,7 +249,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
     setPending(true);
     try {
       const body = {
-        catalogKind, requestKey, expectedVersion: initial?.recipe.version,
+        catalogKind, requestKey, expectedVersion: copy ? undefined : initial?.recipe.version,
         dish: {
           ...form,
           ...(tax !== dishTaxValue(dish) ? dishTaxInput(tax) : {}),
@@ -261,7 +271,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
               form.weightedMeasure !== dish?.weightedMeasure || form.weightedPriceBase !== dish?.weightedPriceBase))
               ? { producedStockIngredientId: producedStockId || null } : {}),
           },
-          ...(JSON.stringify(modifiers) !== JSON.stringify(initial?.modifiers ?? { allowIngredientExclusions: false, groups: [] })
+          ...(JSON.stringify(modifiers) !== JSON.stringify(copy ? emptyModifiers : initialModifiers)
             ? { modifiers } : {}),
         } : {}),
       };

@@ -5,6 +5,7 @@ import { lockIngredients } from './stock-lock';
 import { fromBase, unitLabel, type UnitCode } from './units';
 import { getWarehouseBalance } from './warehouse-location';
 import { RecipeResolver, recipeAmount, warehouseKey, lockRecipeGraph } from './recipe-resolution';
+import { processingSnapshot } from './recipe-processing';
 import { postStockMovement } from './stock-posting';
 import type { ModifierSelectionSnapshot } from './menu-modifiers';
 
@@ -138,6 +139,7 @@ export class IngredientStockService {
             snapshot: { dishId: dish.id, dishName: dish.name, recipeVersion: dish.recipeVersion, variantId: serving.variantId ?? null,
               kind: row.modifier ? 'modifier' : directId ? 'direct' : 'recipe', modifier: row.modifier as unknown as Prisma.InputJsonValue ?? null,
               excludedIngredientIds: [...exclusions], componentId: serving.componentId ?? null, path: part.path, preparationRecipes: part.preparations,
+              ...('processingStages' in row ? processingSnapshot(row) : {}),
               amount: part.amount.toString(), warehouseId: part.warehouse?.id ?? null } });
         }
       }

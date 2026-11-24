@@ -50,6 +50,8 @@ test('PostgreSQL: recipe preview, saved card, and costing list use the same ware
       assert.deepEqual([milkCost.amount, milkCost.netAmount, milkCost.avgCost, milkCost.lineCost, milkCost.warehouseName], [0.2, 0.19, 200, 40, bar.name]);
       assert.deepEqual(preview.output, { amount: 190, unit: 'ml' });
       assert.equal(preview.items.find(({ ingredientId }) => ingredientId === cup.id).warehouseName, main.name);
+      const smallNorm = await recipes.preview({ dishId: dish.id, items: [{ ingredientId: milk.id, amount: 0.02, unit: 'ml' }] });
+      assert.deepEqual([smallNorm.compositionFoodCost, smallNorm.compositionCostForScaling], [0, 0.004]);
       assert.equal(await db.recipeItem.count({ where: { dishId: dish.id } }), 0, 'preview does not save rows');
       assert.equal(await db.stockMovement.count(), 0, 'preview does not post stock');
 
@@ -72,7 +74,7 @@ test('PostgreSQL: recipe preview, saved card, and costing list use the same ware
 
       const unfinished = await db.ingredient.create({ data: { name: 'Старая заготовка', isPrepared: true, preparationMode: 'virtual' } });
       const incomplete = await recipes.preview({ dishId: dish.id, items: [{ ingredientId: unfinished.id, amount: 1 }] });
-      assert.deepEqual([incomplete.foodCost, incomplete.missingCosts], [null, [unfinished.name]]);
+      assert.deepEqual([incomplete.foodCost, incomplete.compositionCostForScaling, incomplete.missingCosts], [null, null, [unfinished.name]]);
       await db.recipeItem.create({ data: { dishId: dish.id, ingredientId: unfinished.id, amount: 1 } });
       assert.deepEqual((await recipes.getByDish(dish.id)).missingCosts, [unfinished.name]);
       await db.recipeItem.deleteMany({ where: { dishId: dish.id, ingredientId: unfinished.id } });
@@ -98,7 +100,8 @@ test('PostgreSQL: recipe preview, saved card, and costing list use the same ware
       assert.throws(() => previewController.preview({ dishId: dish.id, items }, { role: 'ADMIN', permissions: { sections: { warehouse: false } } }), { status: 403 });
       const readOnly = await previewController.preview({ dishId: dish.id, items }, { role: 'ADMIN', permissions: { sections: { warehouse: true }, readOnlySections: ['warehouse'] } });
       const masked = redactWarehouseCosts(readOnly);
-      assert.deepEqual([masked.foodCost, masked.marginAmount, masked.markupPercent, masked.productionCost, masked.items[0].avgCost], [null, null, null, null, null]);
+      assert.deepEqual([masked.foodCost, masked.marginAmount, masked.markupPercent, masked.productionCost, masked.items[0].avgCost,
+        masked.compositionCostForScaling], [null, null, null, null, null, null]);
       assert.equal(masked.items[0].warehouseName, bar.name);
     });
   } finally {

@@ -427,6 +427,59 @@ test('PostgreSQL: unified stock covers direct sales, recipes, production, stages
         assert.equal(await balance(raw.id), 1700); assert.equal(batch.totalCost, 20); assert.equal(batch.items.recipeInstructions, 'Очистить и охладить');
       });
 
+      await t.test('ordered processing stages, net anchors and cooked weight gain preserve gross stock accounting', async () => {
+        const rice = await ingredients.create({ name: 'Рис для многоступенчатой обработки', unit: 'kg', stock: 4, avgCost: 100,
+          processingLosses: { cleaning: 20, boiling: -100, frying: 40 } });
+        const stages = [{ method: 'cleaning', lossPercent: 20 }, { method: 'frying', lossPercent: 25 }];
+        const menu = await dish('Крупа с двумя этапами');
+        const staged = { ingredientId: rice.id, amount: 1000, unit: 'g', processingBasis: 'gross', processingStages: stages };
+        const preview = await recipes.preview({ dishId: menu.id, items: [staged] });
+        assert.deepEqual(preview.items[0].processingStageResults.map(({ inputAmount, outputAmount }) => [inputAmount, outputAmount]), [[1000, 800], [800, 600]]);
+        assert.deepEqual([preview.items[0].netAmount, preview.items[0].lossPercent, preview.foodCost], [600, 40, 100]);
+        const saved = await recipes.saveDraft(menu.id, { expectedVersion: 1, items: [staged] });
+        assert.deepEqual(saved.recipe.output, { amount: 600, unit: 'g' });
+        assert.deepEqual(saved.recipe.items[0].processingStages, stages);
+        const sold = await order([{ dishId: menu.id, quantity: 1 }]);
+        const [debit] = await db.stockMovement.findMany({ where: { sourceId: sold.id } });
+        assert.equal(await db.stockMovement.count({ where: { sourceId: sold.id } }), 1);
+        assert.deepEqual([Number(debit.change), Number(debit.costAtMoment), await balance(rice.id)], [-1000, 0.1, 3000]);
+        assert.deepEqual(debit.recipeSnapshot.processingStages, stages);
+
+        const variantMenu = await dish('Порция с точной нормой по этапам');
+        const variant = await db.dishVariant.create({ data: { dishId: variantMenu.id, name: 'Большая', price: 200 } });
+        await recipes.addItem(variantMenu.id, { ...staged, amount: 0.003, variantAmounts: { [variant.id]: 10 } });
+        const variantRecipe = await recipes.getByDish(variantMenu.id, variant.id);
+        assert.deepEqual([variantRecipe.items[0].amount, variantRecipe.items[0].netAmount, variantRecipe.items[0].lossPercent,
+          variantRecipe.items[0].processingStageResults[1].outputAmount], [10, 6, 40, 6]);
+
+        const netMenu = await dish('Норма по нетто');
+        const net = await recipes.addItem(netMenu.id, { ingredientId: rice.id, amount: 200, netAmount: 200, unit: 'g', processingBasis: 'net', processingMethod: 'cleaning' });
+        assert.deepEqual([net.items[0].amount, net.items[0].netAmount, net.foodCost], [250, 200, 25]);
+        const netSale = await order([{ dishId: netMenu.id, quantity: 1 }]);
+        assert.equal(Number((await db.stockMovement.findFirstOrThrow({ where: { sourceId: netSale.id, type: 'sale' } })).change), -250);
+
+        const grown = await recipes.preview({ dishId: menu.id, items: [{ ingredientId: rice.id, amount: 300, unit: 'g', processingStages: null,
+          processingBasis: 'gross', processingMethod: 'boiling' }] });
+        assert.deepEqual([grown.items[0].amount, grown.items[0].netAmount, grown.items[0].lossPercent, grown.foodCost], [300, 600, -100, 30]);
+        const manual = await recipes.updateItem(saved.recipe.items[0].id, { amount: 0.3, netAmount: 0.42, unit: 'kg', processingStages: stages });
+        assert.deepEqual([manual.items[0].amount, manual.items[0].netAmount, manual.items[0].lossPercent, manual.items[0].processingBasis], [0.3, 0.42, -40, 'manual']);
+        const cached = await recipes.updateItem(saved.recipe.items[0].id, { amount: 0.6, unit: 'kg' });
+        assert.equal(cached.items[0].netAmount, 0.84, 'editing gross without a replacement net preserves the stored manual ratio');
+        await ingredients.update(rice.id, { processingLosses: { boiling: -40 } });
+        assert.equal((await recipes.getByDish(netMenu.id)).items[0].amount, 250);
+        assert.equal(Number((await db.stockMovement.findUniqueOrThrow({ where: { id: debit.id } })).change), -1000);
+
+        const prep = await preparation.create({ name: 'Разваренный рис', unit: 'kg' });
+        const gain = [{ method: 'boiling', lossPercent: -100 }];
+        const cooked = await preparation.saveRecipe(prep.id, { outputQuantity: 600, outputUnit: 'g',
+          items: [{ ingredientId: rice.id, quantity: 300, unit: 'g', processingBasis: 'gross', processingStages: gain }] });
+        assert.deepEqual([cooked.items[0].quantity, cooked.items[0].netAmount, cooked.totalCost], [300, 600, 30]);
+        const batch = await preparation.produce(prep.id, { quantity: 600, unit: 'g' }, owner);
+        assert.equal(batch.totalCost, 30);
+        assert.deepEqual(batch.items.recipe[0].processingStages, gain);
+        assert.deepEqual([await balance(rice.id), await balance(prep.id)], [2450, 600]);
+      });
+
       await t.test('unknown opening valuation stays unknown after a paid receipt and through production and sale', async () => {
         const raw = await ingredients.create({ name: 'Сырьё неизвестная стоимость', unit: 'kg', stock: 1 });
         await db.$transaction(async tx => {

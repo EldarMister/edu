@@ -1,9 +1,11 @@
 import { DatePicker, DateTimePicker } from '@/components/DatePicker';
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { Role } from '@/types';
 import { useAssignableStaffPositions } from './positions-api';
 import { positionAccessSummary } from './position-permissions';
-import { financeDateTime, parseMoney } from './finance/finance-format';
+import { financeDateTime, financeDay, financeLocalTime, parseMoney } from './finance/finance-format';
+import { useFinanceAccess } from './finance/api';
 import { Link } from 'react-router-dom';
 import { Modal } from '@/components/Modal';
 import { DeleteNameField } from '../components/DeleteNameField';
@@ -14,7 +16,8 @@ import { Spinner } from '@/components/Spinner';
 import { WorkspacePending } from '../components/WorkspacePending';
 import { ACCOUNT_PHONE_ERROR, isAccountPhone, PhoneInput } from '@/components/PhoneInput';
 import { apiError } from '@/lib/api';
-import { displayOrderNumber, money, timeHM } from '@/lib/format';
+import { displayOrderNumber, money } from '@/lib/format';
+import { useSocketEvent } from '@/lib/socket';
 import { useT } from '@/lib/i18n';
 import { useAuth } from '@/store/auth';
 import { usePreparationStations, usePreparationStationUpdates } from '@/features/kitchen/stations';
@@ -26,6 +29,7 @@ import { WorkspaceHeaderCount } from './WorkspaceHeader';
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { DocumentField } from './warehouse/WarehouseUi';
 import { useEditorRoute } from './warehouse/workspace-route';
+import { inventoryTimeIso } from './warehouse/inventory-time';
 import {
   useShiftReport,
   useSetCashHanded,
@@ -69,10 +73,10 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
-const todayYmd = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
+const todayYmd = () => financeDay();
+const calendarDay = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Asia/Bishkek', dateStyle: 'short' });
+const calendarTime = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Asia/Bishkek', hour: '2-digit', minute: '2-digit' });
+const timeHM = (iso: string) => calendarTime.format(new Date(iso));
 
 const WAITER_REPORT_BADGE_EXPIRES_AT = new Date('2026-09-05T19:16:46.239+06:00').getTime();
 
@@ -94,18 +98,11 @@ function signedMoney(n: number) {
 }
 
 function dateDMY(iso: string) {
-  return new Date(iso).toLocaleDateString('ru-RU');
+  return calendarDay.format(new Date(iso));
 }
 
 function toDateTimeLocal(iso: string | null | undefined) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function fromDateTimeLocal(value: string) {
-  return value ? new Date(value).toISOString() : null;
+  return iso ? financeLocalTime(new Date(iso)) : '';
 }
 
 type StaffTab = 'directory' | 'current' | 'history' | 'waiter-orders';
@@ -115,6 +112,15 @@ export function StaffPage({ initialTab = 'directory' }: { initialTab?: StaffTab 
   usePreparationStationUpdates();
   const stationNames = new Map(stations.map(({ id, name }) => [id, name]));
   const [tab, setTab] = useState<StaffTab>(initialTab);
+  const client = useQueryClient();
+  const refreshShifts = () => {
+    void client.invalidateQueries({ queryKey: ['admin', 'staff', 'list'] });
+    void client.invalidateQueries({ queryKey: ['admin', 'staff', 'shift-report'] });
+    void client.invalidateQueries({ queryKey: ['admin', 'staff', 'shift-history'] });
+  };
+  useSocketEvent('waiter:shift_started', refreshShifts);
+  useSocketEvent('waiter:shift_ended', refreshShifts);
+  useSocketEvent('waiter:shift_updated', refreshShifts);
   const [sortNamesAscending, setSortNamesAscending] = useState(true);
   const [employeeSearch, setEmployeeSearch] = useState('');
   const [employeePosition, setEmployeePosition] = useState('');
@@ -145,6 +151,7 @@ export function StaffPage({ initialTab = 'directory' }: { initialTab?: StaffTab 
   const currentUser = useAuth((s) => s.user);
   const { isOwner, canAction, canEditSection } = usePermissions();
   const canManageStaff = isOwner || canAction('manageStaff');
+  const canCloseWorkShifts = canEditSection('staff') && canAction('closeShift');
   const canEditMember = (member: StaffMember) => canManageStaff && (member.canManage ?? isOwner);
   const positionKey = (member: StaffMember) => member.positionId ?? member.role;
   const positionLabel = (member: StaffMember) => member.positionName ?? tr(ROLE_LABEL[member.role]);
@@ -525,19 +532,20 @@ export function StaffPage({ initialTab = 'directory' }: { initialTab?: StaffTab 
         )}
         </div>
       ) : tab === 'history' ? (
-        <ShiftHistoryTable
+        historyQ.isError ? <p role="alert" className="py-6 text-sm text-danger">{apiError(historyQ.error)}{' '}
+          <button type="button" className="underline" onClick={() => void historyQ.refetch()}>Повторить</button></p> : <ShiftHistoryTable
           data={historyQ.data}
           isLoading={historyQ.isLoading}
           expanded={historyExpanded}
           setExpanded={setHistoryExpanded}
-          onEdit={canManageStaff ? setEditingShift : undefined}
-          onClose={canEditSection('staff') && canAction('closeShift') ? setClosingShift : undefined}
+          onEdit={canEditSection('staff') && canManageStaff ? setEditingShift : undefined}
+          onClose={canCloseWorkShifts ? setClosingShift : undefined}
         />
       ) : null}
 
       {renderStaffEditor()}
       {editingShift && (
-        <ShiftEditModal row={editingShift} onClose={() => setEditingShift(null)} />
+        <ShiftEditModal row={editingShift} canChangeStatus={canCloseWorkShifts} onClose={() => setEditingShift(null)} />
       )}
       {closingShift && (
         <Modal
@@ -676,6 +684,7 @@ function HistoryFilters({
       )}
       <div className="w-full sm:w-52">
         <Select
+          ariaLabel="Сотрудник"
           className="h-10 w-full"
           value={filters.employeeId ?? ''}
           onChange={(v) => setFilters((f) => ({ ...f, employeeId: v || undefined }))}
@@ -684,6 +693,7 @@ function HistoryFilters({
       </div>
       <div className="w-full sm:w-44">
         <Select
+          ariaLabel="Роль сотрудника"
           className="h-10 w-full"
           value={filters.role ?? ''}
           onChange={(v) => setFilters((f) => ({ ...f, role: (v || undefined) as ShiftHistoryFilters['role'] }))}
@@ -744,6 +754,17 @@ function ShiftHistoryTable({
   onClose?: (row: ShiftHistoryRow) => void;
 }) {
   const rows = data?.items ?? [];
+  function rowActions(row: ShiftHistoryRow) {
+    return <div className="flex items-center justify-end gap-1">
+      {onEdit && <IconBtn title="Редактировать время смены" onClick={() => onEdit(row)}>
+        <IconEdit className="h-4 w-4" />
+      </IconBtn>}
+      {row.status !== 'closed' && onClose && <button type="button" onClick={() => onClose(row)}
+        className="h-8 rounded-lg border border-warning/30 px-2.5 text-xs font-medium text-warning transition-colors hover:bg-warning/10">
+        Закрыть
+      </button>}
+    </div>;
+  }
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-white">
       {isLoading ? (
@@ -752,7 +773,7 @@ function ShiftHistoryTable({
         <p className="py-12 text-center text-text-muted">Нет смен за выбранный период</p>
       ) : (
         <>
-          <div className="overflow-x-auto">
+          <div className="hidden overflow-x-auto xl:block">
             <table className="w-full min-w-[900px] text-sm">
               <thead>
                 <tr className="border-b border-border bg-background text-left text-xs text-text-muted">
@@ -775,7 +796,10 @@ function ShiftHistoryTable({
                         className="cursor-pointer border-b border-border transition-colors hover:bg-background/60"
                         onClick={() => setExpanded(open ? null : row.id)}
                       >
-                        <td className="px-2 py-2.5"><Chevron open={open} /></td>
+                        <td className="px-2 py-2.5"><button type="button" aria-label={`Подробности смены ${row.employeeName}`}
+                          aria-expanded={open} onClick={(event) => { event.stopPropagation(); setExpanded(open ? null : row.id); }}>
+                          <Chevron open={open} />
+                        </button></td>
                         <td className="px-3 py-2.5">
                           <div className="font-medium text-text-primary">{row.employeeName}</div>
                           <div className="text-xs text-text-muted">{ROLE_LABEL[row.role]}</div>
@@ -786,19 +810,7 @@ function ShiftHistoryTable({
                         <td className="whitespace-nowrap px-3 py-2.5 font-medium text-text-primary">{durationLabel(row.durationMin)}</td>
                         <td className="whitespace-nowrap px-3 py-2.5"><ShiftStatusBadge status={row.status} /></td>
                         <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex justify-end gap-1">
-                            {onEdit && <IconBtn title="Редактировать время смены" onClick={() => onEdit(row)}>
-                              <IconEdit className="h-4 w-4" />
-                            </IconBtn>}
-                            {row.status !== 'closed' && onClose && (
-                              <button
-                                onClick={() => onClose(row)}
-                                className="h-8 rounded-lg border border-warning/30 px-2.5 text-xs font-medium text-warning transition-colors hover:bg-warning/10"
-                              >
-                                Закрыть
-                              </button>
-                            )}
-                          </div>
+                          {rowActions(row)}
                         </td>
                       </tr>
                       {open && (
@@ -814,18 +826,41 @@ function ShiftHistoryTable({
               </tbody>
             </table>
           </div>
+          <ul className="divide-y divide-border xl:hidden">
+            {rows.map((row) => <li key={row.id} className="space-y-2 p-3 text-sm">
+              <div className="flex items-start justify-between gap-2">
+                <button type="button" className="min-w-0 text-left font-medium" aria-expanded={expanded === row.id}
+                  onClick={() => setExpanded(expanded === row.id ? null : row.id)}>
+                  {row.employeeName}<span className="block text-xs font-normal text-text-muted">{ROLE_LABEL[row.role]}</span>
+                </button>
+                <ShiftStatusBadge status={row.status} />
+              </div>
+              <div className="flex flex-wrap justify-between gap-1 text-text-muted">
+                <span>{financeDateTime(row.startedAt)} — {row.endedAt ? financeDateTime(row.endedAt) : '—'}</span>
+                <span>{durationLabel(row.durationMin)}</span>
+              </div>
+              {rowActions(row)}
+              {expanded === row.id && <ShiftHistoryDetails row={row} />}
+            </li>)}
+          </ul>
           <div className="flex flex-wrap gap-x-2 gap-y-1 border-t border-border bg-background/40 px-3 py-2 text-xs text-text-muted">
             <span>Всего смен: <span className="font-medium text-text-secondary">{data?.summary.shiftsCount ?? 0}</span></span>
             <span>·</span>
             <span>Общая выработка: <span className="font-medium text-text-secondary">{durationLabel(data?.summary.totalDurationMin ?? 0)}</span></span>
             <span>·</span>
             <span>В смене сейчас: <span className="font-medium text-text-secondary">{data?.summary.activeCount ?? 0}</span></span>
+            {!!data?.summary.unclosedCount && <span className="text-warning">Не закрыто: {data.summary.unclosedCount}</span>}
           </div>
         </>
       )}
     </div>
   );
 }
+
+const shiftChangeLabel = {
+  correction: 'Исправление времени', 'manual-close': 'Ручное закрытие', 'self-close': 'Сотрудник закрыл смену',
+  'auto-close': 'Автоматическое закрытие', 'cash-close': 'Закрытие вместе с кассовой сменой',
+};
 
 function ShiftHistoryDetails({ row }: { row: ShiftHistoryRow }) {
   return (
@@ -857,6 +892,19 @@ function ShiftHistoryDetails({ row }: { row: ShiftHistoryRow }) {
           </div>
         )}
       </div>
+      {!!row.changes?.length && <details className="md:col-span-2">
+        <summary className="cursor-pointer font-medium text-primary">История изменений</summary>
+        <ol className="mt-2 divide-y divide-border">
+          {row.changes.map((change) => <li key={change.id} className="space-y-1 py-2 text-xs">
+            <p className="font-medium">{shiftChangeLabel[change.kind]} · {financeDateTime(change.at)}
+              {change.actorName && ` · ${change.actorName}`}
+            </p>
+            <p className="text-text-secondary">Было {financeDateTime(change.oldTime.startedAt)} — {financeDateTime(change.oldTime.endedAt)}</p>
+            <p className="text-text-secondary">Стало {financeDateTime(change.newTime.startedAt)} — {financeDateTime(change.newTime.endedAt)}</p>
+            {change.reason && <p className="break-words text-text-muted">{change.reason}</p>}
+          </li>)}
+        </ol>
+      </details>}
     </div>
   );
 }
@@ -870,7 +918,7 @@ function DetailLine({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () => void }) {
+function ShiftEditModal({ row, canChangeStatus, onClose }: { row: ShiftHistoryRow; canChangeStatus: boolean; onClose: () => void }) {
   const actions = useShiftHistoryActions();
   const push = useNotifications((s) => s.push);
   const [startedAt, setStartedAt] = useState(toDateTimeLocal(row.startedAt));
@@ -878,17 +926,25 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
   const [startedAtValid, setStartedAtValid] = useState(true);
   const [endedAtValid, setEndedAtValid] = useState(true);
   const [openShift, setOpenShift] = useState(!row.endedAt);
+  const [reason, setReason] = useState('');
   const [error, setError] = useState('');
-  const datesValid = startedAtValid && !!startedAt && (openShift || (endedAtValid && !!endedAt));
+  const originalStart = toDateTimeLocal(row.startedAt);
+  const originalEnd = toDateTimeLocal(row.endedAt);
+  const changed = startedAt !== originalStart || openShift !== !row.endedAt || (!openShift && endedAt !== originalEnd);
+  const startInstant = startedAt === originalStart ? row.startedAt : inventoryTimeIso(startedAt);
+  const endInstant = openShift ? null : endedAt === originalEnd ? row.endedAt : inventoryTimeIso(endedAt);
+  const datesValid = startedAtValid && !!startInstant && (openShift || (endedAtValid && !!endInstant));
 
   async function submit() {
-    if (!datesValid || actions.update.isPending) return;
+    if (!datesValid || !changed || !reason.trim() || actions.update.isPending) return;
     setError('');
     try {
       await actions.update.mutateAsync({
         id: row.id,
-        startedAt: fromDateTimeLocal(startedAt) ?? undefined,
-        endedAt: openShift ? null : fromDateTimeLocal(endedAt),
+        expectedUpdatedAt: row.updatedAt,
+        reason: reason.trim(),
+        ...(startInstant !== row.startedAt ? { startedAt: startInstant } : {}),
+        ...(endInstant !== row.endedAt ? { endedAt: endInstant } : {}),
       });
       push({ message: 'Смена обновлена', type: 'success', at: new Date().toISOString() });
       onClose();
@@ -900,16 +956,16 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={() => { if (!actions.update.isPending) onClose(); }}
       title="Редактировать время смены"
       footer={
-        <button className="btn-primary btn-lg w-full font-semibold" disabled={actions.update.isPending || !datesValid} onClick={submit}>
+        <button className="btn-primary btn-lg w-full font-semibold" disabled={actions.update.isPending || !datesValid || !changed || !reason.trim()} onClick={submit}>
           {actions.update.isPending ? <Spinner /> : 'Сохранить'}
         </button>
       }
     >
       <div className="space-y-3">
-        <p className="text-sm text-text-secondary">{row.employeeName} · {ROLE_LABEL[row.role]}</p>
+        <p className="text-sm text-text-secondary">{row.employeeName} · {ROLE_LABEL[row.role]} · время Бишкека</p>
         <Field label="Начало смены">
           <DateTimePicker
             className="input"
@@ -920,7 +976,11 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
           />
         </Field>
         <label className="flex items-center gap-2.5 text-sm text-text-secondary">
-          <input type="checkbox" checked={openShift} onChange={(e) => setOpenShift(e.target.checked)} />
+          <input type="checkbox" disabled={!canChangeStatus || actions.update.isPending} checked={openShift}
+            onChange={(e) => {
+              setOpenShift(e.target.checked);
+              if (!e.target.checked && !endedAt) setEndedAt(financeLocalTime());
+            }} />
           Смена еще открыта
         </label>
         {!openShift && (
@@ -934,7 +994,11 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
             />
           </Field>
         )}
-        {error && <p className="text-sm text-danger">{error}</p>}
+        <label className="block text-sm font-medium text-text-secondary">Причина исправления
+          <textarea className="input mt-1 min-h-16 w-full" maxLength={500} value={reason}
+            disabled={actions.update.isPending} onChange={(event) => setReason(event.target.value)} />
+        </label>
+        {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       </div>
     </Modal>
   );
@@ -1093,6 +1157,8 @@ function StaffEditor({
   const [positionId, setPositionId] = useState(member?.positionId ?? '');
   const currentUser = useAuth((state) => state.user);
   const { isOwner } = usePermissions();
+  const financeAccess = useFinanceAccess(!isOwner && !!member);
+  const canViewEmployeePayroll = !!member && member.role !== 'OWNER' && (isOwner || financeAccess.data?.canViewAll);
   const canAssignPosition = member?.role !== 'OWNER' && (!member || member.id !== currentUser?.id);
   const positions = useAssignableStaffPositions(canAssignPosition);
   const stations = usePreparationStations().data ?? [];
@@ -1206,6 +1272,10 @@ function StaffEditor({
               options={member?.role === 'OWNER' ? [{ value: 'owner', label: 'Владелец' }] : positionOptions}
             />
             <p className="mt-2 text-xs text-text-muted">Права доступа и ставки зарплаты задаются в должности и применяются ко всем её сотрудникам.</p>
+            {canViewEmployeePayroll && <Link className="mt-2 inline-block text-sm text-primary hover:underline"
+              to={`?section=finance&view=payroll&payrollEmployee=${encodeURIComponent(member.id)}`}>
+              Зарплата сотрудника
+            </Link>}
             {assignedPosition && <div className="mt-2 rounded-lg bg-background p-3 text-xs">
               <p className="font-medium">Доступ по должности</p>
               <p className="mt-1 text-text-secondary">{positionAccessSummary(assignedPosition.role, assignedPosition.permissions)}</p>

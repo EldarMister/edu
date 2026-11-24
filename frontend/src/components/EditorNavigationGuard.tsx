@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useBeforeUnload, useBlocker, type Blocker, type BlockerFunction } from 'react-router-dom';
 import { useT } from '@/lib/i18n';
 import { Modal } from './Modal';
@@ -36,7 +37,7 @@ export function EditorNavigationGuard() {
   useBeforeUnload(useCallback((event) => {
     if (hasChanges()) { event.preventDefault(); event.returnValue = ''; }
   }, []));
-  return blocker.state === 'blocked' ? <UnsavedChangesDialog blocker={blocker} /> : null;
+  return blocker.state === 'blocked' ? createPortal(<UnsavedChangesDialog blocker={blocker} />, document.body) : null;
 }
 
 function UnsavedChangesDialog({ blocker }: { blocker: Extract<Blocker, { state: 'blocked' }> }) {
@@ -69,14 +70,14 @@ function UnsavedChangesDialog({ blocker }: { blocker: Extract<Blocker, { state: 
     if (!saving) blocker.reset();
   }
 
-  return <Modal open title={t('Есть несохранённые изменения')} onClose={stay} footer={
+  return <Modal open manageFocus title={t('Есть несохранённые изменения')} onClose={stay} footer={
     <div className={canSave ? 'space-y-2' : ''}>
       {canSave && <button type="button" disabled={saving} className="btn-primary btn-lg w-full"
         onClick={() => void saveAndLeave()}>
         {saving ? t('Сохраняем…') : t('Сохранить и выйти')}
       </button>}
       <div className="grid grid-cols-2 gap-2">
-        <button type="button" autoFocus disabled={saving} className="btn-secondary btn-lg h-auto min-h-12 px-2 py-2" onClick={stay}>
+        <button type="button" data-dialog-initial-focus disabled={saving} className="btn-secondary btn-lg h-auto min-h-12 px-2 py-2" onClick={stay}>
           {t('Продолжить редактирование')}
         </button>
         <button type="button" disabled={saving} className="btn-danger btn-lg h-auto min-h-12 px-2 py-2" onClick={() => blocker.proceed()}>

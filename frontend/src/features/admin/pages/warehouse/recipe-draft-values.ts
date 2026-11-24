@@ -1,4 +1,4 @@
-import type { Ingredient, RecipeItem, RecipeRowInput } from './api';
+import type { Ingredient, ProcessingBasis, ProcessingStage, RecipeItem, RecipeRowInput } from './api';
 import type { UnitCode, UnitType } from './units';
 
 export function recipeQuantity(amount: number, unit: string) {
@@ -7,6 +7,31 @@ export function recipeQuantity(amount: number, unit: string) {
 
 export function supportsProcessing(unitType: Ingredient['unitType']) {
   return unitType === 'mass';
+}
+
+export const MAX_PROCESSING_STAGES = 10;
+export const MIN_STAGE_LOSS = -999.99;
+
+export function displayedProcessingStages({ processingStages, processingMethod, lossPercent }: Pick<RecipeRowInput,
+  'processingStages' | 'processingMethod' | 'lossPercent'>): ProcessingStage[] {
+  if (processingStages?.length) return processingStages;
+  return processingMethod ? [{ method: processingMethod, lossPercent: lossPercent ?? 0 }] : [];
+}
+
+export function processingRetention(stages: readonly ProcessingStage[], legacyLoss = 0) {
+  return stages.length ? stages.reduce((remaining, stage) => remaining * (1 - stage.lossPercent / 100), 1)
+    : 1 - legacyLoss / 100;
+}
+
+export function validProcessingStages(stages: readonly ProcessingStage[]) {
+  return stages.length <= MAX_PROCESSING_STAGES && stages.every(({ lossPercent }) =>
+    Number.isFinite(lossPercent) && lossPercent >= MIN_STAGE_LOSS && lossPercent <= 100);
+}
+
+export function processingQuantities(gross: number, net: number, basis: ProcessingBasis, retention: number) {
+  if (basis === 'net' && retention > 0) return { amount: Number((net / retention).toFixed(6)), netAmount: net };
+  if (basis === 'gross') return { amount: gross, netAmount: Number((gross * retention).toFixed(6)) };
+  return { amount: gross, netAmount: net };
 }
 
 export function parsePieceWeightGrams(input: string) {
@@ -53,24 +78,33 @@ export type RecipeDraftRow = Omit<RecipeRowInput, 'netAmount'> & {
   netAmount?: number | null;
 };
 
-export function recipeDraftRows(items: RecipeItem[]): RecipeDraftRow[] {
-  return items.map((row) => ({
-    ingredientId: row.ingredientId,
-    name: row.name,
-    unitType: row.unitType,
-    amount: row.amount,
-    unit: row.amountUnit,
-    netAmount: row.netAmount,
-    lossPercent: row.lossPercent,
-    processingMethod: row.processingMethod,
-    variantAmounts: row.variantAmounts,
-    fromCommonWarehouse: row.fromCommonWarehouse,
-    warehouseId: row.warehouseId,
-  }));
+export function recipeDraftRows(items: RecipeItem[], copying = false): RecipeDraftRow[] {
+  return items.map((row) => {
+    const copyNonMass = copying && !supportsProcessing(row.unitType);
+    return {
+      ingredientId: row.ingredientId,
+      name: row.name,
+      unitType: row.unitType,
+      amount: row.amount,
+      unit: row.amountUnit,
+      netAmount: copyNonMass ? row.netAmount ?? netFromLoss(row.amount, row.lossPercent ?? 0) : row.netAmount,
+      lossPercent: copyNonMass ? undefined : row.lossPercent,
+      processingMethod: copyNonMass ? undefined : row.processingMethod,
+      processingStages: !copyNonMass && row.processingStages?.length ? row.processingStages : undefined,
+      processingBasis: copyNonMass ? undefined : row.processingBasis,
+      variantAmounts: row.variantAmounts,
+      fromCommonWarehouse: row.fromCommonWarehouse,
+      warehouseId: row.warehouseId,
+    };
+  });
 }
 
 export function recipeDraftPayload(rows: readonly RecipeDraftRow[]) {
-  return rows.map(({ name: _name, unitType: _type, ...row }) => row);
+  return rows.map(({ name: _name, unitType: _type, ...row }) => ({
+    ...row,
+    netAmount: row.processingBasis === 'gross' ? undefined : row.netAmount,
+    ...(row.processingStages?.length && { lossPercent: undefined, processingMethod: undefined }),
+  }));
 }
 
 export function recipePreviewItems(rows: readonly RecipeDraftRow[], savedVariantIds: readonly string[], unsavedVariantKey?: string) {
@@ -97,7 +131,15 @@ export function lossFromAmounts(gross: number, net: number) {
 }
 
 export function validRecipeRows(rows: readonly RecipeDraftRow[]) {
-  return rows.every(({ amount, netAmount, lossPercent = 0 }) => Number.isFinite(amount) && amount > 0
-    && (netAmount == null || (Number.isFinite(netAmount) && netAmount >= 0 && netAmount <= amount))
-    && lossPercent >= 0 && lossPercent <= 100 && (lossPercent < 100 || (netAmount ?? 0) === 0));
+  return rows.every(({ amount, netAmount, lossPercent = 0, unitType, processingStages, processingBasis }) => {
+    if (!Number.isFinite(amount) || amount <= 0 || (netAmount != null && (!Number.isFinite(netAmount) || netAmount < 0))) return false;
+    if (!supportsProcessing(unitType)) return (netAmount ?? 0) <= amount && lossPercent >= 0 && lossPercent <= 100
+      && (lossPercent < 100 || (netAmount ?? 0) === 0);
+    if ((processingStages == null && (!Number.isFinite(lossPercent) || lossPercent < -1e16 || lossPercent > 100)) ||
+      !validProcessingStages(processingStages ?? [])) return false;
+    if (processingBasis === 'net') return (netAmount ?? 0) > 0 && processingRetention(processingStages ?? [], lossPercent) > 0;
+    if (processingBasis === 'manual') return netAmount != null;
+    if (processingBasis == null && processingStages == null && lossPercent >= 0 && (netAmount ?? 0) > amount) return false;
+    return processingBasis === 'gross' || lossPercent < 100 || (netAmount ?? 0) === 0;
+  });
 }

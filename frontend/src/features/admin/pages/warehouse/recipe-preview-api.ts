@@ -21,6 +21,7 @@ export interface RecipePreviewInput {
 export interface RecipePreview {
   items: {
     ingredientId: string;
+    name: string;
     warehouseName: string | null;
     amount: number;
     netAmount: number | null;
@@ -35,6 +36,7 @@ export interface RecipePreview {
   accountingConfigured: boolean;
   foodCost: number | null;
   compositionFoodCost: number | null;
+  compositionCostForScaling: number | null;
   compositionMissingCosts: string[];
   ingredientCost: number | null;
   packagingCost: number | null;

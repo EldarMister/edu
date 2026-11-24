@@ -4,7 +4,8 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { balanceMoney as money, balanceQuantity as qty } from './balance-format';
 import { Select } from '@/components/Select';
 import type { AdminDish } from '../../api';
-import { PROCESSING_METHODS, useIngredient, usePreparationRecipe, useRecipe, type IngredientDetails, type IngredientUsage, type Recipe } from './api';
+import { useIngredient, usePreparationRecipe, useRecipe, type IngredientDetails, type IngredientUsage, type Recipe } from './api';
+import { recipeProcessingLabel } from './RecipeProcessingFields';
 import { normalizeUnitLabel, unitLabel } from './units';
 import { recipeQuantity } from './recipe-draft-values';
 import { QueryState } from './WarehouseUi';
@@ -138,7 +139,7 @@ function DishRecipeDetails({ recipe, costs }: { recipe: Recipe; costs: boolean }
           const net = item.netAmount ?? item.amount * (1 - (item.lossPercent ?? 0) / 100);
           return <tr key={item.id}>
             <td>{item.name}</td><td>{item.warehouseName ?? (item.fromCommonWarehouse ? 'Основной склад' : 'По маршруту блюда')}</td>
-            <td>{PROCESSING_METHODS.find((method) => method.value === item.processingMethod)?.label ?? '—'}</td>
+            <td>{recipeProcessingLabel(item) || '—'}</td>
             <td className="whitespace-nowrap text-right">{recipeQuantity(item.amount, item.unit)}</td>
             <td className="whitespace-nowrap text-right">{item.netWeightGrams == null ? recipeQuantity(net, item.unit) : <>
               {recipeQuantity(item.netWeightGrams, 'г')}
@@ -172,7 +173,7 @@ export function PreparationComposition({ id, warehouseId }: { id: string; wareho
                 {query.data.items.map((item) => (
                   <tr key={item.ingredientId}>
                     <td>{item.name}<span className="text-text-muted">, {unitLabel(item.unit)}</span></td>
-                    <td>{PROCESSING_METHODS.find((method) => method.value === item.processingMethod)?.label ?? '—'}</td>
+                    <td>{recipeProcessingLabel(item) || '—'}</td>
                     <td className="text-right whitespace-nowrap">{qty(item.quantity, unitLabel(item.unit))}</td>
                     <td className="text-right whitespace-nowrap">{qty(item.netAmount ?? item.quantity * (1 - (item.lossPercent ?? 0) / 100), unitLabel(item.unit))}</td>
                     {costs && <td className="text-right whitespace-nowrap">{item.lineCost == null ? '—' : money(item.lineCost)}</td>}

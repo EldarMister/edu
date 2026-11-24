@@ -29,6 +29,7 @@ const ACTION_LABELS: Record<string, string> = {
   STAFF_CREATED: 'Добавление сотрудника',
   STAFF_UPDATED: 'Изменение сотрудника',
   STAFF_DELETED: 'Удаление сотрудника',
+  STAFF_SHIFT_CHANGED: 'Изменение рабочей смены',
   POSITION_CREATED: 'Добавление должности',
   POSITION_UPDATED: 'Изменение должности',
   POSITION_DELETED: 'Удаление должности',

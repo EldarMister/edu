@@ -8,7 +8,8 @@ const filename = resolve(__dirname, '../src/features/admin/pages/warehouse/recip
 const code = ts.transpileModule(readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } });
 const draft = {};
 new Function('exports', code.outputText)(draft);
-const { grossFromLoss, lossFromAmounts, netFromLoss, parsePieceWeightGrams, pieceNetWeight, preparationYieldBase,
+const { displayedProcessingStages, grossFromLoss, lossFromAmounts, netFromLoss, parsePieceWeightGrams, pieceNetWeight,
+  preparationYieldBase, processingQuantities, processingRetention, recipeDraftPayload, recipeDraftRows,
   recipePreviewItems, supportsProcessing, validRecipeRows } = draft;
 
 const potato = { ingredientId: 'potato', name: 'Картофель', unit: 'g', unitType: 'mass', amount: 200, netAmount: 160,
@@ -70,4 +71,52 @@ test('preparation yield combines weighted pieces and mass and requires measured 
   assert.equal(preparationYieldBase('mass', [mass, { ...pieces, netAmount: 0, pieceWeightGrams: null }]), 160);
   assert.equal(preparationYieldBase('count', [pieces]), 2);
   assert.equal(preparationYieldBase('volume', [volume]), 300);
+});
+
+test('ordered stages use the remaining weight and can calculate gross from a required net', () => {
+  const stages = [{ method: 'cleaning', lossPercent: 20 }, { method: 'boiling', lossPercent: 25 }];
+  const first = processingQuantities(1_000, 0, 'gross', processingRetention(stages.slice(0, 1)));
+  assert.equal(first.netAmount, 800);
+  assert.deepEqual(processingQuantities(1_000, 0, 'gross', processingRetention(stages)), { amount: 1_000, netAmount: 600 });
+  assert.deepEqual(processingQuantities(0, 200, 'net', processingRetention(stages.slice(0, 1))), { amount: 250, netAmount: 200 });
+  const [payload] = recipeDraftPayload([{ ...potato, processingStages: stages, processingBasis: 'gross' }]);
+  assert.deepEqual(payload.processingStages, stages);
+  assert.equal(payload.netAmount, undefined);
+  assert.equal(payload.lossPercent, undefined);
+});
+
+test('cooking growth and measured yield preserve the stock charge', () => {
+  const stages = [{ method: 'boiling', lossPercent: -100 }];
+  assert.deepEqual(processingQuantities(500, 0, 'gross', processingRetention(stages)), { amount: 500, netAmount: 1_000 });
+  assert.deepEqual(processingQuantities(500, 1_100, 'manual', processingRetention(stages)), { amount: 500, netAmount: 1_100 });
+  const rice = { ...potato, amount: 500, netAmount: 1_100, processingStages: stages, processingBasis: 'manual' };
+  assert.equal(validRecipeRows([rice]), true);
+  assert.equal(validRecipeRows([{ ...rice, processingBasis: 'net', processingStages: [{ method: 'boiling', lossPercent: 100 }] }]), false);
+  assert.equal(validRecipeRows([{ ...rice, processingStages: [{ method: 'boiling', lossPercent: -1_000 }] }]), false);
+  const [variant] = recipePreviewItems([{ ...rice, variantAmounts: { half: 250 } }], [], 'half');
+  assert.equal(variant.amount, 250);
+  assert.equal(variant.netAmount, 550);
+  assert.deepEqual(variant.processingStages, stages);
+});
+
+test('an empty API stage list keeps a saved single-method legacy rule and its explicit net', () => {
+  const legacy = { ...potato, amountUnit: 'g', processingMethod: 'cleaning', processingStages: [], processingBasis: null };
+  const [row] = recipeDraftRows([legacy]);
+  assert.deepEqual(displayedProcessingStages(row), [{ method: 'cleaning', lossPercent: 20 }]);
+  const [payload] = recipeDraftPayload([row]);
+  assert.equal(payload.processingStages, undefined);
+  assert.equal(payload.lossPercent, 20);
+  assert.equal(payload.netAmount, 160);
+});
+
+test('copying a legacy non-mass recipe carries its measured yield and variant norm', () => {
+  const legacy = { ...potato, unitType: 'volume', amountUnit: 'ml', netAmount: null, processingMethod: 'boiling', variantAmounts: { small: 100 } };
+  const [copy] = recipeDraftRows([legacy], true);
+  assert.equal(copy.netAmount, 160);
+  assert.equal(copy.processingMethod, undefined);
+  assert.deepEqual(copy.variantAmounts, { small: 100 });
+  assert.equal(validRecipeRows([copy]), true);
+  const [source] = recipeDraftRows([legacy]);
+  assert.equal(source.processingMethod, 'boiling');
+  assert.equal(source.netAmount, null);
 });

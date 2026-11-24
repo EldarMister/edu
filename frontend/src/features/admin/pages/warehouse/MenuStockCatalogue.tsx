@@ -38,16 +38,6 @@ export function MenuStockCatalogue({ view }: { view: 'ingredients' | 'preparatio
         <QueryState pending={locations.isPending} error={locations.error} empty={locations.isSuccess} />
       </EditorPage>
     );
-  if (editor?.type === 'item')
-    return (
-      <ItemCard
-        id={editor.id}
-        defaultKind="raw"
-        onClose={closeEditor}
-        onHistory={(id) => openEditor({ type: 'history', id })}
-        onRecipe={(item) => openEditor({ type: 'preparation', id: item.id })}
-      />
-    );
   if (editor?.type === 'history' && editor.id)
     return (
       <EditorPage title="История позиции" onClose={closeEditor}>
@@ -67,7 +57,7 @@ export function MenuStockCatalogue({ view }: { view: 'ingredients' | 'preparatio
         />
       </EditorPage>
     );
-  return (
+  return (<>
     <IngredientsTab
       catalogue={view}
       filter={filter as StockFilter}
@@ -82,5 +72,8 @@ export function MenuStockCatalogue({ view }: { view: 'ingredients' | 'preparatio
       onHistory={(id) => openEditor({ type: 'history', id })}
       onProduce={(item) => openEditor({ type: 'produce', id: item.id })}
     />
-  );
+    {editor?.type === 'item' && <ItemCard id={editor.id} defaultKind="raw" onClose={closeEditor}
+      onHistory={(id) => openEditor({ type: 'history', id })}
+      onRecipe={(item) => openEditor({ type: 'preparation', id: item.id })} />}
+  </>);
 }

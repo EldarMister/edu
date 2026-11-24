@@ -533,14 +533,14 @@ export class IngredientsService {
     let processingLosses: typeof dto.processingLosses;
     if (dto.processingLosses !== undefined) {
       if (!dto.processingLosses || Array.isArray(dto.processingLosses) || Object.entries(dto.processingLosses).some(([method, percent]) =>
-        !['cleaning', 'boiling', 'frying', 'stewing', 'baking'].includes(method) || typeof percent !== 'number' || !Number.isFinite(percent) || percent < 0 || percent >= 100)) {
-        throw new BadRequestException('Потери обработки должны быть от 0 до 99,99% для выбранного способа');
+        !['cleaning', 'boiling', 'frying', 'stewing', 'baking'].includes(method) || typeof percent !== 'number' || !Number.isFinite(percent) || percent < -999.99 || percent >= 100)) {
+        throw new BadRequestException('Потери обработки должны быть от −999,99 до 99,99% для выбранного способа');
       }
       if (type === 'mass') processingLosses = dto.processingLosses;
       else {
         const stored = current?.processingLosses as Record<string, unknown> | null | undefined;
         // Old clients can resend stored losses on an unrelated edit without reactivating the setting.
-        if (Object.entries(dto.processingLosses).some(([method, percent]) => percent > 0 && stored?.[method] !== percent)) {
+        if (Object.entries(dto.processingLosses).some(([method, percent]) => percent !== 0 && stored?.[method] !== percent)) {
           throw new BadRequestException('Потери обработки настраиваются только для весовых ингредиентов');
         }
       }

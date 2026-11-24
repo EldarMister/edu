@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -24,7 +25,7 @@ const avgCheck = cash('avgCheck', 'Средний чек');
 const methods = [cash('cash', 'Наличные'), cash('card', 'Карта'), cash('qr', 'QR-код'), cash('other', 'Другие оплаты')];
 
 const columns: Record<Report, Column[]> = {
-  sales: [date, orders, revenue, avgCheck, cash('discount', 'Скидка')],
+  sales: [date, orders, cash('paidAmount', 'Продажи до возвратов'), cash('refundedAmount', 'Возвраты'), revenue, avgCheck, cash('discount', 'Скидка')],
   products: [{ key: 'category', label: 'Категория' }, { key: 'name', label: 'Товар' }, { key: 'waiter', label: 'Официант' },
     quantity, cash('gross', 'Валовый оборот'), cash('discount', 'Скидка'), revenue, cost, profit, foodCost],
   staff: [{ key: 'name', label: 'Официант' }, revenue, profit, orders, avgCheck,
@@ -70,6 +71,7 @@ function choices(rows: Row[], key: string, label: string, all: string) {
 
 export function StatisticsReport({ report, data, periodControl }: { report: Report; data: StatisticsReports; periodControl: ReactNode }) {
   const t = useT();
+  const { pathname } = useLocation();
   const { canAction, canSection } = usePermissions();
   const seeCosts = canSection('warehouse') && canAction('warehouseCosts') && canAction('warehouseReports');
   const [search, setSearch] = useState('');
@@ -112,6 +114,16 @@ export function StatisticsReport({ report, data, periodControl }: { report: Repo
     ? rangeDate.format(new Date(data.range.from)) + ' — ' + rangeDate.format(new Date(Date.parse(data.range.to) - 1))
     : t('Всё время');
   const showSearch = report === 'products' || report === 'categories' || report === 'staff';
+  const linkPaidChecks = report === 'sales' && canSection('orders');
+
+  function renderCell(row: Row, { key, format }: Pick<Column, 'key' | 'format'>) {
+    const value = formatValue(row[key], format);
+    if (!linkPaidChecks || key !== 'date' || typeof row.date !== 'string') return value;
+    const search = new URLSearchParams({ section: 'orders', ordersTab: 'paid', ordersDateField: 'closed',
+      ordersPeriod: 'custom', ordersFrom: row.date, ordersTo: row.date });
+    return <Link className="font-medium text-primary hover:underline" to={{ pathname, search: search.toString() }}
+      aria-label={t('Закрытые чеки') + ' · ' + value}>{value}</Link>;
+  }
 
   return <>
     <WorkspaceHeaderCount count={rows.length} />
@@ -161,7 +173,7 @@ export function StatisticsReport({ report, data, periodControl }: { report: Repo
           <tbody>
             {rows.map((row, index) => <tr key={String(row.date ?? row.id) + ':' + index} className="border-b border-border hover:bg-background">
               {visible.map(({ key, format }) => <td key={key} className={'px-4 py-4 text-text-primary ' +
-                (typeof row[key] === 'number' || format && format !== 'date' ? 'text-right tabular-nums' : 'text-left')}>{formatValue(row[key], format)}</td>)}
+                (typeof row[key] === 'number' || format && format !== 'date' ? 'text-right tabular-nums' : 'text-left')}>{renderCell(row, { key, format })}</td>)}
             </tr>)}
             {!rows.length && <tr><td colSpan={visible.length} className="p-8 text-center text-text-muted">{t('Нет данных за период')}</td></tr>}
           </tbody>

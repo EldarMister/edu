@@ -281,6 +281,7 @@ export interface Order {
   comment: string | null;
   requiresWaiterDecision: boolean;
   createdAt: string;
+  closedAt?: string | null;
   updatedAt?: string;
   table: TableItem & { hall?: { name: string } };
   waiter: { id: string; name: string } | null;

@@ -8,6 +8,12 @@ const get = async <T>(url: string) => (await api.get<T>(url)).data;
 import type { UnitCode, UnitType } from './units';
 
 export type ProcessingMethod = 'cleaning' | 'boiling' | 'frying' | 'stewing' | 'baking';
+export type ProcessingBasis = 'gross' | 'net' | 'manual';
+export type ProcessingStage = { method: ProcessingMethod; lossPercent: number };
+export interface RecipeProcessing {
+  processingStages?: ProcessingStage[] | null;
+  processingBasis?: ProcessingBasis | null;
+}
 export const PROCESSING_METHODS: { value: ProcessingMethod; label: string }[] = [
   { value: 'cleaning', label: 'Очистка' },
   { value: 'boiling', label: 'Варка' },
@@ -66,13 +72,13 @@ export interface IngredientsOverview {
   avgCost: number | null;
 }
 
-export interface RecipeItem {
+export interface RecipeItem extends RecipeProcessing {
   costKnown?: boolean;
   processingMethod?: ProcessingMethod | null;
   warehouseId?: string | null;
   warehouseName?: string;
   baseAmount?: number;
-  netAmount?: number;
+  netAmount?: number | null;
   pieceWeightGrams?: number | null;
   netWeightGrams?: number | null;
   lossPercent?: number;
@@ -477,7 +483,7 @@ export function useRecipe(dishId: string | null, variantId?: string) {
   });
 }
 
-export interface RecipeRowInput {
+export interface RecipeRowInput extends RecipeProcessing {
   processingMethod?: ProcessingMethod | null;
   amount: number;
   unit?: string;
@@ -537,14 +543,14 @@ interface PreparationRecipeInput {
   mode?: 'stocked' | 'virtual';
   outputQuantity: number;
   outputUnit: UnitCode;
-  items: {
+  items: (RecipeProcessing & {
     ingredientId: string;
     quantity: number;
     unit: UnitCode;
-    netAmount?: number;
+    netAmount?: number | null;
     lossPercent?: number;
     processingMethod?: ProcessingMethod | null;
-  }[];
+  })[];
 }
 
 export interface PreparationRecipe extends Omit<PreparationRecipeInput, 'items'> {
