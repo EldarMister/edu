@@ -25,6 +25,13 @@ export function warehousePeriodRange(preset: PeriodPreset, today: Date, customFr
 } {
   if (preset === 'custom') return { dateFrom: customFrom, dateTo: customTo };
   if (preset === 'all') return {};
+  if (preset === 'lastWeek' || preset === 'lastTwoWeeks') {
+    const sinceMonday = (today.getUTCDay() + 6) % 7;
+    return {
+      dateFrom: calendarDate(today, -sinceMonday - (preset === 'lastTwoWeeks' ? 14 : 7)),
+      dateTo: calendarDate(today, -sinceMonday - 1),
+    };
+  }
   const year = today.getUTCFullYear();
   const month = today.getUTCMonth();
   if (preset === 'lastMonth') {
@@ -40,6 +47,6 @@ export function warehousePeriodRange(preset: PeriodPreset, today: Date, customFr
     const yesterday = calendarDate(today, -1);
     return { dateFrom: yesterday, dateTo: yesterday };
   }
-  const daysBefore = preset === 'month' ? 29 : preset === 'week' ? 6 : 0;
+  const daysBefore = preset === 'month' ? 29 : preset === 'twoWeeks' ? 13 : preset === 'week' ? 6 : 0;
   return { dateFrom: calendarDate(today, -daysBefore), dateTo: calendarDate(today) };
 }

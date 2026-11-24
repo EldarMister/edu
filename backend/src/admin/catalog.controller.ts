@@ -4,6 +4,7 @@ import { GoodsExportQuery } from './goods-xlsx';
 import { hasPermission, resolvePermissions } from '../common/permissions';
 import { MenuEntryService } from './menu-entry.service';
 import { MenuEntryDto } from './menu-entry.dto';
+import { MenuPriceBatchDto } from './menu-prices.dto';
 import { Role } from '@prisma/client';
 import { CatalogService } from './catalog.service';
 import { SaveFloorPlanDto, SetFloorPlanModeDto } from './floor-plan.dto';
@@ -39,6 +40,9 @@ export class CatalogController {
 
   @Put('menu/entries/:id') @RequirePermission('sections.menu', 'actions.editMenu')
   updateMenuEntry(@Param('id') id: string, @Body() dto: MenuEntryDto, @CurrentUser() user: AuthUser) { this.assertRecipePermission(dto, user); return this.entries.save(id, dto, user); }
+
+  @Post('menu/food-cost/prices') @RequirePermission('sections.menu', 'actions.editMenu')
+  applyMenuPrices(@Body() dto: MenuPriceBatchDto, @CurrentUser() user: AuthUser) { return this.catalog.applyMenuPrices(dto, user); }
 
   private assertRecipePermission(dto: MenuEntryDto, user: AuthUser) {
     if ((dto.recipe || dto.modifiers || dto.dish.variants?.some(({ ownRecipe }) => ownRecipe !== undefined))

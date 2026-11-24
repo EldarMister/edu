@@ -17,6 +17,7 @@ import { WarehouseDocumentsController } from './documents.controller';
 import { WarehouseDocumentsService } from './documents.service';
 import { WarehouseReportsController } from './reports.controller';
 import { WarehouseReportsService } from './reports.service';
+import { FoodCostAnalysisController, FoodCostAnalysisService } from './food-cost-analysis';
 import { WarehousePolicyController } from './policy.controller';
 import { WarehouseSuppliersModule } from './suppliers';
 import { WarehousePackagesModule } from './packages';
@@ -39,6 +40,7 @@ import { RecipeExportController } from './recipe-export.controller';
     WarehouseLocationsController,
     WarehouseDocumentsController,
     WarehouseReportsController,
+    FoodCostAnalysisController,
     WarehousePolicyController,
     MenuModifiersController,
   ],
@@ -52,6 +54,7 @@ import { RecipeExportController } from './recipe-export.controller';
     WarehouseLocationsService,
     WarehouseDocumentsService,
     WarehouseReportsService,
+    FoodCostAnalysisService,
     IngredientStockService,
     MenuModifiersService,
   ],

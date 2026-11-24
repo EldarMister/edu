@@ -3,16 +3,32 @@ import { Role } from '@prisma/client';
 import type { Response } from 'express';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
-import { WarehouseMovementExportQuery, WarehouseReportQuery } from './reports.dto';
+import { FoodCostExportQuery, FoodCostReportQuery, WarehouseMovementExportQuery, WarehouseReportQuery } from './reports.dto';
 import { WarehouseReportsService } from './reports.service';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { assertWarehousePermission } from './warehouse-permissions';
+import { writeFoodCostWorkbook } from './food-cost-xlsx';
+import { sendWarehouseWorkbook } from './warehouse-register-xlsx';
 
 @Controller('admin/warehouse/reports')
 @Roles(Role.ADMIN, Role.OWNER)
 @RequirePermission('sections.warehouse')
 export class WarehouseReportsController {
   constructor(private readonly reports: WarehouseReportsService) {}
+
+  @Get('food-cost')
+  foodCost(@Query() query: FoodCostReportQuery, @CurrentUser() user: AuthUser) {
+    assertWarehousePermission(user, 'warehouseCosts');
+    return this.reports.foodCost(query);
+  }
+
+  @Get('food-cost.xlsx')
+  async exportFoodCost(@Query() query: FoodCostExportQuery, @Res() response: Response, @CurrentUser() user: AuthUser) {
+    assertWarehousePermission(user, 'warehouseCosts');
+    assertWarehousePermission(user, 'exportReports');
+    const report = await this.reports.foodCost(query);
+    sendWarehouseWorkbook(response, writeFoodCostWorkbook(report, query), 'food-cost.xlsx');
+  }
 
   @Get('export.csv')
   @RequirePermission('actions.warehouseReports')

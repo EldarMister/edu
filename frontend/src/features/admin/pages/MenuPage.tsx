@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useRef, useState } from 'react';
+import { Fragment, lazy, Suspense, useEffect, useId, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { createPortal } from 'react-dom';
 import { Navigate, useLocation } from 'react-router-dom';
@@ -36,7 +36,6 @@ import { filterMenuGoods, MenuAdditionalFilters, MenuGoodsActions, menuGoodsColu
 import { MenuEntryPage } from './MenuEntryPage';
 import { InlineMenuPrice } from './InlineMenuPrice';
 import { RecipeExportButton } from './warehouse/RecipeExportButton';
-import { MenuFoodCostPage } from './MenuFoodCostPage';
 import { costPercent, menuOutputLabel, useMenuCosts, type MenuCostRow } from './menu-cost-api';
 import { dishTaxInput, dishTaxValue, effectiveMenuTaxId, MenuTaxSelect } from '../../settings/MenuTaxSelect';
 import { useMenuTaxOptions } from '../../settings/taxes-api';
@@ -53,14 +52,18 @@ import {
   type AdminCategory,
 } from '../api';
 
+const MenuFoodCostPage = lazy(() => import('./MenuFoodCostPage').then(({ MenuFoodCostPage }) => ({ default: MenuFoodCostPage })));
+
 export function MenuPage({ view }: { view: Exclude<MenuView, 'categories' | 'ingredientCategories'> }) {
   const { editor, openEditor } = useEditorRoute();
   const { can } = usePermissions();
   if (view === 'foodCost') {
     if (!can('sections.warehouse') || !can('actions.warehouseCosts'))
       return <p className="card p-8 text-center text-text-muted">Нет доступа к себестоимости.</p>;
-    if (!editor) return <MenuFoodCostPage onOpen={(row) => openEditor({ type: row.isSet ? 'set' : 'entry',
-      id: row.dishId, itemId: row.variantId ?? undefined, action: row.catalogKind === 'goods' ? 'goods' : 'recipe' })} />;
+    if (!editor) return <Suspense fallback={<WorkspacePending />}>
+      <MenuFoodCostPage onOpen={(row) => openEditor({ type: row.isSet ? 'set' : 'entry',
+        id: row.dishId, itemId: row.variantId ?? undefined, action: row.catalogKind === 'goods' ? 'goods' : 'recipe' })} />
+    </Suspense>;
     return <MenuDishList view={editor.action === 'goods' ? 'goods' : 'recipes'} />;
   }
   if (view === 'ingredients' || view === 'preparations')

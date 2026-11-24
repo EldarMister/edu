@@ -1,5 +1,5 @@
 import { Transform, Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { IngredientKind } from '@prisma/client';
 
 export const warehouseReportViews = ['balances', 'movement_summary', 'movements', 'purchases', 'losses', 'sales', 'variances'] as const;
@@ -7,6 +7,22 @@ export type WarehouseReportView = typeof warehouseReportViews[number];
 
 const ingredientKinds = Object.values(IngredientKind);
 const repeatedQueryValue = ({ value }: { value: unknown }) => typeof value === 'string' ? [value] : value;
+
+export class FoodCostReportQuery {
+  @IsString() @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  from: string;
+
+  @IsString() @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  to: string;
+}
+
+export class FoodCostExportQuery extends FoodCostReportQuery {
+  @IsIn(['positions', 'ingredients'])
+  tab: 'positions' | 'ingredients';
+
+  @IsOptional() @IsString() @MaxLength(160)
+  search?: string;
+}
 
 export class WarehouseReportQuery {
   @IsOptional() @IsIn(warehouseReportViews)

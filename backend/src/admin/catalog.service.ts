@@ -15,6 +15,9 @@ import { assertAssignableStation, BUILTIN_STATIONS, defaultCategoryStation, lock
 import { goodsExportColumns, writeGoodsWorkbook, type GoodsExportQuery } from './goods-xlsx';
 import { assertMenuTax, dishTaxFields } from '../settings/order-taxes';
 import { type SaveFloorPlanDto, withinFloorPlan } from './floor-plan.dto';
+import type { AuthUser } from '../common/decorators/current-user.decorator';
+import type { MenuPriceBatchDto } from './menu-prices.dto';
+import { saveMenuPrices } from './menu-prices';
 import {
   CreateCategoryDto,
   CreateDishDto,
@@ -697,6 +700,12 @@ export class CatalogService {
       },
     });
     return withDishImageRef(updated);
+  }
+
+  async applyMenuPrices(dto: MenuPriceBatchDto, actor: AuthUser) {
+    const { changedDishIds, ...result } = await saveMenuPrices(this.prisma, dto, actor);
+    if (result.changed) this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { cafeId: actor.cafeId, dishIds: changedDishIds });
+    return result;
   }
 
   async deleteDish(id: string, actor: AuditActor) {

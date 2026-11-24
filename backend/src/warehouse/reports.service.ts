@@ -5,7 +5,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { getCafeId } from '../tenant/tenant-context';
 import { warehouseDateRange } from './report-range';
 import { reportIngredientFilters } from './report-ingredient-filters';
-import { WarehouseMovementExportQuery, WarehouseReportQuery, WarehouseReportView } from './reports.dto';
+import { FoodCostReportQuery, WarehouseMovementExportQuery, WarehouseReportQuery, WarehouseReportView } from './reports.dto';
+import { readFoodCostReport } from './food-cost-report';
 import { warehouseBalances } from './warehouse-location';
 import { reportWarehouses } from './report-warehouses';
 import { internalTransferLegs } from './report-transfer-flow';
@@ -32,6 +33,12 @@ export class WarehouseReportsService {
 
   async report(query: WarehouseReportQuery) {
     return this.prisma.$transaction((tx) => this.readReport(tx, query), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
+  foodCost(query: FoodCostReportQuery) {
+    return this.prisma.$transaction((tx) => readFoodCostReport(tx, query), {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 20_000,
+    });
   }
 
   private async readReport(db: Prisma.TransactionClient, query: WarehouseReportQuery) {

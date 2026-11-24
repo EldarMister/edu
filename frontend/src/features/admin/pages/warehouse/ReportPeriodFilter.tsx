@@ -12,7 +12,14 @@ export const REPORT_PERIODS = [
   { value: 'lastMonth', label: 'Прошлый месяц' },
   { value: 'all', label: 'Всё время' },
 ] as const;
-export type PeriodPreset = typeof REPORT_PERIODS[number]['value'] | 'custom';
+export const COMPARISON_PERIODS = [
+  { value: 'lastWeek', label: 'Прошлая неделя' },
+  { value: 'lastTwoWeeks', label: 'Прошлые 2 недели' },
+  { value: 'week', label: 'Последние 7 дней' },
+  { value: 'twoWeeks', label: 'Последние 14 дней' },
+  { value: 'lastMonth', label: 'Прошлый месяц' },
+] as const;
+export type PeriodPreset = typeof REPORT_PERIODS[number]['value'] | typeof COMPARISON_PERIODS[number]['value'] | 'custom';
 
 const weekdays = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
 const months = Array.from({ length: 12 }, (_, index) =>
@@ -42,13 +49,14 @@ interface Props {
   allCaption?: string;
   confirmSelection?: boolean;
   includeAll?: boolean;
+  comparison?: boolean;
   allRange?: { dateFrom: string; dateTo: string };
   onPreset: (preset: PeriodPreset) => void;
   onRange: (from: string, to: string) => void;
 }
 
 export function ReportPeriodFilter({ preset, today, range, label: dialogLabel = 'Период отчёта',
-  allCaption = 'Всё время', confirmSelection = false, includeAll = true, allRange, onPreset, onRange }: Props) {
+  allCaption = 'Всё время', confirmSelection = false, includeAll = true, comparison = false, allRange, onPreset, onRange }: Props) {
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -62,9 +70,10 @@ export function ReportPeriodFilter({ preset, today, range, label: dialogLabel = 
   const [pending, setPending] = useState<{ preset: PeriodPreset; range: Props['range'] }>();
   const todayKey = today.toISOString().slice(0, 10);
   const { dateFrom, dateTo } = range;
+  const presets = comparison ? COMPARISON_PERIODS : REPORT_PERIODS;
   const label = preset === 'all' ? allCaption : confirmSelection && dateFrom && dateTo
     ? formatFinanceRange(dateFrom, dateTo)
-    : REPORT_PERIODS.find(({ value }) => value === preset)?.label ?? rangeCaption(dateFrom, dateTo);
+    : presets.find(({ value }) => value === preset)?.label ?? rangeCaption(dateFrom, dateTo);
   const yearNumber = month.getUTCFullYear();
   const monthIndex = month.getUTCMonth();
   const atCurrentMonth = yearNumber === today.getUTCFullYear() && monthIndex === today.getUTCMonth();
@@ -220,7 +229,7 @@ export function ReportPeriodFilter({ preset, today, range, label: dialogLabel = 
         className={`report-period-panel ${confirmSelection ? 'report-period-panel--confirm' : ''}`}
         style={position ?? { width: `min(${confirmSelection ? 680 : 432}px, calc(100vw - 16px))`, visibility: 'hidden' }}>
         <div className="report-period-presets">
-          {REPORT_PERIODS.filter(({ value }) => value !== 'month' && (includeAll || value !== 'all')).map(({ value, label: caption }) =>
+          {presets.filter(({ value }) => value !== 'month' && (includeAll || value !== 'all')).map(({ value, label: caption }) =>
             <button type="button" key={value} aria-pressed={!choosingRange && (pending?.preset ?? preset) === value}
               onClick={() => choosePreset(value)}>{value === 'all' ? allCaption
                 : confirmSelection && value === 'currentMonth' ? monthName(today.getUTCMonth())

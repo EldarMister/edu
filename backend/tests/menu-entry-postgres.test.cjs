@@ -6,6 +6,9 @@ const { PrismaClient } = require('@prisma/client');
 const { runWithTenant, tenantPrismaMiddleware } = require('../src/tenant/tenant-context.ts');
 const { MenuEntryService } = require('../src/admin/menu-entry.service.ts');
 const { CatalogController } = require('../src/admin/catalog.controller.ts');
+const { CatalogService } = require('../src/admin/catalog.service.ts');
+const { MenuPriceBatchDto } = require('../src/admin/menu-prices.dto.ts');
+const { getDefaultPermissionsByRole } = require('../src/common/permissions.ts');
 const { RecipesService } = require('../src/warehouse/recipes.service.ts');
 const { MenuModifiersService } = require('../src/warehouse/menu-modifiers.ts');
 const { IngredientsService } = require('../src/warehouse/ingredients.service.ts');
@@ -644,3 +647,104 @@ test(
     }
   },
 );
+
+test('PostgreSQL: food-cost basket updates menu list prices atomically with tenant and editor guards', { skip: !url }, async () => {
+  const db = new PrismaClient({ datasourceUrl: url });
+  db.$use(tenantPrismaMiddleware);
+  const prefix = randomUUID();
+  const [cafe, foreign] = await Promise.all([
+    db.cafe.create({ data: { name: `Menu price QA ${prefix}` } }),
+    db.cafe.create({ data: { name: `Other menu price QA ${prefix}` } }),
+  ]);
+  const events = [];
+  const catalog = new CatalogService(db, { emitBroadcast: (...args) => events.push(args) }, {});
+  const controller = new CatalogController(catalog, {});
+  const change = (dish, price, variant) => ({
+    dishId: dish.id, variantId: variant?.id ?? null, price,
+    expectedPrice: Number(variant?.price ?? dish.price),
+    expectedUnit: dish.isWeighted ? 'ml' : 'pcs',
+    expectedPriceBase: dish.isWeighted ? dish.weightedPriceBase : 1,
+  });
+  try {
+    const otherDish = await runWithTenant({ cafeId: foreign.id }, async () => {
+      const category = await db.category.create({ data: { name: 'Другая категория' } });
+      return db.dish.create({ data: { categoryId: category.id, name: 'Другое кафе', price: 200 } });
+    });
+    await runWithTenant({ cafeId: cafe.id }, async () => {
+      const actor = await db.user.create({ data: { name: 'QA', role: 'ADMIN', phone: prefix, passwordHash: 'local-fixture' } });
+      actor.permissions = getDefaultPermissionsByRole('ADMIN');
+      actor.permissions.sections.menu = true;
+      actor.permissions.actions.editMenu = true;
+      const guard = new PermissionsGuard(new Reflector());
+      const context = {
+        getHandler: () => controller.applyMenuPrices,
+        getClass: () => CatalogController,
+        switchToHttp: () => ({ getRequest: () => ({ user: actor, method: 'POST' }) }),
+      };
+      assert.equal(guard.canActivate(context), true);
+      actor.permissions.actions.editMenu = false;
+      assert.throws(() => guard.canActivate(context), /нет доступа/);
+      actor.permissions.actions.editMenu = true;
+      actor.permissions.readOnlySections = ['menu'];
+      assert.throws(() => guard.canActivate(context), /только просмотр/);
+      actor.permissions.readOnlySections = [];
+
+      const category = await db.category.create({ data: { name: 'Напитки' } });
+      const coffee = await db.dish.create({
+        data: { id: `${prefix}:a`, categoryId: category.id, name: 'Кофе', price: 150,
+          variants: { create: [{ name: '250 мл', price: 150, sortOrder: 0 }, { name: '400 мл', price: 180, sortOrder: 1 }] } },
+        include: { variants: { orderBy: { sortOrder: 'asc' } } },
+      });
+      const [small, large] = coffee.variants;
+      const tea = await db.dish.create({
+        data: { id: `${prefix}:b`, categoryId: category.id, name: 'Чай на розлив', price: 220,
+          isWeighted: true, weightedPriceBase: 1000, weightedMeasure: 'volume' },
+      });
+      const request = { changes: [change(coffee, 189.50, small), change(tea, 249.75)] };
+      const pipe = new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true });
+      const body = { type: 'body', metatype: MenuPriceBatchDto };
+      await assert.rejects(pipe.transform({ changes: [{ ...request.changes[0], price: 1.001 }] }, body), /Bad Request/);
+      const validated = await pipe.transform(request, body);
+
+      await assert.rejects(catalog.applyMenuPrices({ changes: [request.changes[0], change(otherDish, 250)] }, actor), /Позиция меню недоступна/);
+      await assert.rejects(catalog.applyMenuPrices({ changes: [request.changes[0], request.changes[0]] }, actor), /указана дважды/);
+      await assert.rejects(catalog.applyMenuPrices({ changes: [change(coffee, 160)] }, actor), /Изменились варианты/);
+      await assert.rejects(catalog.applyMenuPrices({ changes: [request.changes[0], { ...request.changes[1], expectedUnit: 'g' }] }, actor), /Изменилась единица цены/);
+      await assert.rejects(catalog.applyMenuPrices({ changes: [request.changes[0], { ...request.changes[1], expectedPrice: 219 }] }, actor), /уже изменилась/);
+      assert.equal(Number((await db.dishVariant.findUniqueOrThrow({ where: { id: small.id } })).price), 150);
+      assert.equal(await db.recipeRevision.count(), 0);
+      assert.equal(await db.auditLog.count(), 0);
+      assert.equal(events.length, 0);
+
+      const results = await Promise.all([controller.applyMenuPrices(validated, actor), controller.applyMenuPrices(validated, actor)]);
+      assert.deepEqual(results.map(({ changed }) => changed).sort(), [0, 2]);
+      const current = await db.dish.findUniqueOrThrow({ where: { id: coffee.id }, include: {
+        variants: { orderBy: { sortOrder: 'asc' } },
+      } });
+      assert.equal(Number(current.price), 180);
+      assert.equal(current.recipeVersion, coffee.recipeVersion + 1);
+      assert.deepEqual(current.variants.map(({ id, price }) => [id, Number(price)]), [[small.id, 189.5], [large.id, 180]]);
+      const weighted = await db.dish.findUniqueOrThrow({ where: { id: tea.id } });
+      assert.deepEqual([Number(weighted.price), weighted.weightedPriceBase, weighted.weightedMeasure], [249.75, 1000, 'volume']);
+      assert.equal(await db.recipeRevision.count(), 2);
+      const audits = await db.auditLog.findMany({ where: { actionType: 'MENU_ITEM_PRICE_CHANGED' } });
+      assert.deepEqual(audits.map((row) => [row.metadata.variantId, row.oldValue.price, row.newValue.price]).sort(), [
+        [small.id, 150, 189.5], [null, 220, 249.75],
+      ].sort());
+      assert.deepEqual(events, [['menu:updated', { cafeId: cafe.id, dishIds: [coffee.id, tea.id] }]]);
+
+      const editor = new MenuEntryService(db, new RecipesService(db), new MenuModifiersService(db), {}, {});
+      await assert.rejects(editor.save(coffee.id, { catalogKind: 'recipe', expectedVersion: coffee.recipeVersion,
+        dish: { name: coffee.name, categoryId: category.id, price: 150 } }, actor), /Позиция уже изменена/);
+    });
+    assert.equal(Number((await db.dish.findUniqueOrThrow({ where: { id: otherDish.id } })).price), 200);
+  } finally {
+    const where = { cafeId: { in: [cafe.id, foreign.id] } };
+    await db.auditLog.deleteMany({ where });
+    await db.dish.deleteMany({ where });
+    await db.category.deleteMany({ where });
+    await db.user.deleteMany({ where });
+    await db.cafe.deleteMany({ where: { id: where.cafeId } });
+    await db.$disconnect();
+  }
+});
