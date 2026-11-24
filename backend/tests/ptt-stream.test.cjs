@@ -96,7 +96,10 @@ test('native files and PWA Opus stream in both directions and the general channe
   await gateway.handleJoin(outsider, { channel: 'admin' });
   const talk = { channel: 'general', talkId: randomUUID(), codec: 'opus', preferHq: true, sequenced: true, nativePcm: true };
   assert.equal((await gateway.handleStartTalk(web, talk)).nativePcm, undefined);
-  await gateway.handleJoin(phone, { channel: 'admin' });
+  const joined = await gateway.handleJoin(phone, { channel: 'admin', codecs: ['opus-hq'], sequenced: true, nativeWav: true });
+  assert.equal(joined.nativeWav, true);
+  assert.equal(phone.data.pttSequenced, false);
+  assert.equal(phone.data.pttHq, false);
   assert.equal(web.messages.findLast(m => m.event === 'ptt_presence').payload.onlineCount, 2);
   assert.equal(web.messages.findLast(m => m.event === 'ptt_native_listener').payload.talkId, talk.talkId);
   assert.equal((await gateway.handleStartTalk(phone, { channel: 'admin' })).reason, 'busy');
@@ -128,6 +131,33 @@ test('native files and PWA Opus stream in both directions and the general channe
   assert.equal(phone.messages.some(m => m.event === 'ptt_audio_message'), false);
   await gateway.handleStopTalk(phone, { channel: 'general' });
   assert.equal(web.messages.findLast(m => m.event === 'ptt_channel_free').payload.talkId, segment.talkId);
+});
+
+test('WAV receivers avoid duplicate Opus when mirrored audio is available and retain Opus from older phones', async () => {
+  const { client, gateway } = radioFixture();
+  const web = client('web', 'a');
+  const native = client('wav', 'b');
+  const older = client('older', 'c');
+  const join = { channel: 'admin', codecs: ['opus'], sequenced: true };
+  await gateway.handleJoin(web, { ...join, codecs: ['opus-hq'] });
+  await gateway.handleJoin(native, { ...join, nativeWav: true });
+  await gateway.handleJoin(older, join);
+
+  const pcmTalk = { channel: 'admin', talkId: randomUUID(), codec: 'opus', preferHq: true, sequenced: true, nativePcm: true };
+  const grant = await gateway.handleStartTalk(web, pcmTalk);
+  assert.equal(grant.codec, 'opus');
+  assert.equal(grant.nativePcm, true);
+  gateway.handleAudioBatch(web, { ...pcmTalk, firstFrame: 0, audio: Buffer.alloc(60, 1) });
+  gateway.handleNativePcm(web, { ...pcmTalk, firstSample: 0, audio: Buffer.alloc(960, 1) });
+  assert.equal(native.messages.filter(({ event }) => event === 'ptt_audio_stream').length, 1);
+  assert.equal(native.messages.some(({ event }) => event === 'ptt_audio_packet'), false);
+  assert.equal((await gateway.handleStopTalk(web, { ...pcmTalk, frames: 1 })).ok, true);
+
+  const opusTalk = { ...pcmTalk, talkId: randomUUID(), nativePcm: false };
+  assert.equal((await gateway.handleStartTalk(older, opusTalk)).codec, 'opus');
+  gateway.handleAudioBatch(older, { ...opusTalk, firstFrame: 0, audio: Buffer.alloc(60, 2) });
+  assert.equal(native.messages.filter(({ event }) => event === 'ptt_audio_packet').length, 1);
+  assert.equal((await gateway.handleStopTalk(older, { ...opusTalk, frames: 1 })).ok, true);
 });
 
 test('radio replay keeps a bounded tail and exposes its true first frame', () => {

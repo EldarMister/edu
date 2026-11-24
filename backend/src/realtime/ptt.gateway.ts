@@ -100,6 +100,7 @@ interface JoinBody {
   channel?: PttChannel | null;
   codecs?: OpusProfile[];
   sequenced?: boolean;
+  nativeWav?: boolean;
 }
 
 interface TalkBody {
@@ -185,12 +186,13 @@ export class PttGateway implements OnGatewayDisconnect {
     }
     if (!this.isChannel(nextChannel)) return this.deny(client, undefined, 'invalid_channel');
 
-    client.data.pttSequenced = body.sequenced === true;
-    client.data.pttHq = Array.isArray(body.codecs) && body.codecs.includes('opus-hq');
-    // Released Expo builds join without a codec and play independently decodable files.
-    client.data.pttFiles = !body.codecs && !client.data.pttSequenced;
+    const nativeWav = body.nativeWav === true;
+    client.data.pttSequenced = !nativeWav && body.sequenced === true;
+    client.data.pttHq = !nativeWav && Array.isArray(body.codecs) && body.codecs.includes('opus-hq');
+    // Older native clients already select the file stream by joining without codecs.
+    client.data.pttFiles = nativeWav || (!body.codecs && !client.data.pttSequenced);
     const onlineCount = await this.joinChannel(client, user, nextChannel);
-    return { ok: true, channel: nextChannel, onlineCount };
+    return { ok: true, channel: nextChannel, onlineCount, ...(nativeWav ? { nativeWav: true } : {}) };
   }
 
   @SubscribeMessage(PTT_EVENTS.LIVEKIT_CONNECT)
@@ -433,7 +435,9 @@ export class PttGateway implements OnGatewayDisconnect {
       ...this.streamMetadata(channel, lock), firstFrame, audio,
     });
     // Older releases still speak Opus. Translate the batch back to their original packet format.
-    const legacy = client.to(this.broadcastRooms(user.cafeId, channel, profile === 'opus-hq')).except([...sequencedRooms, account]);
+    const nativeRooms = live.nativePcm?.enabled ? this.fileRooms(user.cafeId, channel) : [];
+    const legacy = client.to(this.broadcastRooms(user.cafeId, channel, profile === 'opus-hq'))
+      .except([...sequencedRooms, ...nativeRooms, account]);
     for (let start = 0; start < count; start += packetFrames) {
       const frames = audio.subarray(start * frameBytes, (start + packetFrames) * frameBytes);
       legacy.emit(PTT_EVENTS.AUDIO_PACKET, Buffer.concat([live.opus.header, frames]));
@@ -855,6 +859,9 @@ export class PttGateway implements OnGatewayDisconnect {
 
   private streamKey(cafeId: string, talkId: string) { return cafeId + ':' + talkId; }
   private fileRoom(cafeId: string, channel: PttChannel) { return `ptt:files:${cafeId}:${channel}`; }
+  private fileRooms(cafeId: string, channel: PttChannel) {
+    return (channel === 'general' ? PTT_CHANNELS : [channel]).map((name) => this.fileRoom(cafeId, name));
+  }
 
   private accountRoom(user: AuthenticatedSocketUser) {
     return `ptt:account:${user.cafeId}:${user.id}`;
