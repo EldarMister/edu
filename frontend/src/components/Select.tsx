@@ -152,9 +152,9 @@ export function Select({
       if (triggerRef.current?.contains(t) || menuRef.current?.contains(t)) return;
       setOpen(false);
     };
-    const close = (e?: Event) => {
-      const t = e?.target as Node | null;
-      if (t && (triggerRef.current?.contains(t) || menuRef.current?.contains(t))) return;
+    const close = (event: Event) => {
+      // Only a scroll which can move the trigger invalidates the portal position.
+      if (event.type === 'scroll' && event.target instanceof Element && !event.target.contains(triggerRef.current)) return;
       setOpen(false);
     };
     document.addEventListener('mousedown', onDoc);
