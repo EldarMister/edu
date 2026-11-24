@@ -11,6 +11,7 @@ const { lockRecipeGraph } = require('../src/warehouse/recipe-resolution.ts');
 const { archiveDishRecipe } = require('../src/warehouse/recipe-revisions.ts');
 const { PreparationProductionService } = require('../src/warehouse/preparation-production.ts');
 const { redactWarehouseCosts } = require('../src/warehouse/warehouse-cost.interceptor.ts');
+const { readProfitLoss } = require('../src/finance/profit-loss.ts');
 
 const url = process.env.ORDER_FEATURE_TEST_DATABASE_URL;
 if (url && (!['localhost', '127.0.0.1'].includes(new URL(url).hostname) || !new URL(url).pathname.includes('test'))) throw new Error('Dedicated local test database required');
@@ -49,6 +50,26 @@ test('PostgreSQL: recipe writeoffs retain source lines and immutable ingredient 
       const withSignatures = (rows, preview) => rows.map((row) => ({ ...row, recipeSignature: preview.sourceLines.find((line) => line.sourceLineId === row.sourceLineId).recipeSignature }));
       const stock = async (id) => (await ingredients.findOne(id)).balances.find((balance) => balance.warehouseId === main.id).stock;
       let posted;
+      await t.test('custom writeoff reasons and details survive older clients and post to the selected P&L block', async () => {
+        const from = new Date(Date.now() - 60_000);
+        const reason = await docs.saveWriteoffReason({ name: '  Пробная   партия ', expense: true });
+        assert.equal(reason.label, 'Пробная партия');
+        assert.ok((await docs.reasons()).some(({ id, expense }) => id === reason.id && expense));
+        await assert.rejects(() => docs.saveWriteoffReason({ name: 'пробная партия', expense: false }), /уже есть/iu);
+        const line = source('ingredient', flour.id, 0.1, 'kg');
+        const draft = await docs.create(owner, { warehouseId: main.id, kind: 'writeoff', writeoffReasonId: reason.id,
+          sourceLines: [{ ...line, details: 'Порвана упаковка' }] });
+        const edited = await docs.update(owner, draft.id, { revision: draft.revision, reason: null, sourceLines: [line] });
+        assert.equal(edited.sourceLines[0].details, 'Порвана упаковка');
+        const submitted = await docs.submit(owner, edited.id, edited.revision);
+        const result = await docs.approve(owner, edited.id, submitted.revision);
+        assert.equal(result.reasonLabel, 'Пробная партия');
+        assert.equal(result.sourceLines[0].details, 'Порвана упаковка');
+        assert.equal((await docs.list(undefined, 'writeoff', 'Порвана упаковка'))[0].id, result.id);
+        const profitLoss = await readProfitLoss(db, cafe.id, { from, to: new Date(Date.now() + 60_000) });
+        assert.equal(profitLoss.rows.find(({ label }) => label === 'Списания на расходы').value, 10);
+        await docs.reverse(owner, result.id, 'Test balance restored', result.revision);
+      });
       await t.test('backdated writeoff uses the dish, its deleted variant and recursive preparation as of the stock date', async () => {
         const preparations = new PreparationProductionService(db);
         const prep = await preparations.saveCard({ requestKey: randomUUID(), name: 'Old stock recipe', unit: 'kg', mode: 'virtual',

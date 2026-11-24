@@ -235,6 +235,7 @@ model Cafe {
   employeeSalaryRates EmployeeSalaryRate[]
   warehouseSuppliers WarehouseSupplier[]
   warehousePackages WarehousePackage[]
+  writeoffReasons WriteoffReason[]
   processingDocuments ProcessingDocument[]
   id              String     @id @default(uuid())
   name            String
@@ -1476,6 +1477,20 @@ model WarehouseStock {
   @@map("warehouse_stock")
 }
 
+model WriteoffReason {
+  id             String @id @default(uuid())
+  cafeId         String @map("cafe_id")
+  name           String
+  normalizedName String @map("normalized_name")
+  expense        Boolean @default(false)
+  cafe           Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  documents      WarehouseDocument[]
+
+  @@unique([cafeId, id])
+  @@unique([cafeId, normalizedName])
+  @@map("writeoff_reasons")
+}
+
 model WarehouseDocument {
   id              String                  @id @default(uuid())
   cafeId          String                  @map("cafe_id")
@@ -1483,6 +1498,8 @@ model WarehouseDocument {
   kind            WarehouseDocumentKind
   mode            WarehouseInventoryMode?
   reason          WarehouseWriteoffReason?
+  writeoffReasonId String? @map("writeoff_reason_id")
+  writeoffReason   WriteoffReason? @relation(fields: [cafeId, writeoffReasonId], references: [cafeId, id], onDelete: NoAction)
   note            String?
   sourceLines     Json?                   @map("source_lines")
   destinationWarehouseId String? @map("destination_warehouse_id")
@@ -1511,6 +1528,7 @@ model WarehouseDocument {
 
   @@unique([cafeId, id])
   @@unique([cafeId, requestKey])
+  @@index([cafeId, writeoffReasonId])
   @@index([cafeId, warehouseId, kind, createdAt], map: "warehouse_documents_cafe_id_warehouse_id_kind_created_at_idx")
   @@map("warehouse_documents")
 }

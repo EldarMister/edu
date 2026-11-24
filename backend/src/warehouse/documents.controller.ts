@@ -9,7 +9,7 @@ import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
 import {
   ReverseWarehouseDocumentDto, CreateWarehouseDocumentDto, UpdateWarehouseDocumentDto, WarehouseDocumentRevisionDto,
-  WarehouseDocumentsQueryDto, WriteoffPreviewDto, warehouseWriteoffReasons,
+  WarehouseDocumentsQueryDto, WriteoffPreviewDto, WriteoffReasonDto,
 } from './documents.dto';
 import { WarehouseDocumentsService } from './documents.service';
 import { assertWarehousePermission } from './warehouse-permissions';
@@ -28,7 +28,19 @@ export class WarehouseDocumentsController {
 
   @Get('reasons')
   reasons() {
-    return Object.entries(warehouseWriteoffReasons).map(([id, label]) => ({ id, label }));
+    return this.documents.reasons();
+  }
+
+  @Post('reasons')
+  @RequirePermission('sections.warehouse', 'actions.warehouseSettings')
+  createReason(@Body() dto: WriteoffReasonDto) {
+    return this.documents.saveWriteoffReason(dto);
+  }
+
+  @Patch('reasons/:id')
+  @RequirePermission('sections.warehouse', 'actions.warehouseSettings')
+  updateReason(@Param('id') id: string, @Body() dto: WriteoffReasonDto) {
+    return this.documents.saveWriteoffReason(dto, id);
   }
 
   @Get('writeoff-options')

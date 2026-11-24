@@ -1,5 +1,4 @@
 import { Fragment, useEffect, useId, useState } from 'react';
-import { IconEye } from '../../components/icons';
 import { apiError } from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
 import { Select } from '@/components/Select';
@@ -9,8 +8,8 @@ import './document-workspace.css';
 import { balanceMoney } from './balance-format';
 import { documentQuantityError } from './stock-document-form';
 import type { StockDocumentDetails } from './stock-documents-api';
-import { unitLabel, unitTypeOf, unitsForType, type UnitCode } from './units';
-import { useWriteoffOptions, useWriteoffPackages, useWriteoffPreview, type WriteoffSourceInput, type WriteoffSourceLine } from './writeoff-api';
+import { ALL_UNITS, unitLabel, unitTypeOf, unitsForType, type UnitCode } from './units';
+import { useWriteoffOptions, useWriteoffPackages, useWriteoffPreview, type WriteoffFileLine, type WriteoffSourceInput, type WriteoffSourceLine } from './writeoff-api';
 import { changeWriteoffPackage, changeWriteoffUnit, emptyWriteoffLine, sameWriteoffSource, writeoffDraftLines, writeoffFormKey, writeoffLineInput, writeoffPreviewPlan, type DraftWriteoffLine } from './writeoff-form-values';
 
 type Choice = { id: string; name: string; group: string; detail?: string; unit: string; unitCode: UnitCode; kind: 'ingredient' | 'dish'; sourceId: string; variantId?: string };
@@ -26,7 +25,7 @@ export function useWriteoffLines(enabled: boolean, warehouseId: string, document
   const snapshotById = new Map(snapshots.map((line) => [line.sourceLineId, line]));
   const entered = rows.filter((row) => row.sourceId || row.quantity);
   const issues = new Map(rows.map((row) => [row.sourceLineId, {
-    product: !row.sourceId && !!row.quantity ? 'Выберите продукт.' : undefined,
+    product: !row.sourceId && !!(row.quantity || row.imported) ? 'Выберите продукт.' : undefined,
     quantity: row.sourceId || row.quantity ? documentQuantityError(row.quantity, false) || (Number(row.quantity) < 0.000001 ? 'Минимальное количество — 0,000001.' : undefined) : undefined,
   }]));
   const firstError = [...issues.values()].flatMap((issue) => [issue.product, issue.quantity]).find(Boolean);
@@ -74,9 +73,30 @@ export function useWriteoffLines(enabled: boolean, warehouseId: string, document
     const option = choices.find((choice) => choice.id === id);
     if (!option) return;
     setRows((current) => current.map((row) => row.sourceLineId === sourceLineId && choiceId(row) !== id
-      ? { sourceLineId, kind: option.kind, sourceId: option.sourceId, variantId: option.variantId, quantity: '1', unit: option.unitCode, name: option.name } : row));
+      ? { sourceLineId, kind: option.kind, sourceId: option.sourceId, variantId: option.variantId, quantity: row.imported ? '' : '1',
+        unit: option.unitCode, name: option.name, details: row.details, imported: row.imported } : row));
   }
-  return { rows, setRows, options, packages, choices, issues, firstError, enteredCount: entered.length, ready, calculating, total, lines, preview, snapshots, choose, adopt,
+  function importRows(lines: WriteoffFileLine[]) {
+    const existing = rows.filter((row) => row.sourceId || row.quantity || row.imported);
+    if (existing.length + lines.length > 200) return false;
+    const normalize = (value: string) => value.trim().toLocaleLowerCase('ru').replace(/\s+/gu, ' ');
+    const next = lines.map((line): DraftWriteoffLine => {
+      const matches = choices.filter((choice) => normalize(choice.name) === normalize(line.name));
+      const unitLabel = normalize(line.unit).replace(/\.$/u, '');
+      const unit = ALL_UNITS.find((item) => item.label === unitLabel || item.code === unitLabel)?.code
+        ?? (unitLabel === 'порц' ? 'pcs' : undefined);
+      const match = matches.length === 1 ? matches[0] : undefined;
+      const quantity = line.quantity != null && line.quantity > 0 && match && unit && unitTypeOf(unit) === unitTypeOf(match.unitCode)
+        ? String(line.quantity) : '';
+      const imported = !quantity ? [line.name, [line.quantity, line.unit].filter((value) => value != null && value !== '').join(' ')].filter(Boolean).join(' · ') : undefined;
+      return { ...emptyWriteoffLine(), sourceId: match?.sourceId ?? '', kind: match?.kind ?? 'ingredient',
+        variantId: match?.variantId, name: match?.name, unit: quantity && unit ? unit : match?.unitCode ?? 'pcs',
+        quantity, details: line.details, imported };
+    });
+    setRows([...existing, ...next]);
+    return true;
+  }
+  return { rows, setRows, options, packages, choices, issues, firstError, enteredCount: entered.length, ready, calculating, total, lines, preview, snapshots, choose, adopt, importRows,
     dirty: writeoffFormKey(rows) !== savedKey || lines.some((line) => snapshotById.has(line.sourceLineId) && snapshotById.get(line.sourceLineId)?.recipeSignature !== line.recipeSignature),
     refresh: () => setRefreshVersion((value) => value + 1),
     input: () => entered.map((row) => ({ ...writeoffLineInput(row), recipeSignature: lines.find((line) => line.sourceLineId === row.sourceLineId)?.recipeSignature })),
@@ -98,14 +118,13 @@ export function WriteoffLines({ editor, sourceLines = [], total, disabled = fals
   const costs = showCost && can('actions.warehouseCosts');
   const id = useId();
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const readonlyPackages = useWriteoffPackages(!editor);
   const rows = editor?.rows ?? writeoffDraftLines(sourceLines);
-  const showPackages = rows.some((row) => row.packageId) || !!(editor?.packages.data ?? readonlyPackages.data)?.some((pack) => pack.isActive);
+  const columnCount = 4 + Number(costs) + Number(!!editor);
   const lines = new Map((editor?.lines ?? sourceLines).map((line) => [line.sourceLineId, line]));
   const oldLines = new Map(editor?.snapshots.map((line) => [line.sourceLineId, line]));
   const updatedRecipe = editor?.lines.some((line) => (line.kind === 'dish' || line.parts.some((part) => part.ingredientId !== line.sourceId)) && oldLines.has(line.sourceLineId) && oldLines.get(line.sourceLineId)?.recipeSignature !== line.recipeSignature);
   const savedTotal = total === undefined ? sourceLines.some((line) => line.total == null) ? null : sourceLines.reduce((sum, line) => sum + (line.total ?? 0), 0) : total;
-  return <section className="poster-document-panel poster-document-products poster-writeoff-lines">
+  return <section aria-label="Позиции списания" className="poster-document-panel poster-document-products poster-writeoff-lines">
     {editor?.options.isPending && <p role="status" className="mb-3 px-4 text-sm text-text-muted">Загрузка продуктов и блюд…</p>}
     {editor?.options.isError && <p role="alert" className="mb-3 px-4 text-sm text-danger">Не удалось загрузить продукты и блюда. <button type="button" className="text-primary" onClick={() => void editor.options.refetch()}>Повторить загрузку</button></p>}
     {editor?.packages.isPending && !editor.options.isPending && <p role="status" className="mb-3 px-4 text-sm text-text-muted">Загрузка фасовок…</p>}
@@ -113,10 +132,10 @@ export function WriteoffLines({ editor, sourceLines = [], total, disabled = fals
     {editor?.calculating && <p role="status" className="mb-3 px-4 text-sm text-text-muted">Расчёт состава…</p>}
     {editor?.preview.isError && <p role="alert" className="mb-3 px-4 text-sm text-danger">{apiError(editor.preview.error)} <button type="button" className="text-primary" onClick={editor.refresh}>Обновить расчёт</button></p>}
     {updatedRecipe && <p role="status" className="mb-3 px-4 text-sm text-text-secondary">Состав пересчитан по текущему рецепту. Проверьте продукты ниже перед сохранением.</p>}
-    <div className="overflow-x-auto"><table className={`poster-table poster-document-table poster-document-table--compact poster-writeoff-table w-full table-fixed text-sm ${showPackages ? 'min-w-[840px]' : 'min-w-[720px]'}`}>
-      <colgroup><col /><col style={{ width: showPackages ? 130 : 210 }} />{showPackages && <col style={{ width: 200 }} />}<col style={{ width: 130 }} /><col style={{ width: 155 }} /><col style={{ width: 40 }} /></colgroup>
-      <thead><tr><th className="text-left">Наименование</th><th className="text-right">Количество</th>{showPackages && <th className="text-left">Фасовки</th>}<th className="text-right">{costs ? 'Сумма' : ''}</th>
-        <th scope="col" className="text-left" aria-label="Детали" title="Детали"><IconEye className="h-4 w-4" aria-hidden="true" /></th><th /></tr></thead>
+    <div className="overflow-x-auto"><table className="poster-table poster-document-table poster-document-table--compact poster-writeoff-table w-full min-w-[740px] table-fixed text-sm">
+      <colgroup><col /><col style={{ width: 112 }} /><col style={{ width: 130 }} />{costs && <col style={{ width: 105 }} />}<col style={{ width: '26%' }} />{editor && <col style={{ width: 40 }} />}</colgroup>
+      <thead><tr><th className="text-left">Наименование</th><th className="text-right">Количество</th><th className="text-left">Ед. / фасовка</th>
+        {costs && <th className="text-right">Сумма</th>}<th scope="col" className="text-left">Детали</th>{editor && <th />}</tr></thead>
       <tbody>{rows.map((row, index) => {
         const line = lines.get(row.sourceLineId);
         const oldLine = oldLines.get(row.sourceLineId);
@@ -140,9 +159,9 @@ export function WriteoffLines({ editor, sourceLines = [], total, disabled = fals
           packageOptions.push({ value: `package:${pack.id}`, label: `${label}${row.packageSnapshotLineId && row.packageId === pack.id ? ' · текущая' : ''}` });
         }
         if (row.packageId && !packageOptions.some((option) => option.value === packageValue)) packageOptions.push({ value: packageValue, label: packageLabel(displayPackage) });
-        const unitControl = editor && row.sourceId ? <Select ariaLabel={`${showPackages ? 'Фасовка' : 'Единица'} ${line?.name ?? row.name ?? 'продукта'}`}
-          className={`poster-inline-select h-9 ${showPackages ? 'w-full' : 'w-20 shrink-0'}`} value={packageValue} options={packageOptions}
-          disabled={disabled || (showPackages && editor.packages.isPending)}
+        const unitControl = editor && row.sourceId ? <Select ariaLabel={`Единица или фасовка ${line?.name ?? row.name ?? 'продукта'}`}
+          className="poster-inline-select h-9 w-full" value={packageValue} options={packageOptions}
+          disabled={disabled || editor.packages.isPending}
           onChange={(value) => editor.setRows((current) => current.map((entry) => {
             if (entry.sourceLineId !== row.sourceLineId || value === packageValue) return entry;
             if (value.startsWith('package:')) {
@@ -160,30 +179,35 @@ export function WriteoffLines({ editor, sourceLines = [], total, disabled = fals
                 disabled={disabled} loading={editor.options.isPending} loadError={editor.options.isError ? 'Не удалось загрузить продукты.' : undefined} onRetry={() => void editor.options.refetch()}
                 fallbackName={oldLine?.name ?? row.name} error={productError} onSelected={() => focusDocumentInput(`${quantityErrorId}-input`)} onChange={(value) => { editor.choose(row.sourceLineId, value); setCollapsed((current) => { const next = new Set(current); next.delete(row.sourceLineId); return next; }); }} /></div>
                 : <span className="block">{line?.name ?? oldLine?.name ?? row.name ?? 'Продукт'}</span>}
+              {editor && row.imported && <span className="mt-1 block break-words text-xs text-text-muted">Из файла · {row.imported}</span>}
+              {hasRecipe && <button type="button" className="poster-recipe-toggle text-sm text-primary" aria-expanded={expanded} aria-controls={`${quantityErrorId}-composition`} onClick={() => setCollapsed((current) => { const next = new Set(current); if (next.has(row.sourceLineId)) next.delete(row.sourceLineId); else next.add(row.sourceLineId); return next; })}>{expanded ? 'Скрыть состав' : 'Состав'} <span className="text-text-muted">· {line.parts.length}</span></button>}
             </td>
             <td className="py-2 text-right">{editor ? <>
               <div className="flex items-center gap-2"><label className="poster-number-unit poster-inline-number flex min-w-0 flex-1 items-center gap-2"><input id={`${quantityErrorId}-input`} className="input poster-document-number h-9 min-w-0 w-full text-right" type="number" min="0.000001" step="any" inputMode="decimal"
                 aria-label={`${row.packageId ? 'Количество фасовок' : 'Количество'} ${line?.name ?? oldLine?.name ?? row.name ?? 'продукта'}`} aria-invalid={!!issue?.quantity || undefined} aria-describedby={issue?.quantity ? quantityErrorId : undefined}
-                disabled={disabled || !row.sourceId} value={row.quantity} onChange={(event) => editor.setRows((current) => current.map((entry) => entry.sourceLineId === row.sourceLineId ? { ...entry, quantity: event.target.value } : entry))} /></label>{!showPackages && unitControl}</div>
+                disabled={disabled || !row.sourceId} value={row.quantity} onChange={(event) => editor.setRows((current) => current.map((entry) => entry.sourceLineId === row.sourceLineId ? { ...entry, quantity: event.target.value } : entry))} /></label></div>
               {issue?.quantity && <p id={quantityErrorId} className="mt-1 text-left text-xs text-danger">{issue.quantity}</p>}
-            </> : <span>{Number(row.quantity).toLocaleString('ru-RU', { maximumFractionDigits: 6 })}{!showPackages && <> {unitControl}</>}</span>}</td>
-            {showPackages && <td>{unitControl}
+            </> : <span>{Number(row.quantity).toLocaleString('ru-RU', { maximumFractionDigits: 6 })}</span>}</td>
+            <td>{unitControl}
               {row.packageId && line?.physicalQuantity != null && <span className="mt-1 block text-xs text-text-muted">= {line.physicalQuantity.toLocaleString('ru-RU', { maximumFractionDigits: 6 })} {unit}</span>}
-            </td>}
-            <td className="whitespace-nowrap text-right tabular-nums">{costs ? line?.total == null ? '—' : balanceMoney(line.total) : ''}</td>
-            <td>{hasRecipe && <button type="button" className="poster-recipe-toggle text-sm text-primary" aria-expanded={expanded} aria-controls={`${quantityErrorId}-composition`} onClick={() => setCollapsed((current) => { const next = new Set(current); if (next.has(row.sourceLineId)) next.delete(row.sourceLineId); else next.add(row.sourceLineId); return next; })}>{expanded ? 'Скрыть состав' : 'Состав'} <span className="text-text-muted">· {line.parts.length}</span></button>}</td>
-            <td>{editor && <button type="button" className="poster-remove" disabled={disabled} aria-label={`Убрать ${line?.name ?? oldLine?.name ?? row.name ?? 'строку'}`} onClick={() => editor.setRows((current) => current.length > 1 ? current.filter((entry) => entry.sourceLineId !== row.sourceLineId) : [emptyWriteoffLine()])}>×</button>}</td>
+            </td>
+            {costs && <td className="whitespace-nowrap text-right tabular-nums">{line?.total == null ? '—' : balanceMoney(line.total)}</td>}
+            <td>{editor ? <input type="text" className="input h-9 w-full" maxLength={300}
+              aria-label={`Детали · строка ${index + 1}`} value={row.details ?? ''} disabled={disabled || !row.sourceId}
+              onChange={(event) => editor.setRows((current) => current.map((entry) => entry.sourceLineId === row.sourceLineId
+                ? { ...entry, details: event.target.value } : entry))} /> : <span className="break-words">{row.details || '—'}</span>}</td>
+            {editor && <td><button type="button" className="poster-remove" disabled={disabled} aria-label={`Убрать ${line?.name ?? oldLine?.name ?? row.name ?? 'строку'}`} onClick={() => editor.setRows((current) => current.length > 1 ? current.filter((entry) => entry.sourceLineId !== row.sourceLineId) : [emptyWriteoffLine()])}>×</button></td>}
           </tr>
-          {hasRecipe && expanded && <tr id={`${quantityErrorId}-composition`} className="poster-recipe-row"><td colSpan={showPackages ? 6 : 5} className="!bg-background !p-4">
+          {hasRecipe && expanded && <tr id={`${quantityErrorId}-composition`} className="poster-recipe-row"><td colSpan={columnCount} className="!bg-background !p-4">
             <p className="mb-2 text-xs text-text-secondary">{editor ? 'Будет списано со склада' : 'Состав списания'}</p>
             <table className="w-full bg-white text-sm"><thead><tr><th className="text-left">Ингредиент</th><th className="text-right">Количество</th>{costs && <th className="text-right">Сумма</th>}</tr></thead><tbody>{line.parts.map((part, partIndex) => <tr key={`${part.ingredientId}:${partIndex}`}><td>{part.name}</td><td className="text-right">{part.quantity.toLocaleString('ru-RU', { maximumFractionDigits: 6 })} {part.unit}</td>{costs && <td className="text-right">{part.total == null ? '—' : balanceMoney(part.total)}</td>}</tr>)}</tbody></table>
           </td></tr>}
         </Fragment>;
       })}</tbody>
-      {!editor && costs && <tfoot><tr className="border-t border-border"><td colSpan={showPackages ? 3 : 2}>Итого</td><td className="text-right tabular-nums">{savedTotal == null ? '—' : balanceMoney(savedTotal)}</td><td colSpan={2} /></tr></tfoot>}
+      {!editor && costs && <tfoot><tr className="border-t border-border"><td colSpan={3}>Итого</td><td className="text-right tabular-nums">{savedTotal == null ? '—' : balanceMoney(savedTotal)}</td><td /></tr></tfoot>}
     </table></div>
     {editor && <div className="poster-document-add flex flex-wrap items-center gap-4 px-4 pt-3">
-      <button type="button" className="text-sm text-primary" disabled={disabled} onClick={() => { const row = emptyWriteoffLine(); editor.setRows((current) => [...current, row]); focusDocumentInput(`${id}-${row.sourceLineId}-quantity-product-input`); }}>+ Добавить</button>
+      <button type="button" className="text-sm text-primary" disabled={disabled || rows.length >= 200} onClick={() => { const row = emptyWriteoffLine(); editor.setRows((current) => [...current, row]); focusDocumentInput(`${id}-${row.sourceLineId}-quantity-product-input`); }}>+ Добавить</button>
       {editor.enteredCount > 0 && <button type="button" className="text-xs text-text-muted" disabled={disabled || editor.calculating || !!editor.firstError} onClick={editor.refresh}>Обновить расчёт</button>}
     </div>}
   </section>;

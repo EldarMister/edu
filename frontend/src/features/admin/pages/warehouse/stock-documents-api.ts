@@ -7,6 +7,7 @@ export type InventoryMode = 'full' | 'partial';
 export type WriteoffReason =
   'spoilage' | 'expired' | 'damage' | 'staff_meal' | 'tasting' | 'household' | 'other';
 export type StockDocumentStatus = 'draft' | 'submitted' | 'posted' | 'reversed';
+export interface WriteoffReasonOption { id: string; label: string; expense: boolean; custom: boolean }
 export type ExportableStockDocument = 'inventory' | 'transfer';
 
 export interface StockDocumentItem {
@@ -29,6 +30,8 @@ export interface StockDocument {
   kind: StockDocumentKind;
   mode: InventoryMode | null;
   reason: WriteoffReason | null;
+  writeoffReasonId?: string | null;
+  reasonLabel?: string | null;
   note: string | null;
   status: StockDocumentStatus;
   revision: number;
@@ -79,6 +82,7 @@ export interface DocumentInput {
   countedAt?: string | null;
   effectiveAt?: string | null;
   reason?: WriteoffReason | null;
+  writeoffReasonId?: string | null;
   note?: string;
   items?: { ingredientId: string; quantity: number | null }[];
   sourceLines?: WriteoffSourceInput[];
@@ -87,6 +91,28 @@ export interface DocumentInput {
 const BASE_URL = '/admin/warehouse/documents';
 const WAREHOUSE_KEY = ['admin', 'warehouse'] as const;
 const DOCUMENTS_KEY = [...WAREHOUSE_KEY, 'documents'] as const;
+const REASONS_KEY = [...DOCUMENTS_KEY, 'reasons'] as const;
+
+export function useWriteoffReasons(enabled = true) {
+  return useQuery({ queryKey: REASONS_KEY, enabled,
+    queryFn: async () => (await api.get<WriteoffReasonOption[]>(`${BASE_URL}/reasons`)).data });
+}
+
+export function useSaveWriteoffReason() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...input }: { id?: string; name: string; expense: boolean }) => {
+      const response = id ? await api.patch<WriteoffReasonOption>(`${BASE_URL}/reasons/${encodeURIComponent(id)}`, input)
+        : await api.post<WriteoffReasonOption>(`${BASE_URL}/reasons`, input);
+      return response.data;
+    },
+    onSuccess: (reason) => {
+      queryClient.setQueryData<WriteoffReasonOption[]>(REASONS_KEY, (existing) =>
+        [...(existing ?? []).filter(({ id }) => id !== reason.id), reason]);
+      void queryClient.invalidateQueries({ queryKey: DOCUMENTS_KEY });
+    },
+  });
+}
 
 export function useStockDocuments(warehouseId?: string, kind?: StockDocumentKind, search?: string) {
   return useQuery({

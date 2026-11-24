@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { EditorPage, useEditorDirty } from './EditorPage';
+import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { DocumentProductPicker } from './DocumentProductPicker';
 import { focusDocumentInput } from './document-focus';
 import './document-workspace.css';
@@ -19,13 +20,14 @@ import {
   useStockDocument,
   type StockDocumentKind,
   type InventoryMode,
-  type WriteoffReason,
 } from './stock-documents-api';
-import { formatDocumentDate, WRITEOFF_REASONS } from './stock-document-format';
+import { formatDocumentDate } from './stock-document-format';
+import { WriteoffReasonField, writeoffReasonInput } from './WriteoffReasonField';
 import { DocumentField, DocumentFooter } from './WarehouseUi';
 import { documentQuantityError, documentQuantityInUnit, documentStockShortages, documentUnitCost, returnableQuantityInUnit } from './stock-document-form';
 import { DocumentStockWarnings } from './DocumentStockWarnings';
 import { WriteoffLines, useWriteoffLines } from './WriteoffLines';
+import { exportWriteoffLines, WriteoffFileImport } from './WriteoffFileImport';
 type DraftRow = { key: string; id: string; quantity: string };
 const emptyRow = (): DraftRow => ({ key: crypto.randomUUID(), id: '', quantity: '' });
 
@@ -117,11 +119,12 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
   const timingReady = timingValid && !inventoryTimingError(timing);
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
   const [note, setNote] = useState(initialTransfer?.note ?? '');
-  const [reason, setReason] = useState<WriteoffReason | ''>('');
+  const [reason, setReason] = useState('');
   const initialRows = initialReturn?.rows ?? initialTransfer?.rows ?? [];
   const [rows, setRows] = useState<DraftRow[]>(() => initialReturn || initialRows.length
     ? initialRows.map((row) => ({ ...row, key: crypto.randomUUID() })) : [emptyRow()]);
   const [error, setError] = useState('');
+  const [fileReading, setFileReading] = useState(false);
   const [validationAttempt, setValidationAttempt] = useState(0);
   const [postAttempt, setPostAttempt] = useState(false);
   const formRef = useRef<HTMLDivElement>(null);
@@ -146,7 +149,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
   const ingredients = useIngredients('', location);
   const sourcePurchase = usePurchase(kind === 'supplier_return' && source ? source : null);
   const returnable = new Map(sourcePurchase.data?.returnableItems?.map((item) => [item.ingredientId, item]));
-  const busy = mutations.create.isPending || mutations.transition.isPending;
+  const busy = mutations.create.isPending || mutations.transition.isPending || fileReading;
   const inventory = kind === 'inventory';
   const productLoading = ingredients.isPending || (kind === 'supplier_return' && !!source && sourcePurchase.isPending);
   const productError = ingredients.isError ? ingredients.error : kind === 'supplier_return' && sourcePurchase.isError ? sourcePurchase.error : null;
@@ -201,14 +204,13 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
       location: location ? '' : 'Выберите склад.',
       destination: kind === 'transfer' && !destination ? 'Выберите склад, на который перемещаете продукты.' : '',
       source: kind === 'supplier_return' && !source ? 'Выберите исходную поставку.' : '',
-      reason: post && kind === 'writeoff' && !reason ? 'Выберите причину списания.' : '',
       note: post && kind === 'writeoff' && reason === 'other' && !note.trim() ? 'Уточните причину списания.' : '',
       scope: inventory && mode === 'partial' && !selectedProducts.length ? 'Выберите продукты, которые нужно посчитать.' : '',
       rows: new Map<string, { product?: string; quantity?: string }>(),
     };
     if (kind === 'writeoff') {
       for (const [key, issue] of writeoffLines.issues) if (issue.product || issue.quantity) issues.rows.set(key, issue);
-      if (post && !writeoffLines.enteredCount) issues.rows.set(writeoffLines.rows[0].sourceLineId, { product: 'Добавьте хотя бы один продукт.' });
+      if (post && !writeoffLines.enteredCount && !issues.rows.size) issues.rows.set(writeoffLines.rows[0].sourceLineId, { product: 'Добавьте хотя бы один продукт.' });
     } else if (!inventory) {
       for (const row of enteredRows) {
         const rowIssues: { product?: string; quantity?: string } = {};
@@ -235,7 +237,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
     setPostAttempt(post);
     setValidationAttempt((attempt) => attempt + 1);
     const issues = validationFor(post);
-    if (issues.location || issues.destination || issues.source || issues.reason || issues.note || issues.scope || issues.rows.size) return;
+    if (issues.location || issues.destination || issues.source || issues.note || issues.scope || issues.rows.size) return;
     if (kind === 'writeoff' && !writeoffLines.ready) {
       setError('Дождитесь расчёта состава или обновите предварительный расчёт.');
       return;
@@ -252,7 +254,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
         sourcePurchaseId: kind === 'supplier_return' ? source : undefined,
         requestKey,
         note,
-        reason: kind === 'writeoff' ? reason || null : undefined,
+        ...(kind === 'writeoff' ? writeoffReasonInput(reason) : {}),
         sourceLines: kind === 'writeoff' ? writeoffLines.input() : undefined,
         items: kind === 'writeoff' ? undefined : inventory
           ? mode === 'partial' ? selectedProducts.map((ingredientId) => ({ ingredientId, quantity: null })) : undefined
@@ -274,6 +276,13 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
         ref={formRef}
         className={`poster-form poster-form--document space-y-6 ${inventory ? 'poster-document--inventory' : 'poster-document--modern'}`}
       >
+        {kind === 'writeoff' && <>
+          {can('actions.exportReports') && <WorkspaceHeaderActions>
+            <button type="button" className="btn-secondary btn-md" disabled={!writeoffLines.enteredCount || busy}
+              onClick={() => exportWriteoffLines(writeoffLines.rows)}>Экспорт CSV</button>
+          </WorkspaceHeaderActions>}
+          <WriteoffFileImport disabled={busy || !writeoffLines.options.isSuccess} onBusy={setFileReading} onRead={writeoffLines.importRows} />
+        </>}
         <div className="poster-document-panel poster-document-fields space-y-3">
           {supportsStockDate && <StockOperationDateField value={timing} onChange={setTiming}
             onValidityChange={setTimingValid} disabled={busy}
@@ -349,17 +358,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
           )}
           {kind === 'writeoff' && (
             <DocumentField label="Причина">
-              <Select
-                className="h-10 w-full"
-                ariaLabel="Причина списания"
-                ariaInvalid={!!validationAttempt && !!fieldErrors.reason || undefined}
-                ariaDescribedBy={validationAttempt && fieldErrors.reason ? `${formId}-reason-error` : undefined}
-                disabled={busy}
-                value={reason}
-                onChange={(v) => setReason(v as WriteoffReason)}
-                options={WRITEOFF_REASONS}
-              />
-              {!!validationAttempt && fieldErrors.reason && <p id={`${formId}-reason-error`} className="mt-1 text-xs text-danger">{fieldErrors.reason}</p>}
+              <WriteoffReasonField disabled={busy} value={reason} onChange={setReason} />
             </DocumentField>
           )}
           {inventory && <InventoryTimingFields value={timing} onChange={setTiming} onValidityChange={setTimingValid} disabled={busy} />}

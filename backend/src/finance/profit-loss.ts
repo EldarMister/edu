@@ -13,10 +13,11 @@ export async function readProfitLoss(db: Prisma.TransactionClient, cafeId: strin
   const range = { gte: bounds.from, lt: bounds.to };
   const [stock, ledger] = await Promise.all([
     db.$queryRaw<{ source: string; value: Prisma.Decimal | null }[]>`
-      SELECT CASE WHEN m.source_type = 'writeoff' AND d.reason = ANY(s.expense_writeoff_reasons)
+      SELECT CASE WHEN m.source_type = 'writeoff' AND (r.expense OR d.reason = ANY(s.expense_writeoff_reasons))
                   THEN 'expense' ELSE m.source_type::text END AS source,
              CASE WHEN BOOL_AND(m.cost_known) THEN SUM(-m.change * m.cost_at_moment) END AS value
       FROM stock_movements m LEFT JOIN warehouse_documents d ON d.cafe_id = m.cafe_id AND d.id = m.source_id
+      LEFT JOIN writeoff_reasons r ON r.cafe_id = d.cafe_id AND r.id = d.writeoff_reason_id
       LEFT JOIN settings s ON s.cafe_id = m.cafe_id
       WHERE m.cafe_id = ${cafeId} AND m.source_type IN ('inventory', 'writeoff') AND m.change <> 0
         AND m.created_at >= (${bounds.from} AT TIME ZONE 'UTC') AND m.created_at < (${bounds.to} AT TIME ZONE 'UTC')

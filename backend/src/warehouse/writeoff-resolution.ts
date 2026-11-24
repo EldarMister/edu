@@ -12,7 +12,7 @@ type SourcePart = { ingredientId: string; name: string; unit: UnitCode; amountBa
 export type WriteoffPackageSnapshot = { packageId: string; packageName: string; packageQuantity: number; packageUnit: UnitCode; packageFactor: number };
 export type WriteoffSourceLine = {
   sourceLineId: string; kind: 'ingredient' | 'dish'; sourceId: string; variantId?: string;
-  name: string; quantity: number; unit: UnitCode; recipeSignature: string;
+  name: string; quantity: number; unit: UnitCode; recipeSignature: string; details?: string;
   parts: SourcePart[]; recipe: Prisma.InputJsonValue;
 } & Partial<WriteoffPackageSnapshot>;
 export type WriteoffSnapshot = { version: 1; lines: WriteoffSourceLine[] };
@@ -38,6 +38,7 @@ export async function resolveWriteoffSources(tx: Prisma.TransactionClient, wareh
   if (!Array.isArray(inputs) || (!allowEmpty && !inputs.length) || inputs.length > 200) throw new BadRequestException('Добавьте продукты для списания');
   if (new Set(inputs.map((line) => line.sourceLineId)).size !== inputs.length) throw new BadRequestException('Строка списания указана несколько раз');
   const resolver = new RecipeResolver(tx, { effectiveAt, allowInactive: !!effectiveAt });
+  const previousLines = new Map(savedSnapshot?.lines.map(line => [line.sourceLineId, line]));
   const packageIds = [...new Set(inputs.flatMap((input) => input.packageId && !input.packageSnapshotLineId ? [input.packageId] : []))];
   const packages = new Map((packageIds.length ? await tx.warehousePackage.findMany({ where: { cafeId: warehouse.cafeId, id: { in: packageIds }, isActive: true } }) : []).map((pack) => [pack.id, pack]));
   const lines: WriteoffSourceLine[] = [];
@@ -118,15 +119,18 @@ export async function resolveWriteoffSources(tx: Prisma.TransactionClient, wareh
     if ((requireSignatures && !input.recipeSignature) || (input.recipeSignature && input.recipeSignature !== signature)) {
       throw new ConflictException('Состав изменился. Обновите предварительный расчёт');
     }
+    const previousLine = previousLines.get(input.sourceLineId);
+    const details = input.details === undefined && previousLine?.kind === input.kind && previousLine.sourceId === input.sourceId &&
+      previousLine.variantId === input.variantId ? previousLine.details : input.details?.trim();
     lines.push({ sourceLineId: input.sourceLineId, kind: input.kind, sourceId: input.sourceId, variantId: input.variantId,
-      name, quantity: input.quantity, unit, ...pack, recipeSignature: signature, parts: sourceParts, recipe });
+      name, quantity: input.quantity, unit, ...pack, ...(details ? { details } : {}), recipeSignature: signature, parts: sourceParts, recipe });
   }
   return { version: 1, lines };
 }
 
 export function sourceInputs(snapshot: WriteoffSnapshot): WriteoffSourceLineDto[] {
-  return snapshot.lines.map(({ sourceLineId, kind, sourceId, variantId, quantity, unit, recipeSignature, packageId }) => ({
-    sourceLineId, kind, sourceId, variantId, quantity, unit, recipeSignature,
+  return snapshot.lines.map(({ sourceLineId, kind, sourceId, variantId, quantity, unit, recipeSignature, packageId, details }) => ({
+    sourceLineId, kind, sourceId, variantId, quantity, unit, recipeSignature, details,
     ...(packageId ? { packageId, packageSnapshotLineId: sourceLineId } : {}),
   }));
 }

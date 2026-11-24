@@ -4,6 +4,7 @@ export interface InvoiceLine {
   quantity: number | null;
   price: number | null;
   total: number | null;
+  details?: string;
   tax?: { rate: number | null; amount: number | null; totalWithTax: number | null; needsReview: boolean };
 }
 export interface InvoicePreview {
@@ -26,7 +27,7 @@ function amount(value: unknown): number | null {
 
 const headerNames = {
   name: /^(?:наименование|название|номенклатура|товар|продукт|ингредиент|описание|item|product|name|description)/iu,
-  unit: /^(?:ед(?:иниц|\s|\.|$)|фасовка|unit|uom)/iu,
+  unit: /^(?:ед(?:иниц|\s|\.|$)|фасовк|unit|uom)/iu,
   quantity: /^(?:кол(?:ич|\s*[-–.]?\s*во)|кол\.?$|qty|quantity|amount of)/iu,
   price: /^(?:цена|закупочная цена|стоимость за|price|unit price|unit cost)/iu,
   total: /^(?:сумма|общая сумма|стоимость|всего|итого|amount|total|line total)/iu,
@@ -92,8 +93,11 @@ function metadata(preview: InvoicePreview, source: string) {
   }
 }
 
-export function addSheet(preview: InvoicePreview, cells: unknown[][]): boolean {
+const detailsHeading = /^(?:детали|примечание|комментарий|details|note)$/iu;
+
+export function addSheet(preview: InvoicePreview, cells: unknown[][], writeoff = false): boolean {
   let columns: ReturnType<typeof sheetColumns> | undefined;
+  let detailsColumn = -1;
   for (const row of cells) {
     const values = row.map((value) => String(value ?? '').trim());
     if (!values.some(Boolean)) continue;
@@ -101,8 +105,9 @@ export function addSheet(preview: InvoicePreview, cells: unknown[][]): boolean {
     const text = values.filter(Boolean).join(' ');
     metadata(preview, text);
     const detected = sheetColumns(values);
-    if (detected.name >= 0 && detected.quantity >= 0 && [detected.price, detected.total, detected.netPrice, detected.net, detected.grossPrice, detected.gross].some(n => n >= 0)) {
+    if (detected.name >= 0 && detected.quantity >= 0 && (writeoff || [detected.price, detected.total, detected.netPrice, detected.net, detected.grossPrice, detected.gross].some(n => n >= 0))) {
       columns = detected;
+      detailsColumn = writeoff ? values.findIndex((value) => detailsHeading.test(value)) : -1;
       continue;
     }
     if (!columns) continue;
@@ -118,12 +123,16 @@ export function addSheet(preview: InvoicePreview, cells: unknown[][]): boolean {
       if ([columns.quantity, columns.price, columns.total].some(index => amount(row[index]) !== null)) preview.warnings.push(text.slice(0, 240));
       continue;
     }
-    if (![columns.quantity, columns.price, columns.total].some(index => amount(row[index]) !== null)) {
+    if (!writeoff && ![columns.quantity, columns.price, columns.total].some(index => amount(row[index]) !== null)) {
       if (text !== name || row[columns.quantity] || row[columns.price] || row[columns.total]) preview.warnings.push(text.slice(0, 240));
       continue;
     }
     const line = { name: name.slice(0, 240), unit: (values[columns.unit] ?? '').slice(0, 40),
       quantity: amount(row[columns.quantity]), price: amount(row[columns.price]), total: amount(row[columns.total]) };
+    if (writeoff) {
+      if (/\p{L}/u.test(name)) preview.lines.push({ ...line, details: values[detailsColumn]?.slice(0, 300) });
+      continue;
+    }
     const taxed = [columns.taxRate, columns.taxAmount, columns.unspecifiedTax, columns.grossPrice, columns.gross].some(n => n >= 0);
     preview.lines.push(taxed ? taxedLine(row, columns, line) : { ...line,
       price: amount(row[columns.netPrice]) ?? line.price, total: amount(row[columns.net]) ?? line.total });
@@ -169,7 +178,18 @@ type Word = { x: number; right: number; centerY: number; height: number; value: 
 
 /** Real invoices often put prices, totals and units in a different order. Use the
  * printed column headings and word coordinates whenever the page has a table. */
-export function addInvoicePage(preview: InvoicePreview, text: string, tsv: string | null) {
+export function addInvoicePage(preview: InvoicePreview, text: string, tsv: string | null, writeoff = false) {
+  const fallback = () => {
+    if (!writeoff) return addInvoiceText(preview, text);
+    for (const raw of text.split(/\r?\n/u)) {
+      const line = raw.trim().replace(/^\d+[.)]?\s+/u, '');
+      if (skip.test(line) || footer.test(line)) continue;
+      const match = /^(.+?)\s+(\d+(?:[.,]\d+)?)\s+(шт\.?|кг|г|мл|л|порц\.?|kg|pcs|ml|g|l)\s*$/iu.exec(line);
+      if (match && /\p{L}/u.test(match[1])) preview.lines.push({
+        name: match[1].slice(0, 240), quantity: amount(match[2]), unit: match[3], price: null, total: null,
+      });
+    }
+  };
   const words: Word[] = [];
   for (const line of (tsv ?? '').split('\n')) {
     const fields = line.split('\t');
@@ -186,9 +206,9 @@ export function addInvoicePage(preview: InvoicePreview, text: string, tsv: strin
   rows.forEach(row => row.sort((a, b) => a.x - b.x));
   const headerIndex = rows.findIndex(row => {
     const has = (pattern: RegExp) => row.some(word => pattern.test(word.value));
-    return has(headerNames.name) && has(headerNames.quantity) && (has(headerNames.price) || has(headerNames.total));
+    return has(headerNames.name) && has(headerNames.quantity) && (writeoff || has(headerNames.price) || has(headerNames.total));
   });
-  if (headerIndex < 0) { addInvoiceText(preview, text); return; }
+  if (headerIndex < 0) { fallback(); return; }
   // Printed Cyrillic «НДС» is often read as Latin HOC or HAC. Normalize only table headings.
   const header = rows[headerIndex].map(word => /^[нh][дaаoо][сc][.:,]?$/iu.test(word.value) ? { ...word, value: 'НДС' } : word);
   const columns: Word[] = [];
@@ -196,6 +216,7 @@ export function addInvoicePage(preview: InvoicePreview, text: string, tsv: strin
     const previous = columns.at(-1);
     const close = previous && word.x - previous.right < Math.max(10, word.height * 1.3);
     const startsColumn = Object.values(headerNames).some(pattern => pattern.test(word.value))
+      || (writeoff && detailsHeading.test(word.value))
       || /^(?:№|код|артикул|barcode|sku|ндс|налог|vat|tax|ставка)$/iu.test(word.value);
     const continues = previous && (/^(?:ндс|налог|vat|tax)$/iu.test(word.value)
       && /(?:без|(?:^|\s)с|сумма|ставка|incl\.?|excl\.?|rate|with)$/iu.test(previous.value)
@@ -221,8 +242,8 @@ export function addInvoicePage(preview: InvoicePreview, text: string, tsv: strin
   while (cells[0]?.some(Boolean) && cells[0].every(value => /^(?:(?:без|с|ндс|налога?|ставка|%|за|единицу|изм\.?|vat|tax|incl\.?|excl\.?)\s*)*$/iu.test(value))) {
     cells.shift()!.forEach((value, i) => { if (value) headings[i] += ' ' + value; });
   }
-  addSheet(page, [headings, ...cells]);
-  if (!page.lines.length) { addInvoiceText(preview, text); return; }
+  addSheet(page, [headings, ...cells], writeoff);
+  if (!page.lines.length) { fallback(); return; }
   for (const row of rows.slice(0, headerIndex)) metadata(preview, row.map(word => word.value).join(' '));
   preview.lines.push(...page.lines);
   preview.warnings.push(...page.warnings);

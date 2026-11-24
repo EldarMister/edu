@@ -11,6 +11,17 @@ export const WRITEOFF_REASONS: { value: WriteoffReason; label: string }[] = [
   { value: 'other', label: 'Другое' },
 ];
 
+export function writeoffReasonLabel(document: StockDocument) {
+  return document.reasonLabel ?? WRITEOFF_REASONS.find(({ value }) => value === document.reason)?.label ?? 'Без причины';
+}
+
+export function writeoffPostedTotals(documents: StockDocument[]) {
+  const posted = documents.filter(({ status }) => status === 'posted');
+  const known = posted.filter(({ varianceValue }) => varianceValue != null);
+  return { count: posted.length, amount: known.reduce((sum, { varianceValue }) => sum + Math.abs(varianceValue!), 0),
+    partial: known.length !== posted.length };
+}
+
 export type StockDocumentDisplayStatus = StockDocumentStatus | 'reopened';
 
 const STATUS_LABEL: Record<StockDocumentDisplayStatus, string> = {

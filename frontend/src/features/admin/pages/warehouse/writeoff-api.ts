@@ -14,6 +14,7 @@ export interface WriteoffSourceInput {
   quantity: number;
   unit?: UnitCode;
   recipeSignature?: string;
+  details?: string;
 }
 
 export interface WriteoffSourceLine extends Omit<WriteoffSourceInput, 'unit'> {
@@ -36,6 +37,8 @@ export interface WriteoffOptions {
 }
 
 export interface WriteoffPreview { sourceLines: WriteoffSourceLine[]; total: number | null }
+
+export interface WriteoffFileLine { name: string; unit: string; quantity: number | null; details?: string }
 
 export function useWriteoffOptions(enabled: boolean, effectiveAt?: string | null) {
   return useQuery({

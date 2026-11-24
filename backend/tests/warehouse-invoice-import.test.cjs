@@ -51,6 +51,15 @@ test('paper invoice recognizes the quantity, unit price and line total with a Ru
     [['Мука', 'кг', 2, 14], ['Молоко', 'л', 3, 16]]);
 });
 
+test('writeoff imports quantities and per-line notes from a price-free sheet', async () => {
+  const buffer = Buffer.from('Наименование;Количество;Единица;Детали\r\nХлеб;2;шт.;Повреждена упаковка\r\nМолоко;;л;Уточнить количество');
+  const { lines } = await recognizeInvoice([{ originalname: 'списание.csv', buffer }], true);
+  assert.deepEqual(lines.map(({ name, quantity, unit, details }) => ({ name, quantity, unit, details })), [
+    { name: 'Хлеб', quantity: 2, unit: 'шт.', details: 'Повреждена упаковка' },
+    { name: 'Молоко', quantity: null, unit: 'л', details: 'Уточнить количество' },
+  ]);
+});
+
 test('spreadsheets keep VAT-exclusive cost, VAT and payable distinct across reordered columns', async () => {
   const headers = ['Наименование', 'Ед.', 'Количество', 'Всего с НДС', 'Сумма НДС', 'НДС %', 'Цена без НДС', 'Сумма без НДС'];
   const data = [headers, ['Мука', 'кг', 2, 206, 6, '3%', 100, 200], ['Итого', '', '', 206, 6, '', '', 200]];

@@ -3,7 +3,7 @@ import { Prisma, Role, WarehouseDocument, WarehouseDocumentItem, WarehouseDocume
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { getCafeId } from '../tenant/tenant-context';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateWarehouseDocumentDto, UpdateWarehouseDocumentDto, WriteoffPreviewDto, warehouseWriteoffReasons } from './documents.dto';
+import { CreateWarehouseDocumentDto, UpdateWarehouseDocumentDto, WriteoffPreviewDto, WriteoffReasonDto, warehouseWriteoffReasons } from './documents.dto';
 import { assertInventoryCutoff, inventoryHistoricalPlan, parseInventoryCountedAt } from './inventory-historical-plan';
 import { inventoryPeriodContext } from './inventory-period-context';
 import { postStockMovement } from './stock-posting';
@@ -21,9 +21,11 @@ import { warehouseDateColumn, warehouseMoneyFormat, warehouseRegisterColumns, wa
   writeWarehouseRegister, type WarehouseRegisterExportDto } from './warehouse-register-xlsx';
 
 type Actor = Pick<AuthUser, 'id' | 'role' | 'name' | 'cafeId'> & Partial<Pick<AuthUser, 'permissions'>>;
-type Document = WarehouseDocument & { items: WarehouseDocumentItem[] };
+type DocumentWithReason = WarehouseDocument & { writeoffReason?: { name: string } | null };
+type Document = DocumentWithReason & { items: WarehouseDocumentItem[] };
 type StockLine = Omit<WarehouseDocumentItem, 'documentId' | 'cafeId' | 'reopenedQuantity'>;
-const documentInclude = { items: { orderBy: [{ name: 'asc' }, { ingredientId: 'asc' }] } } satisfies Prisma.WarehouseDocumentInclude;
+const writeoffReasonSelect = { select: { name: true } } as const;
+const documentInclude = { items: { orderBy: [{ name: 'asc' }, { ingredientId: 'asc' }] }, writeoffReason: writeoffReasonSelect } satisfies Prisma.WarehouseDocumentInclude;
 const maxQuantity = new Prisma.Decimal('99999999999.999');
 const zero = new Prisma.Decimal(0);
 const inventoryCostReset = 'inventory_zero_cost';
@@ -48,6 +50,43 @@ function documentEffectiveAt(kind: WarehouseDocumentKind, value: string | null |
 export class WarehouseDocumentsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async reasons() {
+    const cafeId = this.cafeId();
+    const [custom, settings] = await Promise.all([
+      this.prisma.writeoffReason.findMany({ where: { cafeId }, orderBy: { normalizedName: 'asc' } }),
+      this.prisma.settings.findUnique({ where: { cafeId }, select: { expenseWriteoffReasons: true } }),
+    ]);
+    const expenses = new Set<string>(settings?.expenseWriteoffReasons);
+    return [
+      ...Object.entries(warehouseWriteoffReasons).map(([id, label]) => ({ id, label, expense: expenses.has(id), custom: false })),
+      ...custom.map(({ id, name, expense }) => ({ id, label: name, expense, custom: true })),
+    ];
+  }
+
+  async saveWriteoffReason(dto: WriteoffReasonDto, id?: string) {
+    const cafeId = this.cafeId();
+    const name = dto.name.trim().replace(/\s+/gu, ' ');
+    const normalize = (value: string) => value.toLocaleLowerCase('ru');
+    const normalizedName = normalize(name);
+    if (!name) throw new BadRequestException('Укажите название причины');
+    if (['Без причины', ...Object.values(warehouseWriteoffReasons)].some((label) => normalize(label) === normalizedName)) {
+      throw new ConflictException('Причина с таким названием уже есть');
+    }
+    const data = { name, normalizedName, expense: dto.expense };
+    try {
+      const saved = id
+        ? await this.prisma.writeoffReason.update({ where: { cafeId_id: { cafeId, id } }, data })
+        : await this.prisma.writeoffReason.create({ data: { cafeId, ...data } });
+      return { id: saved.id, label: saved.name, expense: saved.expense, custom: true };
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2002') throw new ConflictException('Причина с таким названием уже есть');
+        if (error.code === 'P2025') throw new NotFoundException('Причина списания не найдена');
+      }
+      throw error;
+    }
+  }
+
   async list(warehouseId?: string, kind?: WarehouseDocumentKind, search?: string, ids?: string[]) {
     if (ids?.length === 0) return [];
     const cafeId = this.cafeId();
@@ -62,6 +101,7 @@ export class WarehouseDocumentsService {
           SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(d.source_lines->'lines') = 'array'
             THEN d.source_lines->'lines' ELSE '[]'::jsonb END) AS source_line
           WHERE strpos(lower(source_line->>'name'), lower(${text})) > 0
+             OR strpos(lower(source_line->>'details'), lower(${text})) > 0
         )
       ` : [];
     const where: Prisma.WarehouseDocumentWhereInput = { cafeId, kind, id: ids && { in: ids },
@@ -70,6 +110,7 @@ export class WarehouseDocumentsService {
         { note: { contains: text, mode: 'insensitive' } },
         { createdByName: { contains: text, mode: 'insensitive' } },
         { postedByName: { contains: text, mode: 'insensitive' } },
+        { writeoffReason: { name: { contains: text, mode: 'insensitive' } } },
         { items: { some: { name: { contains: text, mode: 'insensitive' } } } },
         ...(sourceMatches.length ? [{ id: { in: sourceMatches.map(({ id }) => id) } }] : []),
       ] }] } : {}),
@@ -78,7 +119,8 @@ export class WarehouseDocumentsService {
       this.prisma.warehouseDocument.findMany({
         where,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        include: { items: { select: { name: true, ingredientId: true }, orderBy: [{ name: 'asc' }, { ingredientId: 'asc' }] } },
+        include: { items: { select: { name: true, ingredientId: true }, orderBy: [{ name: 'asc' }, { ingredientId: 'asc' }] },
+          writeoffReason: writeoffReasonSelect },
       }),
       this.prisma.$queryRaw<Array<{ id: string; itemsCount: number; varianceValue: Prisma.Decimal | null }>>`
         SELECT d.id, COUNT(i.ingredient_id)::int AS "itemsCount",
@@ -225,13 +267,15 @@ export class WarehouseDocumentsService {
     const effectiveAt = documentEffectiveAt(dto.kind, dto.effectiveAt);
     if (dto.sourceLines && (dto.kind !== 'writeoff' || dto.items)) throw new BadRequestException('Составные строки доступны только для списания и заменяют список ингредиентов');
     return this.prisma.$transaction(async (tx) => {
+      const reason = await this.reason(tx, dto.kind, dto.reason, dto.writeoffReasonId);
       if (dto.requestKey) {
         await tx.$queryRaw`SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtext(${`warehouse-request:${cafeId}:${dto.requestKey}`}))) AS request_lock`;
         const existing = await tx.warehouseDocument.findUnique({ where: { cafeId_requestKey: { cafeId, requestKey: dto.requestKey } }, include: documentInclude });
         if (existing) {
           if (existing.kind !== dto.kind || existing.warehouseId !== dto.warehouseId || existing.destinationWarehouseId !== (dto.destinationWarehouseId ?? null) || existing.sourcePurchaseId !== (dto.sourcePurchaseId ?? null)
             || (countedAt !== undefined && existing.countedAt?.getTime() !== countedAt?.getTime())
-            || existing.effectiveAt?.getTime() !== effectiveAt?.getTime()) {
+            || existing.effectiveAt?.getTime() !== effectiveAt?.getTime()
+            || (dto.kind === 'writeoff' && (existing.reason !== reason.reason || existing.writeoffReasonId !== reason.writeoffReasonId))) {
             throw new ConflictException('Ключ повторного запроса уже использован для другого документа');
           }
           if (dto.sourceLines) {
@@ -241,6 +285,7 @@ export class WarehouseDocumentsService {
               return !saved || saved.kind !== input.kind || saved.sourceId !== input.sourceId || saved.variantId !== input.variantId
                 || saved.quantity !== input.quantity || saved.unit !== normalizeUnit(input.unit ?? saved.unit)
                 || saved.packageId !== input.packageId
+                || (input.details !== undefined && (saved.details ?? '') !== (input.details?.trim() ?? ''))
                 || (input.recipeSignature && saved.recipeSignature !== input.recipeSignature);
             })) {
               throw new ConflictException('Ключ повторного запроса уже использован для другого состава списания');
@@ -265,7 +310,7 @@ export class WarehouseDocumentsService {
       const document = await tx.warehouseDocument.create({
         data: {
           cafeId, warehouseId: warehouse.id, kind: dto.kind, mode: dto.mode ?? null, countedAt, effectiveAt,
-          reason: this.reason(dto.kind, dto.reason), note: dto.note?.trim() || null,
+          ...reason, note: dto.note?.trim() || null,
           destinationWarehouseId: dto.destinationWarehouseId, sourcePurchaseId: dto.sourcePurchaseId, requestKey: dto.requestKey,
           createdById: actor.id, createdByName: actor.name,
         },
@@ -296,6 +341,8 @@ export class WarehouseDocumentsService {
       if (dto.recount && document.kind !== 'inventory') throw new BadRequestException('Пересчёт доступен только для инвентаризации');
       const previous = readWriteoffSnapshot(document.sourceLines);
       const dateChanged = effectiveAt !== undefined && effectiveAt?.getTime() !== document.effectiveAt?.getTime();
+      const reasonProvided = dto.writeoffReasonId !== undefined || dto.reason != null
+        || (dto.reason === null && !document.writeoffReasonId);
       const sourceLines = dto.sourceLines ?? (dateChanged && previous ? sourceInputs(previous).map((line) => ({ ...line, recipeSignature: undefined })) : null);
       if (sourceLines) {
         await lockRecipeGraph(tx, true);
@@ -317,7 +364,7 @@ export class WarehouseDocumentsService {
           countedAt,
           effectiveAt,
           note: dto.note === undefined ? undefined : dto.note?.trim() || null,
-          reason: dto.reason === undefined ? undefined : this.reason(document.kind, dto.reason),
+          ...(reasonProvided ? await this.reason(tx, document.kind, dto.reason, dto.writeoffReasonId) : {}),
         },
         include: documentInclude,
       });
@@ -335,9 +382,8 @@ export class WarehouseDocumentsService {
     if (document.reopenedAt) throw new BadRequestException('Проведите исправленную инвентаризацию повторно');
     await this.validateSourceSnapshot(tx, document);
     await this.validateLines(tx, document);
-    if (document.kind === 'writeoff') {
-      if (!document.reason) throw new BadRequestException('Укажите причину списания');
-      if (document.reason === 'other' && !document.note) throw new BadRequestException('Опишите причину списания в комментарии');
+    if (document.kind === 'writeoff' && document.reason === 'other' && !document.note) {
+      throw new BadRequestException('Опишите причину списания в комментарии');
     }
     return this.preview(tx, await tx.warehouseDocument.update({
       where: { id, cafeId: document.cafeId },
@@ -392,7 +438,7 @@ export class WarehouseDocumentsService {
     this.assertActor(actor, true);
     const cutoffAt = document.countedAt ?? document.postedAt!;
     if ((dto.countedAt !== undefined && parseInventoryCountedAt('inventory', dto.countedAt)?.getTime() !== cutoffAt.getTime())
-      || dto.recount || dto.effectiveAt != null || dto.sourceLines || dto.reason != null) {
+      || dto.recount || dto.effectiveAt != null || dto.sourceLines || dto.reason != null || dto.writeoffReasonId != null) {
       throw new BadRequestException('При повторном проведении дата, вид и список позиций инвентаризации остаются прежними');
     }
     if (dto.finalize === 'submit') throw new BadRequestException('Проведите исправленную инвентаризацию повторно');
@@ -483,13 +529,13 @@ export class WarehouseDocumentsService {
           costKnown: balance.valuationKnown && (difference.gte(0) || balance.stock.gte(difference.abs())) },
       });
       if (difference.isZero() && !resetCost) continue;
-      const comment = kind === 'writeoff' ? [warehouseWriteoffReasons[document.reason!], document.note].filter(Boolean).join(' · ') : document.note;
+      const comment = kind === 'writeoff' ? [this.reasonLabel(document), document.note].filter(Boolean).join(' · ') : document.note;
       const source = await postStockMovement(tx, { ingredientId: item.ingredientId, warehouse, change: difference,
         costKnown: difference.gt(0) ? balance.valuationKnown : undefined,
         carriedAverage: resetCost ? zero : undefined,
         allowNegative: effectiveAt || kind === 'transfer' ? true : undefined,
         movement: { ...dateEvidence, type: kind, sourceType: kind, sourceId: id, actorId: actor.id, actorName: actor.name,
-          reason: document.reason, comment,
+          reason: document.writeoffReasonId ?? document.reason, comment,
           ...(resetCost ? { recipeSnapshot: { kind: inventoryCostReset } }
             : document.sourceLines ? { recipeSnapshot: document.sourceLines as Prisma.InputJsonValue } : {}) } });
       if (effectiveAt) insertedMovementIds.push(source.movement.id);
@@ -850,12 +896,20 @@ export class WarehouseDocumentsService {
     return cafeId;
   }
 
-  private reason(kind: WarehouseDocumentKind, reason?: keyof typeof warehouseWriteoffReasons | null) {
-    if (reason == null) return null;
-    if (kind !== 'writeoff' || !Object.prototype.hasOwnProperty.call(warehouseWriteoffReasons, reason)) {
+  private async reason(tx: Prisma.TransactionClient, kind: WarehouseDocumentKind,
+    reason?: keyof typeof warehouseWriteoffReasons | null, writeoffReasonId?: string | null) {
+    if ((kind !== 'writeoff' && (reason != null || writeoffReasonId != null))
+      || (reason != null && (writeoffReasonId != null || !Object.prototype.hasOwnProperty.call(warehouseWriteoffReasons, reason)))) {
       throw new BadRequestException('Выберите допустимую причину списания');
     }
-    return reason;
+    if (writeoffReasonId != null && !(await tx.writeoffReason.findUnique({
+      where: { cafeId_id: { cafeId: this.cafeId(), id: writeoffReasonId } }, select: { id: true },
+    }))) throw new BadRequestException('Причина списания не найдена');
+    return { reason: reason ?? null, writeoffReasonId: writeoffReasonId ?? null };
+  }
+
+  private reasonLabel(document: DocumentWithReason) {
+    return document.writeoffReason?.name ?? (document.reason ? warehouseWriteoffReasons[document.reason] : null);
   }
 
   private quantity(value: number, unit: UnitCode, kind: WarehouseDocumentKind) {
@@ -867,10 +921,11 @@ export class WarehouseDocumentsService {
     return quantity;
   }
 
-  private summary(document: WarehouseDocument, itemsCount: number, variance: Prisma.Decimal | null) {
+  private summary(document: DocumentWithReason, itemsCount: number, variance: Prisma.Decimal | null) {
     return {
       id: document.id, warehouseId: document.warehouseId, kind: document.kind, mode: document.mode,
-      reason: document.reason, note: document.note, status: document.status, revision: document.revision,
+      reason: document.reason, writeoffReasonId: document.writeoffReasonId, reasonLabel: this.reasonLabel(document),
+      note: document.note, status: document.status, revision: document.revision,
       destinationWarehouseId: document.destinationWarehouseId, sourcePurchaseId: document.sourcePurchaseId,
       reversedAt: document.reversedAt, reversedByName: document.reversedByName, reversalReason: document.reversalReason,
       createdAt: document.createdAt, submittedAt: document.submittedAt, postedAt: document.postedAt, reopenedAt: document.reopenedAt,

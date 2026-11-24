@@ -25,12 +25,14 @@ import { documentQuantityError, documentQuantityFromBase, documentQuantityValue,
 import { DocumentStockWarnings } from './DocumentStockWarnings';
 import { StockDocumentExportButton } from './StockDocumentExportButton';
 import { WriteoffLines, useWriteoffLines } from './WriteoffLines';
+import { WriteoffReasonField, writeoffReasonInput } from './WriteoffReasonField';
+import { exportWriteoffLines, WriteoffFileImport } from './WriteoffFileImport';
+import { writeoffDraftLines } from './writeoff-form-values';
 import {
   useStockDocument,
   useStockDocumentMutations,
   type StockDocumentDetails,
   type StockDocumentItem,
-  type WriteoffReason,
 } from './stock-documents-api';
 import {
   documentDisplayStatus,
@@ -38,7 +40,7 @@ import {
   documentStatus,
   formatDocumentDate,
   formatVariance,
-  WRITEOFF_REASONS,
+  writeoffReasonLabel,
 } from './stock-document-format';
 
 export function StockDocumentModal({
@@ -149,7 +151,8 @@ function StockDocumentDraft({
   const push = useNotifications((state) => state.push);
   const [baseRevision, setBaseRevision] = useState(document.revision);
   const [items, setItems] = useState(() => draftItems(document));
-  const [reason, setReason] = useState<WriteoffReason | ''>(document.reason ?? '');
+  const [reason, setReason] = useState(document.writeoffReasonId ?? document.reason ?? '');
+  const [fileReading, setFileReading] = useState(false);
   const [note, setNote] = useState(document.note ?? '');
   const supportsStockDate = document.kind === 'writeoff' || document.kind === 'transfer';
   const [timing, setTiming] = useState(() => inventoryTimingFor(supportsStockDate ? document.effectiveAt : document.countedAt));
@@ -169,7 +172,7 @@ function StockDocumentDraft({
   useEffect(() => { if (previewNeedsSave) setParametersOpen(true); }, [previewNeedsSave]);
   const timingReady = reopened || (document.kind !== 'inventory' && !supportsStockDate) ||
     (timingValid && !inventoryTimingError(timing) && (supportsStockDate ? effectiveAt !== undefined : countedAt !== undefined));
-  const [savedValues, setSavedValues] = useState(() => draftValues(draftItems(document), document.reason ?? '', document.note ?? '', document.countedAt));
+  const [savedValues, setSavedValues] = useState(() => draftValues(draftItems(document), document.writeoffReasonId ?? document.reason ?? '', document.note ?? '', document.countedAt));
   const hasUnsavedValues = draftValues(items, reason, note, countedAt) !== savedValues;
   const { markSaved } = useEditorDirty(hasUnsavedValues ||
     (supportsStockDate && effectiveAt !== savedEffectiveAt) || !timingReady || (document.kind === 'writeoff' && writeoffLines.dirty));
@@ -203,8 +206,7 @@ function StockDocumentDraft({
   const allCounted = counted.length === items.length;
   const canSubmit =
     (document.kind === 'writeoff' ? writeoffLines.enteredCount > 0 && writeoffLines.ready : counted.length > 0 && allCounted) &&
-    (!needsReason || (reason && (reason !== 'other' || note.trim())));
-  const reasonError = validationAttempt && submitAttempt && needsReason && !reason ? 'Выберите причину списания.' : '';
+    (!needsReason || reason !== 'other' || !!note.trim());
   const noteError = validationAttempt && submitAttempt && needsReason && reason === 'other' && !note.trim() ? 'Уточните причину списания.' : '';
   useEffect(() => {
     if (validationAttempt) formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
@@ -213,12 +215,13 @@ function StockDocumentDraft({
   function adopt(saved: StockDocumentDetails) {
     setBaseRevision(saved.revision);
     setItems(draftItems(saved));
-    setReason(saved.reason ?? '');
+    const savedReason = saved.writeoffReasonId ?? saved.reason ?? '';
+    setReason(savedReason);
     setNote(saved.note ?? '');
     setTiming(inventoryTimingFor(supportsStockDate ? saved.effectiveAt : saved.countedAt));
     setSavedEffectiveAt(saved.effectiveAt ?? null);
     setSavedCountedAt(saved.countedAt ?? null);
-    setSavedValues(draftValues(draftItems(saved), saved.reason ?? '', saved.note ?? '', saved.countedAt));
+    setSavedValues(draftValues(draftItems(saved), savedReason, saved.note ?? '', saved.countedAt));
     if (document.kind === 'writeoff') writeoffLines.adopt(saved);
   }
 
@@ -256,7 +259,7 @@ function StockDocumentDraft({
   }
 
   async function save(action: 'save' | 'submit' | 'recount' | 'apply-time') {
-    if (pending || stale || !sourceReady || !timingReady || ((action === 'submit' || action === 'save') && previewNeedsSave)) return;
+    if (pending || fileReading || stale || !sourceReady || !timingReady || ((action === 'submit' || action === 'save') && previewNeedsSave)) return;
     setError('');
     setValidationAttempt((attempt) => attempt + 1);
     setSubmitAttempt(action === 'submit');
@@ -270,7 +273,7 @@ function StockDocumentDraft({
         id: document.id,
         revision: baseRevision,
         finalize: action === 'submit' ? (canApprove ? 'post' : 'submit') : undefined,
-        reason: needsReason ? reason || null : undefined,
+        ...(needsReason ? writeoffReasonInput(reason) : {}),
         note: note.trim(),
         recount: action === 'recount' || undefined,
         countedAt: document.kind === 'inventory' && !reopened ? countedAt : undefined,
@@ -365,9 +368,7 @@ function StockDocumentDraft({
       ? writeoff ? 'Добавьте продукт и укажите количество.' : 'Внесите фактический остаток хотя бы одного продукта.'
       : !allCounted
         ? `Осталось посчитать: ${items.length - counted.length}. Для отсутствующего продукта укажите 0.`
-        : needsReason && !reason
-          ? 'Выберите причину списания.'
-          : needsReason && reason === 'other' && !note.trim()
+        : needsReason && reason === 'other' && !note.trim()
             ? 'Уточните причину списания в комментарии.'
             : '';
 
@@ -383,6 +384,14 @@ function StockDocumentDraft({
             disabled={hasUnsavedValues || !timingReady || pending || stale} />}
           <button type="button" className="btn-ghost btn-md text-primary" disabled={previewNeedsSave || !timingReady} onClick={() => window.print()}>Печать списка</button>
         </WorkspaceHeaderActions>
+      </>}
+      {document.kind === 'writeoff' && <>
+        {can('actions.exportReports') && <WorkspaceHeaderActions>
+          <button type="button" className="btn-secondary btn-md" disabled={!writeoffLines.enteredCount || pending || fileReading}
+            onClick={() => exportWriteoffLines(writeoffLines.rows)}>Экспорт CSV</button>
+        </WorkspaceHeaderActions>}
+        <WriteoffFileImport disabled={pending || stale || fileReading || !writeoffLines.options.isSuccess}
+          onBusy={setFileReading} onRead={writeoffLines.importRows} />
       </>}
       <div className="poster-document-panel poster-document-fields space-y-3">
         <DocumentHeader document={document} warehouse={warehouse} editingStockDate={supportsStockDate} />
@@ -401,17 +410,7 @@ function StockDocumentDraft({
           label={document.kind === 'transfer' ? 'Дата и время перемещения' : 'Дата и время списания'} />}
         {needsReason && (
           <DocumentField label="Причина списания">
-            <Select
-              ariaLabel="Причина списания"
-              ariaInvalid={!!reasonError || undefined}
-              ariaDescribedBy={reasonError ? `${formId}-reason-error` : undefined}
-              disabled={pending || stale}
-              className="h-10 w-full"
-              value={reason}
-              onChange={(value) => setReason(value as WriteoffReason)}
-              options={WRITEOFF_REASONS}
-            />
-            {reasonError && <p id={`${formId}-reason-error`} className="mt-1 text-xs text-danger">{reasonError}</p>}
+            <WriteoffReasonField disabled={pending || stale} value={reason} onChange={setReason} />
           </DocumentField>
         )}
         <DocumentField label={reason === 'other' ? 'Уточните причину' : 'Комментарий'}>
@@ -439,7 +438,7 @@ function StockDocumentDraft({
           {apiError(ingredients.error)}
         </p>
       )}
-      {document.kind === 'writeoff' ? <WriteoffLines editor={writeoffLines} disabled={pending || stale} showErrors={!!validationAttempt} requireRows={submitAttempt} showCost={!historical} /> : <DocumentItems
+      {document.kind === 'writeoff' ? <WriteoffLines editor={writeoffLines} disabled={pending || stale || fileReading} showErrors={!!validationAttempt} requireRows={submitAttempt} showCost={!historical} /> : <DocumentItems
         writeoff={writeoff}
         rows={rows}
         total={total}
@@ -528,7 +527,7 @@ function StockDocumentDraft({
         <button
           type="button"
           className="btn-primary btn-md"
-          disabled={pending || stale || !sourceReady || !timingReady || previewNeedsSave || (document.kind === 'writeoff' && (writeoffLines.calculating || !writeoffLines.options.isSuccess)) || (!writeoff && (invalidCount || !canSubmit))}
+          disabled={pending || fileReading || stale || !sourceReady || !timingReady || previewNeedsSave || (document.kind === 'writeoff' && (writeoffLines.calculating || !writeoffLines.options.isSuccess)) || (!writeoff && (invalidCount || !canSubmit))}
           onClick={() => void save('submit')}
         >
           {canApprove
@@ -540,7 +539,7 @@ function StockDocumentDraft({
         <button
           type="button"
           className="btn-secondary btn-md"
-          disabled={pending || stale || !sourceReady || !timingReady || previewNeedsSave || (document.kind === 'writeoff' && (writeoffLines.calculating || !writeoffLines.options.isSuccess))}
+          disabled={pending || fileReading || stale || !sourceReady || !timingReady || previewNeedsSave || (document.kind === 'writeoff' && (writeoffLines.calculating || !writeoffLines.options.isSuccess))}
           onClick={() => void save('save')}
         >
           {reopened ? 'Сохранить изменения' : 'Сохранить черновик'}
@@ -578,7 +577,7 @@ function StockDocumentReview({
   const approvalDemands = document.kind === 'writeoff' && document.sourceLines?.length
     ? document.sourceLines.flatMap((line) => line.parts) : document.items;
   const shortages = showAvailability ? documentStockShortages(approvalCatalog.data ?? [], approvalDemands) : [];
-  const reason = WRITEOFF_REASONS.find(({ value }) => value === document.reason)?.label;
+  const reason = document.kind === 'writeoff' ? writeoffReasonLabel(document) : null;
 
   async function change(action: 'approve' | 'reopen' | 'reverse') {
     if (pending) return;
@@ -612,6 +611,10 @@ function StockDocumentReview({
       className={`poster-form poster-form--document space-y-6 ${document.kind === 'inventory' ? 'poster-document--inventory' : 'poster-document--modern'}`}
     >
       {document.kind === 'inventory' && <InventoryCountSheet document={document} warehouseName={warehouse.name} rows={document.items} />}
+      {document.kind === 'writeoff' && document.itemsCount > 0 && can('actions.exportReports') && <WorkspaceHeaderActions>
+        <button type="button" className="btn-secondary btn-md"
+          onClick={() => exportWriteoffLines(writeoffDraftLines(document.sourceLines, document.items))}>Экспорт CSV</button>
+      </WorkspaceHeaderActions>}
       <div className="poster-document-panel poster-document-fields space-y-3">
         <DocumentHeader document={document} warehouse={warehouse} />
         {reason && (

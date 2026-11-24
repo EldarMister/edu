@@ -41,6 +41,16 @@ export class WriteoffSourceLineDto {
   unit?: string;
   @IsOptional() @IsString() @MaxLength(64)
   recipeSignature?: string;
+  @IsOptional() @IsString() @MaxLength(300)
+  details?: string;
+}
+
+export class WriteoffReasonDto {
+  @IsString() @IsNotEmpty() @MaxLength(120)
+  name: string;
+
+  @IsBoolean()
+  expense: boolean;
 }
 
 export class WriteoffPreviewDto {
@@ -71,6 +81,9 @@ export class UpdateWarehouseDocumentDto extends WarehouseDocumentRevisionDto {
 
   @IsOptional() @IsEnum(WarehouseWriteoffReason)
   reason?: WarehouseWriteoffReason | null;
+
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  writeoffReasonId?: string | null;
 
   @IsOptional() @IsString() @MaxLength(1000)
   note?: string | null;

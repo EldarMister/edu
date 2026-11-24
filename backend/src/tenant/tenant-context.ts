@@ -38,7 +38,7 @@ const TENANT_MODELS = new Set<string>([
   'Purchase', 'PurchaseItem', 'StockMovement', 'PreparationStation',
   'FinanceAccount', 'FinanceCategory', 'FinanceEntry', 'SalaryAccrual',
   'Warehouse', 'WarehouseStock', 'StationWarehouse', 'PreparationRecipe', 'PreparationRecipeItem', 'PreparationRecipeRevision',
-  'WarehouseDocument', 'WarehouseDocumentItem', 'PreparationBatch', 'RecipeRevision', 'WarehouseSupplier', 'WarehousePackage', 'ProcessingDocument', 'ProcessingLine', 'MenuModifierGroup', 'MenuModifierOption',
+  'WarehouseDocument', 'WarehouseDocumentItem', 'WriteoffReason', 'PreparationBatch', 'RecipeRevision', 'WarehouseSupplier', 'WarehousePackage', 'ProcessingDocument', 'ProcessingLine', 'MenuModifierGroup', 'MenuModifierOption',
 ]);
 
 /** Ключи вложенных операций записи Prisma — по ним отличаем relation-write от Json-поля. */

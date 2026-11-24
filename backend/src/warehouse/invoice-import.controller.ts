@@ -10,22 +10,36 @@ import { getCafeId } from '../tenant/tenant-context';
 import type { InvoicePreview } from './invoice-lines';
 import type { InvoiceFile } from './invoice-recognition.worker';
 
-@Controller('admin/warehouse/purchases/import')
+const importFiles = () => FilesInterceptor('files', 2, { limits: { files: 2, fileSize: 12 * 1024 * 1024, fields: 0, parts: 3 } });
+
+@Controller('admin/warehouse')
 @Roles(Role.ADMIN, Role.OWNER)
 @RequirePermission('sections.warehouse')
 export class InvoiceImportController {
   private busy = false;
 
-  @Post('preview') @HttpCode(200)
+  @Post('purchases/import/preview') @HttpCode(200)
   @RequirePermission('actions.warehouseReceive', 'actions.warehouseCosts')
-  @UseInterceptors(FilesInterceptor('files', 2, { limits: { files: 2, fileSize: 12 * 1024 * 1024, fields: 0, parts: 3 } }))
+  @UseInterceptors(importFiles())
   async preview(@UploadedFiles() files: InvoiceFile[], @CurrentUser() user: AuthUser, @Req() request: Request): Promise<InvoicePreview> {
+    return this.recognize(files, user, request, false);
+  }
+
+  @Post('documents/writeoff-import/preview') @HttpCode(200)
+  @RequirePermission('sections.warehouse', 'actions.warehouseWriteoff')
+  @UseInterceptors(importFiles())
+  async writeoffPreview(@UploadedFiles() files: InvoiceFile[], @CurrentUser() user: AuthUser, @Req() request: Request) {
+    const { lines, warnings } = await this.recognize(files, user, request, true);
+    return { lines: lines.map(({ name, unit, quantity, details }) => ({ name, unit, quantity, details })), warnings };
+  }
+
+  private async recognize(files: InvoiceFile[], user: AuthUser, request: Request, writeoff: boolean): Promise<InvoicePreview> {
     if (!user.cafeId || getCafeId() !== user.cafeId) throw new ForbiddenException('Заведение не назначено');
-    if (!files?.length) throw new BadRequestException('Выберите документ накладной.');
-    if (this.busy) throw new HttpException('Сейчас обрабатывается другая накладная. Повторите через минуту.', 429);
+    if (!files?.length) throw new BadRequestException('Выберите файл документа.');
+    if (this.busy) throw new HttpException('Сейчас обрабатывается другой документ. Повторите через минуту.', 429);
     // PDF decoding, OCR and workbook parsing must not block the API event loop.
     const worker = new Worker(require.resolve('./invoice-recognition.worker'), {
-      workerData: { invoiceFiles: files.map(({ buffer, originalname }) => ({ buffer, originalname })) },
+      workerData: { invoiceFiles: files.map(({ buffer, originalname }) => ({ buffer, originalname })), writeoff },
       resourceLimits: { maxOldGenerationSizeMb: 192 },
     });
     this.busy = true;
@@ -41,7 +55,7 @@ export class InvoiceImportController {
           if (message.result) resolve(message.result);
           else fail(message.error && /^[А-ЯЁа-яё]/u.test(message.error) ? message.error : 'Не удалось прочитать документ. Проверьте формат и качество изображения.');
         });
-        worker.once('error', () => fail('Не удалось прочитать накладную. Попробуйте файл меньшего размера.'));
+        worker.once('error', () => fail('Не удалось прочитать документ. Попробуйте файл меньшего размера.'));
         worker.once('exit', () => fail('Распознавание прервалось. Попробуйте ещё раз.'));
       });
     } finally {

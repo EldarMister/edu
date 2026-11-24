@@ -17,6 +17,7 @@ import { PreparationModal, ProductionBatchModal } from './PreparationTab';
 import { StartDocumentModal } from './StockDocumentsTab';
 import { StockDocumentModal } from './StockDocumentModal';
 import { DocumentList, ProductionList } from './WarehouseDocumentLists';
+import { WriteoffReasonsPage } from './WriteoffReasonsPage';
 import { SupplyList } from './WarehouseSupplies';
 import { ProcessingPage, ProcessingModal } from './ProcessingPage';
 import { LocationsPage, SuppliersPage, PackagesPage } from './WarehouseDirectories';
@@ -52,7 +53,8 @@ export function WarehouseSection({
     movementClosedGroups: '',
     movementWarehouses: '',
     balanceWarehouses: '',
-    supplyPage: '1', supplyExpanded: '', transferPage: '1', writeoffPage: '1', inventoryPage: '1', productionPage: '1', balancePage: '1', balanceExpanded: '',
+    supplyPage: '1', supplyExpanded: '', transferPage: '1', writeoffPage: '1', writeoffTab: 'list', writeoffReason: '',
+    inventoryPage: '1', productionPage: '1', balancePage: '1', balanceExpanded: '',
   });
   const {
     warehouse: warehouseId,
@@ -74,6 +76,14 @@ export function WarehouseSection({
   const setWarehouseId = (value: string) => setReportConditions({ warehouse: value });
   const { editor: active, openEditor: setActive, closeEditor: close } = useEditorRoute();
   const [stockFilter, setStockFilter] = usePageFilter('stockFilter');
+  const reasonTab = view === 'writeoffs' && conditions.writeoffTab === 'reasons';
+  const writeoffNavigation = <nav aria-label="Списания" className="flex gap-2 border-b border-border">
+    {[{ id: 'list', label: 'Список' }, { id: 'reasons', label: 'Причины' }].map(({ id, label }) => {
+      const selected = id === (reasonTab ? 'reasons' : 'list');
+      return <button key={id} type="button" aria-current={selected ? 'page' : undefined} onClick={() => updateConditions({ writeoffTab: id })}
+        className={`border-b-2 px-4 py-2 text-sm font-medium ${selected ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text-primary'}`}>{label}</button>;
+    })}
+  </nav>;
   const policy = useWarehousePolicy();
   const permissions = usePermissions();
   const locationsQ = useWarehouseLocations();
@@ -184,7 +194,10 @@ export function WarehouseSection({
                       onCopy={(id) => setActive({ type: 'processing', id, action: 'copy' })}
                     />
                   )}
-                  {['transfers', 'writeoffs', 'inventory'].includes(view) && (
+                  {view === 'writeoffs' && (reasonTab
+                    ? <WriteoffReasonsPage navigation={writeoffNavigation} onSelect={(id) => updateConditions({ writeoffTab: 'list', writeoffReason: id, writeoffPage: '1' })} />
+                    : writeoffNavigation)}
+                  {!reasonTab && ['transfers', 'writeoffs', 'inventory'].includes(view) && (
                     <DocumentList
                       filters={view === 'inventory' ? warehouseFilter : undefined}
                       kind={

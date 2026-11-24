@@ -28,15 +28,15 @@ async function ocrWorker(): Promise<Worker> {
   } finally { await rm(langPath, { recursive: true, force: true }); }
 }
 
-export async function recognizeInvoice(files: InvoiceFile[]) {
-  if (!files.length || files.length > 2) throw new Error('Выберите одну таблицу, PDF или до двух фотографий одной накладной.');
+export async function recognizeInvoice(files: InvoiceFile[], writeoff = false) {
+  if (!files.length || files.length > 2) throw new Error('Выберите одну таблицу, PDF или до двух фотографий одного документа.');
   const preview = newInvoicePreview();
   let worker: Worker | undefined;
   async function readPhoto(data: Buffer) {
     worker ??= await ocrWorker();
     const { data: result } = await worker.recognize(data, { rotateAuto: true }, { text: true, tsv: true });
     const before = preview.lines.length;
-    addInvoicePage(preview, result.text, result.tsv);
+    addInvoicePage(preview, result.text, result.tsv, writeoff);
     if (preview.lines.length === before) preview.warnings.push('На одной из страниц не найдены позиции. Сверьте состав с оригиналом.');
   }
   try {
@@ -44,10 +44,12 @@ export async function recognizeInvoice(files: InvoiceFile[]) {
       const ext = extname(file.originalname).toLowerCase();
       const bytes = Buffer.from(file.buffer);
       if (!bytes.length) throw new Error('Загружен пустой файл.');
-      if (files.length > 1 && !photoExtensions.has(ext)) throw new Error('Несколько файлов можно загрузить только для фотографий одной накладной.');
+      if (files.length > 1 && !photoExtensions.has(ext)) throw new Error('Несколько файлов можно загрузить только для фотографий одного документа.');
       if (tableExtensions.has(ext)) {
-        const recognized = readImportSpreadsheet(bytes, ext, true).map(cells => addSheet(preview, cells));
-        if (!recognized.some(Boolean)) throw new Error('Не найдены заголовки таблицы. Укажите столбцы «Наименование», «Количество» и «Цена» или «Сумма».');
+        const recognized = readImportSpreadsheet(bytes, ext, true).map(cells => addSheet(preview, cells, writeoff));
+        if (!recognized.some(Boolean)) throw new Error(writeoff
+          ? 'Не найдены заголовки таблицы. Укажите столбцы «Наименование» и «Количество».'
+          : 'Не найдены заголовки таблицы. Укажите столбцы «Наименование», «Количество» и «Цена» или «Сумма».');
       }
       else if (ext === '.pdf') {
         if (!bytes.subarray(0, 8).toString().startsWith('%PDF-')) throw new Error('Проверьте формат PDF.');
@@ -78,14 +80,17 @@ export async function recognizeInvoice(files: InvoiceFile[]) {
       } else throw new Error('Поддерживаются JPEG, PNG, PDF, CSV, XLS и XLSX.');
     }
   } finally { await worker?.terminate(); }
+  if (writeoff && preview.lines.length > 200) throw new Error('Разделите документ на файлы по 200 позиций.');
   if (preview.lines.length > lineLimit) throw new Error('Разделите накладную на файлы по 300 позиций.');
-  if (!preview.lines.length) throw new Error('Не удалось выделить позиции. Загрузите более чёткое фото или таблицу с количеством и ценой.');
+  if (!preview.lines.length) throw new Error(writeoff
+    ? 'Не удалось выделить позиции. Загрузите более чёткое фото или таблицу с количеством.'
+    : 'Не удалось выделить позиции. Загрузите более чёткое фото или таблицу с количеством и ценой.');
   preview.warnings = preview.warnings.slice(0, 25);
   return preview;
 }
 
 if (parentPort && workerData?.invoiceFiles) {
-  recognizeInvoice(workerData.invoiceFiles).then(
+  recognizeInvoice(workerData.invoiceFiles, workerData.writeoff === true).then(
     result => parentPort!.postMessage({ result }),
     error => parentPort!.postMessage({ error: error instanceof Error ? error.message : '' }),
   );
