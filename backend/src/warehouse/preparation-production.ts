@@ -13,7 +13,7 @@ import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, u
 import { getWarehouseBalance, resolveWarehouse, warehouseBalances } from './warehouse-location';
 import { IngredientsService } from './ingredients.service';
 import { lockRecipeGraph, RecipeResolver, warehouseKey } from './recipe-resolution';
-import { massProcessing, measuredVolumeNetWeight, nonMassProcessing, processingSnapshot, processingStageResults, readProcessingStages } from './recipe-processing';
+import { massProcessing, measuredNetWeight, nonMassProcessing, processingSnapshot, processingStageResults, readProcessingStages } from './recipe-processing';
 import { ProcessingOptionsDto } from './recipe-processing.dto';
 import { postStockMovement } from './stock-posting';
 import { inventoryReversalBlockedReason } from './closed-inventory-period';
@@ -217,7 +217,7 @@ export class PreparationProductionService {
     ingredient: Prisma.IngredientGetPayload<{}>, previous?: Prisma.PreparationRecipeItemGetPayload<{}>) {
     const processing = ingredient.unitType === 'mass' ? massProcessing(gross.amount, gross.unit, input, previous, ingredient.processingLosses)
       : { amount: gross.amount, ...nonMassProcessing(gross.amount, gross.unit, input, previous), processingStages: [], processingBasis: null };
-    return { ...processing, measuredNetWeightGrams: measuredVolumeNetWeight(ingredient.unitType, gross.amount,
+    return { ...processing, measuredNetWeightGrams: measuredNetWeight(ingredient.unitType, gross.amount,
       input.measuredNetWeightGrams, previous?.measuredNetWeightGrams) };
   }
 

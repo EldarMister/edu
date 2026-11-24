@@ -5,10 +5,10 @@ import { Prisma } from '@prisma/client';
 import { getCafeId } from '../tenant/tenant-context';
 import { assertAssignableStation } from '../kitchen/preparation-stations';
 import { PrismaService } from '../prisma/prisma.service';
-import { RecipeCostsQuery, RecipeDraftDto, RecipeItemInputDto, RecipeItemUpdateDto, RecipePreviewDto, RecipeSettingsDto } from './recipes.dto';
+import { MAX_RECIPE_PORTIONS, RecipeCostsQuery, RecipeDraftDto, RecipeItemInputDto, RecipeItemUpdateDto, RecipePreviewDto, RecipeSettingsDto } from './recipes.dto';
 import { MenuModifiersService } from './menu-modifiers';
 import { lockRecipeGraph } from './recipe-resolution';
-import { massProcessing, measuredVolumeNetWeight, nonMassProcessing, readProcessingStages } from './recipe-processing';
+import { massProcessing, measuredNetWeight, nonMassProcessing, readProcessingStages } from './recipe-processing';
 import { addRecipeValue, RecipeCalculator, recipeMetrics, recipeOutput, type RecipeCostRow } from './recipe-calculation';
 import { assertUnitMatchesType, normalizeUnit, toBase, unitLabel, type UnitCode } from './units';
 import { archiveDishRecipe, readCompositionRevisions, type RecipeRevisionEditor } from './recipe-revisions';
@@ -52,7 +52,8 @@ export class RecipesService {
         const ingredient = await tx.ingredient.findUnique({ where: { id: row.ingredientId } });
         const previous = dish.recipeItems.find((item) => item.ingredientId === row.ingredientId);
         if (!ingredient || (!ingredient.isActive && !previous)) throw new BadRequestException('Ингредиент недоступен');
-        const data = await this.rowData(tx, dishId, ingredient.unitType, ingredient.displayUnit, row, previous, ingredient.processingLosses);
+        const data = await this.rowData(tx, dishId, ingredient.unitType, ingredient.displayUnit, row, previous,
+          ingredient.processingLosses, { inputPortions: dto.inputPortions });
         await tx.recipeItem.upsert({ where: { dishId_ingredientId: { dishId, ingredientId: row.ingredientId } },
           create: { dishId, ingredientId: row.ingredientId, ...data }, update: data });
       }
@@ -111,7 +112,8 @@ export class RecipesService {
         const ingredient = ingredients.get(item.ingredientId);
         const previous = savedRows.get(item.ingredientId);
         if (!ingredient || (!ingredient.isActive && !previous)) throw new BadRequestException('Ингредиент недоступен');
-        const data = await this.rowData(tx, dish?.id, ingredient.unitType, ingredient.displayUnit, item, previous, ingredient.processingLosses, variantIds);
+        const data = await this.rowData(tx, dish?.id, ingredient.unitType, ingredient.displayUnit, item, previous,
+          ingredient.processingLosses, { variantIds, inputPortions: dto.inputPortions });
         composition.push({ ...data, id: previous?.id, ingredient, ingredientId: ingredient.id,
           fromCommonWarehouse: data.fromCommonWarehouse ?? previous?.fromCommonWarehouse ?? false, warehouseId: data.warehouseId ?? null,
           processingStages: readProcessingStages(data.processingStages),
@@ -143,6 +145,7 @@ export class RecipesService {
         !!directId || recipe.items.length > 0 || setCalculation?.response.accountingConfigured === true, tax);
       return { ...metrics, items: recipe.items, stockItem: direct?.stockItem ?? null,
         output: recipeOutput(dto.metadata ?? dish?.recipeMetadata, recipe.output, composition, dto.variantId),
+        compositionOutput: recipe.output,
         compositionFoodCost: recipeMetrics(null, recipe.value, recipe.items.length > 0).foodCost, compositionMissingCosts: [...recipe.value.missing],
         compositionCostForScaling: recipe.items.length && !recipe.value.missing.size ? Number(recipe.value.cost) : null,
         productionCost: direct ? metrics.foodCost : null, productionMissingCosts: direct ? [...direct.value.missing] : [] };
@@ -263,6 +266,7 @@ export class RecipesService {
     return { value, response: {
       ...metrics, price: Number(price), dishId: dish.id, dishName: dish.name, items: composition.items, version: dish.recipeVersion,
       metadata: dish.recipeMetadata ?? {}, output: recipeOutput(dish.recipeMetadata, composition.output, dish.recipeItems, variantId),
+      compositionOutput: composition.output,
       stockIngredientId: directId, stockAmount: Number(directAmount), stockItem: direct?.stockItem ?? null,
       variants: dish.variants.map(({ id, name, stockIngredientId, stockAmount }) => ({ id, name, stockIngredientId, stockAmount: Number(stockAmount) })),
       components, warehouseName: direct?.stockItem?.warehouseName ?? calculator.stationWarehouseName(station),
@@ -367,18 +371,25 @@ export class RecipesService {
     if (!await tx.dish.findUnique({ where: { id: dishId }, select: { id: true } })) throw new NotFoundException('Блюдо не найдено');
   }
 
-  private quantity(value: number, unit: UnitCode) {
+  private quantity(value: number, unit: UnitCode, portions = 1) {
     if (!Number.isFinite(value) || value < 0) throw new BadRequestException('Количество должно быть неотрицательным числом');
-    const amount = new Prisma.Decimal(value).mul(toBase(1, unit)).toDecimalPlaces(3);
+    const amount = new Prisma.Decimal(value).mul(toBase(1, unit)).div(portions).toDecimalPlaces(3);
     if (amount.gte(100_000_000_000)) throw new BadRequestException('Количество вне допустимого диапазона');
+    if (portions > 1 && value > 0 && amount.isZero()) throw new BadRequestException('Количество на одну порцию меньше допустимой точности');
     return amount;
   }
 
   async rowData(tx: Prisma.TransactionClient, dishId: string | undefined, unitType: 'mass' | 'volume' | 'count', defaultUnit: string,
-    dto: RecipeItemUpdateDto, previous?: Prisma.RecipeItemGetPayload<{}>, processingLosses?: Prisma.JsonValue | null, variantIds?: Set<string>) {
+    dto: RecipeItemUpdateDto, previous?: Prisma.RecipeItemGetPayload<{}>, processingLosses?: Prisma.JsonValue | null,
+    { variantIds, inputPortions: portions = 1 }: { variantIds?: ReadonlySet<string>; inputPortions?: number } = {}) {
     const unit = normalizeUnit(dto.unit ?? defaultUnit);
     assertUnitMatchesType(unit, unitType);
-    const amount = this.quantity(dto.amount, unit);
+    if (!Number.isInteger(portions) || portions < 1 || portions > MAX_RECIPE_PORTIONS) {
+      throw new BadRequestException(`Укажите от 1 до ${MAX_RECIPE_PORTIONS} порций в рецептуре`);
+    }
+    const amount = this.quantity(dto.amount, unit, portions);
+    const input = portions > 1 && dto.netAmount != null
+      ? { ...dto, netAmount: this.quantity(dto.netAmount, unit, portions).div(toBase(1, unit)).toNumber() } : dto;
     const warehouseId = dto.warehouseId === undefined ? previous?.warehouseId : dto.warehouseId;
     if (warehouseId && !await tx.warehouse.findFirst({ where: { id: warehouseId, cafeId: getCafeId() } })) throw new BadRequestException('Склад не найден');
     let variantAmounts: Prisma.InputJsonValue | undefined;
@@ -387,12 +398,12 @@ export class RecipesService {
       const ids = variantIds ?? new Set(variants.map(({ id }) => id));
       const entries = Object.entries(dto.variantAmounts);
       if (entries.some(([id, value]) => !ids.has(id) || typeof value !== 'number' || !Number.isFinite(value) || value < 0)) throw new BadRequestException('Укажите допустимые нормы существующих вариантов блюда');
-      variantAmounts = Object.fromEntries(entries.map(([id, value]) => [id, this.quantity(value, unit).toString()]));
+      variantAmounts = Object.fromEntries(entries.map(([id, value]) => [id, this.quantity(value, unit, portions).toString()]));
     }
-    const processing = unitType === 'mass' ? massProcessing(amount, unit, dto, previous, processingLosses)
-      : { amount, ...nonMassProcessing(amount, unit, dto, previous), processingStages: [], processingBasis: null };
+    const processing = unitType === 'mass' ? massProcessing(amount, unit, input, previous, processingLosses)
+      : { amount, ...nonMassProcessing(amount, unit, input, previous), processingStages: [], processingBasis: null };
     return { ...processing, processingStages: processing.processingStages.length ? processing.processingStages : Prisma.DbNull,
-      measuredNetWeightGrams: measuredVolumeNetWeight(unitType, amount, dto.measuredNetWeightGrams, previous?.measuredNetWeightGrams),
+      measuredNetWeightGrams: measuredNetWeight(unitType, processing.amount, dto.measuredNetWeightGrams, previous?.measuredNetWeightGrams, portions),
       amountUnit: unit, fromCommonWarehouse: dto.fromCommonWarehouse, warehouseId, variantAmounts };
   }
 }

@@ -1,28 +1,34 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Select } from '@/components/Select';
+import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
 import { Toggle } from '@/components/Toggle';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { api, apiError } from '@/lib/api';
-import { downscaleToDataUrl, resolveApiImage } from '@/lib/image';
+import { money } from '@/lib/format';
+import { printReport } from '@/lib/report-output';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
 import { routingOptions, usePreparationStations } from '@/features/kitchen/stations';
 import { useAdminCategories, type AdminDish } from '../api';
-import { IconPlus } from '../components/icons';
+import { IconPrinter } from '../components/icons';
 import { dishTaxInput, dishTaxValue, MenuTaxSelect } from '../../settings/MenuTaxSelect';
 import { useIngredients, type Ingredient, type Recipe, type RecipeMetadata } from './warehouse/api';
 import { EditorPage } from './warehouse/EditorPage';
 import { RecipeDraftFields } from './warehouse/RecipeDraftFields';
-import { recipeDraftPayload, recipeDraftRows, recipePreviewItems, validRecipeRows } from './warehouse/recipe-draft-values';
+import { recipeDraftPayload, recipeDraftRows, recipePreviewItems, recipeQuantity, validRecipeRows } from './warehouse/recipe-draft-values';
 import { RecipeCostSummary } from './warehouse/RecipeCostSummary';
-import { useRecipePreview } from './warehouse/recipe-preview-api';
+import { RecipeBatchPanel } from './warehouse/RecipeBatchPreview';
+import { useRecipePreview, type RecipePreview } from './warehouse/recipe-preview-api';
 import { ModifierDraftFields, type ModifierDraft } from './warehouse/ModifierDraftFields';
-import { normalizeUnitLabel, unitLabelOptions } from './warehouse/units';
+import { normalizeUnitLabel, unitLabel, unitLabelOptions } from './warehouse/units';
 import { useWarehousePolicy } from './warehouse/settings-api';
 import { salePrice } from './menu-sale-price';
+import { WorkspaceHeaderActions } from './WorkspaceHeader';
+import { MenuEntryPhoto } from './MenuEntryPhoto';
 
 type MenuEntry = {
   dish: Omit<AdminDish, 'variants'> & {
@@ -41,6 +47,11 @@ type VariantDraft = {
 };
 
 const emptyModifiers: ModifierDraft = { allowIngredientExclusions: false, groups: [] };
+const maxRecipePortions = 10_000;
+
+function validPortionCount(count: number) {
+  return Number.isSafeInteger(count) && count >= 1 && count <= maxRecipePortions;
+}
 
 function newVariant(): VariantDraft {
   return { key: crypto.randomUUID(), name: '', price: '', unit: 'шт' };
@@ -92,8 +103,8 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
   const dish = copy ? undefined : source;
   const catalogKind = source?.catalogKind ?? kind;
   const isGoods = catalogKind === 'goods';
-  const title = copy ? 'Копирование техкарты' : dish ? (isGoods ? 'Редактирование товара' : 'Редактирование блюда')
-    : (isGoods ? 'Добавление товара' : 'Добавление блюда');
+  const title = copy ? 'Копирование техкарты' : dish ? (isGoods ? 'Редактирование товара' : 'Редактирование техкарты')
+    : (isGoods ? 'Добавление товара' : 'Добавление техкарты');
   const categories = useAdminCategories().data ?? [];
   const stations = usePreparationStations().data ?? [];
   const { can, canEditSection } = usePermissions();
@@ -139,16 +150,21 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
   const activeVariants = !isGoods || withVariants ? variants : [];
   const [costVariantKey, setCostVariantKey] = useState(initialVariantId ?? '');
   const costVariant = activeVariants.find((variant) => variant.key === costVariantKey) ?? (isGoods ? activeVariants[0] : undefined);
-  const [rows, setRows] = useState(() => recipeDraftRows(initial?.recipe.items ?? [], copy));
   const [metadata, setMetadata] = useState<RecipeMetadata>(() => initial?.recipe.metadata ?? {});
+  const savedPortions = initial?.recipe.metadata?.recipePortions ?? 1;
+  const initialPortions = validPortionCount(savedPortions) ? savedPortions : 1;
+  const [recipePortions, setRecipePortions] = useState(String(initialPortions));
+  const inputPortions = Number(recipePortions);
+  const portionsValid = validPortionCount(inputPortions);
+  const [rows, setRows] = useState(() => recipeDraftRows(initial?.recipe.items ?? [], copy, initialPortions));
   const savedStockId = copy ? '' : initial?.recipe.stockIngredientId ?? '';
   const [producedStockId, setProducedStockId] = useState(savedStockId);
   const producedStock = stock?.find((item) => item.id === producedStockId && item.isPrepared);
   const canBindProducedStock = !!productionEnabled && !isGoods && canWarehouse && canRecipe
     && (!savedStockId || !!stock?.find((item) => item.id === savedStockId && item.isPrepared));
   const [initialModifiers] = useState<ModifierDraft>(() => {
-    const { allowIngredientExclusions, groups } = initial?.modifiers ?? emptyModifiers;
-    return { allowIngredientExclusions, groups: copy ? groups.map(({ id: _id, options, ...group }) => ({
+    const { allowIngredientExclusions, excludableIngredientIds, groups } = initial?.modifiers ?? emptyModifiers;
+    return { allowIngredientExclusions, excludableIngredientIds, groups: copy ? groups.map(({ id: _id, options, ...group }) => ({
       ...group, options: options.map(({ id: _id, ...option }) => option),
     })) : groups };
   });
@@ -156,9 +172,10 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
-  const [photoUrl, setPhotoUrl] = useState(form.imageUrl.startsWith('http') ? form.imageUrl : '');
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [variantEditor, setVariantEditor] = useState<VariantDraft>();
   const submission = useRef(false);
-  const snapshot = JSON.stringify([form, tax, activeVariants, withVariants, rows, metadata, modifiers, photoUrl, producedStockId]);
+  const snapshot = JSON.stringify([form, tax, activeVariants, withVariants, rows, metadata, modifiers, recipePortions, producedStockId]);
   const [baseline] = useState(snapshot);
   const { markSaved } = useEditorDirty(snapshot !== baseline || pending);
   const busy = pending || photoBusy;
@@ -171,9 +188,10 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
   const priceBasis = weightedPriceUnits.find((unit) => unit.value === String(form.weightedPriceBase))?.label;
   const hasStockBinding = !isGoods && !!producedStockId;
   const validRows = validRecipeRows(rows);
+  const hasVariantNorms = !!costVariant && rows.some((row) => row.variantAmounts?.[costVariant.id ?? costVariant.key] != null);
   const previewPrice = salePrice(costVariant?.price ?? form.price);
   const goodsBindingPending = isGoods && (!!costVariant && !costVariant.id || !withVariants && !dish?.stockIngredientId);
-  const preview = useRecipePreview(canWarehouse && !goodsBindingPending && !!form.categoryId && (dish || rows.length || hasStockBinding)
+  const preview = useRecipePreview(canWarehouse && !goodsBindingPending && (isGoods || portionsValid) && !!form.categoryId && (dish || rows.length || hasStockBinding)
     && (validRows || hasStockBinding || isGoods) ? {
       dishId: dish?.id,
       categoryId: form.categoryId,
@@ -183,7 +201,8 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
       ...dishTaxInput(tax),
       ...(!isGoods && producedStockId !== savedStockId ? { producedStockIngredientId: producedStockId || null } : {}),
       weightedPriceBase: form.isWeighted ? form.weightedPriceBase : undefined,
-      metadata: !isGoods ? { outputQuantity: metadata.outputQuantity, outputUnit: metadata.outputUnit } : undefined,
+      inputPortions: !isGoods && !dish?.isSet ? inputPortions : undefined,
+      metadata: !isGoods ? { outputQuantity: hasVariantNorms ? undefined : metadata.outputQuantity, outputUnit: metadata.outputUnit } : undefined,
       items: !isGoods && !dish?.isSet && validRows
         ? recipePreviewItems(rows, activeVariants.flatMap(({ id }) => id ? [id] : []), costVariant?.id ? undefined : costVariant?.key)
         : [],
@@ -235,14 +254,17 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
       setError('Проверьте количество и этапы обработки. Для расчёта от нетто нужен положительный выход.');
       return;
     }
-    const typedPhotoUrl = photoUrl.trim();
-    if (typedPhotoUrl && !/^https?:\/\/.+/i.test(typedPhotoUrl)) {
-      setError('Ссылка на фото должна начинаться с https:// или http://.');
+    if (canRecipe && !isGoods && !dish?.isSet && !portionsValid) {
+      focusMain();
+      setError('Укажите целое количество порций от 1 до 10 000.');
       return;
     }
     submission.current = true;
     setPending(true);
     try {
+      const recipeIngredientIds = new Set(rows.map(({ ingredientId }) => ingredientId));
+      const modifiersToSave = { ...modifiers, excludableIngredientIds: modifiers.excludableIngredientIds
+        ?.filter((ingredientId) => recipeIngredientIds.has(ingredientId)) ?? modifiers.excludableIngredientIds };
       const body = {
         catalogKind, requestKey, expectedVersion: copy ? undefined : initial?.recipe.version,
         dish: {
@@ -250,7 +272,6 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
           ...(tax !== dishTaxValue(dish) ? dishTaxInput(tax) : {}),
           name: form.name.trim(),
           price: price ?? 0,
-          imageUrl: typedPhotoUrl || form.imageUrl,
           prepStation: form.prepStation || null,
           variants: pricedVariants,
         },
@@ -261,13 +282,14 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
               variantAmounts: Object.fromEntries(Object.entries(row.variantAmounts ?? {})
                 .filter(([id]) => activeVariants.some((variant) => (variant.id ?? variant.key) === id))),
             })),
-            metadata,
+            metadata: dish?.isSet ? metadata : { ...metadata, recipePortions: inputPortions },
+            ...(!dish?.isSet && { inputPortions }),
             ...(producedStockId !== savedStockId || (producedStock && (form.isWeighted !== dish?.isWeighted ||
               form.weightedMeasure !== dish?.weightedMeasure || form.weightedPriceBase !== dish?.weightedPriceBase))
               ? { producedStockIngredientId: producedStockId || null } : {}),
           },
-          ...(JSON.stringify(modifiers) !== JSON.stringify(copy ? emptyModifiers : initialModifiers)
-            ? { modifiers } : {}),
+          ...(JSON.stringify(modifiersToSave) !== JSON.stringify(copy ? emptyModifiers : initialModifiers)
+            ? { modifiers: modifiersToSave } : {}),
         } : {}),
       };
       if (dish) await api.put('/admin/menu/entries/' + dish.id, body);
@@ -307,6 +329,27 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
     });
   }
 
+  function saveRecipeVariant(variant: VariantDraft) {
+    setVariants((current) => current.some(({ key }) => key === variant.key)
+      ? current.map((value) => value.key === variant.key ? variant : value)
+      : [...current, variant]);
+    setVariantEditor(undefined);
+  }
+
+  function printRecipe() {
+    if (!preview.data?.items.length || preview.pending) return;
+    const details = preview.data;
+    const caption = [costVariant?.name, details.output
+      ? 'Выход порции — ' + recipeQuantity(details.output.amount, unitLabel(details.output.unit)) : 'Выход порции не рассчитан']
+      .filter(Boolean).join(' · ');
+    const printed = printReport(form.name.trim() || 'Техкарта', caption, ['Ингредиент / полуфабрикат', 'Брутто', 'Нетто', 'Склад'],
+      details.items.map((item) => [item.name, recipeQuantity(item.amount, unitLabel(item.amountUnit)),
+        item.netWeightGrams != null ? recipeQuantity(item.netWeightGrams, 'г')
+          : item.netAmount == null ? 'Не рассчитано' : recipeQuantity(item.netAmount, unitLabel(item.amountUnit)),
+        item.warehouseName ?? 'По цеху']), { title: 'Технология приготовления', text: metadata.instructions ?? '' });
+    setError(printed ? '' : 'Разрешите открытие окна печати в браузере.');
+  }
+
   const variantCards = <div className="space-y-3">
     {activeVariants.map((variant, index) => <VariantCard key={variant.key} value={variant} index={index}
       count={activeVariants.length} disabled={!canEdit || busy} unitLocked={isGoods && !!variant.id}
@@ -333,8 +376,12 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
     {goodsBindingPending ? <p className="text-sm text-text-secondary">Складская привязка появится после сохранения.</p>
       : <RecipeCostSummary preview={preview} showCosts={canCosts} showPriceMetrics={previewPrice != null && (!activeVariants.length || !!costVariant)}
         showMissing={isGoods || hasStockBinding || !!dish?.isSet || !canRecipe}
-        showError={isGoods || hasStockBinding || !!dish?.isSet || !canRecipe} />}
+        showError={isGoods || hasStockBinding || !!dish?.isSet || !canRecipe} compactMetrics={!isGoods}
+        showCostValue={isGoods || hasStockBinding || !!dish?.isSet || !canRecipe} />}
   </div>;
+  const outputDetails = <RecipeOutput preview={preview.data} pending={preview.pending} metadata={metadata}
+    manualApplies={!hasVariantNorms} editable={canEdit && !busy && !costVariant}
+    onChange={(outputQuantity, outputUnit) => setMetadata((current) => ({ ...current, outputQuantity, outputUnit }))} />;
 
   return (
     <EditorPage title={title} onClose={() => !busy && onClose()} footer={
@@ -351,49 +398,56 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
         {error && <p role="alert" className="min-w-0 grow text-sm text-danger">{error}</p>}
       </div>
     }>
-      <form id={formId} className="min-w-0 max-w-6xl space-y-5 pt-1 sm:space-y-6 sm:pt-2" noValidate
+      {!isGoods && canRecipe && <WorkspaceHeaderActions>
+        <button type="button" className="btn-secondary btn-md inline-flex items-center gap-2" onClick={printRecipe}
+          disabled={busy || preview.pending || !preview.data?.items.length}>
+          <IconPrinter className="h-4 w-4" aria-hidden="true" /> Распечатать
+        </button>
+      </WorkspaceHeaderActions>}
+      <form id={formId} className={'min-w-0 space-y-5 pt-1 sm:space-y-6 sm:pt-2' + (isGoods ? ' max-w-6xl' : '')} noValidate
         onSubmit={(event) => {
           if (event.target !== event.currentTarget) return;
           event.preventDefault();
           void save();
         }}>
         <fieldset ref={startRef} disabled={!canEdit || busy} aria-label="Основные параметры"
-          className="grid min-w-0 max-w-3xl scroll-mt-4 gap-3 sm:gap-4">
-          <FormRow label="Название" htmlFor={formId + '-name'}>
+          className={'grid min-w-0 scroll-mt-4 gap-3 sm:gap-4 ' + (isGoods ? 'max-w-3xl' : 'xl:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)] xl:gap-x-8')}>
+          <div className={'grid content-start gap-3' + (isGoods ? '' : ' min-[1450px]:grid-cols-2 min-[1450px]:gap-x-5')}>
+          <FormRow label="Название" htmlFor={formId + '-name'} stackOnWide={!isGoods}>
             <input id={formId + '-name'} ref={nameRef} className="input" value={form.name} maxLength={120}
               onChange={(event) => patch({ name: event.target.value })}
               placeholder={isGoods ? 'Например, лимонад 0,5 л' : 'Например, капучино'} required />
           </FormRow>
-          <FormRow label="Категория">
+          <FormRow label="Категория" stackOnWide={!isGoods}>
             <Select searchable ariaLabel="Категория" placeholder="Выберите категорию" className="h-11 w-full"
               value={form.categoryId} disabled={!canEdit || busy} onChange={(value) => patch({ categoryId: value })}
               options={categories.map(({ id, name }) => ({ value: id, label: name }))} />
           </FormRow>
-          <FormRow label="Цех приготовления">
+          <FormRow label="Цех приготовления" stackOnWide={!isGoods}>
             <Select ariaLabel="Цех приготовления" className="h-11 w-full" value={form.prepStation} disabled={!canEdit || busy}
               onChange={(value) => patch({ prepStation: value })}
               options={[{ value: '', label: 'По категории' }, ...routingOptions(stations, form.prepStation)]} />
           </FormRow>
-          <FormRow label="Налог">
+          <FormRow label="Налог" stackOnWide={!isGoods}>
             <MenuTaxSelect value={tax} onChange={setTax} inherit disabled={!canEdit || busy}
               categoryTaxId={categories.find((category) => category.id === form.categoryId)?.taxId} />
           </FormRow>
+          </div>
           <FormRow label="Обложка">
-            <CoverEditor name={form.name} imageUrl={form.imageUrl} photoUrl={photoUrl} loading={photoBusy}
-              onUrl={setPhotoUrl} onBusy={setPhotoBusy} onError={setError}
+            <MenuEntryPhoto name={form.name} imageUrl={form.imageUrl} loading={photoBusy} onBusy={setPhotoBusy}
               onImage={(imageUrl) => patch({ imageUrl })}>
-              <div className="grid gap-3">
+              <div className="grid min-w-0 gap-2">
                 <label className="flex items-center justify-between gap-3 text-sm">
                   Доступно для заказа
-                  <Toggle checked={form.isAvailable} onChange={(isAvailable) => patch({ isAvailable })} />
+                  <Toggle ariaLabel="Доступно для заказа" checked={form.isAvailable} onChange={(isAvailable) => patch({ isAvailable })} />
                 </label>
                 <label className="flex items-center justify-between gap-3 text-sm">
                   {isGoods ? 'Весовой товар' : 'Весовое блюдо'}
-                  <Toggle checked={form.isWeighted} onChange={(isWeighted) => patch({ isWeighted })}
+                  <Toggle ariaLabel={isGoods ? 'Весовой товар' : 'Весовое блюдо'} checked={form.isWeighted} onChange={(isWeighted) => patch({ isWeighted })}
                     disabled={activeVariants.length > 0 || (isGoods && withVariants) || weightedLocked} />
                 </label>
               </div>
-            </CoverEditor>
+            </MenuEntryPhoto>
             {form.isWeighted && <div className="mt-2 grid gap-3 border-l-2 border-border pl-3 min-[430px]:grid-cols-2">
               <Field label="Мера весовой позиции">
                 <Select ariaLabel="Мера весовой позиции" className="h-11 w-full" value={form.weightedMeasure}
@@ -410,7 +464,8 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
           </FormRow>
         </fieldset>
 
-        <fieldset disabled={!canEdit || busy} aria-label="Цена и варианты" className="min-w-0 max-w-3xl border-t border-border pt-5">
+        <fieldset disabled={!canEdit || busy} aria-label={isGoods ? 'Цена и варианты' : 'База рецептуры и цена'}
+          className={'min-w-0 border-t border-border pt-4' + (isGoods ? ' max-w-3xl' : '')}>
           {isGoods ? <FormRow label="Цена товара">
             <div role="group" aria-label="Формат товара" className="divide-y divide-border rounded-xl border border-border">
               <div className={!withVariants ? 'bg-background/50' : undefined}>
@@ -442,36 +497,24 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
                 {withVariants && <div className="space-y-4 px-4 pb-4">{variantCards}{priceMetrics}</div>}
               </div>
             </div>
-          </FormRow> : <div className="grid gap-4">
-            {(!activeVariants.length || priceMetrics) && <FormRow label={activeVariants.length ? 'Расчёт себестоимости' : priceLabel}>
-              <div className="flex flex-wrap items-start gap-x-5 gap-y-3">
-                {!activeVariants.length && <div className="w-full min-[480px]:w-44">{priceInput}</div>}
-                {priceMetrics}
+          </FormRow> : <div className="grid gap-x-8 gap-y-3 lg:grid-cols-2">
+            {canRecipe && !dish?.isSet && <FormRow label="Рецепт на" htmlFor={formId + '-portions'}>
+              <div className="flex items-center gap-2">
+                <input id={formId + '-portions'} type="number" min={1} max={maxRecipePortions} step={1} inputMode="numeric"
+                  aria-invalid={!portionsValid || undefined} aria-describedby={!portionsValid ? formId + '-portions-error' : undefined}
+                  className="input w-24 tabular-nums" value={recipePortions} onChange={(event) => setRecipePortions(event.target.value)} />
+                <span className="text-sm text-text-secondary">порций</span>
               </div>
+              {!portionsValid && <p id={formId + '-portions-error'} className="mt-1 text-sm text-danger">От 1 до 10 000 целых порций.</p>}
             </FormRow>}
-            {!form.isWeighted && <FormRow label="Варианты порций">{variantCards}</FormRow>}
+            {!activeVariants.length ? <FormRow label={priceLabel}>
+              <div className="max-w-44">{priceInput}</div>
+            </FormRow> : <FormRow label="Цена продажи"><p className="py-2 text-sm text-text-secondary">Указывается у каждого варианта.</p></FormRow>}
           </div>}
         </fieldset>
 
-        <fieldset disabled={!canEdit || busy} className="min-w-0 max-w-3xl">
-          <details className="border-t border-border pt-4">
-            <summary className="w-fit cursor-pointer text-sm font-semibold text-primary">Дополнительно</summary>
-            <div className="mt-4 grid gap-3 sm:gap-4">
-              <FormRow label="Описание" htmlFor={formId + '-description'}>
-                <textarea id={formId + '-description'} className="input min-h-24 py-2.5" value={form.description} maxLength={300}
-                  onChange={(event) => patch({ description: event.target.value })} />
-              </FormRow>
-              <FormRow label="Название для озвучки" htmlFor={formId + '-voice-name'}>
-                <input id={formId + '-voice-name'} className="input" value={form.voiceName} maxLength={120}
-                  placeholder="Как произносить вслух" onChange={(event) => patch({ voiceName: event.target.value })} />
-              </FormRow>
-            </div>
-          </details>
-        </fieldset>
-
-        {!isGoods && canRecipe && <fieldset ref={recipeRef} disabled={!canEdit || busy} className="min-w-0 scroll-mt-4 space-y-5">
-          {canBindProducedStock && <ProducedStockField items={stock ?? []} value={producedStockId} onChange={setProducedStockId}
-            savedStockId={savedStockId} canProduce={can('actions.warehouseProduce')} />}
+        {!isGoods && canRecipe && <fieldset ref={recipeRef} aria-label="Состав техкарты" disabled={!canEdit || busy}
+          className="min-w-0 scroll-mt-4 space-y-3">
           {!!initial?.recipe.components?.length && <section className="space-y-2 rounded-xl border border-border p-4">
             <h3 className="font-semibold">Состав сета</h3>
             <ul className="divide-y divide-border text-sm">
@@ -480,34 +523,148 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
               </li>)}
             </ul>
           </section>}
-          {!hasStockBinding && !dish?.isSet && <>
-          <RecipeDraftFields rows={rows} onChange={setRows} showCosts={canCosts} disabled={!canEdit || busy}
+          {!hasStockBinding && !dish?.isSet && <RecipeDraftFields rows={rows} onChange={setRows} showCosts={canCosts} disabled={!canEdit || busy}
             allowCreate={canEditSection('warehouse') && can('actions.warehouseReceive')}
             variants={activeVariants.map((variant) => ({ id: variant.id ?? variant.key, name: variant.name }))}
-            preview={preview} previewVariant={costVariant?.key} />
-          <div className="grid gap-4 rounded-xl border border-border p-4 md:grid-cols-[220px_minmax(0,1fr)]">
-            <Field label="Выход готового блюда">
-              <div className="flex gap-2">
-                <input aria-label="Выход готового блюда" className="input min-w-0 flex-1" type="number" min="0.001" step="any"
-                  value={metadata.outputQuantity ?? ''}
-                  onChange={(event) => setMetadata((current) => ({
-                    ...current, outputQuantity: event.target.value ? Number(event.target.value) : undefined,
-                  }))} />
-                <input aria-label="Единица выхода" className="input w-20" placeholder="г" value={metadata.outputUnit ?? ''}
-                  onChange={(event) => setMetadata((current) => ({ ...current, outputUnit: event.target.value }))} />
-              </div>
-            </Field>
-            <Field label="Способ приготовления">
-              <textarea aria-label="Способ приготовления" className="input min-h-24" value={metadata.instructions ?? ''}
-                onChange={(event) => setMetadata((current) => ({ ...current, instructions: event.target.value }))} />
-            </Field>
-          </div>
-          </>}
-          <ModifierDraftFields value={modifiers} onChange={setModifiers} />
+            preview={preview} previewVariant={costVariant?.key} inputPortions={portionsValid ? inputPortions : 1}
+            outputDetails={outputDetails} showBatchPreview={false} />}
+          {canBindProducedStock && <details open={hasStockBinding}>
+            <summary className="w-fit cursor-pointer text-sm text-primary">Складской учёт блюда</summary>
+            <div className="mt-2"><ProducedStockField items={stock ?? []} value={producedStockId} onChange={setProducedStockId}
+              savedStockId={savedStockId} canProduce={can('actions.warehouseProduce')} /></div>
+          </details>}
         </fieldset>}
+        {!isGoods && <div className="flex flex-wrap items-start justify-between gap-3">
+          {priceMetrics}
+          {canRecipe && !hasStockBinding && !dish?.isSet && <button type="button" className="btn-secondary btn-md ml-auto"
+            disabled={busy || !preview.data?.items.length || preview.pending} onClick={() => setBatchOpen(true)}>Рассчитать на N порций</button>}
+        </div>}
+        {!isGoods && !form.isWeighted && !dish?.isSet && <fieldset aria-label="Варианты порций" disabled={!canEdit || busy}
+          className="min-w-0 space-y-2 border-t border-border pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-base font-semibold">Варианты порций</h2>
+            <button type="button" className="btn-secondary btn-md" onClick={() => setVariantEditor(newVariant())}>+ Добавить вариант</button>
+          </div>
+          {activeVariants.length > 0 && <ul className="divide-y divide-border">
+            {activeVariants.map((variant, index) => <li key={variant.key} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2"
+              draggable={canEdit && !busy} onDragStart={() => { draggedVariant.current = index; }}
+              onDragEnd={() => { draggedVariant.current = null; }} onDragOver={(event) => event.preventDefault()}
+              onDrop={() => {
+                if (draggedVariant.current !== null) moveVariant(draggedVariant.current, index);
+                draggedVariant.current = null;
+              }}>
+              <span className="grow break-words text-sm font-medium">{variant.name || `Вариант ${index + 1}`}</span>
+              <span className="text-sm tabular-nums">{salePrice(variant.price) == null ? 'Цена не указана' : money(variant.price)}</span>
+              <div className="flex flex-wrap items-center gap-1">
+                <button type="button" className="btn-ghost h-8 px-2" aria-label={`Поднять ${variant.name}`}
+                  disabled={index === 0} onClick={() => moveVariant(index, index - 1)}>↑</button>
+                <button type="button" className="btn-ghost h-8 px-2" aria-label={`Опустить ${variant.name}`}
+                  disabled={index === activeVariants.length - 1} onClick={() => moveVariant(index, index + 1)}>↓</button>
+                <button type="button" className="btn-ghost h-8 px-2 text-primary" onClick={() => setVariantEditor({ ...variant })}>Изменить</button>
+                <button type="button" className="btn-ghost h-8 px-2 text-danger"
+                  onClick={() => setVariants((current) => current.filter(({ key }) => key !== variant.key))}>Удалить</button>
+              </div>
+            </li>)}
+          </ul>}
+        </fieldset>}
+        {!isGoods && canRecipe && <fieldset disabled={!canEdit || busy} className="min-w-0 border-t border-border pt-4">
+          <ModifierDraftFields value={modifiers} onChange={setModifiers} recipeIngredientIds={rows.map(({ ingredientId }) => ingredientId)} />
+        </fieldset>}
+        <fieldset disabled={!canEdit || busy} className="min-w-0 space-y-3 border-t border-border pt-4">
+          <details className="max-w-3xl">
+            <summary className="w-fit cursor-pointer text-sm font-semibold text-primary">Дополнительно</summary>
+            <div className="mt-3 grid gap-3">
+              <FormRow label="Описание" htmlFor={formId + '-description'}>
+                <textarea id={formId + '-description'} className="input min-h-20 py-2" value={form.description} maxLength={300}
+                  onChange={(event) => patch({ description: event.target.value })} />
+              </FormRow>
+              <FormRow label="Название для озвучки" htmlFor={formId + '-voice-name'}>
+                <input id={formId + '-voice-name'} className="input" value={form.voiceName} maxLength={120}
+                  placeholder="Как произносить вслух" onChange={(event) => patch({ voiceName: event.target.value })} />
+              </FormRow>
+            </div>
+          </details>
+          {!isGoods && canRecipe && !dish?.isSet && <details className="max-w-3xl">
+            <summary className="w-fit cursor-pointer text-sm font-semibold text-primary">Технология приготовления</summary>
+            <textarea aria-label="Технология приготовления" className="input mt-3 min-h-24" value={metadata.instructions ?? ''} maxLength={12_000}
+              onChange={(event) => setMetadata((current) => ({ ...current, instructions: event.target.value }))} />
+          </details>}
+        </fieldset>
       </form>
+      {batchOpen && createPortal(<Modal open manageFocus title="Расчёт партии" onClose={() => setBatchOpen(false)} panelClassName="max-w-xl">
+        <RecipeBatchPanel preview={preview.data} pending={preview.pending} showCosts={canCosts} />
+      </Modal>, document.body)}
+      {variantEditor && <RecipeVariantDialog initial={variantEditor} editing={variants.some(({ key }) => key === variantEditor.key)}
+        onSave={saveRecipeVariant} onClose={() => setVariantEditor(undefined)} />}
     </EditorPage>
   );
+}
+
+function RecipeVariantDialog({ initial, editing, onSave, onClose }: {
+  initial: VariantDraft; editing: boolean; onSave: (variant: VariantDraft) => void; onClose: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const canSave = !!value.name.trim() && (salePrice(value.price) ?? 0) > 0;
+  return createPortal(<Modal open manageFocus title={editing ? 'Вариант порции' : 'Добавление варианта порции'} onClose={onClose}
+    footer={<div className="flex justify-end gap-2">
+      <button type="button" className="btn-secondary btn-md" onClick={onClose}>Отмена</button>
+      <button type="button" className="btn-primary btn-md" disabled={!canSave} onClick={() => onSave(value)}>Применить</button>
+    </div>}>
+    <div className="grid gap-3">
+      <label className="grid gap-1 text-sm">Название варианта
+        <input className="input" data-dialog-initial-focus maxLength={80} value={value.name}
+          onChange={(event) => setValue({ ...value, name: event.target.value })} />
+      </label>
+      <Field label="Цена продажи"><PriceInput label="Цена варианта" value={value.price}
+        onChange={(price) => setValue({ ...value, price })} /></Field>
+      <Field label="Единица учёта"><Select ariaLabel="Единица учёта варианта" className="w-full" value={value.unit}
+        onChange={(unit) => setValue({ ...value, unit })} options={unitLabelOptions(value.unit)} /></Field>
+    </div>
+  </Modal>, document.body);
+}
+
+function RecipeOutput({ preview, pending, metadata, manualApplies, editable, onChange }: {
+  preview?: RecipePreview; pending: boolean; metadata: RecipeMetadata; manualApplies: boolean; editable: boolean;
+  onChange: (amount?: number, unit?: string) => void;
+}) {
+  const amountId = useId();
+  const [open, setOpen] = useState(false);
+  const [input, setInput] = useState('');
+  const [unit, setUnit] = useState('г');
+  const manual = manualApplies && metadata.outputQuantity != null && !!metadata.outputUnit;
+  const calculated = preview?.compositionOutput ?? (!manual ? preview?.output : null);
+  const output = manual ? { amount: metadata.outputQuantity!, unit: normalizeUnitLabel(metadata.outputUnit ?? calculated?.unit ?? 'г') }
+    : preview?.output;
+  const amount = Number(input.trim().replace(',', '.'));
+  const valid = Number.isFinite(amount) && amount >= 0.001;
+  const close = () => setOpen(false);
+
+  return <>
+    <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+      <span>Выход порции <strong className="tabular-nums">{output
+        ? recipeQuantity(output.amount, normalizeUnitLabel(output.unit)) : pending ? 'Расчёт…' : 'Не рассчитан'}</strong></span>
+      {manual && <span className="text-xs text-text-muted">Указан вручную{calculated &&
+        ` · По составу ${recipeQuantity(calculated.amount, unitLabel(calculated.unit))}`}</span>}
+      {editable && <button type="button" className="text-sm text-primary hover:underline" onClick={() => {
+        setInput(output ? String(output.amount) : '');
+        setUnit(normalizeUnitLabel(output?.unit ?? calculated?.unit ?? 'г'));
+        setOpen(true);
+      }}>Уточнить выход</button>}
+    </span>
+    {open && createPortal(<Modal open manageFocus title="Выход порции" onClose={close} footer={
+      <div className="flex flex-wrap justify-end gap-2">
+        {manual && <button type="button" className="btn-ghost btn-md" onClick={() => { onChange(); close(); }}>Считать по составу</button>}
+        <button type="button" className="btn-primary btn-md" disabled={!valid} onClick={() => { onChange(amount, unit); close(); }}>Применить</button>
+      </div>}>
+      <label className="mb-1 block text-sm" htmlFor={amountId}>Фактический выход одной порции</label>
+      <div className="flex items-center gap-2">
+        <input id={amountId} className="input min-w-0 flex-1" data-dialog-initial-focus inputMode="decimal"
+          value={input} onChange={(event) => setInput(event.target.value)} />
+        <Select ariaLabel="Ед. измерения выхода" value={unit} onChange={setUnit} options={unitLabelOptions(unit)} />
+      </div>
+      {calculated && <p className="mt-2 text-sm text-text-muted">По составу {recipeQuantity(calculated.amount, unitLabel(calculated.unit))}</p>}
+    </Modal>, document.body)}
+  </>;
 }
 
 function ProducedStockField({ items, value, onChange, savedStockId, canProduce }: {
@@ -537,9 +694,9 @@ function ProducedStockField({ items, value, onChange, savedStockId, canProduce }
   </div>;
 }
 
-function FormRow({ label, htmlFor, children }: { label: string; htmlFor?: string; children: ReactNode }) {
-  const labelClass = 'text-sm font-medium text-text-secondary sm:pt-2.5';
-  return <div className="grid min-w-0 gap-1.5 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-x-5">
+function FormRow({ label, htmlFor, children, stackOnWide = false }: { label: string; htmlFor?: string; children: ReactNode; stackOnWide?: boolean }) {
+  const labelClass = 'text-sm font-medium text-text-secondary sm:pt-2.5' + (stackOnWide ? ' min-[1450px]:pt-0' : '');
+  return <div className={'grid min-w-0 gap-1.5 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-x-5' + (stackOnWide ? ' min-[1450px]:grid-cols-1' : '')}>
     {htmlFor ? <label htmlFor={htmlFor} className={labelClass}>{label}</label> : <div className={labelClass}>{label}</div>}
     <div className="min-w-0">{children}</div>
   </div>;
@@ -605,84 +762,6 @@ function VariantCard({ value, index, count, disabled, unitLocked, onChange, onMo
         <Select ariaLabel={'Единица учёта ' + caption} className="h-11 w-full" value={value.unit}
           disabled={disabled || unitLocked} onChange={(unit) => onChange({ unit })} options={unitLabelOptions(value.unit)} />
       </Field>
-    </div>
-  </div>;
-}
-
-function CoverEditor({ name, imageUrl, photoUrl, loading, onUrl, onImage, onBusy, onError, children }: {
-  name: string; imageUrl: string; photoUrl: string; loading: boolean;
-  onUrl: (value: string) => void; onImage: (value: string) => void;
-  onBusy: (value: boolean) => void; onError: (value: string) => void;
-  children: ReactNode;
-}) {
-  const input = useRef<HTMLInputElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const panelId = useId();
-  const [expanded, setExpanded] = useState(false);
-
-  function previewUrl() {
-    const value = photoUrl.trim();
-    if (!value) return;
-    if (!/^https?:\/\/.+/i.test(value)) {
-      onError('Ссылка на фото должна начинаться с https:// или http://.');
-      return;
-    }
-    onImage(value);
-    onError('');
-  }
-
-  return <div className="space-y-3" onKeyDown={(event) => {
-    if (expanded && event.key === 'Escape') {
-      event.stopPropagation();
-      setExpanded(false);
-      trigger.current?.focus();
-    }
-  }}>
-    <input ref={input} hidden type="file" accept="image/png,image/jpeg,image/webp"
-      onChange={async (event) => {
-        const file = event.target.files?.[0];
-        event.target.value = '';
-        if (!file) return;
-        if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
-          onError('Фото: только PNG, JPG или WEBP.');
-          return;
-        }
-        onBusy(true);
-        onError('');
-        try {
-          onImage(await downscaleToDataUrl(file));
-          onUrl('');
-        } catch (failure) {
-          onError(apiError(failure));
-        } finally {
-          onBusy(false);
-        }
-      }} />
-    <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
-      <button ref={trigger} type="button" aria-label={imageUrl ? 'Изменить обложку' : 'Добавить обложку'}
-        aria-expanded={expanded} aria-controls={panelId} onClick={() => setExpanded(!expanded)}
-        className={'flex h-24 w-32 items-center justify-center overflow-hidden rounded-lg border bg-background text-primary transition-colors hover:border-primary ' +
-          (expanded ? 'border-primary' : 'border-border')}>
-        {loading ? <Spinner /> : imageUrl ? <img src={resolveApiImage(imageUrl) ?? undefined} alt={name || 'Фото позиции'}
-          className="h-full w-full object-cover" /> : <span className="flex items-center gap-1.5 whitespace-nowrap text-xs font-medium">
-          <span aria-hidden="true"><IconPlus className="h-4 w-4" /></span> Добавить фото
-        </span>}
-      </button>
-      {children}
-    </div>
-    <div id={panelId} hidden={!expanded} className="rounded-xl border border-border bg-background/50 px-3.5 py-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className="btn-secondary btn-md" onClick={() => input.current?.click()}>Выбрать файл</button>
-        {imageUrl && <button type="button" className="btn-ghost btn-md text-danger" onClick={() => {
-          onImage(''); onUrl(''); onError('');
-        }}>Удалить фото</button>}
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <input aria-label="Ссылка на фото" className="input min-w-0 flex-[1_1_11rem]" type="url" placeholder="https://…"
-          value={photoUrl} onChange={(event) => onUrl(event.target.value)}
-          onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); previewUrl(); } }} />
-        <button type="button" className="btn-secondary btn-md shrink-0" disabled={!photoUrl.trim()} onClick={previewUrl}>По ссылке</button>
-      </div>
     </div>
   </div>;
 }

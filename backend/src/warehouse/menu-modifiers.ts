@@ -3,12 +3,12 @@ import { SERVER_EVENTS } from '../realtime/events';
 import { BadRequestException, Body, Controller, Get, Injectable, Optional, NotFoundException, Param, Put } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
 import { CurrentUser, type AuthUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
-import { lockRecipeGraph } from './recipe-resolution';
+import { lockRecipeGraph, recipeAmount } from './recipe-resolution';
 import { archiveDishRecipe, type RecipeRevisionEditor } from './recipe-revisions';
 import { assertUnitMatchesType, fromBase, normalizeUnit, toBase, UnitCode } from './units';
 
@@ -17,6 +17,7 @@ class ModifierOptionDto {
   @IsString() @MaxLength(120) name: string;
   @IsNumber() @Min(0) @Max(1000000) price: number;
   @IsOptional() @IsString() ingredientId?: string | null;
+  @IsOptional() @IsString() replacesIngredientId?: string | null;
   @IsOptional() @IsNumber() @Min(0) amount?: number;
   @IsOptional() @IsString() unit?: string;
   @IsOptional() @IsBoolean() fromCommonWarehouse?: boolean;
@@ -35,11 +36,54 @@ class ModifierGroupDto {
 }
 export class MenuModifiersDto {
   @IsBoolean() allowIngredientExclusions: boolean;
+  @IsOptional() @IsArray() @ArrayUnique() @ArrayMaxSize(250) @IsString({ each: true }) excludableIngredientIds?: string[] | null;
   @IsArray() @ArrayMaxSize(30) @ValidateNested({ each: true }) @Type(() => ModifierGroupDto) groups: ModifierGroupDto[];
+}
+type ExclusionDish = {
+  allowIngredientExclusions: boolean;
+  excludableIngredientIds: Prisma.JsonValue | null;
+  stockIngredientId: string | null;
+  variants: { id: string; stockIngredientId: string | null }[];
+  recipeItems: { ingredientId: string; amount: Prisma.Decimal; variantAmounts: Prisma.JsonValue | null;
+    ingredient: { id: string; name: string } }[];
+};
+
+function exclusionAllowlist(value: Prisma.JsonValue | null): string[] | null {
+  // Null keeps the original recipe-wide permission on existing dishes.
+  return value === null ? null : Array.isArray(value)
+    ? value.filter((id): id is string => typeof id === 'string') : [];
+}
+
+function servingIngredients(dish: ExclusionDish, variantId?: string | null) {
+  const variant = variantId ? dish.variants.find(({ id }) => id === variantId) : null;
+  if (variantId && !variant) throw new BadRequestException('Вариант не относится к выбранному блюду');
+  if (dish.stockIngredientId || variant?.stockIngredientId) return [];
+  return dish.recipeItems.filter((row) => variantId ? recipeAmount(row, variantId).gt(0)
+    : row.amount.gt(0) || dish.variants.some((entry) => !entry.stockIngredientId && recipeAmount(row, entry.id).gt(0)))
+    .map(({ ingredient }) => ingredient);
+}
+
+function excludableIngredients(dish: ExclusionDish, ingredients: { id: string; name: string }[]) {
+  if (!dish.allowIngredientExclusions) return [];
+  const ids = exclusionAllowlist(dish.excludableIngredientIds);
+  return ids === null ? ingredients : ingredients.filter(({ id }) => ids.includes(id));
+}
+
+function modifierOrderGroup<T extends { isActive: boolean; replacesIngredientId: string | null; maxQuantity: number }>(
+  group: { minSelections: number; options: T[] }, recipeNames: ReadonlyMap<string, string>,
+) {
+  const active = group.options.filter(({ isActive }) => isActive);
+  const options = active.filter(({ replacesIngredientId }) => !replacesIngredientId || recipeNames.has(replacesIngredientId));
+  if (options.length === active.length) return { options, minSelections: group.minSelections };
+  const replacementTargets = new Set(options.flatMap(({ replacesIngredientId }) => replacesIngredientId ? [replacesIngredientId] : []));
+  const capacity = options.reduce((total, option) => total + (option.replacesIngredientId ? 0 : option.maxQuantity), replacementTargets.size);
+  return { options, minSelections: Math.min(group.minSelections, capacity) };
 }
 export type ModifierSelectionSnapshot = {
   optionId: string; groupId: string; name: string; quantity: number; price: string;
   ingredientId: string | null; amount: string; amountUnit: string; fromCommonWarehouse: boolean; warehouseId: string | null;
+  replacesIngredientId?: string;
+  replacesIngredientName?: string;
 };
 export function selectionIdentity(options: unknown, exclusions: unknown) {
   return JSON.stringify({ options: (Array.isArray(options) ? options : []).map((option) => ({ optionId: option.optionId, quantity: option.quantity })).sort((a, b) => a.optionId.localeCompare(b.optionId)),
@@ -48,42 +92,62 @@ export function selectionIdentity(options: unknown, exclusions: unknown) {
 
 /** Resolve only catalog ids; all prices, ingredient quantities and routes are server snapshots. */
 export async function resolveMenuSelections(tx: Prisma.TransactionClient, dishId: string,
-  selections: { optionId: string; quantity: number }[] = [], exclusions: string[] = [], existing?: { modifierSelections: Prisma.JsonValue | null; excludedIngredientIds: Prisma.JsonValue | null; excludedIngredientNames: Prisma.JsonValue | null }) {
+  selections: { optionId: string; quantity: number }[] = [], exclusions: string[] = [], existing?: { dishVariantId: string | null; modifierSelections: Prisma.JsonValue | null; excludedIngredientIds: Prisma.JsonValue | null; excludedIngredientNames: Prisma.JsonValue | null }, variantId?: string | null) {
   if (new Set(selections.map((item) => item.optionId)).size !== selections.length || new Set(exclusions).size !== exclusions.length) throw new BadRequestException('Добавка или исключение указаны дважды');
-  if (existing && selectionIdentity(selections, exclusions) === selectionIdentity(existing.modifierSelections, existing.excludedIngredientIds)) {
+  if (existing && existing.dishVariantId === (variantId ?? null) && selectionIdentity(selections, exclusions) === selectionIdentity(existing.modifierSelections, existing.excludedIngredientIds)) {
     const options = (existing.modifierSelections ?? []) as ModifierSelectionSnapshot[];
     return { options, exclusions, exclusionNames: (existing.excludedIngredientNames ?? []) as string[], price: options.reduce((sum, option) => sum.add(new Prisma.Decimal(option.price).mul(option.quantity)), new Prisma.Decimal(0)) };
   }
-  const dish = await tx.dish.findUnique({ where: { id: dishId }, include: { modifierGroups: { include: { options: true } }, recipeItems: { include: { ingredient: true } } } });
+  const dish = await tx.dish.findUnique({ where: { id: dishId }, include: { modifierGroups: { include: { options: true } },
+    variants: { select: { id: true, stockIngredientId: true } }, recipeItems: { include: { ingredient: { select: { id: true, name: true } } } } } });
   if (!dish) throw new NotFoundException('Блюдо не найдено');
   const byId = new Map(dish.modifierGroups.flatMap((group) => group.options.map((option) => [option.id, option] as const)));
+  const ingredients = servingIngredients(dish, variantId);
+  const recipeNames = new Map(ingredients.map(({ id, name }) => [id, name]));
+  const replaced = new Set<string>();
   const options: ModifierSelectionSnapshot[] = [];
   for (const selected of selections) {
     const option = byId.get(selected.optionId);
     if (!option || !option.isActive || !Number.isInteger(selected.quantity) || selected.quantity < 1 || selected.quantity > option.maxQuantity) throw new BadRequestException('Выберите доступную добавку и допустимое количество');
+    const target = option.replacesIngredientId;
+    const replacesIngredientName = target ? recipeNames.get(target) : undefined;
+    if (target && (!option.ingredientId || !replacesIngredientName || selected.quantity !== 1 || replaced.has(target))) {
+      throw new BadRequestException('В этой порции каждый ингредиент можно заменить только один раз');
+    }
+    if (target) replaced.add(target);
     options.push({ optionId: option.id, groupId: option.groupId, name: option.name, quantity: selected.quantity, price: option.price.toString(),
-      ingredientId: option.ingredientId, amount: option.amount.toString(), amountUnit: option.amountUnit, fromCommonWarehouse: option.fromCommonWarehouse, warehouseId: option.warehouseId });
+      ingredientId: option.ingredientId, amount: option.amount.toString(), amountUnit: option.amountUnit, fromCommonWarehouse: option.fromCommonWarehouse, warehouseId: option.warehouseId,
+      ...(target && replacesIngredientName && { replacesIngredientId: target, replacesIngredientName }) });
   }
   for (const group of dish.modifierGroups) {
     const count = options.filter((option) => option.groupId === group.id).reduce((sum, option) => sum + option.quantity, 0);
-    if (count < group.minSelections || (group.maxSelections != null && count > group.maxSelections)) throw new BadRequestException(`Проверьте количество добавок в группе «${group.name}»`);
+    const { minSelections } = modifierOrderGroup(group, recipeNames);
+    if (count < minSelections || (group.maxSelections != null && count > group.maxSelections)) throw new BadRequestException(`Проверьте количество добавок в группе «${group.name}»`);
   }
-  const roots = new Map(dish.recipeItems.map((row) => [row.ingredientId, row.ingredient.name]));
-  if (exclusions.length && (!dish.allowIngredientExclusions || exclusions.some((id) => !roots.has(id)))) throw new BadRequestException('Нельзя исключить выбранный ингредиент из этого блюда');
+  const roots = new Map(excludableIngredients(dish, ingredients).map(({ id, name }) => [id, name]));
+  if (exclusions.some((id) => !roots.has(id))) throw new BadRequestException('Нельзя исключить выбранный ингредиент из этого блюда');
   return { options, exclusions, exclusionNames: exclusions.map((id) => roots.get(id)!), price: options.reduce((sum, option) => sum.add(new Prisma.Decimal(option.price).mul(option.quantity)), new Prisma.Decimal(0)) };
 }
 
 @Injectable()
 export class MenuModifiersService {
   constructor(private prisma: PrismaService, @Optional() private events?: EventsGateway) {}
-  async get(dishId: string, publicView = false) {
-    const dish = await this.prisma.dish.findUnique({ where: { id: dishId }, include: { modifierGroups: { orderBy: { sortOrder: 'asc' }, include: { options: { orderBy: { sortOrder: 'asc' } } } }, recipeItems: { include: { ingredient: { select: { id: true, name: true } } } } } });
+  async get(dishId: string, publicView = false, variantId?: string) {
+    const dish = await this.prisma.dish.findUnique({ where: { id: dishId }, include: { modifierGroups: { orderBy: { sortOrder: 'asc' }, include: { options: { orderBy: { sortOrder: 'asc' } } } },
+      variants: { select: { id: true, stockIngredientId: true } }, recipeItems: { include: { ingredient: { select: { id: true, name: true } } } } } });
     if (!dish) throw new NotFoundException('Блюдо не найдено');
+    const ingredients = servingIngredients(dish, variantId);
+    const targetNames = new Map(ingredients.map(({ id, name }) => [id, name]));
     return { dishId, allowIngredientExclusions: dish.allowIngredientExclusions,
-      excludableIngredients: dish.allowIngredientExclusions ? dish.recipeItems.map((row) => row.ingredient) : [],
-      groups: dish.modifierGroups.map((group) => ({ id: group.id, name: group.name, minSelections: group.minSelections, maxSelections: group.maxSelections, sortOrder: group.sortOrder,
-        options: group.options.filter((option) => !publicView || option.isActive).map((option) => ({ id: option.id, name: option.name, price: Number(option.price), maxQuantity: option.maxQuantity, isActive: option.isActive, sortOrder: option.sortOrder,
-          ...(!publicView ? { ingredientId: option.ingredientId, amount: fromBase(Number(option.amount), option.amountUnit as UnitCode), unit: option.amountUnit, fromCommonWarehouse: option.fromCommonWarehouse, warehouseId: option.warehouseId } : {}) })) })) };
+      ...(!publicView && { excludableIngredientIds: exclusionAllowlist(dish.excludableIngredientIds) }),
+      excludableIngredients: excludableIngredients(dish, ingredients),
+      groups: dish.modifierGroups.map((group) => {
+        const { options, minSelections } = publicView ? modifierOrderGroup(group, targetNames) : group;
+        return { id: group.id, name: group.name, minSelections, maxSelections: group.maxSelections, sortOrder: group.sortOrder,
+          options: options.map((option) => ({ id: option.id, name: option.name, price: Number(option.price), maxQuantity: option.maxQuantity, isActive: option.isActive, sortOrder: option.sortOrder,
+          ...(option.replacesIngredientId && { replacesIngredientId: option.replacesIngredientId, replacesIngredientName: targetNames.get(option.replacesIngredientId) }),
+            ...(!publicView ? { ingredientId: option.ingredientId, amount: fromBase(Number(option.amount), option.amountUnit as UnitCode), unit: option.amountUnit, fromCommonWarehouse: option.fromCommonWarehouse, warehouseId: option.warehouseId } : {}) })) };
+      }) };
   }
   async save(dishId: string, dto: MenuModifiersDto, editor?: RecipeRevisionEditor) {
     await this.prisma.$transaction(async (tx) => {
@@ -96,6 +160,11 @@ export class MenuModifiersService {
   async saveInTransaction(tx: Prisma.TransactionClient, dishId: string, dto: MenuModifiersDto, archive = true, editor?: RecipeRevisionEditor) {
       const dish = await tx.dish.findUnique({ where: { id: dishId }, include: { recipeItems: true, variants: true, modifierGroups: { include: { options: true } } } });
       if (!dish) throw new NotFoundException('Блюдо не найдено');
+      const exclusionIds = dto.excludableIngredientIds;
+      if (Array.isArray(exclusionIds) && (new Set(exclusionIds).size !== exclusionIds.length
+        || exclusionIds.some((id) => !dish.recipeItems.some((row) => row.ingredientId === id)))) {
+        throw new BadRequestException('Выберите ингредиенты, которые входят в состав блюда');
+      }
       if (archive) await archiveDishRecipe(tx, dishId, editor, 'full');
       const groupIds = new Set(dish.modifierGroups.map((group) => group.id));
       const existingOptions = new Map(dish.modifierGroups.flatMap((group) => group.options.map((option) => [option.id, option] as const)));
@@ -107,10 +176,17 @@ export class MenuModifiersService {
         const group = input.id ? await tx.menuModifierGroup.update({ where: { id: input.id }, data }) : await tx.menuModifierGroup.create({ data });
         keptGroups.push(group.id);
         const keptOptions: string[] = [];
+        const activeReplacementTargets = new Set<string>();
+        let activeAdditionsCapacity = 0;
         for (const [optionIndex, option] of input.options.entries()) {
           const existing = option.id ? existingOptions.get(option.id) : undefined;
           if (!option.name.trim() || (option.id && (!existing || seenOptions.has(option.id)))) throw new BadRequestException('Проверьте название и идентификатор добавки');
           if (option.id) seenOptions.add(option.id);
+          const replacesIngredientId = option.replacesIngredientId === undefined ? existing?.replacesIngredientId : option.replacesIngredientId;
+          if (replacesIngredientId && (dish.isSet || dish.stockIngredientId || !option.ingredientId || replacesIngredientId === option.ingredientId
+            || !dish.recipeItems.some((row) => row.ingredientId === replacesIngredientId))) {
+            throw new BadRequestException('Укажите другой складской ингредиент для замены позиции из состава блюда');
+          }
           let amount = new Prisma.Decimal(0), unit: UnitCode = 'pcs';
           if (option.ingredientId) {
             const preservesLink = existing?.ingredientId === option.ingredientId;
@@ -126,16 +202,25 @@ export class MenuModifiersService {
           }
           if (option.warehouseId && !await tx.warehouse.findUnique({ where: { id: option.warehouseId } })) throw new BadRequestException('Склад добавки не найден');
           const data = { groupId: group.id, name: option.name.trim(), price: new Prisma.Decimal(option.price), ingredientId: option.ingredientId ?? null,
+            replacesIngredientId: replacesIngredientId ?? null,
             amount, amountUnit: unit, fromCommonWarehouse: option.fromCommonWarehouse ?? false, warehouseId: option.warehouseId ?? null,
-            maxQuantity: option.maxQuantity ?? 1, isActive: option.isActive ?? true, sortOrder: option.sortOrder ?? optionIndex };
+            maxQuantity: replacesIngredientId ? 1 : option.maxQuantity ?? 1, isActive: option.isActive ?? true, sortOrder: option.sortOrder ?? optionIndex };
           const saved = option.id ? await tx.menuModifierOption.update({ where: { id: option.id }, data }) : await tx.menuModifierOption.create({ data });
           keptOptions.push(saved.id);
+          if (saved.isActive) {
+            if (replacesIngredientId) activeReplacementTargets.add(replacesIngredientId);
+            else activeAdditionsCapacity += saved.maxQuantity;
+          }
         }
-        if (input.options.filter((option) => option.isActive !== false).reduce((sum, option) => sum + (option.maxQuantity ?? 1), 0) < (input.minSelections ?? 0)) throw new BadRequestException('Недостаточно доступных добавок для обязательного выбора');
+        if (activeAdditionsCapacity + activeReplacementTargets.size < (input.minSelections ?? 0)) {
+          throw new BadRequestException('Недостаточно доступных добавок для обязательного выбора');
+        }
         await tx.menuModifierOption.deleteMany({ where: { groupId: group.id, id: { notIn: keptOptions } } });
       }
       await tx.menuModifierGroup.deleteMany({ where: { dishId, id: { notIn: keptGroups } } });
-      await tx.dish.update({ where: { id: dishId }, data: { allowIngredientExclusions: dto.allowIngredientExclusions, ...(archive ? { recipeVersion: { increment: 1 } } : {}) } });
+      await tx.dish.update({ where: { id: dishId }, data: { allowIngredientExclusions: dto.allowIngredientExclusions,
+        ...(exclusionIds !== undefined && { excludableIngredientIds: exclusionIds ?? Prisma.DbNull }),
+        ...(archive ? { recipeVersion: { increment: 1 } } : {}) } });
   }
 }
 

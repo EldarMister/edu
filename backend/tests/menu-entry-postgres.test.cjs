@@ -197,6 +197,26 @@ test(
             assert.equal(recipe.modifiers.groups[0].options[0].name, 'Добавить молоко');
           },
         );
+        await t.test('menu editor accepts batch input and reopens canonical recipe rows', async () => {
+          const pipe = new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true });
+          const batch = await pipe.transform({
+            ...recipeDto,
+            requestKey: randomUUID(),
+            dish: { ...recipeDto.dish, name: 'Капучино из партии' },
+            recipe: {
+              inputPortions: 10,
+              metadata: { recipePortions: 10 },
+              items: [{ ingredientId: milk.id, amount: 2, unit: 'l', netAmount: 1.9, measuredNetWeightGrams: 2100 }],
+            },
+          }, { type: 'body', metatype: MenuEntryDto });
+          const created = await service.save(null, batch, actor);
+          assert.deepEqual([created.recipe.metadata.recipePortions, created.recipe.foodCost, created.recipe.output],
+            [10, 20, { amount: 210, unit: 'g' }]);
+          const reopened = await service.get(created.dish.id);
+          const [milkRow] = reopened.recipe.items;
+          assert.deepEqual([milkRow.amount, milkRow.netAmount, milkRow.netWeightGrams, milkRow.measuredNetWeightGrams],
+            [0.2, 0.19, 210, 210]);
+        });
         await t.test(
           'invalid modifier rolls back changed name, composition and revision',
           async () => {

@@ -9,7 +9,7 @@ import { projectDishStock } from '../warehouse/dish-stock-projection';
 export class DishesService {
   constructor(private prisma: PrismaService) {}
 
-  modifiers(id: string) { return new MenuModifiersService(this.prisma).get(id, true); }
+  modifiers(id: string, variantId?: string) { return new MenuModifiersService(this.prisma).get(id, true, variantId); }
 
   /** Активные блюда для меню официанта. Можно фильтровать по категории и поиску. */
   async findAll(params: { categoryId?: string; search?: string }) {
@@ -41,6 +41,7 @@ export class DishesService {
         isSet: true,
         isWeighted: true,
         allowIngredientExclusions: true,
+        excludableIngredientIds: true,
         _count: { select: { modifierGroups: true } },
         weightedMeasure: true,
         weightedPriceBase: true,
@@ -76,14 +77,19 @@ export class DishesService {
 
     // Вместо тяжёлого base64 отдаём лёгкую ссылку на картинку блюда.
     const stock = await projectDishStock(this.prisma, dishes);
-    return dishes.map(({ updatedAt, stockIngredientId, stockAmount, category, _count, variants, ...d }) => ({
-      ...d,
-      trackInventory: stock.get(d.id)!.trackInventory,
-      stock: stock.get(d.id)!.stock,
-      variants: variants.map(({ stockIngredientId, stockAmount, ...variant }) => ({ ...variant, stock: stock.get(d.id)!.variantStocks.get(variant.id) ?? null })),
-      hasModifiers: _count.modifierGroups > 0 || d.allowIngredientExclusions,
-      imageUrl: dishImageRef(d.id, updatedAt, d.imageUrl),
-    }));
+    return dishes.map(({ updatedAt, stockIngredientId, stockAmount, category, _count, variants, excludableIngredientIds, ...d }) => {
+      const allowIngredientExclusions = d.allowIngredientExclusions
+        && (!Array.isArray(excludableIngredientIds) || excludableIngredientIds.length > 0);
+      return {
+        ...d,
+        trackInventory: stock.get(d.id)!.trackInventory,
+        stock: stock.get(d.id)!.stock,
+        variants: variants.map(({ stockIngredientId, stockAmount, ...variant }) => ({ ...variant, stock: stock.get(d.id)!.variantStocks.get(variant.id) ?? null })),
+        allowIngredientExclusions,
+        hasModifiers: _count.modifierGroups > 0 || allowIngredientExclusions,
+        imageUrl: dishImageRef(d.id, updatedAt, d.imageUrl),
+      };
+    });
   }
 
   /** Фото блюда как бинарь (для эндпоинта-картинки). */

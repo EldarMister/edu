@@ -15,6 +15,17 @@ const { displayedProcessingStages, grossFromLoss, lossFromAmounts, netFromLoss, 
 const potato = { ingredientId: 'potato', name: 'Картофель', unit: 'g', unitType: 'mass', amount: 200, netAmount: 160,
   lossPercent: 20, warehouseId: 'kitchen' };
 
+test('reopening a batch recipe restores batch gross, net and explicit variant quantities', () => {
+  const saved = { ingredientId: 'cheese', name: 'Сыр', unitType: 'count', amountUnit: 'pcs',
+    amount: 0.2, netAmount: 0.2, measuredNetWeightGrams: 40, variantAmounts: { small: 0.1, excluded: 0 } };
+  const [row] = recipeDraftRows([saved], false, 10);
+  assert.equal(row.amount, 2);
+  assert.equal(row.netAmount, 2);
+  assert.equal(row.measuredNetWeightGrams, 400);
+  assert.deepEqual(row.variantAmounts, { small: 1, excluded: 0 });
+  assert.equal(saved.amount, 0.2);
+});
+
 test('gross and net can be the basis of the same 20% processing loss', () => {
   assert.equal(grossFromLoss(160, 20, 0), 200);
   assert.equal(netFromLoss(200, 20), 160);
@@ -147,4 +158,18 @@ test('preparation can sum measured liquid, mass and weighted pieces in grams wit
   assert.equal(preparationYieldBase('volume', [milk]), 135);
   assert.equal(preparationYieldBase('mass', [{ ...milk, measuredNetWeightGrams: 0 }]), 0);
   assert.equal(preparationYieldBase('mass', [{ ...milk, measuredNetWeightGrams: null }, coffee]), null);
+});
+
+test('measured piece yield can override the gram conversion without changing the stock quantity', () => {
+  const cheese = { ingredientId: 'cheese', name: 'Сыр', unit: 'pcs', unitType: 'count', amount: 0.2,
+    measuredNetWeightGrams: 40, variantAmounts: { small: 0.1 } };
+  assert.equal(validRecipeRows([cheese]), true);
+  const [payload] = recipeDraftPayload([cheese]);
+  assert.equal(payload.amount, 0.2);
+  assert.equal(payload.measuredNetWeightGrams, 40);
+  const [small] = recipePreviewItems([cheese], [], 'small');
+  assert.deepEqual([small.amount, small.measuredNetWeightGrams], [0.1, 20]);
+  const row = { unitType: 'count', unitFactor: 1, netAmount: 0.2, pieceWeightGrams: 300, measuredNetWeightGrams: 40 };
+  assert.equal(preparationYieldBase('mass', [row]), 40);
+  assert.equal(preparationYieldBase('count', [row]), 0.2);
 });

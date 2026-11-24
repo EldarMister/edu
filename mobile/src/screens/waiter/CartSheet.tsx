@@ -5,18 +5,22 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { colors, fontSize, spacing } from '@/theme';
 import { useCart, linePrice } from '@/store/cart';
 import { money } from '@/utils/format';
+import { orderCustomizationText } from '@/utils/order-customization';
+import type { CartLine } from '@/types';
 
 /** Корзина как нижний лист поверх меню — повторяет PWA CartSheet. */
 export function CartSheet({
   visible,
   onClose,
   onSubmit,
+  onEditModifiers,
   submitting,
   submitLabel,
 }: {
   visible: boolean;
   onClose: () => void;
   onSubmit: () => void;
+  onEditModifiers: (line: CartLine, index: number) => void;
   submitting: boolean;
   submitLabel: string;
 }) {
@@ -60,7 +64,9 @@ export function CartSheet({
         {!hasLines ? (
           <Text style={styles.empty}>Корзина пуста</Text>
         ) : (
-          lines.map((l, i) => (
+          lines.map((l, i) => {
+            const customization = orderCustomizationText(l);
+            return (
             <View
               key={l.lineId ?? `${l.dish.id}-${l.variant?.id ?? ''}-${i}`}
               style={[styles.line, i > 0 && styles.lineBorder]}
@@ -69,7 +75,13 @@ export function CartSheet({
                 <Text style={styles.lineName} numberOfLines={1}>
                   {l.dish.name}
                   {l.variant ? ` · ${l.variant.name}` : ''}
+                  {l.weightGrams ? ` · ${l.weightGrams} ${l.dish.weightedMeasure === 'volume' ? 'мл' : 'г'}` : ''}
                 </Text>
+                {!!customization && <Text style={styles.lineSub}>{customization}</Text>}
+                {(l.dish.isWeighted || l.dish.hasModifiers || l.dish.allowIngredientExclusions
+                  || !!l.modifierSelections?.length || !!l.excludedIngredientIds?.length) && <Pressable onPress={() => onEditModifiers(l, i)}>
+                  <Text style={styles.edit}>Добавки и состав</Text>
+                </Pressable>}
                 {l.set ? (
                   <Text style={styles.lineSub}>
                     {l.set.components.filter((c) => c.action !== 'removed').length} блюд
@@ -88,7 +100,8 @@ export function CartSheet({
               </View>
               <Text style={styles.linePrice}>{money(linePrice(l))}</Text>
             </View>
-          ))
+            );
+          })
         )}
       </ScrollView>
     </BottomSheet>
@@ -111,6 +124,7 @@ const styles = StyleSheet.create({
   lineBorder: { borderTopWidth: 1, borderTopColor: colors.border },
   lineName: { fontSize: fontSize.base, color: colors.textPrimary },
   lineSub: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: 2 },
+  edit: { fontSize: fontSize.sm, color: colors.primary, marginVertical: 5 },
   takeawayChip: {
     alignSelf: 'flex-start',
     marginTop: 4,

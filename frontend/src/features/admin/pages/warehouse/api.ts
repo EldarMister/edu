@@ -107,6 +107,7 @@ export interface RecipeMetadata {
   outputQuantity?: number;
   outputUnit?: string;
   photoUrl?: string;
+  recipePortions?: number;
 }
 export interface Recipe {
   costKnown?: boolean;

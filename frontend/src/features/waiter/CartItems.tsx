@@ -58,7 +58,9 @@ export function CartLinesList({
                   )}
                 </button>
                 {(l.dish.hasModifiers || l.dish.allowIngredientExclusions || !!l.modifierSelections?.length || !!l.excludedIngredientIds?.length) && <button type="button" className="mt-1 text-xs text-primary" disabled={l.editAllowed === false || l.cancelAllowed === false} onClick={() => setModifierLine(l)}>Добавки и состав</button>}
-                {l.modifierSelections?.map((option) => <p key={option.optionId} className="text-sm text-text-secondary">+ {option.name} ×{option.quantity}</p>)}
+                {l.modifierSelections?.map((option) => <p key={option.optionId} className="text-sm text-text-secondary">
+                  {option.replacesIngredientName ? `${option.replacesIngredientName} → ${option.name}` : `+ ${option.name} ×${option.quantity}`}
+                </p>)}
                 {l.excludedIngredientNames?.map((name) => <p key={name} className="text-sm text-warning">Без {name}</p>)}
                 {/* Компактная метка «С собой» — только если позиция навынос. Тап снимает отметку. */}
                 {l.takeaway && onToggleTakeaway && (

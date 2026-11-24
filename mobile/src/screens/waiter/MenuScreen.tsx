@@ -13,8 +13,9 @@ import { makeIdempotencyKey, money } from '@/utils/format';
 import { apiError } from '@/lib/api';
 import { useConnectionStatus } from '@/services/socket';
 import { CartSheet } from './CartSheet';
+import { ModifierSheet } from './ModifierSheet';
 import { TablePickerSheet } from './TablePickerSheet';
-import type { Dish, DishVariant } from '@/types';
+import type { CartLine, Dish, DishVariant } from '@/types';
 
 export function MenuScreen() {
   const navigation = useNavigation<any>();
@@ -37,6 +38,7 @@ export function MenuScreen() {
   const [cartOpen, setCartOpen] = useState(false);
   const [tablePickerOpen, setTablePickerOpen] = useState(false);
   const [variantDish, setVariantDish] = useState<Dish | null>(null);
+  const [modifierTarget, setModifierTarget] = useState<{ line: CartLine; index?: number } | null>(null);
 
   const sortedCategories = useMemo(
     () => (categories.data ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder),
@@ -71,16 +73,22 @@ export function MenuScreen() {
     );
   }
 
+  function addPortion(dish: Dish, variant?: DishVariant) {
+    if (dish.isWeighted || dish.hasModifiers || dish.allowIngredientExclusions) {
+      setModifierTarget({ line: { dish, variant, quantity: 1 } });
+    } else cart.add(dish, variant);
+  }
+
   const onAddDish = (dish: Dish) => {
     if (dish.isSet) {
       cart.addLine(buildSetLine(dish));
       return;
     }
-    if (dish.variants && dish.variants.length > 0) {
+    if (!dish.isWeighted && dish.variants && dish.variants.length > 0) {
       setVariantDish(dish);
       return;
     }
-    cart.add(dish);
+    addPortion(dish);
   };
 
   const onSubmit = () => {
@@ -181,7 +189,7 @@ export function MenuScreen() {
                 ) : null}
                 <View style={styles.dishBottom}>
                   <Text style={styles.dishPrice}>
-                    {hasVariants ? `от ${money(unit)}` : money(unit)}
+                    {hasVariants ? `от ${money(unit)}` : money(unit)}{d.isWeighted && ` / ${d.weightedPriceBase ?? 1000} ${d.weightedMeasure === 'volume' ? 'мл' : 'г'}`}
                   </Text>
                   {active ? (
                     <Pressable
@@ -227,8 +235,9 @@ export function MenuScreen() {
       </View>
 
       <CartSheet
-        visible={cartOpen}
+        visible={cartOpen && !modifierTarget}
         onClose={() => setCartOpen(false)}
+        onEditModifiers={(line, index) => setModifierTarget({ line, index })}
         onSubmit={onSubmit}
         submitting={submitting}
         submitLabel={submitLabel}
@@ -238,10 +247,18 @@ export function MenuScreen() {
         dish={variantDish}
         onClose={() => setVariantDish(null)}
         onAdd={(variant) => {
-          if (variantDish) cart.add(variantDish, variant);
+          if (variantDish) addPortion(variantDish, variant);
           setVariantDish(null);
         }}
       />
+
+      {modifierTarget && <ModifierSheet line={modifierTarget.line} editing={modifierTarget.index !== undefined}
+        onClose={() => setModifierTarget(null)} onConfirm={(customization) => {
+          const { line, index } = modifierTarget;
+          if (index === undefined) cart.add(line.dish, line.variant, customization);
+          else cart.setCustomization(index, customization);
+          setModifierTarget(null);
+        }} />}
 
       <TablePickerSheet visible={tablePickerOpen} onClose={() => setTablePickerOpen(false)} />
     </SafeAreaView>

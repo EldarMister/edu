@@ -226,14 +226,19 @@ export function SegmentTabs<T extends string>({
 }
 
 /** Круглая кнопка ±, как в корзине PWA (dec красная, inc синяя). */
-export function RoundBtn({ kind, onPress }: { kind: 'inc' | 'dec'; onPress: () => void }) {
+export function RoundBtn({ kind, onPress, disabled = false, accessibilityLabel }: {
+  kind: 'inc' | 'dec'; onPress: () => void; disabled?: boolean; accessibilityLabel?: string;
+}) {
   const isDec = kind === 'dec';
   return (
     <Pressable
       onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       style={({ pressed }) => [
         styles.roundBtn,
-        { borderColor: isDec ? colors.red400 : colors.primary, opacity: pressed ? 0.6 : 1 },
+        { borderColor: isDec ? colors.red400 : colors.primary, opacity: disabled ? 0.4 : pressed ? 0.6 : 1 },
       ]}
     >
       <Text style={[styles.roundBtnText, { color: isDec ? colors.red500 : colors.primary }]}>

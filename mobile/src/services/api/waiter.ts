@@ -4,6 +4,7 @@ import type {
   Category,
   CartLine,
   Dish,
+  DishModifierConfiguration,
   Hall,
   Order,
   PaymentMethod,
@@ -31,6 +32,13 @@ export function useDishes() {
     queryKey: ['dishes'],
     queryFn: async () => (await api.get<Dish[]>('/dishes')).data,
     staleTime: 5 * 60_000,
+  });
+}
+
+export function useDishModifiers(dishId: string, variantId?: string) {
+  return useQuery({
+    queryKey: ['dish-modifiers', dishId, variantId],
+    queryFn: async ({ signal }) => (await api.get<DishModifierConfiguration>(`/dishes/${dishId}/modifiers`, { signal, params: { variantId } })).data,
   });
 }
 
@@ -102,6 +110,9 @@ function linesToItems(lines: CartLine[]) {
   return lines.map((l) => ({
     dishId: l.dish.id,
     variantId: l.variant?.id,
+    weightGrams: l.weightGrams,
+    modifierSelections: l.modifierSelections?.map(({ optionId, quantity }) => ({ optionId, quantity })),
+    excludedIngredientIds: l.excludedIngredientIds,
     quantity: l.quantity,
     comment: l.comment?.trim() || undefined,
     takeaway: l.takeaway || undefined,

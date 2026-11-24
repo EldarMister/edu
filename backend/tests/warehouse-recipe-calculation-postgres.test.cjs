@@ -54,7 +54,7 @@ test('PostgreSQL: recipe preview, saved card, and costing list use the same ware
       assert.deepEqual(preview.output, { amount: 190, unit: 'ml' });
       assert.equal(preview.items.find(({ ingredientId }) => ingredientId === cup.id).warehouseName, main.name);
       const smallNorm = await recipes.preview({ dishId: dish.id, items: [{ ingredientId: milk.id, amount: 0.02, unit: 'ml' }] });
-      assert.deepEqual([smallNorm.compositionFoodCost, smallNorm.compositionCostForScaling], [0, 0.004]);
+      assert.deepEqual([smallNorm.compositionFoodCost, smallNorm.compositionCostForScaling, smallNorm.items[0].lineCostForScaling], [0, 0.004, 0.004]);
       assert.equal(await db.recipeItem.count({ where: { dishId: dish.id } }), 0, 'preview does not save rows');
       assert.equal(await db.stockMovement.count(), 0, 'preview does not post stock');
 
@@ -68,6 +68,7 @@ test('PostgreSQL: recipe preview, saved card, and costing list use the same ware
       const zero = await recipes.getByDish(dish.id, empty.id);
       assert.deepEqual([zero.costKnown, zero.foodCost, zero.foodCostPercent, zero.markupPercent, zero.marginAmount, zero.marginPercent],
         [true, 0, null, null, 0, null]);
+      assert.equal(zero.output, null, 'the manual base output does not apply to an empty variant');
 
       const fromMain = await recipes.preview({ dishId: dish.id, prepStation: 'kitchen', items });
       assert.equal(fromMain.foodCost, 25);
@@ -104,7 +105,7 @@ test('PostgreSQL: recipe preview, saved card, and costing list use the same ware
       const readOnly = await previewController.preview({ dishId: dish.id, items }, { role: 'ADMIN', permissions: { sections: { warehouse: true }, readOnlySections: ['warehouse'] } });
       const masked = redactWarehouseCosts(readOnly);
       assert.deepEqual([masked.foodCost, masked.marginAmount, masked.markupPercent, masked.productionCost, masked.items[0].avgCost,
-        masked.compositionCostForScaling], [null, null, null, null, null, null]);
+        masked.compositionCostForScaling, masked.items[0].lineCostForScaling], [null, null, null, null, null, null, null]);
       assert.equal(masked.items[0].warehouseName, bar.name);
 
       await recipes.saveDraft(dish.id, { expectedVersion: firstDraft.recipe.version,

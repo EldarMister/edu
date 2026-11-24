@@ -27,7 +27,8 @@ export async function archiveDishRecipe(tx: Prisma.TransactionClient, dishId: st
     where: { dishId_version: { dishId, version: dish.recipeVersion } },
     create: { dishId, version: dish.recipeVersion, snapshot: JSON.parse(JSON.stringify({
       replacedBy: editor ? { id: editor.id, name: editor.name ?? null } : null,
-      modifierGroups: dish.modifierGroups, allowIngredientExclusions: dish.allowIngredientExclusions, metadata: dish.recipeMetadata,
+      modifierGroups: dish.modifierGroups, allowIngredientExclusions: dish.allowIngredientExclusions,
+      excludableIngredientIds: dish.excludableIngredientIds, metadata: dish.recipeMetadata,
       stockIngredientId: dish.stockIngredientId, stockAmount: dish.stockAmount, items: dish.recipeItems, variants,
       ingredientLabels: Object.fromEntries(labels),
       setComponents: dish.setComponents.map(({ dish, dishId, dishVariant, dishVariantId, id, quantity }) => ({

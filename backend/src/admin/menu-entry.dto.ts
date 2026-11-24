@@ -7,15 +7,18 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
 import { CreateDishDto, DishVariantDto } from './dto';
-import { RecipeItemInputDto, RecipeMetadataDto } from '../warehouse/recipes.dto';
+import { MAX_RECIPE_PORTIONS, RecipeItemInputDto, RecipeMetadataDto } from '../warehouse/recipes.dto';
 import { MenuModifiersDto } from '../warehouse/menu-modifiers';
 
 export class MenuRecipeDto {
+  @IsOptional() @IsInt() @Min(1) @Max(MAX_RECIPE_PORTIONS) inputPortions?: number;
+
   @IsOptional() @IsString() @MaxLength(160)
   producedStockIngredientId?: string | null;
 

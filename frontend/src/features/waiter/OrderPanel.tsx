@@ -291,7 +291,9 @@ export function OrderPanel({
               {cancellationRequested && !rejected && !cancelled && (
                 <p className="mt-1 text-xs font-medium text-warning">{t('Отмена запрошена')}</p>
               )}
-              {it.modifierSelections?.map((option) => <p key={option.optionId} className="mt-1 text-sm text-text-secondary">+ {option.name} ×{option.quantity}</p>)}
+              {it.modifierSelections?.map((option) => <p key={option.optionId} className="mt-1 text-sm text-text-secondary">
+                {option.replacesIngredientName ? `${option.replacesIngredientName} → ${option.name}` : `+ ${option.name} ×${option.quantity}`}
+              </p>)}
               {it.excludedIngredientNames?.map((name) => <p key={name} className="mt-1 text-sm text-warning">Без {name}</p>)}
               {hasExtra && (
                 <div className="mt-1.5 text-xs">

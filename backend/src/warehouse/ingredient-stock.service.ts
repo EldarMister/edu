@@ -122,6 +122,7 @@ export class IngredientStockService {
       const excludedIngredientIds = stored?.excludedIngredientIds ?? line.excludedIngredientIds;
       const modifiers = (Array.isArray(modifierSelections) ? modifierSelections : []) as ModifierSelectionSnapshot[];
       const exclusions = new Set(Array.isArray(excludedIngredientIds) ? excludedIngredientIds as string[] : []);
+      for (const modifier of modifiers) if (modifier.replacesIngredientId) exclusions.add(modifier.replacesIngredientId);
       recordedSnapshots.set(line.id!, { version: 1, recordedAt: new Date().toISOString(), dishId: parentDish.id,
         recipeVersion: parentDish.recipeVersion, variantId: line.dishVariantId ?? null, excludedIngredientIds: [...exclusions],
         modifierSelections: modifiers as unknown as Prisma.InputJsonValue });
@@ -157,7 +158,8 @@ export class IngredientStockService {
         .map((row) => ({ ...row, consumed: recipeAmount(row, serving.variantId).mul(multiplier), modifier: null as ModifierSelectionSnapshot | null }));
       for (const modifier of selectedModifiers) if (modifier.ingredientId) selectedRoots.push({ ingredientId: modifier.ingredientId,
         amount: new Prisma.Decimal(modifier.amount), warehouseId: modifier.warehouseId, fromCommonWarehouse: modifier.fromCommonWarehouse,
-        variantAmounts: null, consumed: new Prisma.Decimal(modifier.amount).mul(modifier.quantity).mul(line.quantity!), modifier } as typeof selectedRoots[number]);
+        variantAmounts: null, consumed: new Prisma.Decimal(modifier.amount).mul(modifier.quantity)
+          .mul(modifier.replacesIngredientId ? multiplier : line.quantity!), modifier } as typeof selectedRoots[number]);
       for (const row of selectedRoots) {
         const warehouse = row.warehouseId ? warehouseById.get(row.warehouseId) : row.fromCommonWarehouse ? null : route;
         if (row.warehouseId && !warehouse) throw new BadRequestException('Склад рецептуры недоступен');

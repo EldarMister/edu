@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { calculateSaleTaxes } from '../settings/order-taxes';
 import { getCafeId } from '../tenant/tenant-context';
 import { recipeAmount, RecipeResolver } from './recipe-resolution';
-import { processingStageResults, readProcessingStages, stagedNetAmount, volumeNetWeightForGross } from './recipe-processing';
+import { measuredNetWeightForGross, processingStageResults, readProcessingStages, stagedNetAmount } from './recipe-processing';
 import { assertUnitMatchesType, baseUnitForType, costUnitLabel, normalizeUnit, toBase, unitLabel, type UnitCode } from './units';
 import { getWarehouseBalance, type WarehouseLocation } from './warehouse-location';
 
@@ -120,10 +120,8 @@ export class RecipeCalculator {
   async composition(rows: readonly RecipeCostRow[], station: string, variantId?: string) {
     const value = emptyCalculation();
     const totalsByUnit = new Map<UnitCode, Prisma.Decimal>();
-    let totalGrams = zero;
-    let hasWeightedPiece = false;
-    let hasMeasuredVolume = false;
-    let allUsableInGrams = true;
+    let hasMeasuredWeight = false;
+    let countFallback: Prisma.Decimal | null = zero;
     const items = [];
     for (const row of rows) {
       const ingredient = row.ingredient;
@@ -156,20 +154,16 @@ export class RecipeCalculator {
       }
       const yieldAmount = net ?? configuredNet();
       const pieceWeight = ingredient.unitType === 'count' ? ingredient.pieceWeightGrams : null;
-      const pieceNetWeight = pieceWeight?.mul(yieldAmount) ?? null;
-      const measuredNetWeight = ingredient.unitType === 'volume' ? row.measuredNetWeightGrams : null;
-      const measuredVolumeWeight = volumeNetWeightForGross(measuredNetWeight, row.amount, amount);
-      const netWeight = measuredVolumeWeight ?? pieceNetWeight;
-      const outputUnit = measuredVolumeWeight == null ? baseUnit : 'g';
-      const outputAmount = measuredVolumeWeight ?? yieldAmount;
-      if (ingredient.kind !== 'consumable' && measuredVolumeWeight != null && amount.gt(0)) hasMeasuredVolume = true;
+      const manualWeight = ingredient.unitType === 'mass' ? null : row.measuredNetWeightGrams;
+      const measured = measuredNetWeightForGross(manualWeight, row.amount, amount);
+      const netWeight = measured ?? pieceWeight?.mul(yieldAmount) ?? null;
+      const outputUnit = netWeight == null ? baseUnit : 'g';
+      const outputAmount = netWeight ?? yieldAmount;
+      if (ingredient.kind !== 'consumable' && measured != null && amount.gt(0)) hasMeasuredWeight = true;
       if (outputAmount.gt(0) && ingredient.kind !== 'consumable') {
         totalsByUnit.set(outputUnit, (totalsByUnit.get(outputUnit) ?? zero).add(outputAmount));
-        if (outputUnit === 'g') totalGrams = totalGrams.add(outputAmount);
-        else if (pieceNetWeight != null) {
-          totalGrams = totalGrams.add(pieceNetWeight);
-          hasWeightedPiece = true;
-        } else allUsableInGrams = false;
+        // When every row is a piece and some weights are missing, the pieces still add up.
+        if (countFallback != null) countFallback = baseUnit === 'pcs' && measured == null ? countFallback.add(yieldAmount) : null;
       }
       const rowValue = invalidVariant || (amount.gt(0) && (invalidUnit || row.warehouseId && !warehouse))
         ? { ...emptyCalculation(), missing: new Set([ingredient.name]) }
@@ -184,7 +178,7 @@ export class RecipeCalculator {
         amountUnit: unit, unitType: ingredient.unitType, ingredientDisplayUnit: ingredient.displayUnit, amount: quantity(amount, unit),
         baseAmount: quantity(row.amount, unit), netAmount: net == null ? null : quantity(net, unit), lossPercent: Number(row.lossPercent),
         pieceWeightGrams: pieceWeight == null ? null : Number(pieceWeight),
-        measuredNetWeightGrams: measuredNetWeight == null ? null : quantity(measuredNetWeight, 'g'),
+        measuredNetWeightGrams: manualWeight == null ? null : quantity(manualWeight, 'g'),
         netWeightGrams: netWeight == null ? null : quantity(netWeight, 'g'),
         processingMethod: row.processingMethod, processingStages: stages, processingBasis: row.processingBasis ?? null,
         processingStageResults: processingStageResults(stages, amount, unit), variantAmounts: Object.fromEntries(
@@ -194,12 +188,13 @@ export class RecipeCalculator {
           })),
         costKnown, avgCost: unitCost == null ? null : Number(unitCost.mul(toBase(1, unit)).toDecimalPlaces(8)),
         costUnitLabel: costUnitLabel(unit), lineCost: costKnown ? money(rowValue.cost) : null,
+        lineCostForScaling: costKnown ? Number(rowValue.cost) : null,
         stock: balance ? quantity(balance.stock, unit) : null, isLow: !!balance && balance.stock.lte(ingredient.lowStockThreshold), isActive: ingredient.isActive });
     }
     const [one] = totalsByUnit;
-    const output = hasWeightedPiece && allUsableInGrams ? { amount: quantity(totalGrams, 'g'), unit: 'g' as const }
-      : totalsByUnit.size === 1 ? { amount: Number(one[1]), unit: one[0] }
-      : !totalsByUnit.size && hasMeasuredVolume ? { amount: 0, unit: 'g' as const } : null;
+    const output = totalsByUnit.size === 1 ? { amount: quantity(one[1], one[0]), unit: one[0] }
+      : countFallback?.gt(0) ? { amount: quantity(countFallback, 'pcs'), unit: 'pcs' as const }
+      : !totalsByUnit.size && hasMeasuredWeight ? { amount: 0, unit: 'g' as const } : null;
     return { items, value, output };
   }
 
@@ -220,7 +215,7 @@ export class RecipeCalculator {
 
 export function recipeOutput(metadata: unknown, fallback: { amount: number; unit: UnitCode } | null,
   rows: readonly Pick<RecipeCostRow, 'variantAmounts'>[] = [], variantId?: string) {
-  if (fallback && variantId && rows.some(({ variantAmounts }) => variantAmounts && typeof variantAmounts === 'object'
+  if (variantId && rows.some(({ variantAmounts }) => variantAmounts && typeof variantAmounts === 'object'
     && !Array.isArray(variantAmounts) && Object.prototype.hasOwnProperty.call(variantAmounts, variantId))) return fallback;
   if (!metadata || typeof metadata !== 'object' || !('outputQuantity' in metadata) || !('outputUnit' in metadata)) return fallback;
   const { outputQuantity: amount, outputUnit: unit } = metadata;

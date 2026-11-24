@@ -26,6 +26,7 @@ export function useRealtimeSync() {
     };
     const invalidateMenu = () => {
       qc.invalidateQueries({ queryKey: ['dishes'] });
+      qc.invalidateQueries({ queryKey: ['dish-modifiers'] });
       qc.invalidateQueries({ queryKey: ['categories'] });
     };
     const invalidateSettings = () => {

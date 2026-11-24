@@ -2,14 +2,17 @@ import { useId, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
-import { useIngredients } from './api';
-import { unitsForType } from './units';
+import { money } from '@/lib/format';
+import { useIngredients, type Ingredient } from './api';
+import { recipeQuantity } from './recipe-draft-values';
+import { ALL_UNITS, normalizeUnitLabel, unitsForType } from './units';
 
 export interface ModifierDraftOption {
   id?: string;
   name: string;
   price: number;
   ingredientId?: string | null;
+  replacesIngredientId?: string | null;
   amount?: number;
   unit?: string;
   fromCommonWarehouse?: boolean;
@@ -28,10 +31,13 @@ export interface ModifierDraftGroup {
 }
 export interface ModifierDraft {
   allowIngredientExclusions: boolean;
+  excludableIngredientIds?: string[] | null;
   groups: ModifierDraftGroup[];
 }
 
 type GroupSettings = Pick<ModifierDraftGroup, 'name' | 'minSelections' | 'maxSelections'>;
+type OptionEditor = { groupIndex: number; optionIndex?: number };
+type IngredientTarget = { id: string; name: string };
 
 function isSingleChoice(group: GroupSettings) {
   return group.minSelections === 1 && group.maxSelections === 1;
@@ -122,32 +128,129 @@ function ModifierGroupDialog({
   </Modal>;
 }
 
+function ModifierOptionDialog({ option, ingredients, targets, onClose, onSave }: {
+  option?: ModifierDraftOption;
+  ingredients: readonly Ingredient[];
+  targets: readonly IngredientTarget[];
+  onClose: () => void;
+  onSave: (option: ModifierDraftOption) => void;
+}) {
+  const formId = useId();
+  const [draft, setDraft] = useState(() => option ?? { name: '', price: 0 });
+  const [priceInput, setPriceInput] = useState(String(option?.price ?? 0));
+  const [amountInput, setAmountInput] = useState(String(option?.amount ?? 1));
+  const ingredient = ingredients.find(({ id }) => id === draft.ingredientId);
+  const unit = draft.unit ?? ingredient?.displayUnit ?? 'pcs';
+  const amount = Number(amountInput);
+  const price = Number(priceInput);
+  const factor = ALL_UNITS.find(({ code }) => code === unit)?.factor ?? 1;
+  const amountBase = Math.round(amount * factor * 1000) / 1000;
+  const canSave = !!draft.name.trim() && priceInput !== '' && Number.isFinite(price) && price >= 0 && price <= 1000000
+    && (!draft.ingredientId || (amountBase > 0 && amountBase < 100000000000));
+  const ingredientOptions = [
+    { value: '', label: 'Без списания' },
+    ...ingredients.map(({ id, name }) => ({ value: id, label: name })),
+    ...(draft.ingredientId && !ingredient ? [{ value: draft.ingredientId, label: 'Складская позиция недоступна' }] : []),
+  ];
+  const replacementOptions = targets.filter(({ id, name }) => id !== draft.ingredientId && !!name)
+    .map(({ id, name }) => ({ value: id, label: name }));
+  const unitOptions = unitsForType(ingredient?.unitType ?? 'count');
+
+  function patch(next: Partial<ModifierDraftOption>) {
+    setDraft((current) => ({ ...current, ...next }));
+  }
+
+  function chooseIngredient(id: string) {
+    const selected = ingredients.find((item) => item.id === id);
+    patch({ ingredientId: id || null, unit: selected?.displayUnit,
+      ...((!id || id === draft.replacesIngredientId) && { replacesIngredientId: null }) });
+    setAmountInput(id ? (Number(amountInput) ? amountInput : '1') : '0');
+  }
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (canSave) onSave({ ...draft, name: draft.name.trim(), price,
+      ...(draft.ingredientId && { amount, unit }),
+      ...(!draft.ingredientId && draft.ingredientId !== undefined && { amount: 0 }),
+    });
+  }
+
+  return <Modal open manageFocus title={option ? 'Редактирование модификатора' : 'Добавление модификатора'} onClose={onClose}
+    panelClassName="max-w-md" footer={<div className="flex flex-wrap justify-end gap-2">
+      <button type="button" className="btn-secondary btn-md" onClick={onClose}>Отмена</button>
+      <button type="submit" form={formId} className="btn-primary btn-md" disabled={!canSave}>
+        {option ? 'Применить' : 'Добавить модификатор'}
+      </button>
+    </div>}>
+    <form id={formId} className="space-y-3" onSubmit={submit}>
+      <label className="block text-sm text-text-secondary">
+        Название модификатора
+        <input className="input mt-1" data-dialog-initial-focus required maxLength={120} value={draft.name}
+          placeholder="Например, миндальное молоко" onChange={(event) => patch({ name: event.target.value })} />
+      </label>
+      <label className="block text-sm text-text-secondary">
+        Доплата, с
+        <input className="input mt-1" type="number" required min="0" max="1000000" step="0.01" value={priceInput}
+          onChange={(event) => setPriceInput(event.target.value)} />
+      </label>
+      <div className="space-y-1 text-sm text-text-secondary">
+        <span>Списывать со склада</span>
+        <Select searchable ariaLabel="Складская позиция модификатора" className="h-10 w-full"
+          value={draft.ingredientId ?? ''} options={ingredientOptions} onChange={chooseIngredient} />
+      </div>
+      {draft.ingredientId && <>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="text-sm text-text-secondary">
+            Расход
+            <input className="input mt-1" type="number" required min="0" step="any" value={amountInput}
+              onChange={(event) => setAmountInput(event.target.value)} />
+          </label>
+          <div className="space-y-1 text-sm text-text-secondary">
+            <span>Единица</span>
+            <Select ariaLabel="Единица расхода" className="h-10 w-full" value={unit}
+              onChange={(unit) => patch({ unit })} options={unitOptions.some(({ value }) => value === unit) ? unitOptions
+                : [{ value: unit, label: normalizeUnitLabel(unit) }, ...unitOptions]} />
+          </div>
+        </div>
+        {(replacementOptions.length > 0 || draft.replacesIngredientId) && <div className="space-y-1 text-sm text-text-secondary">
+          <span>Заменяемый ингредиент</span>
+          <Select ariaLabel="Заменяемый ингредиент" className="h-10 w-full" value={draft.replacesIngredientId ?? ''}
+            onChange={(id) => patch({ replacesIngredientId: id || null, ...(id && { maxQuantity: 1 }) })}
+            options={[{ value: '', label: 'Без замены' }, ...replacementOptions,
+              ...(draft.replacesIngredientId && !replacementOptions.some(({ value }) => value === draft.replacesIngredientId)
+                ? [{ value: draft.replacesIngredientId, label: 'Ингредиент недоступен' }] : []),
+            ]} />
+        </div>}
+      </>}
+    </form>
+  </Modal>;
+}
+
 export function ModifierDraftFields({
   value,
   onChange,
+  recipeIngredientIds = [],
 }: {
   value: ModifierDraft;
   onChange: (value: ModifierDraft) => void;
+  recipeIngredientIds?: readonly string[];
 }) {
   const [editedGroup, setEditedGroup] = useState<{ index: number } | 'new' | null>(null);
+  const [editedOption, setEditedOption] = useState<OptionEditor | null>(null);
+  const [editingExclusions, setEditingExclusions] = useState(false);
   const dialogTrigger = useRef<HTMLButtonElement | null>(null);
-  const ingredients = useIngredients('', undefined, value.groups.length > 0).data ?? [];
+  const ingredientsQuery = useIngredients('', undefined, value.groups.length > 0 || value.allowIngredientExclusions);
+  const ingredients = ingredientsQuery.data ?? [];
   const ingredientsById = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient]));
-  const ingredientOptions = [
-    { value: '', label: 'Без списания' },
-    ...ingredients.map((ingredient) => ({ value: ingredient.id, label: ingredient.name })),
-  ];
+  const recipeIds = [...new Set(recipeIngredientIds.filter(Boolean))];
+  const allowlist = value.excludableIngredientIds;
+  const eligible = allowlist == null ? recipeIds : recipeIds.filter((id) => allowlist.includes(id));
+  const exclusionOptions = recipeIds.map((id) => ({ id, name: ingredientsById.get(id)?.name ?? '' }));
   function group(index: number, patch: Partial<ModifierDraftGroup>) {
     onChange({
       ...value,
       groups: value.groups.map((item, i) => (i === index ? { ...item, ...patch } : item)),
-    });
-  }
-  function option(index: number, optionIndex: number, patch: Partial<ModifierDraftOption>) {
-    group(index, {
-      options: value.groups[index].options.map((item, i) =>
-        i === optionIndex ? { ...item, ...patch } : item,
-      ),
     });
   }
   function closeGroupDialog() {
@@ -156,18 +259,25 @@ export function ModifierDraftFields({
   }
   function saveGroup(settings: GroupSettings) {
     if (editedGroup === 'new') {
-      onChange({ ...value, groups: [...value.groups, { ...settings, options: [{ name: '', price: 0 }] }] });
+      onChange({ ...value, groups: [...value.groups, { ...settings, options: [] }] });
     } else if (editedGroup) {
       group(editedGroup.index, settings);
     }
     closeGroupDialog();
+  }
+  function saveOption(option: ModifierDraftOption) {
+    if (!editedOption) return;
+    const { groupIndex, optionIndex } = editedOption;
+    const options = value.groups[groupIndex].options;
+    group(groupIndex, { options: optionIndex == null ? [...options, option] : options.map((item, index) => index === optionIndex ? option : item) });
+    setEditedOption(null);
   }
   return (
     <section className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-lg font-semibold">Модификаторы</h3>
-          <p className="mt-1 text-sm text-text-muted">Добавки и варианты, которые выбирают при заказе.</p>
+          <p className="mt-1 text-sm text-text-muted">Добавки и исключения для заказа.</p>
         </div>
         <button type="button" className="btn-secondary btn-md" disabled={value.groups.length >= 30}
           onClick={(event) => {
@@ -208,109 +318,38 @@ export function ModifierDraftFields({
               </button>
             </div>
           </div>
-          {item.options.map((entry, optionIndex) => {
-            const ingredient = entry.ingredientId ? ingredientsById.get(entry.ingredientId) : undefined;
-            return (
-              <div
-                key={entry.id ?? optionIndex}
-                className="relative grid grid-cols-2 items-end gap-2 rounded-lg border border-border bg-card p-3 pr-10 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,.75fr)_minmax(0,1.25fr)_minmax(0,.65fr)_minmax(0,.65fr)]"
-              >
-                <label className="min-w-0 space-y-1 text-xs text-text-muted">
-                  <span className="block">Название модификатора</span>
-                  <input
-                    className="input"
-                    value={entry.name}
-                    maxLength={120}
-                    placeholder="Например, миндальное"
-                    onChange={(event) => option(index, optionIndex, { name: event.target.value })}
-                  />
-                </label>
-                <label className="min-w-0 space-y-1 text-xs text-text-muted">
-                  <span className="block">Доплата, с</span>
-                  <input
-                    aria-label={`Цена ${entry.name || optionIndex + 1}`}
-                    className="input"
-                    type="number"
-                    min="0"
-                    max="1000000"
-                    step="0.01"
-                    value={entry.price}
-                    onChange={(event) => option(index, optionIndex, { price: Number(event.target.value) })}
-                  />
-                </label>
-                <div className="col-span-2 min-w-0 space-y-1 lg:col-span-1">
-                  <span className="block text-xs text-text-muted">Списывать со склада</span>
-                  <Select
-                    className="h-11 w-full"
-                    ariaLabel={`Складская позиция ${entry.name || optionIndex + 1}`}
-                    value={entry.ingredientId ?? ''}
-                    onChange={(id) => {
-                      const selected = ingredientsById.get(id);
-                      option(index, optionIndex, {
-                        ingredientId: id || null,
-                        unit: selected?.displayUnit,
-                        amount: id ? entry.amount || 1 : 0,
-                      });
-                    }}
-                    options={ingredientOptions}
-                  />
+          {item.options.length > 0 && <ul className="divide-y divide-border border-t border-border">
+            {item.options.map((entry, optionIndex) => {
+              const ingredient = entry.ingredientId ? ingredientsById.get(entry.ingredientId) : undefined;
+              const replaces = entry.replacesIngredientId ? ingredientsById.get(entry.replacesIngredientId)?.name : undefined;
+              const label = entry.name || 'Модификатор ' + (optionIndex + 1);
+              const amount = entry.ingredientId ? recipeQuantity(entry.amount ?? 1, normalizeUnitLabel(entry.unit ?? ingredient?.displayUnit)) : null;
+              return <li key={entry.id ?? optionIndex} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2">
+                <div className="min-w-0 grow">
+                  <span className="block break-words text-sm font-medium">{label}</span>
+                  {amount && <p className="break-words text-xs text-text-muted">
+                    {entry.replacesIngredientId && ('Замена: ' + (replaces ?? 'Недоступная позиция') + ' → ')}
+                    {ingredient?.name ?? 'Недоступная позиция'} · {amount}
+                  </p>}
                 </div>
-                {entry.ingredientId && (
-                  <>
-                    <label className="min-w-0 space-y-1 text-xs text-text-muted">
-                      <span className="block">Расход</span>
-                      <input
-                        aria-label={`Расход ${entry.name || optionIndex + 1}`}
-                        className="input"
-                        type="number"
-                        min="0.001"
-                        step="any"
-                        value={entry.amount ?? 1}
-                        onChange={(event) => option(index, optionIndex, { amount: Number(event.target.value) })}
-                      />
-                    </label>
-                    <div className="min-w-0 space-y-1">
-                      <span className="block text-xs text-text-muted">Единица</span>
-                      <Select
-                        ariaLabel={`Единица ${entry.name || optionIndex + 1}`}
-                        className="h-11 w-full"
-                        value={entry.unit ?? ''}
-                        onChange={(unit) => option(index, optionIndex, { unit })}
-                        options={unitsForType(ingredient?.unitType ?? 'count')}
-                      />
-                    </div>
-                  </>
-                )}
-                <button
-                  type="button"
-                  className="btn-ghost absolute right-1 top-2 h-8 w-8 text-danger"
-                  aria-label={`Удалить добавку ${entry.name || optionIndex + 1}`}
-                  onClick={() =>
-                    group(index, {
-                      options: item.options.filter((_, i) => i !== optionIndex),
-                    })
-                  }
-                >
-                  ×
-                </button>
-              </div>
-            );
-          })}
-          <button
-            type="button"
-            className="btn-ghost btn-md text-primary"
-            disabled={item.options.length >= 100}
-            onClick={() =>
-              group(index, {
-                options: [...item.options, { name: '', price: 0 }],
-              })
-            }
-          >
-            + Добавить модификатор
-          </button>
+                <span className="text-sm text-text-secondary">{entry.price > 0 ? '+' + money(entry.price) : 'Без доплаты'}</span>
+                <div className="flex gap-1">
+                  <button type="button" className="btn-ghost h-8 px-2 text-primary"
+                    aria-label={'Изменить модификатор «' + label + '»'}
+                    onClick={() => setEditedOption({ groupIndex: index, optionIndex })}>Изменить</button>
+                  <button type="button" className="btn-ghost h-8 px-2 text-danger"
+                    aria-label={'Удалить модификатор «' + label + '»'}
+                    onClick={() => group(index, { options: item.options.filter((_, i) => i !== optionIndex) })}>×</button>
+                </div>
+              </li>;
+            })}
+          </ul>}
+          <button type="button" className="btn-ghost btn-md text-primary" disabled={item.options.length >= 100}
+            onClick={() => setEditedOption({ groupIndex: index })}>+ Добавить модификатор</button>
         </div>
       ))}
-      <label className="flex items-center gap-2 text-sm">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        <label className="flex items-center gap-2 text-sm">
         <input
           type="checkbox"
           checked={value.allowIngredientExclusions}
@@ -318,16 +357,60 @@ export function ModifierDraftFields({
             onChange({
               ...value,
               allowIngredientExclusions: event.target.checked,
+              excludableIngredientIds: event.target.checked ? value.excludableIngredientIds ?? [] : value.excludableIngredientIds,
             })
           }
         />
         Разрешить убрать ингредиент из порции
-      </label>
+        </label>
+        {value.allowIngredientExclusions && <button type="button" className="btn-ghost btn-md text-primary"
+          disabled={!recipeIds.length || ingredientsQuery.isPending}
+          onClick={(event) => { dialogTrigger.current = event.currentTarget; setEditingExclusions(true); }}>
+          Выбрать ингредиенты · {eligible.length}
+        </button>}
+      </div>
       {editedGroup && createPortal(
         <ModifierGroupDialog group={editedGroup === 'new' ? undefined : value.groups[editedGroup.index]}
           onClose={closeGroupDialog} onSave={saveGroup} />,
         document.body,
       )}
+      {editedOption && createPortal(<ModifierOptionDialog
+        option={editedOption.optionIndex == null ? undefined : value.groups[editedOption.groupIndex].options[editedOption.optionIndex]}
+        ingredients={ingredients} targets={exclusionOptions} onClose={() => setEditedOption(null)} onSave={saveOption} />,
+      document.body)}
+      {editingExclusions && createPortal(<ExclusionDialog options={exclusionOptions} selectedIds={eligible}
+        onClose={() => { setEditingExclusions(false); dialogTrigger.current?.focus({ preventScroll: true }); }}
+        onSave={(excludableIngredientIds) => {
+          onChange({ ...value, excludableIngredientIds });
+          setEditingExclusions(false);
+          dialogTrigger.current?.focus({ preventScroll: true });
+        }} />, document.body)}
     </section>
   );
+}
+
+function ExclusionDialog({ options, selectedIds, onClose, onSave }: {
+  options: readonly { id: string; name: string }[];
+  selectedIds: readonly string[];
+  onClose: () => void;
+  onSave: (ids: string[]) => void;
+}) {
+  const [selected, setSelected] = useState(selectedIds);
+  return <Modal open manageFocus title="Что можно убрать из порции" onClose={onClose} panelClassName="max-w-md"
+    footer={<div className="flex flex-wrap justify-end gap-2">
+      <button type="button" className="btn-secondary btn-md" onClick={onClose}>Отмена</button>
+      <button type="button" className="btn-primary btn-md" onClick={() => onSave(options.filter(({ id }) => selected.includes(id)).map(({ id }) => id))}>
+        Применить
+      </button>
+    </div>}>
+    <fieldset className="space-y-2.5 py-1">
+      <legend className="sr-only">Разрешённые исключения</legend>
+      <p className="text-sm text-text-muted">Исключение ингредиента не меняет цену блюда.</p>
+      {options.map(({ id, name }) => <label key={id} className="flex min-h-9 items-center gap-2 text-sm">
+        <input type="checkbox" checked={selected.includes(id)} disabled={!name && !selected.includes(id)}
+          onChange={(event) => setSelected((current) => event.target.checked ? [...current, id] : current.filter((entry) => entry !== id))} />
+        {name || 'Недоступная позиция'}
+      </label>)}
+    </fieldset>
+  </Modal>;
 }

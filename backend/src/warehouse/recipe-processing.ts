@@ -52,10 +52,10 @@ export function processingSnapshot(row: Pick<SavedProcessing, 'processingStages'
     ...(row.measuredNetWeightGrams != null ? { measuredNetWeightGrams: row.measuredNetWeightGrams.toString() } : {}) };
 }
 
-export function measuredVolumeNetWeight(unitType: UnitType, gross: Prisma.Decimal, input: number | null | undefined,
-  previous: Prisma.Decimal | null | undefined) {
-  if (unitType !== 'volume') {
-    if (input != null) throw new BadRequestException('Измеренное нетто в граммах доступно для объёмных ингредиентов');
+export function measuredNetWeight(unitType: UnitType, gross: Prisma.Decimal, input: number | null | undefined,
+  previous: Prisma.Decimal | null | undefined, inputPortions = 1) {
+  if (unitType !== 'volume' && unitType !== 'count') {
+    if (input != null) throw new BadRequestException('Измеренное нетто в граммах доступно для объёмных и штучных ингредиентов');
     return null;
   }
   if (input === null) return null;
@@ -64,12 +64,14 @@ export function measuredVolumeNetWeight(unitType: UnitType, gross: Prisma.Decima
     if (!Number.isFinite(input) || input < 0) throw new BadRequestException('Укажите неотрицательное нетто в граммах');
     weight = new Prisma.Decimal(input);
     if (weight.decimalPlaces() > 3 || weight.gte(100_000_000_000)) throw new BadRequestException('Укажите нетто в граммах с точностью до 0,001 г');
+    weight = weight.div(inputPortions).toDecimalPlaces(3);
+    if (input > 0 && weight.isZero()) throw new BadRequestException('Нетто на одну порцию меньше 0,001 г');
   }
   if (weight?.gt(0) && gross.isZero()) throw new BadRequestException('Укажите брутто больше нуля для положительного нетто в граммах');
   return weight;
 }
 
-export function volumeNetWeightForGross(measured: Prisma.Decimal | null, baseGross: Prisma.Decimal, gross: Prisma.Decimal) {
+export function measuredNetWeightForGross(measured: Prisma.Decimal | null, baseGross: Prisma.Decimal, gross: Prisma.Decimal) {
   if (measured == null) return null;
   if (baseGross.eq(gross)) return measured;
   if (gross.isZero()) return zero;

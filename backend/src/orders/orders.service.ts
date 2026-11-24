@@ -2841,7 +2841,7 @@ export class OrdersService {
       const existing = input.id && skipInventory ? await client.orderItem.findFirst({ where: { id: input.id, dishId: input.dishId } }) : null;
       const options = input.modifierSelections ?? (existing?.modifierSelections as { optionId: string; quantity: number }[] | null) ?? [];
       const exclusions = input.excludedIngredientIds ?? (existing?.excludedIngredientIds as string[] | null) ?? [];
-      return resolveMenuSelections(client, input.dishId, options, exclusions, existing ?? undefined);
+      return resolveMenuSelections(client, input.dishId, options, exclusions, existing ?? undefined, input.variantId);
     }));
     const itemsData = items.map((i, index): Prisma.OrderItemUncheckedCreateWithoutOrderInput => {
       const dish = byId.get(i.dishId);

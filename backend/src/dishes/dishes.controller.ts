@@ -13,7 +13,7 @@ export class DishesController {
   }
 
   @Get(':id/modifiers')
-  modifiers(@Param('id') id: string) { return this.dishes.modifiers(id); }
+  modifiers(@Param('id') id: string, @Query('variantId') variantId?: string) { return this.dishes.modifiers(id, variantId); }
 
   /** Фото блюда с долгим кэшем (URL версионируется по updatedAt). Публично — нужно QR-меню. */
   @Public()

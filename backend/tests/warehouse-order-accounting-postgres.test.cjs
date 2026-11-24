@@ -152,6 +152,50 @@ test('PostgreSQL: unified stock covers direct sales, recipes, production, stages
         assert.equal((await preparation.batch(batch.id)).items.recipe[0].measuredNetWeightGrams, '210');
       });
 
+      await t.test('batch recipe derives one sandwich and measured/manual yield leaves actual stock norms unchanged', async () => {
+        const [sausage, cheese, bread] = await Promise.all([
+          ingredients.create({ name: 'Колбаса для бутерброда', unit: 'pcs', pieceWeightGrams: 400, stock: 10, avgCost: 300 }),
+          ingredients.create({ name: 'Сыр для бутерброда', unit: 'pcs', pieceWeightGrams: 300, stock: 10, avgCost: 300 }),
+          ingredients.create({ name: 'Хлеб для бутерброда', unit: 'pcs', pieceWeightGrams: 300, stock: 10, avgCost: 40 }),
+        ]);
+        const menu = await dish('Бутерброд из рецептуры партии', { price: 150, taxExempt: true });
+        const large = await db.dishVariant.create({ data: { dishId: menu.id, name: 'С двойным сыром', price: 220 } });
+        const batch = [
+          { ingredientId: sausage.id, amount: 2, unit: 'pcs' },
+          { ingredientId: cheese.id, amount: 2, unit: 'pcs', variantAmounts: { [large.id]: 4 } },
+          { ingredientId: bread.id, amount: 4, unit: 'pcs' },
+        ];
+        const input = { dishId: menu.id, items: batch, inputPortions: 10 };
+        const preview = await recipes.preview(input);
+        assert.deepEqual([preview.foodCost, preview.foodCostPercent, preview.markupPercent, preview.marginAmount, preview.output],
+          [136, 90.67, 10.29, 14, { amount: 260, unit: 'g' }]);
+        assert.deepEqual([preview.compositionCostForScaling * 10, preview.output.amount * 10], [1360, 2600]);
+        assert.deepEqual(preview.items.map((row) => [row.amount, row.netWeightGrams, row.lineCost]), [[0.2, 80, 60], [0.2, 60, 60], [0.4, 120, 16]]);
+        await assert.rejects(recipes.preview({ ...input, items: [{ ...batch[0], amount: 0.001 }] }), /меньше допустимой точности/);
+
+        const measured = [batch[0], { ...batch[1], measuredNetWeightGrams: 400 }, batch[2]];
+        const measuredPreview = await recipes.preview({ ...input, items: measured });
+        assert.deepEqual([measuredPreview.items[1].measuredNetWeightGrams, measuredPreview.items[1].netWeightGrams,
+          measuredPreview.output.amount, measuredPreview.foodCost], [40, 40, 240, 136]);
+        const saved = await recipes.saveDraft(menu.id, { expectedVersion: 1, inputPortions: 10, items: measured,
+          metadata: { recipePortions: 10, outputQuantity: 250, outputUnit: 'g' } });
+        assert.deepEqual([saved.recipe.metadata.recipePortions, saved.recipe.output, saved.recipe.compositionOutput],
+          [10, { amount: 250, unit: 'g' }, { amount: 240, unit: 'g' }]);
+        const canonical = await db.recipeItem.findUniqueOrThrow({ where: { dishId_ingredientId: { dishId: menu.id, ingredientId: cheese.id } } });
+        assert.deepEqual([Number(canonical.amount), Number(canonical.measuredNetWeightGrams), Number(canonical.variantAmounts[large.id])], [0.2, 40, 0.4]);
+        const variant = await recipes.getByDish(menu.id, large.id);
+        assert.deepEqual([variant.foodCost, variant.output, variant.items.find(({ ingredientId }) => ingredientId === cheese.id).netWeightGrams],
+          [196, { amount: 280, unit: 'g' }, 80]);
+        assert.deepEqual(await Promise.all([sausage.id, cheese.id, bread.id].map((id) => balance(id))), [10, 10, 10]);
+        const sold = await order([{ dishId: menu.id, variantId: large.id, quantity: 1 }]);
+        const moves = await db.stockMovement.findMany({ where: { type: 'sale', sourceId: sold.id } });
+        assert.deepEqual(Object.fromEntries(moves.map(({ ingredientId, change }) => [ingredientId, Number(change)])),
+          { [sausage.id]: -0.2, [cheese.id]: -0.4, [bread.id]: -0.4 });
+        assert.equal(await db.stockMovement.count({ where: { type: 'writeoff', sourceId: sold.id } }), 0);
+        await orders.cancelOrder(sold.id, owner, 'Проверка возврата партии');
+        assert.deepEqual(await Promise.all([sausage.id, cheese.id, bread.id].map((id) => balance(id))), [10, 10, 10]);
+      });
+
       await t.test('three 200 ml drinks consume 600 ml at the bar and three cups from main', async () => {
         const liquid = await ingredients.create({ name: 'Лимонад', unit: 'l', kind: 'beverage', stock: 2, avgCost: 60, warehouseId: bar.id });
         const cup = await ingredients.create({ name: 'Стакан', unit: 'pcs', kind: 'consumable', stock: 20, avgCost: 3 });
@@ -410,6 +454,105 @@ test('PostgreSQL: unified stock covers direct sales, recipes, production, stages
         await orders.cancelOrder(ticket.id, owner, 'Остальное до готовки');
         assert.equal(await balance(cheese.id), 10000); assert.equal(await balance(onion.id), 2000);
         assert.ok((await recipes.revisions(menu.id)).some(row => row.snapshot.modifierGroups?.length));
+      });
+
+      await t.test('selected exclusions follow the serving variant, preserve sale price and consume only the chosen addition', async () => {
+        const bread = await ingredients.create({ name: 'Обязательный хлеб', unit: 'kg', stock: 3, avgCost: 100 });
+        const onion = await ingredients.create({ name: 'Лук по выбору', unit: 'kg', stock: 3, avgCost: 50 });
+        const extra = await ingredients.create({ name: 'Вне рецептуры', unit: 'kg', stock: 3, avgCost: 20 });
+        const menu = await dish('Порции с разрешёнными исключениями');
+        const small = await db.dishVariant.create({ data: { dishId: menu.id, name: 'Без лука по норме', price: 300 } });
+        const large = await db.dishVariant.create({ data: { dishId: menu.id, name: 'Большая с луком', price: 500 } });
+        await recipes.addItem(menu.id, { ingredientId: bread.id, amount: 100, unit: 'g' });
+        await recipes.addItem(menu.id, { ingredientId: onion.id, amount: 30, unit: 'g', variantAmounts: { [small.id]: 0 } });
+        const modifiers = new MenuModifiersService(db);
+        const groups = [{ name: 'Добавка отдельно', options: [{ name: 'Дополнительный лук', price: 20,
+          ingredientId: onion.id, amount: 5, unit: 'g', maxQuantity: 2 }] }];
+        assert.deepEqual((await modifiers.save(menu.id, { allowIngredientExclusions: true, groups: [] })).excludableIngredients.map(({ id }) => id).sort(),
+          [bread.id, onion.id].sort());
+        await assert.rejects(modifiers.save(menu.id, { allowIngredientExclusions: true, excludableIngredientIds: [extra.id], groups: [] }), /входят в состав/);
+        const config = await modifiers.save(menu.id, { allowIngredientExclusions: true, excludableIngredientIds: [onion.id], groups });
+        assert.deepEqual(config.excludableIngredientIds, [onion.id]);
+        assert.deepEqual((await modifiers.get(menu.id, true, small.id)).excludableIngredients, []);
+        assert.deepEqual((await modifiers.get(menu.id, true, large.id)).excludableIngredients.map(({ id }) => id), [onion.id]);
+        assert.equal((await modifiers.get(menu.id, true, large.id)).excludableIngredientIds, undefined);
+        const base = { dishId: menu.id, quantity: 1 };
+        await assert.rejects(order([{ ...base, variantId: large.id, excludedIngredientIds: [bread.id] }]), /Нельзя исключить/);
+        await assert.rejects(order([{ ...base, variantId: small.id, excludedIngredientIds: [onion.id] }]), /Нельзя исключить/);
+        const selected = { ...base, variantId: large.id, excludedIngredientIds: [onion.id] };
+        const withoutOnion = await order([selected]);
+        assert.equal(Number(withoutOnion.items[0].finalPrice), 500);
+        assert.deepEqual(withoutOnion.items[0].excludedIngredientNames, ['Лук по выбору']);
+        assert.equal(await db.stockMovement.count({ where: { sourceId: withoutOnion.id, ingredientId: onion.id, type: 'sale' } }), 0);
+        const withAddition = await order([{ ...selected, modifierSelections: [{ optionId: config.groups[0].options[0].id, quantity: 2 }] }]);
+        assert.equal(Number(withAddition.items[0].finalPrice), 540);
+        const onionSales = await db.stockMovement.findMany({ where: { sourceId: withAddition.id, ingredientId: onion.id, type: 'sale' } });
+        assert.deepEqual(onionSales.map((movement) => Number(movement.change)), [-10]);
+        assert.equal(onionSales[0].recipeSnapshot.kind, 'modifier');
+        const disabled = await modifiers.save(menu.id, { allowIngredientExclusions: true, excludableIngredientIds: [], groups: [] });
+        assert.deepEqual(disabled.excludableIngredients, []);
+        await assert.rejects(order([selected]), /Нельзя исключить/);
+      });
+
+      await t.test('direct substitutions use a selected variant, one base removal and the configured replacement quantity and price', async () => {
+        const onion = await ingredients.create({ name: 'Исходный лук для замены', unit: 'kg', stock: 3, avgCost: 50 });
+        const peppers = await ingredients.create({ name: 'Перец для замены', unit: 'kg', stock: 3, avgCost: 80 });
+        const tomato = await ingredients.create({ name: 'Томат для замены', unit: 'kg', stock: 3, avgCost: 70 });
+        const menu = await dish('Техкарта с заменой ингредиента');
+        const large = await db.dishVariant.create({ data: { dishId: menu.id, name: 'Большая с луком', price: 500 } });
+        const small = await db.dishVariant.create({ data: { dishId: menu.id, name: 'Малая без лука', price: 300 } });
+        await recipes.addItem(menu.id, { ingredientId: onion.id, amount: 30, unit: 'g', variantAmounts: { [small.id]: 0 } });
+        const service = new MenuModifiersService(db);
+        const replacementOptions = [
+          { name: 'Перец', ingredientId: peppers.id, replacesIngredientId: onion.id, amount: 20, unit: 'g', price: 25, maxQuantity: 3 },
+          { name: 'Томат', ingredientId: tomato.id, replacesIngredientId: onion.id, amount: 15, unit: 'g', price: 10 },
+        ];
+        await assert.rejects(service.save(menu.id, { allowIngredientExclusions: false,
+          groups: [{ name: 'Замена лука', minSelections: 2, options: replacementOptions }] }), /Недостаточно доступных добавок/);
+        const config = await service.save(menu.id, { allowIngredientExclusions: false,
+          groups: [{ name: 'Замена лука', minSelections: 1, options: replacementOptions }] });
+        const [pepperOption, tomatoOption] = config.groups[0].options;
+        assert.equal(pepperOption.maxQuantity, 1);
+        assert.equal(pepperOption.replacesIngredientName, 'Исходный лук для замены');
+        const smallGroup = (await service.get(menu.id, true, small.id)).groups[0];
+        assert.equal(smallGroup.minSelections, 0);
+        assert.deepEqual(smallGroup.options, []);
+        assert.equal((await service.get(menu.id, true, large.id)).groups[0].minSelections, 1);
+        assert.deepEqual((await service.get(menu.id, true, large.id)).groups[0].options.map(({ replacesIngredientId }) => replacesIngredientId), [onion.id, onion.id]);
+        const selected = { dishId: menu.id, variantId: large.id, quantity: 2, modifierSelections: [{ optionId: pepperOption.id, quantity: 1 }] };
+        const smallOrder = await order([{ dishId: menu.id, variantId: small.id, quantity: 1 }]);
+        assert.equal(Number(smallOrder.items[0].finalPrice), 300);
+        await assert.rejects(order([{ dishId: menu.id, variantId: large.id, quantity: 1 }]), /количество добавок/);
+        await assert.rejects(order([{ ...selected, variantId: small.id }]), /замена|заменить/i);
+        await assert.rejects(order([{ ...selected, modifierSelections: [...selected.modifierSelections, { optionId: tomatoOption.id, quantity: 1 }] }]), /один раз/);
+        const ticket = await order([selected]);
+        assert.equal(Number(ticket.items[0].finalPrice), 1050);
+        assert.deepEqual(ticket.items[0].excludedIngredientIds, []);
+        assert.equal(ticket.items[0].modifierSelections[0].replacesIngredientId, onion.id);
+        assert.equal(await balance(onion.id), 3000);
+        assert.equal(await balance(peppers.id), 2960);
+        const movements = await db.stockMovement.findMany({ where: { sourceId: ticket.id, type: 'sale' } });
+        assert.deepEqual(movements.map(({ ingredientId, change }) => [ingredientId, Number(change)]), [[peppers.id, -40]]);
+        await orders.cancelOrder(ticket.id, owner, 'Замена отменена до готовки');
+        assert.deepEqual([await balance(onion.id), await balance(peppers.id)], [3000, 3000]);
+      });
+
+      await t.test('weighted substitutions scale stock with base recipe while ordinary additions and surcharges remain per portion', async () => {
+        const raw = await ingredients.create({ name: 'Сырьё весового блюда', unit: 'kg', stock: 3, avgCost: 50 });
+        const replacement = await ingredients.create({ name: 'Замена в весовом блюде', unit: 'kg', stock: 3, avgCost: 70 });
+        const menu = await dish('Весовое блюдо с заменой', { price: 500, isWeighted: true, weightedPriceBase: 1000 });
+        await recipes.addItem(menu.id, { ingredientId: raw.id, amount: 100, unit: 'g' });
+        const config = await new MenuModifiersService(db).save(menu.id, { allowIngredientExclusions: false, groups: [{ name: 'Дополнительно', options: [
+          { name: 'Замена', ingredientId: replacement.id, replacesIngredientId: raw.id, amount: 40, unit: 'g', price: 25 },
+          { name: 'Добавка отдельно', ingredientId: replacement.id, amount: 5, unit: 'g', price: 2 },
+        ] }] });
+        const ticket = await order([{ dishId: menu.id, weightGrams: 250, quantity: 2,
+          modifierSelections: config.groups[0].options.map(({ id }) => ({ optionId: id, quantity: 1 })) }]);
+        assert.equal(Number(ticket.items[0].finalPrice), 304);
+        assert.deepEqual([await balance(raw.id), await balance(replacement.id)], [3000, 2970]);
+        const [movement] = await db.stockMovement.findMany({ where: { sourceId: ticket.id, type: 'sale' } });
+        assert.equal(Number(movement.change), -30);
+        assert.deepEqual(movement.recipeSnapshot.parts.map(({ amount }) => Number(amount)).sort((a, b) => a - b), [10, 20]);
       });
 
       await t.test('modifier validation rejects foreign options, forbidden exclusions, repeats and required selections', async () => {

@@ -87,6 +87,11 @@ export interface Dish {
   unit?: string;
   prepStation?: PrepStation | null;
   isSet?: boolean;
+  isWeighted?: boolean;
+  weightedPriceBase?: number;
+  weightedMeasure?: 'weight' | 'volume';
+  hasModifiers?: boolean;
+  allowIngredientExclusions?: boolean;
   setComponents?: SetComponentDef[];
   variants: DishVariant[];
 }
@@ -181,6 +186,8 @@ export interface OrderItem {
   rejectionDecision?: RejectionDecision | null;
   replacementForItemId?: string | null;
   setComponents?: OrderSetComponent[];
+  modifierSelections?: ModifierSelection[];
+  excludedIngredientNames?: string[];
 }
 
 export interface Order {
@@ -234,9 +241,29 @@ export interface CartSetComponent {
 export interface CartLine {
   dish: Dish;
   variant?: DishVariant;
+  weightGrams?: number;
+  modifierSelections?: ModifierSelection[];
+  excludedIngredientIds?: string[];
+  excludedIngredientNames?: string[];
   quantity: number;
   comment?: string;
   takeaway?: boolean;
   lineId?: string;
   set?: { components: CartSetComponent[] };
+}
+
+export interface ModifierSelection {
+  optionId: string;
+  name: string;
+  quantity: number;
+  price: string | number;
+  replacesIngredientName?: string;
+}
+
+export type CartCustomization = Pick<CartLine, 'modifierSelections' | 'excludedIngredientIds' | 'excludedIngredientNames' | 'weightGrams'>;
+
+export interface DishModifierConfiguration {
+  groups: { id: string; name: string; minSelections: number; maxSelections: number | null;
+    options: { id: string; name: string; price: number; maxQuantity: number; replacesIngredientId?: string; replacesIngredientName?: string }[] }[];
+  excludableIngredients: { id: string; name: string }[];
 }

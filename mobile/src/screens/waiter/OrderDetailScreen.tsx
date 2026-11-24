@@ -18,6 +18,7 @@ import {
 } from '@/services/api/waiter';
 import { apiError } from '@/lib/api';
 import { displayOrderNumber, hallSuffix, money } from '@/utils/format';
+import { orderCustomizationText } from '@/utils/order-customization';
 import { PaymentSheet } from './PaymentSheet';
 import type { Order, OrderItem } from '@/types';
 
@@ -161,12 +162,16 @@ function ItemCard({ item }: { item: OrderItem }) {
     : item.dishNameSnapshot;
   const done = item.status === 'ready' || item.status === 'served';
   const rejected = item.status === 'rejected' || item.status === 'cancelled';
+  const customization = orderCustomizationText(item);
   return (
     <View style={styles.itemCard}>
-      <Text style={[styles.itemName, rejected && styles.itemRejectedName]} numberOfLines={2}>
-        {name}
-        {item.takeaway ? '  · с собой' : ''}
-      </Text>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[styles.itemName, rejected && styles.itemRejectedName]} numberOfLines={2}>
+          {name}
+          {item.takeaway ? '  · с собой' : ''}
+        </Text>
+        {!!customization && <Text style={styles.itemCustomization}>{customization}</Text>}
+      </View>
       <Text style={styles.itemQty}>×{item.quantity}</Text>
       <View style={styles.itemRight}>
         <Text style={styles.itemPrice}>{money(item.finalPrice)}</Text>
@@ -206,7 +211,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.lg,
   },
-  itemName: { flex: 1, fontSize: fontSize.md, color: colors.textPrimary },
+  itemName: { fontSize: fontSize.md, color: colors.textPrimary },
+  itemCustomization: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: 3 },
   itemRejectedName: { color: colors.danger, textDecorationLine: 'line-through' },
   itemQty: { fontSize: fontSize.base, color: colors.textMuted },
   itemRight: { alignItems: 'flex-end', gap: 2, minWidth: 72 },

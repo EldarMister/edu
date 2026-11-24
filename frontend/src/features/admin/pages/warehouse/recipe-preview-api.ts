@@ -14,6 +14,7 @@ export interface RecipePreviewInput {
   taxExempt?: boolean;
   producedStockIngredientId?: string | null;
   weightedPriceBase?: number;
+  inputPortions?: number;
   metadata?: Pick<RecipeMetadata, 'outputQuantity' | 'outputUnit'>;
   items: (Omit<RecipeRowInput, 'netAmount'> & { ingredientId: string; netAmount?: number | null })[];
 }
@@ -31,9 +32,11 @@ export interface RecipePreview {
     amountUnit: UnitCode;
     avgCost: number | null;
     lineCost: number | null;
+    lineCostForScaling?: number | null;
   }[];
   stockItem: { id: string; name: string; unit: UnitCode; amount: number; warehouseName: string; kind: string } | null;
   output: { amount: number; unit: UnitCode } | null;
+  compositionOutput?: { amount: number; unit: UnitCode } | null;
   accountingConfigured: boolean;
   foodCost: number | null;
   compositionFoodCost: number | null;

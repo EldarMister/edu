@@ -3,6 +3,8 @@ import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsNumber, Is
 import { MenuModifiersDto } from './menu-modifiers';
 import { ProcessingOptionsDto } from './recipe-processing.dto';
 
+export const MAX_RECIPE_PORTIONS = 10000;
+
 export class RecipeItemUpdateDto extends ProcessingOptionsDto {
   @IsNumber() @Min(0) amount: number;
   @IsOptional() @IsString() @MaxLength(16) unit?: string;
@@ -17,6 +19,7 @@ export class RecipeItemInputDto extends RecipeItemUpdateDto {
 
 export class RecipeMetadataDto {
   @IsOptional() @IsString() @MaxLength(12000) instructions?: string;
+  @IsOptional() @IsInt() @Min(1) @Max(MAX_RECIPE_PORTIONS) recipePortions?: number;
   @IsOptional() @IsNumber() @Min(0.001) outputQuantity?: number;
   @IsOptional() @IsString() @MaxLength(16) outputUnit?: string;
   @IsOptional() @IsString() @MaxLength(2000) photoUrl?: string;
@@ -33,6 +36,7 @@ export class RecipeSettingsDto {
 /** Warehouse staff may change the recipe, never the menu's price/name/category. */
 export class RecipeDraftDto {
   @IsInt() @Min(1) expectedVersion: number;
+  @IsOptional() @IsInt() @Min(1) @Max(MAX_RECIPE_PORTIONS) inputPortions?: number;
   @IsArray() @ArrayMaxSize(200) @ValidateNested({ each: true }) @Type(() => RecipeItemInputDto)
   items: RecipeItemInputDto[];
   @IsOptional() @ValidateNested() @Type(() => RecipeMetadataDto) metadata?: RecipeMetadataDto;
@@ -40,6 +44,7 @@ export class RecipeDraftDto {
 }
 
 export class RecipePreviewDto {
+  @IsOptional() @IsInt() @Min(1) @Max(MAX_RECIPE_PORTIONS) inputPortions?: number;
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160) dishId?: string;
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160) categoryId?: string;
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160) prepStation?: string | null;

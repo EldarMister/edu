@@ -1,10 +1,16 @@
 import { create } from 'zustand';
-import type { CartLine, Dish, DishVariant } from '@/types';
+import type { CartCustomization, CartLine, Dish, DishVariant } from '@/types';
 
 /** Цена линии с учётом варианта и количества. */
 export function linePrice(line: CartLine): number {
   const base = Number(line.variant?.price ?? line.dish.price);
-  return base * line.quantity;
+  const baseAmount = line.dish.isWeighted && line.weightGrams ? base * line.weightGrams / (line.dish.weightedPriceBase || 1000) : base;
+  const additions = (line.modifierSelections ?? []).reduce((sum, option) => sum + Number(option.price) * option.quantity, 0);
+  const unit = baseAmount + additions;
+  const rate = Number(line.dish.discountValue) || 0;
+  const discount = !line.set && line.dish.discountType === 'percent' ? unit * rate / 100
+    : !line.set && line.dish.discountType === 'fixed' ? rate : 0;
+  return Math.round(Math.max(0, unit - Math.max(0, discount)) * line.quantity * 100) / 100;
 }
 
 interface CartState {
@@ -19,8 +25,9 @@ interface CartState {
   selectTable: (table: { id: string; number: number; hallName?: string }, activeOrderId?: string | null) => void;
   clearTable: () => void;
   setOrderComment: (comment: string) => void;
-  add: (dish: Dish, variant?: DishVariant) => void;
+  add: (dish: Dish, variant?: DishVariant, customization?: CartCustomization) => void;
   addLine: (line: CartLine) => void;
+  setCustomization: (index: number, customization: CartCustomization) => void;
   setQuantity: (index: number, quantity: number) => void;
   setComment: (index: number, comment: string) => void;
   setTakeaway: (index: number, takeaway: boolean) => void;
@@ -31,8 +38,10 @@ interface CartState {
 }
 
 /** Ключ слияния обычных позиций (сеты не сливаются — у них lineId). */
-function sameLine(a: CartLine, dish: Dish, variant?: DishVariant): boolean {
-  return !a.set && a.dish.id === dish.id && a.variant?.id === variant?.id;
+function customizationKey(value: CartCustomization) {
+  const options = (value.modifierSelections ?? []).map(({ optionId, quantity }) => [optionId, quantity] as const)
+    .sort(([left], [right]) => left.localeCompare(right));
+  return JSON.stringify([value.weightGrams ?? null, options, [...(value.excludedIngredientIds ?? [])].sort()]);
 }
 
 export const useCart = create<CartState>((set, get) => ({
@@ -55,17 +64,21 @@ export const useCart = create<CartState>((set, get) => ({
   clearTable: () =>
     set({ tableId: null, tableNumber: null, hallName: null, activeOrderId: null, lines: [], comment: '' }),
   setOrderComment: (comment) => set({ comment }),
-  add: (dish, variant) =>
+  add: (dish, variant, customization = {}) =>
     set((s) => {
-      const idx = s.lines.findIndex((l) => sameLine(l, dish, variant));
+      const key = customizationKey(customization);
+      const idx = s.lines.findIndex((line) => !line.set && line.dish.id === dish.id && line.variant?.id === variant?.id && customizationKey(line) === key);
       if (idx >= 0) {
         const lines = [...s.lines];
         lines[idx] = { ...lines[idx], quantity: lines[idx].quantity + 1 };
         return { lines };
       }
-      return { lines: [...s.lines, { dish, variant, quantity: 1 }] };
+      return { lines: [...s.lines, { dish, variant, quantity: 1, ...customization }] };
     }),
   addLine: (line) => set((s) => ({ lines: [...s.lines, line] })),
+  setCustomization: (index, customization) => set((s) => ({
+    lines: s.lines.map((line, i) => index === i ? { ...line, ...customization } : line),
+  })),
   setQuantity: (index, quantity) =>
     set((s) => {
       if (quantity <= 0) return { lines: s.lines.filter((_, i) => i !== index) };

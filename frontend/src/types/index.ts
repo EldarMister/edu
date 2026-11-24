@@ -445,4 +445,4 @@ export interface AppNotification {
   durationMs?: number;
 }
 
-export interface MenuModifierSelection { optionId: string; quantity: number; name: string; price: string | number; }
+export interface MenuModifierSelection { optionId: string; quantity: number; name: string; price: string | number; replacesIngredientName?: string; }

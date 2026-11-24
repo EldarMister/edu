@@ -399,6 +399,7 @@ export class MenuEntryService {
               mappedRow,
               existing,
               ingredient.processingLosses,
+              { inputPortions: dto.recipe.inputPortions },
             );
             await tx.recipeItem.upsert({
               where: {

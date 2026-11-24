@@ -32,6 +32,7 @@ import { SERVER_EVENTS } from '@/services/socket/events';
 import { useAuth } from '@/store/auth';
 import { disconnectSocket } from '@/services/socket';
 import { unregisterPushDevice } from '@/services/push';
+import { orderCustomizationText } from '@/utils/order-customization';
 import { displayOrderNumber, hallSuffix, timeHM, dateDM, elapsed } from '@/utils/format';
 import { apiError } from '@/lib/api';
 import type { Order, OrderItem, PrepStation } from '@/types';
@@ -198,6 +199,7 @@ function KitchenCard({
     const checked = selected.has(item.id);
     const rejected = item.status === 'rejected';
     const isReady = item.status === 'ready' || item.status === 'served';
+    const customization = isComponent ? '' : orderCustomizationText(item);
     return (
       <Pressable
         key={item.id}
@@ -210,7 +212,7 @@ function KitchenCard({
             {checked ? <Ionicons name="checkmark" size={13} color={colors.white} /> : null}
           </View>
         ) : null}
-        <Text
+        <View style={{ flex: 1, minWidth: 0 }}><Text
           style={[
             styles.itemText,
             isComponent && styles.itemComponent,
@@ -223,6 +225,7 @@ function KitchenCard({
           {item.dishVariantNameSnapshot ? ` (${item.dishVariantNameSnapshot})` : ''}
           {item.takeaway ? '  · с собой' : ''}
         </Text>
+        {!!customization && <Text style={styles.itemCustomization}>{customization}</Text>}</View>
         {isReady ? <Text style={styles.itemFlagDone}>✓</Text> : null}
         {rejected ? <Text style={styles.itemFlagRej}>Отказ</Text> : null}
       </Pressable>
@@ -266,6 +269,7 @@ function KitchenCard({
                 <Text style={styles.itemQty}>{it.quantity}× </Text>
                 {it.dishNameSnapshot}
               </Text>
+                {!!orderCustomizationText(it) && <Text style={styles.itemCustomization}>{orderCustomizationText(it)}</Text>}
               <View style={styles.setComponents}>
                 {setParts
                   .filter((sc) => sc.action !== 'removed')
@@ -361,7 +365,8 @@ const styles = StyleSheet.create({
     paddingTop: spacing.lg,
   },
   itemRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  itemText: { flex: 1, fontSize: fontSize.base, color: colors.textPrimary },
+  itemText: { fontSize: fontSize.base, color: colors.textPrimary },
+  itemCustomization: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: 3 },
   itemQty: { fontWeight: '700' },
   itemComponent: { fontSize: fontSize.sm, color: colors.textSecondary },
   itemRejected: { color: colors.danger, textDecorationLine: 'line-through' },

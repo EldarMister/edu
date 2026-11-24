@@ -628,6 +628,7 @@ model Dish {
   recipeMetadata Json? @map("recipe_metadata")
   stockIngredient Ingredient? @relation("DirectStockIngredient", fields: [stockIngredientId], references: [id], onDelete: Restrict)
   allowIngredientExclusions Boolean @default(false) @map("allow_ingredient_exclusions")
+  excludableIngredientIds Json? @map("excludable_ingredient_ids")
   modifierGroups MenuModifierGroup[]
   recipeRevisions RecipeRevision[]
   recipeItems        RecipeItem[]
@@ -1820,6 +1821,7 @@ model MenuModifierOption {
   name String
   price Decimal @default(0) @db.Decimal(10,2)
   ingredientId String? @map("ingredient_id")
+  replacesIngredientId String? @map("replaces_ingredient_id")
   amount Decimal @default(0) @db.Decimal(14,3)
   amountUnit String @default("pcs") @map("amount_unit")
   fromCommonWarehouse Boolean @default(false) @map("from_common_warehouse")

@@ -12,7 +12,8 @@ export function exportCsv(title: string, headings: string[], rows: string[][]) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function printReport(title: string, caption: string, headings: string[], rows: string[][]) {
+export function printReport(title: string, caption: string, headings: string[], rows: string[][],
+  notes?: { title: string; text: string }) {
   const target = window.open('', '_blank', 'width=1000,height=730');
   if (!target) return false;
   target.opener = null;
@@ -42,6 +43,14 @@ export function printReport(title: string, caption: string, headings: string[], 
     for (const value of data) row.insertCell().textContent = value;
   }
   doc.body.append(table);
+  if (notes?.text.trim()) {
+    const heading = doc.createElement('h2');
+    heading.textContent = notes.title;
+    const content = doc.createElement('p');
+    content.textContent = notes.text;
+    content.style.whiteSpace = 'pre-wrap';
+    doc.body.append(heading, content);
+  }
   target.addEventListener('afterprint', () => target.close(), { once: true });
   target.focus();
   target.print();

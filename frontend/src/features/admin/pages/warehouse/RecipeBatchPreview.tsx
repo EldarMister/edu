@@ -9,15 +9,24 @@ export function RecipeBatchPreview({ preview, pending, showCosts }: {
   pending: boolean;
   showCosts: boolean;
 }) {
+  return <details className="rounded-xl border border-border bg-background px-4 py-3">
+    <summary className="cursor-pointer font-medium">Расчёт партии</summary>
+    <div className="mt-3"><RecipeBatchPanel preview={preview} pending={pending} showCosts={showCosts} /></div>
+  </details>;
+}
+
+export function RecipeBatchPanel({ preview, pending, showCosts }: {
+  preview?: RecipePreview;
+  pending: boolean;
+  showCosts: boolean;
+}) {
   const [value, setValue] = useState('1');
   const portions = Number(value);
   const valid = Number.isSafeInteger(portions) && portions > 0;
   const { items, output, compositionFoodCost, compositionCostForScaling } = preview ?? {};
   const batchCost = compositionCostForScaling ?? compositionFoodCost;
 
-  return <details className="rounded-xl border border-border bg-background px-4 py-3">
-    <summary className="cursor-pointer font-medium">Расчёт партии</summary>
-    <div className="mt-3 space-y-4 text-sm">
+  return <div className="space-y-4 text-sm">
       <label className="flex flex-wrap items-center gap-x-3 gap-y-1">
         Количество порций
         <input type="number" min={1} max={Number.MAX_SAFE_INTEGER} step={1} inputMode="numeric" value={value}
@@ -50,6 +59,5 @@ export function RecipeBatchPreview({ preview, pending, showCosts }: {
             </tbody>
           </table>
         </>}
-    </div>
-  </details>;
+  </div>;
 }
