@@ -189,7 +189,8 @@ export function addInvoicePage(preview: InvoicePreview, text: string, tsv: strin
     return has(headerNames.name) && has(headerNames.quantity) && (has(headerNames.price) || has(headerNames.total));
   });
   if (headerIndex < 0) { addInvoiceText(preview, text); return; }
-  const header = rows[headerIndex];
+  // Printed Cyrillic «НДС» is often read as Latin HOC or HAC. Normalize only table headings.
+  const header = rows[headerIndex].map(word => /^[нh][дaаoо][сc][.:,]?$/iu.test(word.value) ? { ...word, value: 'НДС' } : word);
   const columns: Word[] = [];
   for (const word of header) {
     const previous = columns.at(-1);

@@ -30,7 +30,7 @@ export class RecipesService {
 
   async getDraft(dishId: string) {
     return this.prisma.$transaction(async (tx) => {
-      const dish = await tx.dish.findUnique({ where: { id: dishId }, select: { isSet: true, catalogKind: true } });
+      const dish = await tx.dish.findUnique({ where: { id: dishId, archivedAt: null }, select: { isSet: true, catalogKind: true } });
       if (!dish) throw new NotFoundException('Блюдо не найдено');
       return {
         recipe: { ...await new RecipesService(tx as PrismaService).getMenuRecipe(dishId), ...dish },
@@ -42,7 +42,7 @@ export class RecipesService {
   async saveDraft(dishId: string, dto: RecipeDraftDto, editor?: RecipeRevisionEditor) {
     await this.prisma.$transaction(async (tx) => {
       await lockRecipeGraph(tx);
-      const dish = await tx.dish.findUnique({ where: { id: dishId } });
+      const dish = await tx.dish.findUnique({ where: { id: dishId, archivedAt: null } });
       if (!dish) throw new NotFoundException('Блюдо не найдено');
       if (dish.catalogKind === 'goods' || dish.stockIngredientId || dish.isSet) throw new BadRequestException('Состав этой позиции изменяется в меню');
       if (dto.expectedVersion !== dish.recipeVersion) throw new ConflictException('Техкарта уже изменена. Обновите страницу перед сохранением.');
@@ -171,7 +171,7 @@ export class RecipesService {
     return this.prisma.$transaction(async (tx) => {
       const where: Prisma.DishWhereInput = {
         cafeId: getCafeId() ?? null,
-        ...(ids ? { id: { in: ids } } : { isActive: true, catalogKind: 'recipe' }),
+        archivedAt: null, ...(ids ? { id: { in: ids } } : { isActive: true, catalogKind: 'recipe' }),
         categoryId: query.categoryId, ...(search ? { name: { contains: search, mode: 'insensitive' } } : {}),
       };
       const [dishes, total, calculator] = await Promise.all([
@@ -410,7 +410,7 @@ export class RecipesService {
   }
 
   private async assertDish(tx: Prisma.TransactionClient, dishId: string) {
-    if (!await tx.dish.findUnique({ where: { id: dishId }, select: { id: true } })) throw new NotFoundException('Блюдо не найдено');
+    if (!await tx.dish.findUnique({ where: { id: dishId, archivedAt: null }, select: { id: true } })) throw new NotFoundException('Блюдо не найдено');
   }
 
   private quantity(value: number, unit: UnitCode, portions = 1) {

@@ -589,6 +589,8 @@ model Dish {
   cookingTime       Int?         @map("cooking_time") // минуты, опционально
   isAvailable       Boolean      @default(true) @map("is_available") // временно отключить
   isActive          Boolean      @default(true) @map("is_active")
+  archivedAt        DateTime?    @map("archived_at")
+  activeBeforeArchive Boolean?   @map("active_before_archive")
   sortOrder         Int          @default(0) @map("sort_order")
   trackInventory    Boolean      @default(false) @map("track_inventory")
   stock             Int?
@@ -1174,6 +1176,7 @@ model Settings {
   printerConnected             Boolean @default(false) @map("printer_connected")
   receiptPrintRequestsOnly     Boolean @default(false) @map("receipt_print_requests_only")
   allowNegativeIngredientStock Boolean @default(false) @map("allow_negative_ingredient_stock")
+  expenseWriteoffReasons WarehouseWriteoffReason[] @default([]) @map("expense_writeoff_reasons")
   warehouseProductionEnabled Boolean @default(false) @map("warehouse_production_enabled")
   warehouseProcessingEnabled Boolean @default(false) @map("warehouse_processing_enabled")
 

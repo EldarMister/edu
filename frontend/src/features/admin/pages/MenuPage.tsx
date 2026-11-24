@@ -46,6 +46,7 @@ import {
   useAdminSets,
   useCategoryMutations,
   useDishMutations,
+  useRecipeTrash,
   useSetMutations,
   type AdminDish,
   type AdminGood,
@@ -165,11 +166,13 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
     try {
       await remove.mutateAsync(dish.id);
       playEffect?.();
-      push({ message: 'Позиция удалена', at: new Date().toISOString() });
+      push({ message: !isGoods && !dish.isSet ? 'Техкарта перемещена в корзину' : 'Позиция удалена', at: new Date().toISOString() });
+      if (!isGoods && !dish.isSet) void queryClient.invalidateQueries({ queryKey: ['admin', 'recipe-trash'] });
     } catch (failure) {
       push({ message: apiError(failure), at: new Date().toISOString() });
     }
   }
+  if (!isGoods && editable && editor?.type === 'recipeTrash') return <RecipeTrashPage onClose={closeEditor} />;
   if (editor?.type === 'categories' || editor?.type === 'category') {
     const categoryRoute = new URLSearchParams({ section: 'menu', view: 'categories' });
     if (editor.type === 'category') {
@@ -215,6 +218,8 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
             {isGoods && <MenuGoodsActions filters={filters} columns={columns} saveColumns={saveColumns}
               ready={goodsQ.isSuccess} canExport={can('actions.exportReports')} />}
             {canExportRecipes && <RecipeExportButton kind="recipes" ids={rows.map(({ id }) => id)} pending={!dishesQ.isSuccess} />}
+            {!isGoods && editable && <button type="button" className="btn-ghost flex items-center gap-2 text-primary"
+              onClick={() => openEditor({ type: 'recipeTrash' })}><IconTrash aria-hidden="true" /> Корзина</button>}
             {!isGoods && editable && (
               <MenuActions
                 ariaLabel="Другие действия"
@@ -412,6 +417,29 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
     </div>
   );
 }
+function RecipeTrashPage({ onClose }: { onClose: () => void }) {
+  const { list, restore } = useRecipeTrash();
+  const push = useNotifications((state) => state.push);
+  return <EditorPage title="Корзина техкарт" onClose={onClose}>
+    <p className="py-3 text-sm text-text-secondary">Техкарту с её вариантами и модификаторами можно восстановить в течение 30 дней после удаления.</p>
+    {list.isPending ? <WorkspacePending /> : list.isError ? <ListLoadError error={list.error}
+      pending={list.isFetching} onRetry={() => void list.refetch()} /> : !list.data.length ? <p className="py-6">Корзина пуста</p> :
+      <div className="overflow-x-auto"><table className="poster-table w-full min-w-[520px] text-sm">
+        <thead><tr className="border-b border-border text-left text-text-secondary">
+          <th className="p-3">Название</th><th className="p-3">Категория</th><th className="p-3">Дата удаления</th><th aria-label="Действия" />
+        </tr></thead>
+        <tbody>{list.data.map((row) => <tr key={row.id} className="border-b border-border">
+          <td className="p-3">{row.name}</td><td className="p-3">{row.category.name}</td>
+          <td className="p-3">{new Date(row.archivedAt).toLocaleString('ru-RU', { timeZone: 'Asia/Bishkek', dateStyle: 'short', timeStyle: 'short' })}</td>
+          <td className="p-3 text-right"><button type="button" className="text-primary hover:underline" disabled={restore.isPending}
+            aria-label={'Восстановить ' + row.name} onClick={() => restore.mutate(row.id, { onSuccess: () =>
+              push({ message: `Техкарта «${row.name}» восстановлена`, at: new Date().toISOString() }) })}>Восстановить</button></td>
+        </tr>)}</tbody>
+      </table></div>}
+    {restore.isError && <p role="alert" className="py-2 text-danger">{apiError(restore.error)}</p>}
+  </EditorPage>;
+}
+
 function recipeMetric(rows: MenuCostRow[] | undefined, metric: 'foodCost' | 'markupPercent' | 'foodCostPercent',
   format: (value: number) => string) {
   if (!rows?.length) return '—';

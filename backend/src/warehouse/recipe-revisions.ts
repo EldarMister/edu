@@ -12,12 +12,13 @@ export type RecipeRevisionEditor = Pick<AuditActor, 'id' | 'name'>;
 
 export async function archiveDishRecipe(tx: Prisma.TransactionClient, dishId: string, editor?: RecipeRevisionEditor,
   variantSnapshot: 'summary' | 'full' = 'summary') {
-  const dish = await tx.dish.findUniqueOrThrow({ where: { id: dishId }, include: {
+  const dish = await tx.dish.findUnique({ where: { id: dishId, archivedAt: null }, include: {
     recipeItems: true,
     variants: { orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] },
     modifierGroups: { include: { options: true } },
     setComponents: { include: { dish: { select: { name: true } }, dishVariant: { select: { name: true } } }, orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] },
   } });
+  if (!dish) throw new BadRequestException('Техкарта отсутствует в меню');
   const ids = [dish.stockIngredientId, ...dish.variants.map((variant) => variant.stockIngredientId),
     ...dish.recipeItems.map((item) => item.ingredientId), ...dish.modifierGroups.flatMap((group) => group.options.map((option) => option.ingredientId))];
   const labels = await ingredientLabels(tx, ids);

@@ -23,6 +23,10 @@ export function writeoffDishUnit(dish: { isWeighted: boolean; weightedMeasure: s
   return dish.weightedMeasure === 'volume' ? 'ml' : 'g';
 }
 
+export function writeoffDishAvailability(date?: Date | null): Prisma.DishWhereInput {
+  return date ? { createdAt: { lte: date }, OR: [{ isActive: true }, { archivedAt: { gt: date }, activeBeforeArchive: true }] } : { isActive: true };
+}
+
 export function readWriteoffSnapshot(value: Prisma.JsonValue | null): WriteoffSnapshot | null {
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.version !== 1 || !Array.isArray(value.lines)) return null;
   return value as unknown as WriteoffSnapshot;
@@ -67,7 +71,7 @@ export async function resolveWriteoffSources(tx: Prisma.TransactionClient, wareh
       const { mode } = await resolver.preparation(ingredient);
       recipe = { kind: mode === 'virtual' ? 'virtual' : 'stock', preparationMode: mode };
     } else if (input.kind === 'dish') {
-      const current = await tx.dish.findFirst({ where: { id: input.sourceId, cafeId: warehouse.cafeId, isActive: true }, include: { variants: true, recipeItems: true } });
+      const current = await tx.dish.findFirst({ where: { id: input.sourceId, cafeId: warehouse.cafeId, ...writeoffDishAvailability(effectiveAt) }, include: { variants: true, recipeItems: true } });
       if (!current || effectiveAt && current.createdAt > effectiveAt) throw new BadRequestException('Техкарта недоступна на дату списания');
       const revision = effectiveAt ? await tx.recipeRevision.findFirst({ where: { dishId: current.id, cafeId: warehouse.cafeId, createdAt: { gt: effectiveAt } },
         orderBy: [{ createdAt: 'asc' }, { version: 'asc' }] }) : null;

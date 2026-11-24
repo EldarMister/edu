@@ -34,7 +34,7 @@ function matchName(name: string, items: CatalogEntry[]) {
   return matches.length === 1 ? matches[0] : undefined;
 }
 const recognizedUnits: Record<string, UnitCode> = {
-  г: 'g', гp: 'g', гр: 'g', g: 'g', кг: 'kg', kg: 'kg', л: 'l', литр: 'l', l: 'l',
+  г: 'g', гp: 'g', гр: 'g', g: 'g', кг: 'kg', kg: 'kg', kr: 'kg', кr: 'kg', kг: 'kg', л: 'l', литр: 'l', l: 'l',
   мл: 'ml', ml: 'ml', шт: 'pcs', штук: 'pcs', pcs: 'pcs', pc: 'pcs',
 };
 export function invoiceUnit(unit: string, item?: CatalogEntry) {

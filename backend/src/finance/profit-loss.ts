@@ -13,10 +13,14 @@ export async function readProfitLoss(db: Prisma.TransactionClient, cafeId: strin
   const range = { gte: bounds.from, lt: bounds.to };
   const [stock, ledger] = await Promise.all([
     db.$queryRaw<{ source: string; value: Prisma.Decimal | null }[]>`
-      SELECT source_type::text AS source, CASE WHEN BOOL_AND(cost_known) THEN SUM(-change * cost_at_moment) END AS value
-      FROM stock_movements WHERE cafe_id = ${cafeId} AND source_type IN ('inventory', 'writeoff') AND change <> 0
-        AND created_at >= (${bounds.from} AT TIME ZONE 'UTC') AND created_at < (${bounds.to} AT TIME ZONE 'UTC')
-      GROUP BY source_type`,
+      SELECT CASE WHEN m.source_type = 'writeoff' AND d.reason = ANY(s.expense_writeoff_reasons)
+                  THEN 'expense' ELSE m.source_type::text END AS source,
+             CASE WHEN BOOL_AND(m.cost_known) THEN SUM(-m.change * m.cost_at_moment) END AS value
+      FROM stock_movements m LEFT JOIN warehouse_documents d ON d.cafe_id = m.cafe_id AND d.id = m.source_id
+      LEFT JOIN settings s ON s.cafe_id = m.cafe_id
+      WHERE m.cafe_id = ${cafeId} AND m.source_type IN ('inventory', 'writeoff') AND m.change <> 0
+        AND m.created_at >= (${bounds.from} AT TIME ZONE 'UTC') AND m.created_at < (${bounds.to} AT TIME ZONE 'UTC')
+      GROUP BY 1`,
     db.$queryRaw<{ kind: string; category: string; amount: Prisma.Decimal }[]>`
       SELECT e.kind::text, COALESCE(c.name, CASE WHEN e.kind = 'salary' THEN 'Зарплата' ELSE 'Без категории' END) AS category,
         SUM(e.amount) AS amount
@@ -64,16 +68,17 @@ export async function readProfitLoss(db: Prisma.TransactionClient, cafeId: strin
     }
     if (checks.length < 2000) break;
   }
-  let inventory: Amount = 0, writeoffs: Amount = 0;
+  let inventory: Amount = 0, writeoffs: Amount = 0, writtenOffToExpenses: Amount = 0;
   for (const group of stock) {
     const value = group.value?.toNumber() ?? null;
     if (group.source === 'inventory') inventory = value;
+    else if (group.source === 'expense') writtenOffToExpenses = value;
     else writeoffs = value;
   }
   const incomeRows = ledger.filter((entry) => entry.kind === 'income');
   const expenseRows = ledger.filter((entry) => entry.kind !== 'income');
   const income = receipts + incomeRows.reduce((total, row) => total + row.amount.toNumber(), 0);
-  const expenses = expenseRows.reduce((total, row) => total - row.amount.toNumber(), 0);
+  const expenses = plus(writtenOffToExpenses, expenseRows.reduce((total, row) => total - row.amount.toNumber(), 0));
   const cost = plus(plus(itemCost, inventory), writeoffs);
   const beforeTax = minus(minus(income, cost), expenses);
   const rows: { label: string; value: Amount; percent: Amount; detail: boolean }[] = [];
@@ -92,6 +97,7 @@ export async function readProfitLoss(db: Prisma.TransactionClient, cafeId: strin
   row('Складские списания', writeoffs, true);
   row('Маржа от продаж', minus(itemSales, itemCost));
   row('Расходы', expenses);
+  row('Списания на расходы', writtenOffToExpenses, true);
   for (const entry of expenseRows) row(entry.category, -entry.amount.toNumber(), true);
   row('Прибыль до налогообложения', beforeTax);
   row('Налоги с продаж', tax);

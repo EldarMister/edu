@@ -58,7 +58,26 @@ test('P&L uses the business date, separates supply payments and omits voided and
     await finance.editTransaction(owner, rent.id, { kind: 'expense', accountId: account.id, categoryId: expenses.id, amount: 16, dealDate: null });
     assert.equal(values(await finance.profitLoss(owner, { from: '2026-02-01', to: '2026-02-01' }))['Расходы'], 16);
     assert.equal(values(await finance.profitLoss(owner, jan))['Расходы'], 0);
+    const item = await db.ingredient.create({ data: { cafeId, name: 'Крупа', unitType: 'mass', displayUnit: 'kg' } });
+    const warehouse = await db.warehouse.create({ data: { cafeId, name: 'Кухня' } });
+    const deduction = await db.warehouseDocument.create({ data: { cafeId, kind: 'writeoff', warehouseId: warehouse.id,
+      reason: 'staff_meal', status: 'posted', createdById: owner.id, createdByName: owner.name } });
+    const movement = { cafeId, ingredientId: item.id, warehouseId: warehouse.id, sourceId: deduction.id,
+      sourceType: 'writeoff', beforeStock: 1000, afterStock: 800, change: -200, costKnown: true, costAtMoment: 0.05 };
+    await db.stockMovement.create({ data: { ...movement, type: 'writeoff', createdAt: new Date('2026-01-31T09:00:00Z') } });
+    assert.equal(values(await finance.profitLoss(owner, jan))['Себестоимость'], 10);
+    await db.settings.upsert({ where: { cafeId }, create: { cafeId, expenseWriteoffReasons: ['staff_meal'] },
+      update: { expenseWriteoffReasons: ['staff_meal'] } });
+    const reclassified = values(await finance.profitLoss(owner, jan));
+    assert.deepEqual([reclassified['Себестоимость'], reclassified['Расходы'], reclassified['Прибыль после налогообложения']], [0, 10, 90]);
+    await db.stockMovement.create({ data: { ...movement, type: 'cancel', reason: 'reversal', beforeStock: 800, afterStock: 1000,
+      change: 200, createdAt: new Date('2026-01-31T10:00:00Z') } });
+    assert.equal(values(await finance.profitLoss(owner, jan))['Расходы'], 0);
   } finally {
+    await db.stockMovement.deleteMany({ where: { cafeId } });
+    await db.ingredient.deleteMany({ where: { cafeId } });
+    await db.warehouse.deleteMany({ where: { cafeId } });
+    await db.settings.deleteMany({ where: { cafeId } });
     await db.financeEntry.deleteMany({ where: { cafeId } });
     await db.purchase.deleteMany({ where: { cafeId } });
     await db.user.deleteMany({ where: { cafeId } });

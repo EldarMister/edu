@@ -3,7 +3,8 @@ import { Prisma, TableStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../realtime/events.gateway';
 import { getCafeId } from '../tenant/tenant-context';
-import { mainMenuCategoryId } from './main-menu-category';
+import { ensureMainMenuCategory, mainMenuCategoryId } from './main-menu-category';
+import { archiveRecipes, earliestRestorableDate } from './recipe-trash';
 import { SERVER_EVENTS } from '../realtime/events';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
@@ -260,7 +261,7 @@ export class CatalogService {
   categoriesAll() {
     return this.prisma.category.findMany({
       orderBy: categoryOrder,
-      select: { id: true, name: true, sortOrder: true, isActive: true, prepStation: true, taxId: true, _count: { select: { dishes: true } } },
+      select: { id: true, name: true, sortOrder: true, isActive: true, prepStation: true, taxId: true, _count: { select: { dishes: { where: { archivedAt: null } } } } },
     });
   }
 
@@ -328,30 +329,28 @@ export class CatalogService {
 
   async deleteCategory(id: string, dto: DeleteCategoryDto, actor: AuditActor) {
     if (id === mainMenuCategoryId()) throw new BadRequestException('Главный экран — корневой раздел меню');
-    const before = await this.ensureCategory(id);
-    const dishes = await this.prisma.dish.count({ where: { categoryId: id } });
-
-    if (dishes > 0) {
-      if (dto.strategy === 'move') {
-        // Переносим блюда в другую категорию, затем удаляем пустую.
-        if (!dto.targetCategoryId || dto.targetCategoryId === id) {
-          throw new BadRequestException('Выберите категорию, в которую перенести блюда');
-        }
-        await this.ensureCategory(dto.targetCategoryId);
-        await this.prisma.dish.updateMany({
-          where: { categoryId: id },
-          data: { categoryId: dto.targetCategoryId },
-        });
-      } else if (dto.strategy === 'delete') {
-        // Удаляем категорию вместе с блюдами (каскад удалит блюда; история заказов
-        // сохраняется по снимкам, ссылки обнуляются).
+    const { before, dishes } = await this.prisma.$transaction(async (tx) => {
+      await lockRecipeGraph(tx);
+      await lockStationRouting(tx);
+      const before = await tx.category.findUnique({ where: { id } });
+      if (!before) throw new NotFoundException('Категория не найдена');
+      const rows = await tx.dish.findMany({ where: { categoryId: id }, select: { id: true, isSet: true, catalogKind: true, archivedAt: true } });
+      const dishes = rows.filter((dish) => !dish.archivedAt).length;
+      if (dto.strategy === 'move' && rows.length) {
+        const target = dto.targetCategoryId && dto.targetCategoryId !== id && await tx.category.findUnique({ where: { id: dto.targetCategoryId } });
+        if (!target) throw new BadRequestException('Выберите категорию, в которую перенести блюда');
+        await tx.dish.updateMany({ where: { categoryId: id }, data: { categoryId: target.id } });
       } else {
-        throw new BadRequestException('В категории есть блюда. Выберите: перенести их или удалить вместе с категорией.');
+        if (dishes && dto.strategy !== 'delete') throw new BadRequestException('В категории есть блюда. Выберите: перенести их или удалить вместе с категорией.');
+        await archiveRecipes(tx, rows, rows.filter((dish) => dish.isSet).map((dish) => dish.id));
+        if (rows.some((dish) => !dish.isSet && dish.catalogKind === 'recipe')) {
+          const main = await ensureMainMenuCategory(tx);
+          await tx.dish.updateMany({ where: { categoryId: id, archivedAt: { not: null } }, data: { categoryId: main.id } });
+        }
       }
-    }
-
-    // Каскад: при удалении категории удалятся её блюда (если их не перенесли).
-    await this.prisma.category.delete({ where: { id } });
+      await tx.category.delete({ where: { id } });
+      return { before, dishes };
+    });
     await this.audit.log({
       actor,
       actionType: AuditAction.CATEGORY_DELETED,
@@ -413,6 +412,7 @@ export class CatalogService {
   /** Все блюда (включая неактивные) с категорией — для управления меню. */
   async dishesAll(params: { categoryId?: string; search?: string; goodsOnly?: boolean }) {
     const where: Prisma.DishWhereInput = {
+      archivedAt: null,
       ...(params.goodsOnly ? { catalogKind: 'goods' } : {}),
       ...(params.categoryId ? { categoryId: params.categoryId } : {}),
       ...(params.search ? { name: { contains: params.search, mode: 'insensitive' } } : {}),
@@ -587,7 +587,7 @@ export class CatalogService {
 
   async updateDish(id: string, dto: UpdateDishDto, actor: AuditActor) {
     const dish = await this.prisma.dish.findUnique({
-      where: { id },
+      where: { id, archivedAt: null },
       include: { _count: { select: { variants: true } }, variants: true },
     });
     if (!dish) throw new NotFoundException('Блюдо не найдено');
@@ -613,7 +613,9 @@ export class CatalogService {
     if (dto.unit !== undefined) data.unit = this.normalizeInventoryUnit(dto.unit);
     if (dto.categoryId) await this.ensureCategory(dto.categoryId);
     const updated = await this.prisma.$transaction(async (tx) => {
+      await lockRecipeGraph(tx);
       await lockStationRouting(tx);
+      if (!await tx.dish.findUnique({ where: { id, archivedAt: null }, select: { id: true } })) throw new NotFoundException('Блюдо не найдено');
       await assertAssignableStation(tx, dto.prepStation);
       Object.assign(data, await dishTaxFields(tx, dto));
       if (variants !== undefined) {
@@ -712,12 +714,15 @@ export class CatalogService {
   }
 
   async deleteDish(id: string, actor: AuditActor) {
-    const dish = await this.prisma.dish.findUnique({ where: { id } });
-    if (!dish) throw new NotFoundException('Блюдо не найдено');
-    const used = await this.prisma.orderItem.count({ where: { dishId: id } });
-    // Полностью убираем блюдо из меню. История заказов не ломается: позиции
-    // хранят снимок названия/цены, а ссылки на блюдо обнуляются (ON DELETE SET NULL).
-    await this.prisma.dish.delete({ where: { id } });
+    const { dish, used } = await this.prisma.$transaction(async (tx) => {
+      await lockRecipeGraph(tx);
+      const dish = await tx.dish.findUnique({ where: { id, archivedAt: null } });
+      if (!dish) throw new NotFoundException('Блюдо не найдено');
+      const used = await tx.orderItem.count({ where: { dishId: id } });
+      if (!dish.isSet && dish.catalogKind === 'recipe') await archiveRecipes(tx, [dish]);
+      else await tx.dish.delete({ where: { id } });
+      return { dish, used };
+    });
     await this.audit.log({
       actor,
       actionType: AuditAction.MENU_ITEM_DELETED,
@@ -729,6 +734,25 @@ export class CatalogService {
     });
     this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { dishId: id });
     return { ok: true };
+  }
+
+  trashedRecipes() {
+    return this.prisma.dish.findMany({ where: { isSet: false, catalogKind: 'recipe', archivedAt: { gt: earliestRestorableDate() } },
+      orderBy: [{ archivedAt: 'desc' }, { id: 'asc' }], select: { id: true, name: true, archivedAt: true, category: { select: { name: true } } } });
+  }
+
+  async restoreRecipe(id: string, actor: AuditActor) {
+    const recipe = await this.prisma.$transaction(async (tx) => {
+      await lockRecipeGraph(tx);
+      const dish = await tx.dish.findFirst({ where: { id, isSet: false, catalogKind: 'recipe', archivedAt: { gt: earliestRestorableDate() } } });
+      if (!dish) throw new NotFoundException('Техкарта отсутствует в корзине или срок восстановления истёк');
+      return tx.dish.update({ where: { id }, data: { archivedAt: null, activeBeforeArchive: null, isActive: dish.activeBeforeArchive ?? true },
+        select: { id: true, name: true } });
+    });
+    await this.audit.log({ actor, actionType: AuditAction.MENU_ITEM_UPDATED, entityType: AuditEntity.MENU_ITEM, entityId: id,
+      description: `${actor.name ?? 'Сотрудник'} восстановил техкарту «${recipe.name}» из корзины` });
+    this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { dishId: id });
+    return recipe;
   }
 
   // ===================== СЕТЫ =====================
@@ -743,9 +767,10 @@ export class CatalogService {
   }
 
   async createSet(dto: CreateSetDto, actor: AuditActor) {
-    await this.validateSetComponents(dto.components);
     const set = await this.prisma.$transaction(async (tx) => {
+      await lockRecipeGraph(tx);
       await lockStationRouting(tx);
+      await this.validateSetComponents(dto.components, tx);
       await assertAssignableStation(tx, dto.prepStation);
       const categoryId = await this.ensureSetsCategory(tx);
       return tx.dish.create({

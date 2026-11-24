@@ -165,6 +165,14 @@ export class CatalogController {
   @RequirePermission('sections.menu')
   goods() { return this.catalog.goodsAll(); }
 
+  @Get('menu/recipes/trash')
+  @RequirePermission('sections.menu', 'actions.editMenu')
+  trashedRecipes() { return this.catalog.trashedRecipes(); }
+
+  @Post('menu/recipes/:id/restore')
+  @RequirePermission('sections.menu', 'actions.editMenu')
+  restoreRecipe(@Param('id') id: string, @CurrentUser() user: AuthUser) { return this.catalog.restoreRecipe(id, user); }
+
   @Get('menu/goods/export.xlsx')
   @RequirePermission('sections.menu', 'actions.exportReports')
   async exportGoods(@Query() query: GoodsExportQuery, @Res() response: Response) {

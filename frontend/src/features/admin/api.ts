@@ -683,6 +683,20 @@ export function useDishMutations() {
   return { create, update, remove };
 }
 
+export function useRecipeTrash() {
+  const qc = useQueryClient();
+  const list = useQuery({
+    queryKey: ['admin', 'recipe-trash'],
+    queryFn: () => get<{ id: string; name: string; archivedAt: string; category: { name: string } }[]>('/admin/menu/recipes/trash'),
+  });
+  const restore = useMutation({
+    mutationFn: (id: string) => api.post('/admin/menu/recipes/' + id + '/restore'),
+    onSuccess: () => Promise.all([['admin', 'recipe-trash'], ['admin', 'dishes'], ['admin', 'warehouse'], ['admin', 'categories'],
+      ['admin', 'menu', 'overview']].map((queryKey) => qc.invalidateQueries({ queryKey }))),
+  });
+  return { list, restore };
+}
+
 // ---------- Сеты ----------
 export interface SetComponentInput {
   dishId: string;

@@ -160,7 +160,7 @@ export class MenuModifiersService {
     return this.get(dishId);
   }
   async saveInTransaction(tx: Prisma.TransactionClient, dishId: string, dto: MenuModifiersDto, archive = true, editor?: RecipeRevisionEditor) {
-      const dish = await tx.dish.findUnique({ where: { id: dishId }, include: { recipeItems: true, variants: true, modifierGroups: { include: { options: true } } } });
+      const dish = await tx.dish.findUnique({ where: { id: dishId, archivedAt: null }, include: { recipeItems: true, variants: true, modifierGroups: { include: { options: true } } } });
       if (!dish) throw new NotFoundException('Блюдо не найдено');
       const exclusionIds = dto.excludableIngredientIds;
       if (Array.isArray(exclusionIds) && (new Set(exclusionIds).size !== exclusionIds.length

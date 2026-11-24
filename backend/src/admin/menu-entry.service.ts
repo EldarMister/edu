@@ -35,7 +35,7 @@ export class MenuEntryService {
     return this.prisma.$transaction(
       async (tx) => {
         const dish = await tx.dish.findUnique({
-          where: { id },
+          where: { id, archivedAt: null },
           include: {
             category: true,
             variants: { orderBy: { sortOrder: 'asc' } },
@@ -86,6 +86,7 @@ export class MenuEntryService {
             },
           });
           if (duplicate) {
+            if (duplicate.archivedAt) throw new ConflictException('Эта техкарта уже находится в корзине');
             if (duplicate.menuCreateKey !== createKey)
               throw new ConflictException(
                 'Ключ создания уже использован с другим содержимым позиции',
@@ -95,7 +96,7 @@ export class MenuEntryService {
         }
         const previous = id
           ? await tx.dish.findUnique({
-              where: { id },
+              where: { id, archivedAt: null },
               include: { variants: true },
             })
           : null;

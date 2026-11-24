@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import type { WriteoffReason } from './stock-documents-api';
+import { financeKey } from '../finance/api';
 export interface Supplier {
   id: string;
   name: string;
@@ -68,6 +70,7 @@ export function useSupplierMutations() {
   return { save, archive };
 }
 export interface WarehousePolicy {
+  expenseWriteoffReasons?: WriteoffReason[];
   warehouseProductionEnabled: boolean;
   warehouseProcessingEnabled: boolean;
   productionInUse: boolean;
@@ -86,8 +89,11 @@ export function useWarehousePolicy(enabled = true) {
 export function useUpdateWarehousePolicy() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: Partial<Pick<WarehousePolicy, 'allowNegativeIngredientStock' | 'warehouseProductionEnabled' | 'warehouseProcessingEnabled'>>) =>
+    mutationFn: (body: Partial<Pick<WarehousePolicy, 'allowNegativeIngredientStock' | 'warehouseProductionEnabled' | 'warehouseProcessingEnabled' | 'expenseWriteoffReasons'>>) =>
       api.patch('/admin/warehouse/policy', body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+    onSuccess: async (_, changes) => {
+      await qc.invalidateQueries({ queryKey: KEY });
+      if (changes.expenseWriteoffReasons) await qc.invalidateQueries({ queryKey: [...financeKey, 'profit-loss'] });
+    },
   });
 }

@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { WorkspacePending } from '../../components/WorkspacePending';
 import { apiError } from '@/lib/api';
 import { useWarehousePolicy, useUpdateWarehousePolicy } from './settings-api';
+import { WRITEOFF_REASONS } from './stock-document-format';
 export function AccountingSettings() {
   const query = useWarehousePolicy();
   const update = useUpdateWarehousePolicy();
   const [error, setError] = useState('');
+  const expenses = query.data?.expenseWriteoffReasons ?? [];
   async function set(allowed: boolean) {
     setError('');
     try {
@@ -33,6 +35,18 @@ export function AccountingSettings() {
           </label>
           {option.inUse && <p className="ml-6 mt-1 text-xs text-text-muted">Раздел доступен для существующих рецептур и документов.</p>}
         </div>)}
+      </section>
+      <section>
+        <h4 className="mb-1 font-semibold">Списания в отчёте о прибылях и убытках</h4>
+        <p className="mb-3 text-sm text-text-secondary">Выберите причины, которые нужно включить в расходы. Остальные списания войдут в себестоимость.</p>
+        {query.data && WRITEOFF_REASONS.map(({ value, label }) => <label key={value} className="mb-2 flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={expenses.includes(value)} disabled={update.isPending}
+            onChange={async (event) => {
+              setError('');
+              const next = event.target.checked ? [...expenses, value] : expenses.filter((reason) => reason !== value);
+              try { await update.mutateAsync({ expenseWriteoffReasons: next }); } catch (err) { setError(apiError(err)); }
+            }} />{label}
+        </label>)}
       </section>
       <section>
         <h4 className="mb-2 font-semibold">Отрицательные остатки</h4>

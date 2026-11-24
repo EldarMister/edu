@@ -38,6 +38,7 @@ const SETTINGS_FIELD_LABELS: Record<string, string> = {
   allowNegativeIngredientStock: 'минусовой остаток сырья',
   warehouseProductionEnabled: 'производство полуфабрикатов',
   warehouseProcessingEnabled: 'переработки',
+  expenseWriteoffReasons: 'учёт причин складских списаний в P&L',
   deliveryEnabled: 'интеграция доставки',
   queueDisplayEnabled: 'экран очереди заказов',
   queueDisplayMode: 'режим экрана очереди',

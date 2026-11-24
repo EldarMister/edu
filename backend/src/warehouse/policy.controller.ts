@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Patch } from '@nestjs/common';
-import { Role } from '@prisma/client';
-import { IsBoolean, IsOptional } from 'class-validator';
+import { Role, WarehouseWriteoffReason } from '@prisma/client';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsEnum, IsOptional, ValidateIf } from 'class-validator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
@@ -9,6 +9,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { getCafeId } from '../tenant/tenant-context';
 
 class WarehousePolicyDto {
+  @ValidateIf((_, value) => value !== undefined) @IsArray() @ArrayUnique() @ArrayMaxSize(7) @IsEnum(WarehouseWriteoffReason, { each: true })
+  expenseWriteoffReasons?: WarehouseWriteoffReason[];
   @IsOptional() @IsBoolean()
   allowNegativeIngredientStock?: boolean;
   @IsOptional() @IsBoolean()
@@ -33,6 +35,7 @@ export class WarehousePolicyController {
       this.prisma.preparationRecipe.count({ where: { cafeId, ingredient: { isActive: true, preparationMode: 'stocked' } } }),
     ]);
     return { ...this.serialize(settings.allowNegativeIngredientStock),
+      expenseWriteoffReasons: settings.expenseWriteoffReasons,
       warehouseProductionEnabled: settings.warehouseProductionEnabled,
       warehouseProcessingEnabled: settings.warehouseProcessingEnabled,
       productionInUse: production > 0 || stockedPreparations > 0,

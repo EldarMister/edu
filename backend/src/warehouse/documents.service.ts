@@ -14,7 +14,7 @@ import { lockIngredients, lockWarehouseCatalog } from './stock-lock';
 import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, UnitCode, unitLabel } from './units';
 import { getWarehouseBalance, resolveWarehouse, warehouseBalances, warehouseDocumentFilter, WarehouseLocation } from './warehouse-location';
 import { lockRecipeGraph } from './recipe-resolution';
-import { previewWriteoffSources, readWriteoffSnapshot, resolveWriteoffSources, serializeWriteoffSources, sourceInputs, writeoffDishUnit, writeoffStockLines } from './writeoff-resolution';
+import { previewWriteoffSources, readWriteoffSnapshot, resolveWriteoffSources, serializeWriteoffSources, sourceInputs, writeoffDishAvailability, writeoffDishUnit, writeoffStockLines } from './writeoff-resolution';
 import { writeTransferAct } from './transfer-act-xlsx';
 import { writeInventoryWorkbook } from './inventory-xlsx';
 import { warehouseDateColumn, warehouseMoneyFormat, warehouseRegisterColumns, warehouseRegisterRows,
@@ -149,7 +149,7 @@ export class WarehouseDocumentsService {
     const [ingredients, dishes, revisions] = await Promise.all([
       this.prisma.ingredient.findMany({ where: { cafeId, isActive: true }, orderBy: { name: 'asc' },
         select: { id: true, name: true, category: true, displayUnit: true, kind: true, preparationMode: true } }),
-      this.prisma.dish.findMany({ where: { cafeId, isActive: true, isSet: date ? undefined : false, createdAt: date ? { lte: date } : undefined, catalogKind: { not: 'goods' } }, orderBy: { name: 'asc' },
+      this.prisma.dish.findMany({ where: { cafeId, ...writeoffDishAvailability(date), isSet: date ? undefined : false, catalogKind: { not: 'goods' } }, orderBy: { name: 'asc' },
         select: { id: true, name: true, isSet: true, isWeighted: true, weightedMeasure: true,
           category: { select: { name: true } }, variants: { select: { id: true, name: true } } } }),
       date ? this.prisma.recipeRevision.findMany({ where: { cafeId, createdAt: { gt: date } }, distinct: ['dishId'],
