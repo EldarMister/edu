@@ -2,8 +2,9 @@ import { Fragment, useId, useState, type ReactNode } from 'react';
 import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
 import { api, apiError } from '@/lib/api';
+import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { useAuth } from '@/store/auth';
-import { PROCESSING_METHODS, useBalances, useIngredients, type Ingredient } from './api';
+import { PROCESSING_METHODS, qty, useBalances, useIngredients, type Ingredient } from './api';
 import { QueryState } from './WarehouseUi';
 import { usePageFilter, usePageFilters } from './workspace-route';
 import { useWarehousePolicy } from './settings-api';
@@ -15,6 +16,7 @@ import { balanceMoney, balanceQuantity, balanceValue } from './balance-format';
 import { CatalogueUsage, PreparationComposition } from './CatalogueDetails';
 import { WarehouseMultiFilter, warehouseMultiFilterValues } from './WarehouseMultiFilter';
 import { visibleWarehouseColumns, WarehouseColumnSettings } from './WarehouseColumnSettings';
+import { RecipeExportButton } from './RecipeExportButton';
 
 const balanceColumns = {
   name: { label: 'Название', width: 210 },
@@ -33,6 +35,22 @@ type BalanceColumn = keyof typeof balanceColumns;
 
 function columnSpec(key: BalanceColumn): { label: string; width: number; numeric?: boolean; costs?: boolean; optional?: boolean } {
   return balanceColumns[key];
+}
+
+const ingredientColumns = {
+  name: { label: 'Название', width: 160 },
+  category: { label: 'Категория', width: 110 },
+  unit: { label: 'Ед. измерения', width: 105 },
+  pieceWeight: { label: 'Вес штуки', width: 125, numeric: true, optional: true },
+  losses: { label: 'Потери', width: 145 },
+  stock: { label: 'Остатки на складах', width: 150, numeric: true },
+  cost: { label: 'Себестоимость', width: 115, numeric: true, costs: true },
+  total: { label: 'Сумма остатков', width: 115, numeric: true, costs: true },
+} satisfies Record<string, { label: string; width: number; numeric?: boolean; costs?: boolean; optional?: boolean }>;
+type IngredientColumn = keyof typeof ingredientColumns;
+
+function ingredientColumnSpec(key: IngredientColumn): { label: string; width: number; numeric?: boolean; costs?: boolean; optional?: boolean } {
+  return ingredientColumns[key];
 }
 
 export type StockFilter = '' | 'low' | 'empty';
@@ -78,6 +96,15 @@ export function IngredientsTab({
   const dataColumns = columns.slice(1);
   const suppliesVisible = can('actions.warehouseReports') && costs;
   const preparedCatalogue = catalogue === 'preparations';
+  const canExportPreparations = preparedCatalogue && can('sections.menu') && can('actions.exportReports');
+  const [ingredientColumnPreference, saveIngredientColumns] = useColumnPreference('menu-ingredients');
+  const [ingredientColumnsOpen, setIngredientColumnsOpen] = useState(false);
+  const ingredientOptions = (Object.keys(ingredientColumns) as IngredientColumn[]).filter((key) => costs || !ingredientColumnSpec(key).costs);
+  const ingredientDefaults = ingredientOptions.filter((key) => !ingredientColumnSpec(key).optional);
+  const selectedIngredientColumns = ingredientColumnPreference
+    ? visibleWarehouseColumns(ingredientColumnPreference, ingredientOptions) : ingredientDefaults;
+  const ingredientDataColumns = selectedIngredientColumns.slice(1);
+  const catalogueColumnCount = preparedCatalogue ? (costs ? 4 : 3) : selectedIngredientColumns.length + 1;
   const [balanceFilters, updateBalanceFilters] = usePageFilters({ search: '', kind: '', category: '', unit: '', stockFilter: '',
     warehouse: '', balancePage: '1', balanceExpanded: '', balanceSort: 'asc' });
   const { search, kind, category, unit, balanceExpanded: expanded, balanceSort: sort } = balanceFilters;
@@ -237,8 +264,34 @@ export function IngredientsTab({
     (!preparedCatalogue && filter)
   );
   const canCreate = preparedCatalogue ? can('actions.warehouseRecipes') : can('actions.warehouseReceive');
-  const showTotal = !preparedCatalogue && costs && rows.length > 0 && (catalogue || columns.includes('total'));
+  const showTotal = !preparedCatalogue && costs && rows.length > 0 &&
+    (catalogue ? selectedIngredientColumns.includes('total') : columns.includes('total'));
   const totalLabel = unknown ? 'Известная стоимость' : catalogue ? 'Итого' : 'Всего';
+  function ingredientCell(item: Ingredient, key: IngredientColumn): ReactNode {
+    switch (key) {
+      case 'name': return item.name;
+      case 'category': return item.category || 'Без категории';
+      case 'unit': return item.unit;
+      case 'pieceWeight': return item.unitType === 'count' && item.pieceWeightGrams != null
+        ? qty(item.pieceWeightGrams, 'г') : '—';
+      case 'losses': return item.unitType === 'mass' ? <div className="flex flex-wrap justify-between gap-x-2 text-xs">
+        {PROCESSING_METHODS.map((method) => {
+          const loss = item.processingLosses?.[method.value] ?? 0;
+          const label = `${method.label}: ${loss}%`;
+          return <span key={method.value} title={label} aria-label={label}>{loss}%</span>;
+        })}
+      </div> : <span className="block md:text-center">—</span>;
+      case 'stock': return stock(item);
+      case 'cost': {
+        const value = listCost(item);
+        return value == null ? '—' : amount(value);
+      }
+      case 'total': {
+        const value = balanceValue(item);
+        return value == null ? '—' : amount(value);
+      }
+    }
+  }
   function balanceCell(item: Ingredient, key: BalanceColumn) {
     switch (key) {
       case 'warehouse': return warehouseName || 'Все склады';
@@ -301,6 +354,17 @@ export function IngredientsTab({
   return (
     <div className={catalogue ? undefined : 'poster-balance-surface'}>
       {catalogue && <WorkspaceHeaderCount count={query.data ? catalogueRows.length : undefined} />}
+      {catalogue === 'ingredients' && <>
+        <WorkspaceHeaderActions><button type="button" className="supply-header-action print:hidden" aria-haspopup="dialog"
+          onClick={() => setIngredientColumnsOpen(true)}>Столбцы</button></WorkspaceHeaderActions>
+        {ingredientColumnsOpen && <WarehouseColumnSettings columns={selectedIngredientColumns} defaults={ingredientOptions}
+          resetColumns={ingredientDefaults} label={(key) => ingredientColumnSpec(key).label}
+          onClose={() => setIngredientColumnsOpen(false)} onApply={(selection) => {
+            const value = selection.join(',');
+            saveIngredientColumns(value === ingredientDefaults.join(',') ? '' : value);
+            setIngredientColumnsOpen(false);
+          }} />}
+      </>}
       {!catalogue && <>
         {canExport && <WorkspaceHeaderActions>
           <button type="button" className="supply-header-action" disabled={exporting || !query.isSuccess}
@@ -323,7 +387,10 @@ export function IngredientsTab({
       <div className="poster-toolbar">
         <WorkspaceSearch label="Поиск позиции" placeholder={catalogue ? 'Быстрый поиск' : 'Поиск...'} value={search} onChange={(value) => setBalanceFilter({ search: value })} />
         {filters}
-        {catalogue && canCreate && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
+        {catalogue && (canCreate || canExportPreparations) && <div className="ml-auto flex flex-wrap items-center gap-2">
+          {canExportPreparations && <RecipeExportButton kind="preparations" ids={rows.map(({ id }) => id)} pending={!catalogueQuery.isSuccess} />}
+          {canCreate && <button type="button" className="btn-primary btn-md" onClick={onCreate}>Добавить</button>}
+        </div>}
         {!catalogue && (
           <WarehouseMultiFilter
             label="Тип"
@@ -411,8 +478,10 @@ export function IngredientsTab({
       </div>
       <QueryState pending={query.isPending} error={query.error}>
         <div className="hidden overflow-x-auto md:block">
-          <table className={`poster-table w-full ${catalogue ? `poster-catalogue-table ${preparedCatalogue ? 'min-w-[680px]' : 'min-w-[1000px]'}` : 'poster-balance-table table-fixed'}`}
-            style={catalogue ? undefined : { minWidth: columns.reduce((width, key) => width + columnSpec(key).width, 0) }}>
+          <table className={`poster-table w-full ${catalogue ? `poster-catalogue-table ${preparedCatalogue ? 'min-w-[680px]' : ''}` : 'poster-balance-table table-fixed'}`}
+            style={preparedCatalogue ? undefined : { minWidth: catalogue === 'ingredients'
+              ? selectedIngredientColumns.reduce((width, key) => width + ingredientColumnSpec(key).width, 100)
+              : columns.reduce((width, key) => width + columnSpec(key).width, 0) }}>
             {!catalogue && (
               <colgroup>
                 {columns.map((key) => <col key={key} style={{ width: columnSpec(key).width }} />)}
@@ -437,25 +506,14 @@ export function IngredientsTab({
                   )}
                 </th>
                 {catalogue ? <>
-                {!preparedCatalogue && (
-                  <>
-                    <th>Категория</th>
-                    <th>Ед. измерения</th>
-                    {catalogue === 'ingredients' && <th className="text-center">Потери</th>}
-                  </>
-                )}
-                <th className="text-right">
-                  {preparedCatalogue ? 'Выход' : 'Остатки на складах'}
-                </th>
-                {costs && (
-                  <>
-                    <th className="text-right">Себестоимость</th>
-                    {!preparedCatalogue && (
-                      <th className="text-right">Сумма остатков</th>
-                    )}
-                  </>
-                )}
-                <th><span className="sr-only">Действия</span></th>
+                  {preparedCatalogue ? <>
+                    <th className="text-right">Выход</th>
+                    {costs && <th className="text-right">Себестоимость</th>}
+                  </> : ingredientDataColumns.map((key) => <th key={key} scope="col" data-column={key}
+                    className={ingredientColumnSpec(key).numeric ? 'text-right' : key === 'losses' ? 'text-center' : undefined}>
+                    {ingredientColumnSpec(key).label}
+                  </th>)}
+                  <th><span className="sr-only">Действия</span></th>
                 </> : dataColumns.map((key) => <th key={key} scope="col" data-column={key} className={columnSpec(key).numeric ? 'text-right' : undefined}>
                   {columnSpec(key).label}
                 </th>)}
@@ -477,47 +535,16 @@ export function IngredientsTab({
                     </button> : toggle(item, `${detailId}-desktop-${item.id}`)}
                   </td>
                   {catalogue ? <>
-                  {!preparedCatalogue && (
-                    <>
-                      <td title={item.category || undefined}>{item.category || 'Без категории'}</td>
-                      <td>{item.unit}</td>
-                      {catalogue === 'ingredients' && (
-                        <td>
-                          {item.unitType === 'mass' ? (
-                            <div className="flex justify-between gap-3 text-xs">
-                              {PROCESSING_METHODS.map((method) => (
-                                <span
-                                  key={method.value}
-                                  title={`${method.label}: ${item.processingLosses?.[method.value] ?? 0}%`}
-                                  aria-label={`${method.label}: ${item.processingLosses?.[method.value] ?? 0}%`}
-                                >
-                                  {item.processingLosses?.[method.value] ?? 0}%
-                                </span>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="block text-center">—</span>
-                          )}
-                        </td>
-                      )}
-                    </>
-                  )}
-                  <td className="text-right whitespace-nowrap">
-                    {preparedCatalogue ? output(item) : stock(item)}
-                  </td>
-                  {costs && (
-                    <>
-                      <td className="text-right whitespace-nowrap">
+                    {preparedCatalogue ? <>
+                      <td className="text-right whitespace-nowrap">{output(item)}</td>
+                      {costs && <td className="text-right whitespace-nowrap">
                         {listCost(item) == null ? '—' : amount(listCost(item)!)}
-                      </td>
-                      {!preparedCatalogue && (
-                        <td className="text-right whitespace-nowrap">
-                          {!virtual(item) && balanceValue(item) != null ? amount(balanceValue(item)!) : '—'}
-                        </td>
-                      )}
-                    </>
-                  )}
-                  <td>{actions(item)}</td>
+                      </td>}
+                    </> : ingredientDataColumns.map((key) => <td key={key} data-column={key}
+                      className={ingredientColumnSpec(key).numeric ? 'text-right whitespace-nowrap tabular-nums' : undefined}>
+                      {ingredientCell(item, key)}
+                    </td>)}
+                    <td>{actions(item)}</td>
                   </> : dataColumns.map((key) => {
                     const value = balanceCell(item, key);
                     return <td key={key} className={columnSpec(key).numeric ? 'text-right whitespace-nowrap' : 'truncate'}
@@ -526,7 +553,7 @@ export function IngredientsTab({
                 </tr>
                 {catalogue && catalogueDetail?.id === item.id && (
                   <tr className="poster-catalogue-detail-row">
-                    <td colSpan={preparedCatalogue ? (costs ? 4 : 3) : (costs ? 8 : 6)}>
+                    <td colSpan={catalogueColumnCount}>
                       {catalogueDetails(item)}
                     </td>
                   </tr>
@@ -543,7 +570,7 @@ export function IngredientsTab({
               {!rows.length && (
                 <tr>
                   <td
-                    colSpan={!catalogue ? columns.length : preparedCatalogue ? (costs ? 4 : 3) : (costs ? 8 : 6)}
+                    colSpan={catalogue ? catalogueColumnCount : columns.length}
                     className="py-12 text-center text-text-muted"
                   >
                     {emptyState}
@@ -554,10 +581,10 @@ export function IngredientsTab({
             {showTotal && (
               <tfoot>
                 {catalogue ? <tr>
-                  <td colSpan={catalogue === 'ingredients' ? 6 : 5}>
-                    {totalLabel}
-                  </td>
-                  <td className="whitespace-nowrap text-right tabular-nums">{amount(total)}</td>
+                  <td>{totalLabel}</td>
+                  {ingredientDataColumns.map((key) => <td key={key} className="whitespace-nowrap text-right tabular-nums">
+                    {key === 'total' ? amount(total) : null}
+                  </td>)}
                   <td />
                 </tr> : <tr>
                   <td>{totalLabel}</td>
@@ -579,16 +606,19 @@ export function IngredientsTab({
                   onClick={() => toggleCatalogue(item.id, 'usage')}>
                   {item.name}
                 </button>
-                {costs && (
+                {preparedCatalogue && costs && (
                   <span className="shrink-0 text-sm">
                     {listCost(item) == null ? '—' : amount(listCost(item)!)}
                   </span>
                 )}
               </div>
-              <div className="mt-1 flex justify-between gap-3 text-xs text-text-muted">
-                <span>{preparedCatalogue ? 'Выход' : item.category || 'Без категории'}</span>
-                <span>{preparedCatalogue ? output(item) : stock(item)}</span>
-              </div>
+              {preparedCatalogue ? <div className="mt-1 flex justify-between gap-3 text-xs text-text-muted">
+                <span>Выход</span><span>{output(item)}</span>
+              </div> : ingredientDataColumns.length > 0 && <dl className="poster-balance-mobile-values mt-2">
+                {ingredientDataColumns.map((key) => <div key={key}>
+                  <dt>{ingredientColumnSpec(key).label}</dt><dd>{ingredientCell(item, key)}</dd>
+                </div>)}
+              </dl>}
               </> : <>
                 {toggle(item, `${detailId}-mobile-${item.id}`)}
                 {dataColumns.length > 0 && <dl className="poster-balance-mobile-values mt-2">
@@ -602,6 +632,7 @@ export function IngredientsTab({
           {!rows.length && emptyState}
           {showTotal && (
             <p className="flex justify-between py-3 text-sm font-medium">
+              {catalogue === 'ingredients' && <span>{totalLabel}</span>}
               <span>{totalLabel}</span>
               <span>{amount(total)}</span>
             </p>

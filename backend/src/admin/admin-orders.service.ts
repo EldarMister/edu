@@ -1,8 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { OrderStatus, PaymentMethod, Prisma } from '@prisma/client';
+import { OrderStatus, PaymentMethod, Prisma, Role } from '@prisma/client';
+import type { AuthUser } from '../common/decorators/current-user.decorator';
+import { hasPermission, resolvePermissions } from '../common/permissions';
 import { PrismaService } from '../prisma/prisma.service';
 import { orderInclude } from '../orders/order.helpers';
+import { preparedLossQuantity } from '../warehouse/movement-cost';
 import { warehouseDateRange } from '../warehouse/report-range';
+import { baseUnitForType, fromBase, unitLabel, unitType, type UnitCode } from '../warehouse/units';
 import { OrderQueryDto } from './dto';
 
 const ACTIVE_STATUSES: OrderStatus[] = [
@@ -17,6 +21,7 @@ const ACTIVE_STATUSES: OrderStatus[] = [
 ];
 
 const CANCELLED_STATUSES: OrderStatus[] = [OrderStatus.cancelled, OrderStatus.rejected];
+const STOCK_UNITS: readonly UnitCode[] = ['g', 'kg', 'ml', 'l', 'pcs'];
 
 // Список заказов отдаёт ещё и разбивку оплат — чтобы показать «Смешанная (нал / QR)».
 const listInclude = {
@@ -159,5 +164,48 @@ export class AdminOrdersService {
     const order = await this.prisma.order.findUnique({ where: { id }, include: orderInclude });
     if (!order) throw new NotFoundException('Заказ не найден');
     return order;
+  }
+
+  async stockMovements(id: string, user: AuthUser) {
+    const cafeId = user.cafeId;
+    const canViewCosts = user.role === Role.OWNER
+      || hasPermission(user.permissions ?? resolvePermissions(user.role as Role, null), 'actions.warehouseCosts');
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.findFirst({ where: { id, cafeId }, select: { id: true } });
+      if (!order) throw new NotFoundException('Заказ не найден');
+      const [movements, defaultWarehouse] = await Promise.all([
+        tx.stockMovement.findMany({
+          where: { cafeId, sourceType: 'order', sourceId: order.id, type: { in: ['sale', 'return', 'writeoff'] }, ingredient: { cafeId },
+            ...(cafeId ? { OR: [{ warehouseId: null }, { warehouse: { cafeId } }] } : { warehouseId: null }) },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: { id: true, type: true, sourceType: true, change: true, createdAt: true,
+            costAtMoment: canViewCosts, costKnown: canViewCosts, recipeSnapshot: true,
+            warehouse: { select: { name: true } }, ingredient: { select: { name: true, unitType: true, displayUnit: true } } },
+        }),
+        cafeId ? tx.warehouse.findFirst({ where: { cafeId, isDefault: true }, select: { name: true } }) : null,
+      ]);
+      let total = new Prisma.Decimal(0);
+      let complete = true;
+      const rows = movements.map((movement) => {
+        const loss = preparedLossQuantity(movement);
+        const preparedLoss = loss.gt(0) && movement.change.isZero();
+        const { ingredient } = movement;
+        const display = STOCK_UNITS.find((unit) => unit === ingredient.displayUnit);
+        const unit = display && unitType(display) === ingredient.unitType ? display : baseUnitForType(ingredient.unitType);
+        let lineCost: number | null = null;
+        if (canViewCosts && !preparedLoss) {
+          if (movement.costKnown && movement.costAtMoment != null) {
+            const cost = movement.change.negated().mul(movement.costAtMoment);
+            total = total.add(cost);
+            lineCost = cost.toDecimalPlaces(2).toNumber();
+          } else if (!movement.change.isZero()) complete = false;
+        }
+        return { id: movement.id, type: preparedLoss ? 'prepared-loss' as const : movement.type,
+          occurredAt: movement.createdAt, name: ingredient.name,
+          warehouseName: movement.warehouse?.name ?? defaultWarehouse?.name ?? 'Основной склад',
+          unit: unitLabel(unit), quantity: fromBase((preparedLoss ? loss : movement.change).toNumber(), unit), lineCost };
+      });
+      return { rows, canViewCosts, totalCost: canViewCosts && complete && rows.length ? total.toDecimalPlaces(2).toNumber() : null };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 }

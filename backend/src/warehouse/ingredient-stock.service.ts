@@ -22,6 +22,37 @@ type Movement = {
   quantity: number; cycle: number; sourceLineId?: string; change: Prisma.Decimal;
   cost?: Prisma.Decimal; costKnown?: boolean; comment: string; snapshot?: Prisma.InputJsonValue;
 };
+type SalePart = { kind?: string; amount?: string | number; componentId?: string | null };
+type SaleSnapshot = SalePart & { parts?: SalePart[]; restockedDirectGoods?: boolean };
+
+function mixedSaleAllocation(snapshot: SaleSnapshot | null, sold: Prisma.Decimal) {
+  const parts = snapshot?.parts;
+  if (!Array.isArray(parts) || !parts.some((part) => part?.kind === 'direct') || parts.every((part) => part?.kind === 'direct')) return null;
+  const quantities = [];
+  for (const part of parts) {
+    if (!part || (typeof part.amount !== 'number' && (typeof part.amount !== 'string' || !part.amount.trim()))
+      || !Number.isFinite(Number(part.amount)) || Number(part.amount) <= 0) return null;
+    quantities.push({ part, recorded: new Prisma.Decimal(part.amount) });
+  }
+  const postedTotal = quantities.reduce((sum, { recorded }) => sum.add(recorded.toDecimalPlaces(3)), new Prisma.Decimal(0));
+  // A reopened or split movement may retain original proportions with a different ledger quantity.
+  const exactParts = postedTotal.eq(sold);
+  const weights = quantities.map(({ part, recorded }) => ({ ...part, weight: exactParts ? recorded.toDecimalPlaces(3) : recorded }));
+  const directShare = (quantity: Prisma.Decimal, componentId?: string, onlyComponent = false) => {
+    const total = weights.reduce((sum, part) => sum.add(!onlyComponent || part.componentId === componentId ? part.weight : 0), new Prisma.Decimal(0));
+    const direct = weights.reduce((sum, part) => sum.add(part.kind === 'direct' && (!componentId || part.componentId === componentId) ? part.weight : 0), new Prisma.Decimal(0));
+    return total.gt(0) ? quantity.mul(direct).div(total).toDecimalPlaces(3) : new Prisma.Decimal(0);
+  };
+  return {
+    target: (componentId?: string) => directShare(sold, componentId),
+    previous: (quantity: Prisma.Decimal, movementItemId: string | null) => {
+      const componentId = weights.find(({ componentId }) => componentId &&
+        (movementItemId === componentId || movementItemId?.endsWith(':' + componentId)))?.componentId ?? undefined;
+      return directShare(quantity, componentId, !!componentId);
+    },
+  };
+}
+
 export type IngredientStockWarning = {
   ingredientId: string; ingredient: string; warehouseId: string | null; warehouseName?: string;
   unit: string; needed: number; available: number; missing: number;
@@ -211,11 +242,24 @@ export class IngredientStockService {
     const originals = await tx.orderItem.findMany({ where: { orderId, id: { in: sourceIds } }, select: { id: true, quantity: true, status: true, prepStation: true } });
     const originalById = new Map(originals.map((line) => [line.id, line]));
     const recorded = new Set(returns.map((row) => [row.orderItemId, row.ingredientId, row.saleCycle, row.warehouseKey].join(':')));
+    const movementKey = (lineId: string | null, movement: { ingredientId: string; saleCycle: number; warehouseKey: string }) =>
+      [lineId, movement.ingredientId, movement.saleCycle, movement.warehouseKey].join(':');
+    const mixedSales = new Map(paidGoodsOnly ? sales.map((sale) => [movementKey(sale.orderItemId, sale),
+      mixedSaleAllocation(sale.recipeSnapshot as SaleSnapshot | null, sale.change.abs())] as const) : []);
     const refunded = new Map<string, Prisma.Decimal>();
+    const refundedDirect = new Map<string, Prisma.Decimal>();
     for (const row of returns) {
-      const key = [row.saleLineId ?? row.orderItemId, row.ingredientId, row.saleCycle, row.warehouseKey].join(':');
+      const key = movementKey(row.saleLineId ?? row.orderItemId, row);
       const loss = row.type === 'writeoff' ? new Prisma.Decimal(String((row.recipeSnapshot as { lossQuantity?: string } | null)?.lossQuantity ?? 0)) : new Prisma.Decimal(0);
-      refunded.set(key, (refunded.get(key) ?? new Prisma.Decimal(0)).add(row.change).add(loss));
+      const handled = row.change.add(loss);
+      refunded.set(key, (refunded.get(key) ?? new Prisma.Decimal(0)).add(handled));
+      const mixed = mixedSales.get(key);
+      if (mixed && handled.gt(0)) {
+        // Prior regular cancellations covered the recorded mix. Paid returns below cover the direct portion alone.
+        const paidDirect = row.type === 'return' && (row.recipeSnapshot as SaleSnapshot | null)?.restockedDirectGoods === true;
+        const directAmount = paidDirect ? handled : mixed.previous(handled, row.orderItemId);
+        refundedDirect.set(key, (refundedDirect.get(key) ?? new Prisma.Decimal(0)).add(directAmount));
+      }
     }
     const plan: Movement[] = [];
     for (const line of expandedLines) {
@@ -230,20 +274,23 @@ export class IngredientStockService {
         // Returning money must not replenish consumed ingredients.
         const snapshot = sale.recipeSnapshot as { kind?: string; parts?: { kind?: string }[] } | null;
         const direct = snapshot?.kind === 'direct' || (snapshot?.parts?.length && snapshot.parts.every((part) => part.kind === 'direct'));
-        if (paidGoodsOnly && !direct) continue;
+        const key = movementKey(sourceId, sale);
+        const mixed = mixedSales.get(key);
+        if (paidGoodsOnly && !direct && !mixed) continue;
         const unstarted = status === 'new' || status === 'accepted';
         const restorable = paidGoodsOnly || unstarted || (direct && (line.prepStation ?? original?.prepStation) === 'none' && status === 'ready');
-        const key = [sourceId, sale.ingredientId, sale.saleCycle, sale.warehouseKey].join(':');
         if (sale.saleCycle !== latestCycle || recorded.has([line.id, sale.ingredientId, sale.saleCycle, sale.warehouseKey].join(':'))) continue;
         const quantity = sale.saleQuantity ?? line.sourceLineQuantity ?? original?.quantity ?? line.quantity;
         const remaining = sale.change.abs().sub(refunded.get(key) ?? 0);
         const snapshotParts = sale.recipeSnapshot as { componentId?: string; amount?: string; parts?: { componentId?: string; amount?: string }[] } | null;
         const componentAmount = line.componentId ? (snapshotParts?.parts ?? (snapshotParts ? [snapshotParts] : []))
           .filter((part) => part.componentId === line.componentId).reduce((sum, part) => sum.add(part.amount ?? 0), new Prisma.Decimal(0)) : null;
-        const target = componentAmount ?? sale.change.abs();
-        const change = Prisma.Decimal.min(remaining, target.mul(line.quantity).div(quantity).toDecimalPlaces(3));
+        const target = mixed?.target(line.componentId) ?? componentAmount ?? sale.change.abs();
+        const remainingDirect = mixed ? mixed.target().sub(refundedDirect.get(key) ?? 0) : remaining;
+        const change = Prisma.Decimal.min(remaining, remainingDirect, target.mul(line.quantity).div(quantity).toDecimalPlaces(3));
         if (change.lte(0)) continue;
         refunded.set(key, (refunded.get(key) ?? new Prisma.Decimal(0)).add(change));
+        if (mixed) refundedDirect.set(key, (refundedDirect.get(key) ?? new Prisma.Decimal(0)).add(change));
         if (!restorable) {
           await postStockMovement(tx, { ingredientId: sale.ingredientId, warehouse: sale.warehouse, change: new Prisma.Decimal(0), cost: sale.costAtMoment, costKnown: sale.costKnown, allowNegative: true,
             movement: { type: 'writeoff', sourceType: 'order', sourceId: orderId, orderItemId: line.id, saleLineId: sourceId, saleCycle: sale.saleCycle,
@@ -254,7 +301,8 @@ export class IngredientStockService {
         }
         plan.push({ ingredient: sale.ingredient, warehouse: sale.warehouse, lineId: line.id, quantity: line.quantity, cycle: sale.saleCycle,
           sourceLineId: sourceId, change, cost: sale.costAtMoment, costKnown: sale.costKnown, comment: paidGoodsOnly ? 'Возврат оплаченного товара: ' + reason : 'Возврат до начала приготовления',
-          snapshot: sale.recipeSnapshot as Prisma.InputJsonValue ?? undefined });
+          snapshot: mixed ? { ...(sale.recipeSnapshot as Prisma.InputJsonObject), restockedDirectGoods: true }
+            : sale.recipeSnapshot as Prisma.InputJsonValue ?? undefined });
       }
     }
     return this.post(tx, orderId, plan, 'return');

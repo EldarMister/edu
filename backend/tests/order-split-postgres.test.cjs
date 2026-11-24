@@ -3,6 +3,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { PrismaClient } = require('@prisma/client');
+const { Reflector } = require('@nestjs/core');
+const { AdminOrdersController } = require('../src/admin/admin-orders.controller.ts');
+const { AdminOrdersService } = require('../src/admin/admin-orders.service.ts');
+const { PermissionsGuard } = require('../src/common/guards/permissions.guard.ts');
+const { RolesGuard } = require('../src/common/guards/roles.guard.ts');
 const { runWithTenant, tenantPrismaMiddleware } = require('../src/tenant/tenant-context.ts');
 const { OrdersService } = require('../src/orders/orders.service.ts');
 const { OrderRefundsService } = require('../src/orders/order-refunds.service.ts');
@@ -17,6 +22,22 @@ const url = process.env.ORDER_FEATURE_TEST_DATABASE_URL;
 if (url && (!['localhost', '127.0.0.1'].includes(new URL(url).hostname) || !new URL(url).pathname.includes('test'))) {
   throw new Error('Only a dedicated local test database is allowed');
 }
+
+test('receipt stock movements require both sections and a back-office role', () => {
+  const reflector = new Reflector();
+  const permissions = new PermissionsGuard(reflector);
+  const roles = new RolesGuard(reflector);
+  const context = (user) => ({ getClass: () => AdminOrdersController, getHandler: () => AdminOrdersController.prototype.stockMovements,
+    switchToHttp: () => ({ getRequest: () => ({ method: 'GET', user }) }) });
+  const user = { role: 'ADMIN', permissions: { sections: { orders: true, warehouse: true }, readOnlySections: ['warehouse'] } };
+  assert.equal(roles.canActivate(context(user)), true);
+  assert.equal(permissions.canActivate(context(user)), true);
+  assert.throws(() => roles.canActivate(context({ ...user, role: 'WAITER' })), { status: 403 });
+  for (const section of ['orders', 'warehouse']) {
+    const hidden = { ...user, permissions: { sections: { ...user.permissions.sections, [section]: false } } };
+    assert.throws(() => permissions.canActivate(context(hidden)), { status: 403 });
+  }
+});
 
 test('PostgreSQL: split checks keep quantities, stock, pricing, table occupation and history consistent', { skip: !url }, async (t) => {
   const db = new PrismaClient({ datasourceUrl: url });
@@ -37,6 +58,7 @@ test('PostgreSQL: split checks keep quantities, stock, pricing, table occupation
       const settings = new SettingsService(db, audit, events);
       const orders = new OrdersService(db, events, shifts, push, settings, { recalculateDishes: async () => {} }, audit, ingredientStock);
       const refunds = new OrderRefundsService(db, audit, events, ingredientStock);
+      const admin = new AdminOrdersService(db);
       const purchases = new PurchasesService(db);
       const [warehouse] = (await new WarehouseLocationsService(db, events).list(cafe.id)).locations;
       await settings.ensure();
@@ -134,6 +156,26 @@ test('PostgreSQL: split checks keep quantities, stock, pricing, table occupation
           where: { type: 'return', sourceId: first.newOrder.id, saleLineId: first.newOrder.items[0].id },
         })).costAtMoment, 15);
         assert.equal((await ingredients.findOne(goods.id)).balances.find((row) => row.warehouseId === warehouse.id).stock, 17);
+        const detail = await admin.stockMovements(first.newOrder.id, owner);
+        assert.equal(detail.canViewCosts, true);
+        assert.equal(detail.totalCost, 0);
+        assert.deepEqual(detail.rows.map(({ type, quantity, warehouseName, lineCost }) => [type, quantity, warehouseName, lineCost]),
+          [['sale', -1, warehouse.name, 15], ['return', 1, warehouse.name, -15]]);
+        assert.deepEqual((await admin.stockMovements(original.id, owner)).rows.map(({ type, quantity }) => [type, quantity]), [['sale', -1]]);
+        const limited = await admin.stockMovements(first.newOrder.id, { ...owner, role: 'ADMIN', permissions: {
+          sections: { orders: true, warehouse: true }, actions: { warehouseCosts: false },
+        } });
+        assert.equal(limited.canViewCosts, false);
+        assert.equal(limited.totalCost, null);
+        assert.deepEqual(limited.rows.map(({ quantity, lineCost }) => [quantity, lineCost]), [[-1, null], [1, null]]);
+        assert.doesNotMatch(JSON.stringify(limited), /costAtMoment|recipeSnapshot|stockValue/);
+        const foreign = await db.cafe.create({ data: { name: 'Other receipt tenant ' + randomUUID() } });
+        try {
+          await runWithTenant({ cafeId: foreign.id }, () =>
+            assert.rejects(admin.stockMovements(first.newOrder.id, { ...owner, cafeId: foreign.id }), { status: 404 }));
+        } finally {
+          await db.cafe.delete({ where: { id: foreign.id } });
+        }
       });
 
       await t.test('whole-line split preserves original rounding and all unpaid checks move together', async () => {
@@ -196,6 +238,33 @@ test('PostgreSQL: split checks keep quantities, stock, pricing, table occupation
         const current = await ingredients.findOne(ingredient.id);
         assert.equal(current.balances.find((row) => row.warehouseId === warehouse.id).stock, 850);
         assert.equal(await db.stockMovement.count({ where: { sourceId: newOrder.id, type: 'return' } }), 0);
+        assert.equal((await admin.stockMovements(newOrder.id, owner)).totalCost, 7.5);
+      });
+
+      await t.test('receipt stock details preserve posted costs, disclose actual losses and leave unknown valuations blank', async () => {
+        const kitchen = await makeUser('KITCHEN');
+        const table = await newTable();
+        const meals = await db.category.create({ data: { name: 'Горячее для списаний', prepStation: 'kitchen' } });
+        const flour = await ingredients.create({ name: 'Мука для списаний', unit: 'kg', stock: 4, avgCost: 40 });
+        const dish = await db.dish.create({ data: { categoryId: meals.id, name: 'Тесто', price: 75 } });
+        await db.recipeItem.create({ data: { dishId: dish.id, ingredientId: flour.id, amount: 250, amountUnit: 'kg' } });
+        const order = await orders.create(waiter, { tableId: table.id, items: [{ dishId: dish.id, quantity: 1 }] });
+        await orders.stationAccept(order.id, kitchen.id, 'kitchen');
+        await orders.kitchenReadyItems(order.id, [order.items[0].id], kitchen.id, 'kitchen');
+        await orders.cancelOrder(order.id, owner, 'Готовое блюдо утилизировано');
+        await db.recipeItem.updateMany({ where: { dishId: dish.id }, data: { amount: 900 } });
+        await db.ingredient.update({ where: { id: flour.id }, data: { avgCost: 9 } });
+        const detail = await admin.stockMovements(order.id, owner);
+        assert.deepEqual(detail.rows.map(({ type, quantity, unit, lineCost }) => [type, quantity, unit, lineCost]),
+          [['sale', -0.25, 'кг', 10], ['prepared-loss', 0.25, 'кг', null]]);
+        assert.equal(detail.totalCost, 10, 'the loss is part of the original physical debit');
+        const historicalSale = detail.rows[0].id;
+        await db.stockMovement.update({ where: { id: historicalSale }, data: { costKnown: false } });
+        const unknown = await admin.stockMovements(order.id, owner);
+        assert.equal(unknown.rows[0].lineCost, null);
+        assert.equal(unknown.totalCost, null);
+        const withoutMovements = await db.order.create({ data: { tableId: table.id, orderNumber: randomUUID(), status: 'paid' } });
+        assert.deepEqual(await admin.stockMovements(withoutMovements.id, owner), { rows: [], canViewCosts: true, totalCost: null });
       });
     });
   } finally {

@@ -3,9 +3,12 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { PrismaClient } = require('@prisma/client');
+const XLSX = require('xlsx');
 const { runWithTenant, tenantPrismaMiddleware } = require('../src/tenant/tenant-context.ts');
 const { RecipePreviewController } = require('../src/warehouse/recipes.controller.ts');
 const { RecipesService } = require('../src/warehouse/recipes.service.ts');
+const { RecipeExportController } = require('../src/warehouse/recipe-export.controller.ts');
+const { PreparationProductionService } = require('../src/warehouse/preparation-production.ts');
 const { redactWarehouseCosts } = require('../src/warehouse/warehouse-cost.interceptor.ts');
 
 const url = process.env.ORDER_FEATURE_TEST_DATABASE_URL;
@@ -103,6 +106,44 @@ test('PostgreSQL: recipe preview, saved card, and costing list use the same ware
       assert.deepEqual([masked.foodCost, masked.marginAmount, masked.markupPercent, masked.productionCost, masked.items[0].avgCost,
         masked.compositionCostForScaling], [null, null, null, null, null, null]);
       assert.equal(masked.items[0].warehouseName, bar.name);
+
+      await recipes.saveDraft(dish.id, { expectedVersion: firstDraft.recipe.version,
+        items: [{ ...items[0], measuredNetWeightGrams: 210 }, items[1]] });
+      await db.preparationRecipe.create({ data: { ingredientId: output.id, outputAmount: 400, outputUnit: 'kg', items: { create: [{
+        ingredientId: milk.id, amount: 200, unit: 'l', netAmount: 190, measuredNetWeightGrams: 210,
+      }] } } });
+      const exportController = new RecipeExportController(recipes, new PreparationProductionService(db));
+      const readOnlyMenu = { role: 'ADMIN', permissions: { sections: { menu: true, warehouse: true },
+        actions: { exportReports: true, warehouseCosts: false }, readOnlySections: ['menu', 'warehouse'] } };
+      const download = async (dto, actor = { role: 'OWNER' }) => {
+        const headers = {};
+        let buffer;
+        await exportController.exportRecipes(dto, actor, { setHeader: (key, value) => { headers[key] = value; }, send: (data) => { buffer = data; } });
+        assert.match(headers['Content-Disposition'], /attachment/);
+        return XLSX.read(buffer, { type: 'buffer' });
+      };
+      const selection = { kind: 'recipes', ids: [set.id, randomUUID(), dish.id, dish.id], includeComposition: true };
+      await assert.rejects(download(selection, { role: 'ADMIN', permissions: { sections: { menu: true } } }), { status: 403 });
+      const listed = await download(selection);
+      assert.deepEqual(listed.SheetNames, ['Техкарты', 'Состав']);
+      const headerRows = XLSX.utils.sheet_to_json(listed.Sheets['Техкарты']);
+      assert.deepEqual(headerRows.map((row) => row['Название']), ['Набор', 'Латте', 'Латте']);
+      const details = XLSX.utils.sheet_to_json(listed.Sheets['Состав']);
+      assert.equal(details[0]['Компонент'], 'Латте · Большой');
+      const measured = details.find((row) => row['Вариант'] === 'Большой' && row['Компонент'] === 'Молоко');
+      assert.deepEqual(['Брутто', 'Ед. брутто', 'Нетто', 'Ед. нетто', 'Нетто в ед. брутто', 'Склад списания', 'Себестоимость строки, сом']
+        .map((field) => measured[field]), [0.3, 'л', 315, 'г', 0.285, 'Склад бара', 60]);
+      assert.deepEqual((await download({ ...selection, includeComposition: false })).SheetNames, ['Техкарты']);
+
+      const hiddenCosts = await download(selection, readOnlyMenu);
+      const [safeHeadings] = XLSX.utils.sheet_to_json(hiddenCosts.Sheets['Состав'], { header: 1 });
+      assert.ok(!safeHeadings.includes('Себестоимость строки, сом'));
+      const preparations = await download({ kind: 'preparations', ids: [output.id, milk.id], includeComposition: true });
+      const prep = XLSX.utils.sheet_to_json(preparations.Sheets['Полуфабрикаты']);
+      assert.deepEqual(prep.map((row) => [row['Название'], row['Выход'], row['Ед. выхода']]), [['Выпуск латте', 0.4, 'кг']]);
+      const [prepRow] = XLSX.utils.sheet_to_json(preparations.Sheets['Состав']);
+      assert.deepEqual([prepRow['Брутто'], prepRow['Нетто'], prepRow['Ед. нетто']], [0.2, 210, 'г']);
+      assert.equal(await db.stockMovement.count(), 0, 'workbook export does not post stock');
     });
   } finally {
     await db.dish.deleteMany({ where: { cafeId } });
@@ -111,6 +152,7 @@ test('PostgreSQL: recipe preview, saved card, and costing list use the same ware
     await db.warehouseStock.deleteMany({ where: { cafeId } });
     await db.stationWarehouse.deleteMany({ where: { cafeId } });
     await db.warehouse.deleteMany({ where: { cafeId } });
+    await db.preparationRecipe.deleteMany({ where: { cafeId } });
     await db.ingredient.deleteMany({ where: { cafeId } });
     await db.settings.deleteMany({ where: { cafeId } });
     await db.cafe.delete({ where: { id: cafeId } });

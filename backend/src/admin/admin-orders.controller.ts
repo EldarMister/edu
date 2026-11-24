@@ -36,6 +36,12 @@ export class AdminOrdersController {
     return this.orders.findOne(id);
   }
 
+  @Get(':id/stock-movements')
+  @RequirePermission('sections.warehouse')
+  stockMovements(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.orders.stockMovements(id, user);
+  }
+
   @Patch(':id/status')
   updateStatus(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: UpdateOrderStatusDto) {
     return this.orderActions.adminUpdateStatus(id, user, dto.status, dto.reason);

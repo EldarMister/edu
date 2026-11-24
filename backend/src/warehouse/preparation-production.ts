@@ -18,6 +18,7 @@ import { ProcessingOptionsDto } from './recipe-processing.dto';
 import { postStockMovement } from './stock-posting';
 import { inventoryReversalBlockedReason } from './closed-inventory-period';
 import { warehouseDateRange } from './report-range';
+import { recipeExportProcessing, type RecipeExportCard } from './recipe-export-workbook';
 
 class CreatePreparationDto {
   @IsString() @IsNotEmpty() @MaxLength(120) name: string;
@@ -124,6 +125,28 @@ export class PreparationProductionService {
           processingMethod: item.processingMethod, processingStages: stages, processingBasis: item.processingBasis,
           processingStageResults: processingStageResults(stages, item.amount, unit), unit: item.unit };
       }) ?? [] };
+  }
+
+  async exportCards(ids: string[], includeComposition: boolean): Promise<RecipeExportCard[]> {
+    return this.prisma.$transaction(async (tx) => {
+      const orderedIds = [...new Set(ids)];
+      const existing = await tx.ingredient.findMany({ where: { cafeId: this.cafeId(), id: { in: orderedIds }, isPrepared: true, isActive: true },
+        select: { id: true } });
+      const visible = new Set(existing.map(({ id }) => id));
+      const service = new PreparationProductionService(tx as PrismaService);
+      const cards: RecipeExportCard[] = [];
+      for (const id of orderedIds) {
+        if (!visible.has(id)) continue;
+        const card = await service.getRecipe(id);
+        cards.push({ name: card.name, category: card.category, type: card.kind === 'prepared_dish' ? 'Готовое блюдо' : 'Полуфабрикат',
+          output: card.items.length ? { amount: card.outputQuantity, unit: unitLabel(card.outputUnit) } : null, cost: card.totalCost,
+          items: includeComposition ? card.items.map((item) => ({ name: item.name, gross: item.quantity, unit: unitLabel(normalizeUnit(item.unit)),
+            net: item.netAmount, netGrams: item.netWeightGrams, cost: item.lineCost,
+            processing: recipeExportProcessing(item.processingStages, item.processingMethod),
+          })) : [] });
+      }
+      return cards;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30_000 });
   }
 
   async saveRecipe(id: string, dto: PreparationRecipeDto) {
@@ -486,5 +509,5 @@ class PreparationProductionController {
   @Post(':id/batches') @RequirePermission('actions.warehouseProduce')
   produce(@Param('id') id: string, @Body() dto: ProducePreparationDto, @CurrentUser() actor: AuthUser) { return this.preparation.produce(id, dto, actor); }
 }
-@Module({ controllers: [PreparationProductionController], providers: [PreparationProductionService] })
+@Module({ controllers: [PreparationProductionController], providers: [PreparationProductionService], exports: [PreparationProductionService] })
 export class PreparationProductionModule {}

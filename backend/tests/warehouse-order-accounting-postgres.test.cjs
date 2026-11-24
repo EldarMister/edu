@@ -607,6 +607,61 @@ test('PostgreSQL: unified stock covers direct sales, recipes, production, stages
         assert.equal(Number(loss.change), 0); assert.equal(loss.costKnown, false);
       });
 
+      await t.test('paid goods refund restores only the direct part of a shared stock movement after quantity correction', async () => {
+        const goods = await ingredients.create({ name: 'Товар с добавкой из того же остатка', unit: 'pcs', stock: 20, avgCost: 10 });
+        const replacement = await ingredients.create({ name: 'Новый остаток товара после продажи', unit: 'pcs', stock: 20, avgCost: 40 });
+        const menu = await dish('Прямая продажа с общей добавкой', { prepStation: 'kitchen' });
+        await recipes.updateSettings(menu.id, { stockIngredientId: goods.id, stockAmount: 2, stockUnit: 'pcs' });
+        const modifiers = new MenuModifiersService(db);
+        const config = await modifiers.save(menu.id, { allowIngredientExclusions: false, groups: [{ name: 'Дополнительно',
+          options: [{ name: 'Из того же остатка', price: 5, ingredientId: goods.id, amount: 1 }] }] });
+        const selection = { dishId: menu.id, modifierSelections: [{ optionId: config.groups[0].options[0].id, quantity: 1 }] };
+        const ticket = await order([{ ...selection, quantity: 3 }]);
+        const item = ticket.items[0];
+        const sale = await db.stockMovement.findFirstOrThrow({ where: { sourceId: ticket.id, type: 'sale' } });
+        assert.deepEqual([Number(sale.change), sale.recipeSnapshot.parts.map(({ kind, amount }) => [kind, amount]), await balance(goods.id)],
+          [-9, [['direct', '6'], ['modifier', '3']], 11]);
+
+        await orders.editOrder(ticket.id, owner, [{ ...selection, id: item.id, quantity: 2 }], undefined, 'Сняли одну порцию до приготовления');
+        assert.equal(await balance(goods.id), 14);
+        await db.order.update({ where: { id: ticket.id }, data: { status: 'paid', paymentStatus: 'paid', closedAt: new Date() } });
+        await recipes.updateSettings(menu.id, { stockIngredientId: replacement.id, stockAmount: 4, stockUnit: 'pcs' });
+        await modifiers.save(menu.id, { allowIngredientExclusions: false, groups: [] });
+
+        const refund = (id) => db.$transaction((tx) => stock.restockPaidGoods(tx, ticket.id, id, [{ item, quantity: 1 }], 'Вернули товар'));
+        const first = randomUUID(), second = randomUUID();
+        assert.deepEqual(await Promise.all([refund(first), refund(first)]), [true, true]);
+        assert.equal(await balance(goods.id), 16);
+        assert.equal(await refund(second), true);
+        assert.equal(await refund(randomUUID()), false);
+        assert.deepEqual([await balance(goods.id), await balance(replacement.id)], [18, 20]);
+        const returns = await db.stockMovement.findMany({ where: { sourceId: ticket.id, type: 'return' }, orderBy: { change: 'asc' } });
+        assert.deepEqual(returns.map((row) => [Number(row.change), row.saleLineId, Number(row.costAtMoment)]), [[2, item.id, 10], [2, item.id, 10], [3, item.id, 10]]);
+        assert.deepEqual((await db.stockMovement.findUniqueOrThrow({ where: { id: sale.id } })).recipeSnapshot, sale.recipeSnapshot);
+      });
+
+      await t.test('paid goods refund honors the smaller latest debit when an adjusted order was reopened', async () => {
+        const goods = await ingredients.create({ name: 'Товар переоткрытого чека', unit: 'pcs', stock: 20, avgCost: 10 });
+        const menu = await dish('Переоткрытая прямая продажа', { prepStation: 'kitchen' });
+        await recipes.updateSettings(menu.id, { stockIngredientId: goods.id, stockAmount: 2, stockUnit: 'pcs' });
+        const config = await new MenuModifiersService(db).save(menu.id, { allowIngredientExclusions: false, groups: [{ name: 'Добавка',
+          options: [{ name: 'Тот же остаток', price: 5, ingredientId: goods.id, amount: 1 }] }] });
+        const selection = { dishId: menu.id, modifierSelections: [{ optionId: config.groups[0].options[0].id, quantity: 1 }] };
+        const ticket = await order([{ ...selection, quantity: 3 }]);
+        const item = ticket.items[0];
+        await orders.editOrder(ticket.id, owner, [{ ...selection, id: item.id, quantity: 2 }], undefined, 'Уменьшили количество');
+        await orders.cancelOrder(ticket.id, owner, 'Отменили до приготовления');
+        await orders.adminUpdateStatus(ticket.id, owner, 'sent_to_kitchen');
+        const sale = await db.stockMovement.findFirstOrThrow({ where: { sourceId: ticket.id, orderItemId: item.id, type: 'sale', saleCycle: 1 } });
+        assert.deepEqual([Number(sale.change), sale.saleQuantity, sale.recipeSnapshot.parts.map(({ amount }) => amount)], [-6, 2, ['6', '3']]);
+        const before = await balance(goods.id);
+        await db.order.update({ where: { id: ticket.id }, data: { status: 'paid', paymentStatus: 'paid', closedAt: new Date() } });
+        const refundId = randomUUID();
+        assert.equal(await db.$transaction((tx) => stock.restockPaidGoods(tx, ticket.id, refundId, [{ item, quantity: 2 }], 'Возврат товара')), true);
+        const credit = await db.stockMovement.findFirstOrThrow({ where: { orderItemId: refundId + ':' + item.id, type: 'return' } });
+        assert.deepEqual([Number(credit.change), credit.saleCycle, await balance(goods.id)], [4, 1, before + 4]);
+      });
+
       await t.test('recipe endpoints reject foreign ingredients and warehouses', async () => {
         const foreign = await db.cafe.create({ data: { name: 'Foreign recipe scope' } });
         try {

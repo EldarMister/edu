@@ -8,9 +8,11 @@ import type { Order, OrderItemStatus } from '@/types';
 import { displayOrderNumber, hallSuffix, money, orderItemDisplayName, paymentDisplayLabel, timeHM, isSplitPayment, paymentMethodLabel, tableLabel,
   taxRateLabel } from '@/lib/format';
 import { useNotifications } from '@/store/notifications';
+import { usePermissions } from '@/hooks/usePermissions';
 import { apiError } from '@/lib/api';
 import { useCancelOrderItem, useRetryFiscal } from '../api';
 import { CancelOrderModal } from './CancelOrderModal';
+import { OrderStockMovements } from './OrderStockMovements';
 
 const ITEM_STATUS: Record<OrderItemStatus, string> = {
   new: 'Новое',
@@ -44,6 +46,9 @@ export function OrderDetailsModal({
   const [cancelItem, setCancelItem] = useState<Order['items'][number] | null>(null);
   const cancelOrderItem = useCancelOrderItem();
   const push = useNotifications((s) => s.push);
+  const { effectiveRole, canSection } = usePermissions();
+  const showStockMovements = !waiterLayout && (effectiveRole === 'ADMIN' || effectiveRole === 'OWNER')
+    && canSection('orders') && canSection('warehouse');
 
   if (!order) return null;
 
@@ -233,6 +238,7 @@ export function OrderDetailsModal({
           </>}
         </div>
 
+        {showStockMovements && <OrderStockMovements key={`stock-${order.id}`} orderId={order.id} />}
         {refundMode && order.status === 'paid' && <OrderRefunds key={order.id} order={order} mode={refundMode} />}
         <FiscalBlock order={order} />
       </div>

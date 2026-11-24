@@ -35,6 +35,7 @@ import { filterMenuGoods, MenuAdditionalFilters, MenuGoodsActions, menuGoodsColu
   useMenuGoodsColumns, type MenuGoodsColumn } from './MenuGoodsControls';
 import { MenuEntryPage } from './MenuEntryPage';
 import { InlineMenuPrice } from './InlineMenuPrice';
+import { RecipeExportButton } from './warehouse/RecipeExportButton';
 import { MenuFoodCostPage } from './MenuFoodCostPage';
 import { costPercent, menuOutputLabel, useMenuCosts, type MenuCostRow } from './menu-cost-api';
 import { dishTaxInput, dishTaxValue, effectiveMenuTaxId, MenuTaxSelect } from '../../settings/MenuTaxSelect';
@@ -98,6 +99,7 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
   const push = useNotifications((state) => state.push);
   const { can } = usePermissions();
   const editable = can('actions.editMenu');
+  const canExportRecipes = !isGoods && can('sections.warehouse') && can('actions.exportReports');
   const showRecipeCosts = !isGoods && can('sections.warehouse') && can('actions.warehouseCosts');
   const filtered = Object.entries(filters).some(([key, value]) => !['nameSort', 'taxSort', 'recipePage'].includes(key) && value);
   function clearFilters() {
@@ -205,10 +207,11 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
           options={stationOptions} />
         <MenuAdditionalFilters filters={filters} update={updateFilters} goods={isGoods} units={unitOptions}
           taxes={isGoods || displayTax ? taxFilters : []} />
-        {!editor && (isGoods || editable) && (
+        {!editor && (isGoods || editable || canExportRecipes) && (
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             {isGoods && <MenuGoodsActions filters={filters} columns={columns} saveColumns={saveColumns}
               ready={goodsQ.isSuccess} canExport={can('actions.exportReports')} />}
+            {canExportRecipes && <RecipeExportButton kind="recipes" ids={rows.map(({ id }) => id)} pending={!dishesQ.isSuccess} />}
             {!isGoods && editable && (
               <MenuActions
                 ariaLabel="Другие действия"

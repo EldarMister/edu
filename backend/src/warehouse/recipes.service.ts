@@ -10,8 +10,9 @@ import { MenuModifiersService } from './menu-modifiers';
 import { lockRecipeGraph } from './recipe-resolution';
 import { massProcessing, measuredVolumeNetWeight, nonMassProcessing, readProcessingStages } from './recipe-processing';
 import { addRecipeValue, RecipeCalculator, recipeMetrics, recipeOutput, type RecipeCostRow } from './recipe-calculation';
-import { assertUnitMatchesType, normalizeUnit, toBase, type UnitCode } from './units';
+import { assertUnitMatchesType, normalizeUnit, toBase, unitLabel, type UnitCode } from './units';
 import { archiveDishRecipe, readCompositionRevisions } from './recipe-revisions';
+import { recipeExportProcessing, type RecipeExportCard, type RecipeExportLine } from './recipe-export-workbook';
 
 const recipeDishInclude = {
   variants: { orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] },
@@ -179,6 +180,43 @@ export class RecipesService {
         }
       }
       return { rows, total, offset, limit };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30_000 });
+  }
+
+  async exportCards(ids: string[], includeComposition: boolean): Promise<RecipeExportCard[]> {
+    return this.prisma.$transaction(async (tx) => {
+      const orderedIds = [...new Set(ids)];
+      const [dishes, calculator] = await Promise.all([
+        tx.dish.findMany({ where: { cafeId: getCafeId() ?? null, catalogKind: 'recipe', id: { in: orderedIds } }, include: recipeDishInclude }),
+        RecipeCalculator.create(tx),
+      ]);
+      const byId = new Map(dishes.map((dish) => [dish.id, dish]));
+      const cards: RecipeExportCard[] = [];
+      const service = new RecipesService(tx as PrismaService);
+      for (const id of orderedIds) {
+        const dish = byId.get(id);
+        if (!dish) continue;
+        for (const variant of dish.variants.length ? dish.variants : [null]) {
+          const { response } = await service.calculateSaved(dish, calculator, variant?.id);
+          const items: RecipeExportLine[] = includeComposition ? response.items.map((item) => ({
+            name: item.name, gross: item.amount, unit: item.unit, net: item.netAmount, netGrams: item.netWeightGrams,
+            processing: recipeExportProcessing(item.processingStages, item.processingMethod), warehouse: item.warehouseName, cost: item.lineCost,
+          })) : [];
+          if (includeComposition && !items.length && response.stockItem) {
+            const stock = response.stockItem;
+            items.push({ name: stock.name, gross: stock.amount, unit: unitLabel(stock.unit), net: null,
+              warehouse: stock.warehouseName, cost: response.foodCost });
+          }
+          if (includeComposition && !items.length) for (const component of response.components) {
+            items.push({ name: [component.dishName, component.variantName].filter(Boolean).join(' · '), gross: component.quantity,
+              unit: 'шт', net: null, cost: component.foodCost });
+          }
+          cards.push({ name: dish.name, category: dish.category.name, type: dish.isSet ? 'Сет' : 'Техкарта',
+            variant: variant?.name ?? null, price: response.price, cost: response.foodCost, items,
+            output: response.output ? { amount: response.output.amount, unit: unitLabel(response.output.unit) } : null });
+        }
+      }
+      return cards;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30_000 });
   }
 

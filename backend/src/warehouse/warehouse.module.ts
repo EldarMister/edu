@@ -22,14 +22,17 @@ import { WarehouseSuppliersModule } from './suppliers';
 import { WarehousePackagesModule } from './packages';
 import { ProcessingModule } from './processing';
 import { MenuModifiersController, MenuModifiersService } from './menu-modifiers';
+import { PreparationProductionModule } from './preparation-production';
+import { RecipeExportController } from './recipe-export.controller';
 
 /** Склад: сырьё, техкарты, закупки, движения. */
 @Module({
-  imports: [WarehouseSuppliersModule, WarehousePackagesModule, ProcessingModule],
+  imports: [WarehouseSuppliersModule, WarehousePackagesModule, ProcessingModule, PreparationProductionModule],
   controllers: [
     IngredientsController,
     RecipesController,
     RecipePreviewController,
+    RecipeExportController,
     PurchasesController,
     MovementsController,
     WarehouseOverviewController,
