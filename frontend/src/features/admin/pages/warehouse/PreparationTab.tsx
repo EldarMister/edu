@@ -32,6 +32,7 @@ import { inventoryTimeDisplay, inventoryTimeIso } from './inventory-time';
 import { displayedProcessingStages, lossFromAmounts, pieceNetWeight, preparationYieldBase, processingQuantities,
   processingRetention, recipeQuantity, supportsProcessing, validRecipeRows } from './recipe-draft-values';
 import { RecipeProcessingFields, recipeProcessingLabel } from './RecipeProcessingFields';
+import { VolumeNetFields } from './RecipeQuantityInput';
 
 type PreparationAction = {
   kind: 'recipe' | 'produce';
@@ -147,6 +148,8 @@ interface RecipeDraft extends RecipeProcessing {
   quantity: string;
   unit: UnitCode | '';
   netAmount: string;
+  measuredNetWeightGrams?: number | null;
+  volumeNetEdited?: boolean;
   lossPercent: string;
   processingMethod: ProcessingMethod | '';
 }
@@ -194,6 +197,7 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
           quantity: String(item.quantity),
           unit: item.unit,
           netAmount: String(item.netAmount ?? item.quantity),
+          measuredNetWeightGrams: item.measuredNetWeightGrams,
           lossPercent: String(item.lossPercent ?? 0),
           processingMethod: item.processingMethod ?? '',
           processingBasis: item.processingBasis,
@@ -215,6 +219,7 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
     unitFactor: row.unit ? unitFactor(row.unit) : 1,
     netAmount: row.netAmount === '' ? null : Number(row.netAmount),
     pieceWeightGrams: byId.get(row.ingredientId)?.pieceWeightGrams,
+    measuredNetWeightGrams: row.measuredNetWeightGrams,
   })));
   const requiresMeasuredYield = netBase === null && yieldRows.every(({ unit, netAmount }) => !!unit && netAmount !== '');
   const outputQuantity = enteredOutput ?? (netBase != null && netBase > 0 ? recipeWeight(netBase / unitFactor(outputUnit)) : '');
@@ -230,6 +235,7 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
         row.netAmount !== '' && validRecipeRows([{
           ingredientId: row.ingredientId, unit: row.unit, unitType: unitTypeOf(row.unit), name: '',
           amount: Number(row.quantity), netAmount: Number(row.netAmount), lossPercent: Number(row.lossPercent),
+          measuredNetWeightGrams: row.measuredNetWeightGrams,
           processingStages: row.processingStages, processingBasis: row.processingBasis,
         }]),
     );
@@ -280,13 +286,17 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
         outputUnit,
         mode,
         instructions,
-        items: rows.map(({ ingredientId, quantity, unit: rowUnit, netAmount, lossPercent, processingMethod, processingStages, processingBasis }) => {
+        items: rows.map(({ ingredientId, quantity, unit: rowUnit, netAmount, measuredNetWeightGrams, volumeNetEdited,
+          lossPercent, processingMethod, processingStages, processingBasis }) => {
           const unit = rowUnit as UnitCode;
           const prior = savedItems.get(ingredientId);
-          const pieces = unitTypeOf(unit) === 'count';
+          const unitType = unitTypeOf(unit);
+          const pieces = unitType === 'count';
           const preserveSavedNet = pieces && (!prior || prior.netAmount == null || Number(quantity) !== prior.quantity);
+          const implicitVolume = unitType === 'volume' && prior?.netAmount == null && !volumeNetEdited;
           return { ingredientId, quantity: Number(quantity), unit, processingStages, processingBasis,
-            netAmount: preserveSavedNet || processingBasis === 'gross' ? undefined : Number(netAmount),
+            netAmount: preserveSavedNet || implicitVolume || processingBasis === 'gross' ? undefined : Number(netAmount),
+            ...(unitType === 'volume' && { measuredNetWeightGrams }),
             lossPercent: processingStages?.length ? undefined : Number(lossPercent),
             processingMethod: processingStages?.length ? undefined : processingMethod || null };
         }),
@@ -349,6 +359,7 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
                   const unitType = ingredient?.unitType ?? (row.unit ? unitTypeOf(row.unit) : null);
                   const processing = unitType != null && supportsProcessing(unitType);
                   const pieces = unitType === 'count';
+                  const volume = unitType === 'volume';
                   const pieceNet = pieces && row.netAmount !== '' ? Number(row.netAmount) : null;
                   const netGrams = pieceNetWeight(pieceNet, ingredient?.pieceWeightGrams);
                   const saved = savedItems.get(row.ingredientId);
@@ -399,6 +410,8 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
                               processingMethod: '',
                               processingStages: undefined,
                               processingBasis: undefined,
+                              measuredNetWeightGrams: undefined,
+                              volumeNetEdited: undefined,
                               lossPercent: '0',
                               netAmount: row.quantity,
                             });
@@ -468,7 +481,16 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
                               <span className="whitespace-nowrap">{recipeQuantity(netGrams, 'г')}</span>
                               {pieceNet != null && <span className="block whitespace-nowrap text-xs text-text-muted">{qty(pieceNet, unitLabel(row.unit || 'pcs'))}</span>}
                             </>}
-                          </output> : <input
+                          </output> : volume ? <VolumeNetFields label={`Нетто ${index + 1}`}
+                            unit={row.unit ? unitLabel(row.unit) : ''} grams={row.measuredNetWeightGrams ?? null}
+                            volume={row.netAmount === '' ? null : Number(row.netAmount)}
+                            invalidVolume={Number(row.netAmount) > Number(row.quantity)} disabled={!row.ingredientId || !editable}
+                            onGrams={(measuredNetWeightGrams) => update(row.key, { measuredNetWeightGrams })}
+                            onVolume={(value) => {
+                              const netAmount = value ?? Number(row.quantity);
+                              update(row.key, { netAmount: String(netAmount), volumeNetEdited: true,
+                                lossPercent: String(lossFromAmounts(Number(row.quantity), netAmount)) });
+                            }} /> : <input
                             aria-label={`Нетто ${index + 1}`}
                             className="input h-9 w-[88px]"
                             type="number"
@@ -491,7 +513,7 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
                               }
                             }}
                           />}
-                          {!pieces && <span className="text-xs">{row.unit ? unitLabel(row.unit) : ''}</span>}
+                          {!pieces && !volume && <span className="text-xs">{row.unit ? unitLabel(row.unit) : ''}</span>}
                         </div>
                       </td>
                       {costs && (

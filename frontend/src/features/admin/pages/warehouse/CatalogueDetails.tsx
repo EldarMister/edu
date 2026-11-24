@@ -6,6 +6,7 @@ import { Select } from '@/components/Select';
 import type { AdminDish } from '../../api';
 import { useIngredient, usePreparationRecipe, useRecipe, type IngredientDetails, type IngredientUsage, type Recipe } from './api';
 import { recipeProcessingLabel } from './RecipeProcessingFields';
+import { RecipeHistoryDrawer } from './RecipeHistoryDrawer';
 import { normalizeUnitLabel, unitLabel } from './units';
 import { recipeQuantity } from './recipe-draft-values';
 import { QueryState } from './WarehouseUi';
@@ -84,8 +85,11 @@ export function IngredientUsageTable({ item }: { item: IngredientDetails }) {
 
 export function DishComposition({ dish }: { dish: AdminDish }) {
   const [variantId, setVariantId] = useState(dish.variants[0]?.id ?? '');
+  const [historyOpen, setHistoryOpen] = useState(false);
   const query = useRecipe(dish.id, variantId || undefined);
-  const costs = usePermissions().can('actions.warehouseCosts');
+  const { can, canSection } = usePermissions();
+  const costs = can('actions.warehouseCosts');
+  const canReadHistory = canSection('warehouse');
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center gap-4">
@@ -93,10 +97,12 @@ export function DishComposition({ dish }: { dish: AdminDish }) {
         {dish.variants.length > 0 && <Select ariaLabel="Вариант техкарты" className="w-56"
           value={variantId} onChange={setVariantId}
           options={dish.variants.map((variant) => ({ value: variant.id, label: variant.name }))} />}
+        {canReadHistory && <button type="button" className="btn-secondary btn-md ml-auto" onClick={() => setHistoryOpen(true)}>История состава</button>}
       </div>
       <CatalogueState pending={query.isPending} error={query.error} onRetry={() => void query.refetch()}>
         {query.data && <DishRecipeDetails recipe={query.data} costs={costs} />}
       </CatalogueState>
+      {canReadHistory && historyOpen && <RecipeHistoryDrawer dishId={dish.id} name={dish.name} isSet={dish.isSet === true} onClose={() => setHistoryOpen(false)} />}
     </>
   );
 }
@@ -170,15 +176,20 @@ export function PreparationComposition({ id, warehouseId }: { id: string; wareho
             <table className="poster-table poster-catalogue-detail-table w-full min-w-[620px]">
               <thead><tr><th>Продукты</th><th>Метод приготовления</th><th className="text-right">Брутто</th><th className="text-right">Нетто</th>{costs && <th className="text-right">Себестоимость</th>}</tr></thead>
               <tbody>
-                {query.data.items.map((item) => (
-                  <tr key={item.ingredientId}>
-                    <td>{item.name}<span className="text-text-muted">, {unitLabel(item.unit)}</span></td>
-                    <td>{recipeProcessingLabel(item) || '—'}</td>
-                    <td className="text-right whitespace-nowrap">{qty(item.quantity, unitLabel(item.unit))}</td>
-                    <td className="text-right whitespace-nowrap">{qty(item.netAmount ?? item.quantity * (1 - (item.lossPercent ?? 0) / 100), unitLabel(item.unit))}</td>
-                    {costs && <td className="text-right whitespace-nowrap">{item.lineCost == null ? '—' : money(item.lineCost)}</td>}
-                  </tr>
-                ))}
+                {query.data.items.map((item) => {
+                  const unit = unitLabel(item.unit);
+                  const net = item.netAmount ?? item.quantity * (1 - (item.lossPercent ?? 0) / 100);
+                  return <tr key={item.ingredientId}>
+                      <td>{item.name}<span className="text-text-muted">, {unit}</span></td>
+                      <td>{recipeProcessingLabel(item) || '—'}</td>
+                      <td className="text-right whitespace-nowrap">{qty(item.quantity, unit)}</td>
+                      <td className="text-right whitespace-nowrap">{item.netWeightGrams == null ? qty(net, unit) : <>
+                        {recipeQuantity(item.netWeightGrams, 'г')}
+                        <span className="block text-xs text-text-muted">{recipeQuantity(net, unit)}</span>
+                      </>}</td>
+                      {costs && <td className="text-right whitespace-nowrap">{item.lineCost == null ? '—' : money(item.lineCost)}</td>}
+                    </tr>;
+                })}
                 {!query.data.items.length && <tr><td colSpan={costs ? 5 : 4}>Состав пока не задан.</td></tr>}
               </tbody>
               <tfoot><tr>

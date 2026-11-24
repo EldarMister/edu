@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { calculateSaleTaxes } from '../settings/order-taxes';
 import { getCafeId } from '../tenant/tenant-context';
 import { recipeAmount, RecipeResolver } from './recipe-resolution';
-import { processingStageResults, readProcessingStages, stagedNetAmount } from './recipe-processing';
+import { processingStageResults, readProcessingStages, stagedNetAmount, volumeNetWeightForGross } from './recipe-processing';
 import { assertUnitMatchesType, baseUnitForType, costUnitLabel, normalizeUnit, toBase, unitLabel, type UnitCode } from './units';
 import { getWarehouseBalance, type WarehouseLocation } from './warehouse-location';
 
@@ -16,6 +16,7 @@ export type RecipeCostRow = {
   fromCommonWarehouse: boolean;
   amount: Prisma.Decimal;
   netAmount: Prisma.Decimal | null;
+  measuredNetWeightGrams: Prisma.Decimal | null;
   amountUnit: string;
   lossPercent: Prisma.Decimal;
   processingMethod: string | null;
@@ -121,6 +122,7 @@ export class RecipeCalculator {
     const totalsByUnit = new Map<UnitCode, Prisma.Decimal>();
     let totalGrams = zero;
     let hasWeightedPiece = false;
+    let hasMeasuredVolume = false;
     let allUsableInGrams = true;
     const items = [];
     for (const row of rows) {
@@ -155,9 +157,15 @@ export class RecipeCalculator {
       const yieldAmount = net ?? configuredNet();
       const pieceWeight = ingredient.unitType === 'count' ? ingredient.pieceWeightGrams : null;
       const pieceNetWeight = pieceWeight?.mul(yieldAmount) ?? null;
-      if (yieldAmount.gt(0) && ingredient.kind !== 'consumable') {
-        totalsByUnit.set(baseUnit, (totalsByUnit.get(baseUnit) ?? zero).add(yieldAmount));
-        if (baseUnit === 'g') totalGrams = totalGrams.add(yieldAmount);
+      const measuredNetWeight = ingredient.unitType === 'volume' ? row.measuredNetWeightGrams : null;
+      const measuredVolumeWeight = volumeNetWeightForGross(measuredNetWeight, row.amount, amount);
+      const netWeight = measuredVolumeWeight ?? pieceNetWeight;
+      const outputUnit = measuredVolumeWeight == null ? baseUnit : 'g';
+      const outputAmount = measuredVolumeWeight ?? yieldAmount;
+      if (ingredient.kind !== 'consumable' && measuredVolumeWeight != null && amount.gt(0)) hasMeasuredVolume = true;
+      if (outputAmount.gt(0) && ingredient.kind !== 'consumable') {
+        totalsByUnit.set(outputUnit, (totalsByUnit.get(outputUnit) ?? zero).add(outputAmount));
+        if (outputUnit === 'g') totalGrams = totalGrams.add(outputAmount);
         else if (pieceNetWeight != null) {
           totalGrams = totalGrams.add(pieceNetWeight);
           hasWeightedPiece = true;
@@ -175,7 +183,9 @@ export class RecipeCalculator {
         isPrepared: ingredient.isPrepared, preparationMode: ingredient.preparationMode, name: ingredient.name, unit: unitLabel(unit),
         amountUnit: unit, unitType: ingredient.unitType, ingredientDisplayUnit: ingredient.displayUnit, amount: quantity(amount, unit),
         baseAmount: quantity(row.amount, unit), netAmount: net == null ? null : quantity(net, unit), lossPercent: Number(row.lossPercent),
-        pieceWeightGrams: pieceWeight == null ? null : Number(pieceWeight), netWeightGrams: pieceNetWeight == null ? null : quantity(pieceNetWeight, 'g'),
+        pieceWeightGrams: pieceWeight == null ? null : Number(pieceWeight),
+        measuredNetWeightGrams: measuredNetWeight == null ? null : quantity(measuredNetWeight, 'g'),
+        netWeightGrams: netWeight == null ? null : quantity(netWeight, 'g'),
         processingMethod: row.processingMethod, processingStages: stages, processingBasis: row.processingBasis ?? null,
         processingStageResults: processingStageResults(stages, amount, unit), variantAmounts: Object.fromEntries(
           Object.entries((row.variantAmounts ?? {}) as Record<string, unknown>).flatMap(([id, amount]) => {
@@ -188,7 +198,8 @@ export class RecipeCalculator {
     }
     const [one] = totalsByUnit;
     const output = hasWeightedPiece && allUsableInGrams ? { amount: quantity(totalGrams, 'g'), unit: 'g' as const }
-      : totalsByUnit.size === 1 ? { amount: Number(one[1]), unit: one[0] } : null;
+      : totalsByUnit.size === 1 ? { amount: Number(one[1]), unit: one[0] }
+      : !totalsByUnit.size && hasMeasuredVolume ? { amount: 0, unit: 'g' as const } : null;
     return { items, value, output };
   }
 

@@ -18,6 +18,9 @@ export class ProcessingOptionsDto {
   @IsOptional() @IsNumber() @Min(0)
   netAmount?: number | null;
 
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) @Max(99_999_999_999.999)
+  measuredNetWeightGrams?: number | null;
+
   @IsOptional() @IsNumber() @Max(100)
   lossPercent?: number;
 

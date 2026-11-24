@@ -33,7 +33,7 @@ type Order = Prisma.OrderGetPayload<{ select: typeof statisticsOrderSelect }>;
 type Movement = Prisma.StockMovementGetPayload<{ select: typeof statisticsMovementSelect }>;
 type Item = Order['items'][number];
 type SaleCost = { cost: number; sold: number; released: number; unknown: boolean };
-type Product = { id: string; name: string; categoryId: string; category: string; waiterId: string; waiter: string;
+type Product = { id: string; productKey: string; variantKey: string; baseName: string; name: string; categoryId: string; category: string; waiterId: string; waiter: string;
   quantity: number; gross: number; discount: number; revenue: number; cost: number | null; tax: number | null };
 type Category = { id: string; name: string; quantity: number; revenue: number; cost: number | null; tax: number | null };
 type Staff = { id: string; name: string; orders: number; revenue: number; seconds: number; cost: number | null; tax: number };
@@ -42,8 +42,12 @@ type Payments = { date: string; orders: number; cash: number; card: number; qr: 
 
 const money = (value: number) => Number(new Prisma.Decimal(value).toDecimalPlaces(2));
 const plusCost = (left: number | null, right: number | null) => left == null || right == null ? null : left + right;
-const profit = (revenue: number, cost: number | null, tax: number | null) =>
-  cost == null || tax == null ? null : money(revenue - cost - tax);
+const profitBeforeRounding = (revenue: number, cost: number | null, tax: number | null) =>
+  cost == null || tax == null ? null : revenue - cost - tax;
+const profit = (revenue: number, cost: number | null, tax: number | null) => {
+  const value = profitBeforeRounding(revenue, cost, tax);
+  return value == null ? null : money(value);
+};
 const byRevenue = (left: { revenue: number }, right: { revenue: number }) => right.revenue - left.revenue;
 const byDate = (left: { date: string }, right: { date: string }) => right.date.localeCompare(left.date);
 
@@ -200,8 +204,11 @@ export function buildStatisticsReports(orders: Order[], movements: Movement[], s
       const category = item.dish?.category.name ?? 'Без категории';
       const categoryRow = categories.get(categoryId) ?? { id: categoryId, name: category, quantity: 0, revenue: 0, cost: 0, tax: 0 };
       const name = item.dishVariantNameSnapshot ? `${item.dishNameSnapshot} · ${item.dishVariantNameSnapshot}` : item.dishNameSnapshot;
+      const productKey = JSON.stringify([item.dishId, item.dishNameSnapshot, categoryId]);
+      const variantKey = JSON.stringify([productKey, item.dishVariantId, item.dishVariantNameSnapshot]);
       const id = JSON.stringify([item.dishId, item.dishVariantId, name, categoryId, waiterId]);
-      const product = products.get(id) ?? { id, name, categoryId, category, waiterId, waiter, quantity: 0, gross: 0, discount: 0, revenue: 0, cost: 0, tax: 0 };
+      const product = products.get(id) ?? { id, productKey, variantKey, baseName: item.dishNameSnapshot, name, categoryId, category, waiterId, waiter,
+        quantity: 0, gross: 0, discount: 0, revenue: 0, cost: 0, tax: 0 };
       const revenue = Number(netItemAmount(item, itemPayables[index] / 100));
       const quantity = netItemQuantity(item);
       const cost = itemCosts.get(item.id) ?? null;
@@ -233,8 +240,11 @@ export function buildStatisticsReports(orders: Order[], movements: Movement[], s
       qr: money(row.qr), other: money(row.other), total: money(row.cash + row.card + row.qr + row.other) })),
     staff: [...staff.values()].sort(byRevenue).map(({ tax, cost, seconds, ...row }) => ({ ...row, revenue: money(row.revenue),
       avgCheck: money(row.revenue / row.orders), avgSeconds: Math.round(seconds / row.orders), profit: profit(row.revenue, cost, tax) })),
-    products: [...products.values()].sort(byRevenue).map(({ tax, ...row }) => ({ ...row, gross: money(row.gross), discount: money(row.discount),
-      revenue: money(row.revenue), cost: row.cost == null ? null : money(row.cost), profit: profit(row.revenue, row.cost, tax) })),
+    products: [...products.values()].sort(byRevenue).map(({ tax, ...row }) => {
+      const profitBasis = profitBeforeRounding(row.revenue, row.cost, tax);
+      return { ...row, gross: money(row.gross), discount: money(row.discount), revenue: money(row.revenue),
+        costBasis: row.cost, cost: row.cost == null ? null : money(row.cost), profitBasis, profit: profitBasis == null ? null : money(profitBasis) };
+    }),
     categories: [...categories.values()].sort(byRevenue).map((row) => ({ ...row, revenue: money(row.revenue),
       tax: row.tax == null ? null : money(row.tax), cost: row.cost == null ? null : money(row.cost),
       profit: profit(row.revenue, row.cost, row.tax) })),

@@ -79,6 +79,7 @@ export interface RecipeItem extends RecipeProcessing {
   warehouseName?: string;
   baseAmount?: number;
   netAmount?: number | null;
+  measuredNetWeightGrams?: number | null;
   pieceWeightGrams?: number | null;
   netWeightGrams?: number | null;
   lossPercent?: number;
@@ -490,6 +491,7 @@ export interface RecipeRowInput extends RecipeProcessing {
   fromCommonWarehouse?: boolean;
   warehouseId?: string | null;
   netAmount?: number;
+  measuredNetWeightGrams?: number | null;
   lossPercent?: number;
   variantAmounts?: Record<string, number>;
 }
@@ -548,6 +550,7 @@ interface PreparationRecipeInput {
     quantity: number;
     unit: UnitCode;
     netAmount?: number | null;
+    measuredNetWeightGrams?: number | null;
     lossPercent?: number;
     processingMethod?: ProcessingMethod | null;
   })[];
@@ -561,7 +564,9 @@ export interface PreparationRecipe extends Omit<PreparationRecipeInput, 'items'>
   name: string;
   displayUnit: UnitCode;
   unitType: UnitType;
-  items: (PreparationRecipeInput['items'][number] & { name: string; lineCost?: number | null; costKnown?: boolean })[];
+  items: (PreparationRecipeInput['items'][number] & {
+    name: string; lineCost?: number | null; costKnown?: boolean; netWeightGrams?: number | null;
+  })[];
 }
 
 const PREPARATION_URL = '/admin/warehouse/preparation';

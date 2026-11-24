@@ -8,29 +8,12 @@ import type { useRecipePreview } from './recipe-preview-api';
 import { displayedProcessingStages, lossFromAmounts, pieceNetWeight, processingQuantities, processingRetention, recipeQuantity,
   supportsProcessing, type RecipeDraftRow } from './recipe-draft-values';
 import { RecipeProcessingFields, recipeProcessingLabel } from './RecipeProcessingFields';
+import { QuantityInput, VolumeNetFields } from './RecipeQuantityInput';
 import { RecipeBatchPreview } from './RecipeBatchPreview';
 import { ALL_UNITS, unitLabel, unitsForType, type UnitCode } from './units';
 
 function unitFactor(unit: UnitCode) {
   return ALL_UNITS.find((value) => value.code === unit)!.factor;
-}
-
-function QuantityInput({ label, value, onChange, invalid = false, readOnly = false }: {
-  label: string; value: number | null; onChange: (value: number | null) => void; invalid?: boolean; readOnly?: boolean;
-}) {
-  const [draft, setDraft] = useState<string>();
-  return <input aria-label={label} aria-invalid={invalid || undefined}
-    className={'input h-10 w-full min-w-0 tabular-nums' + (invalid ? ' !border-danger' : '')}
-    type="text" inputMode="decimal" value={draft ?? value ?? ''} placeholder="0" readOnly={readOnly}
-    onBlur={() => setDraft(undefined)}
-    onChange={(event) => {
-      const text = event.target.value;
-      if (!/^\d{0,11}(?:[,.]\d{0,6})?$/.test(text)) return;
-      setDraft(text);
-      const normalized = text.replace(',', '.');
-      if (normalized === '') onChange(null);
-      else if (Number.isFinite(Number(normalized))) onChange(Number(normalized));
-    }} />;
 }
 
 function DraftCell({ label, children, className = '' }: {
@@ -98,6 +81,7 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
             const explicitWarehouseRemoved = row.warehouseId && !locations.some((location) => location.id === row.warehouseId);
             const invalidGross = row.amount <= 0;
             const processing = supportsProcessing(row.unitType);
+            const volume = row.unitType === 'volume';
             const loss = row.lossPercent ?? 0;
             const legacyProcessing = !processing && !!row.processingMethod;
             const stages = displayedProcessingStages(row);
@@ -172,17 +156,20 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
                 </span>}
               </DraftCell>
               <DraftCell label="Брутто">
+                <div className={`flex items-center gap-1.5 ${volume ? 'min-w-24' : ''}`}>
                 <QuantityInput label={`Брутто ${row.name}`} value={row.amount || null} invalid={invalidGross}
                   readOnly={processing && basis === 'net'} onChange={(value) => {
                   const amount = value ?? 0;
                   if (processing) patch(index, { amount, processingBasis: basis, netAmount: basis === 'gross' ? undefined : netAmount });
                   else {
                     const nextNet = row.unitType === 'count' || row.netAmount === row.amount ? undefined : row.netAmount;
-                    patch(index, { amount, netAmount: nextNet, ...(row.unitType === 'volume' && nextNet != null && {
+                    patch(index, { amount, netAmount: nextNet, ...(volume && nextNet != null && {
                       lossPercent: lossFromAmounts(amount, nextNet),
                     }) });
                   }
                 }} />
+                  {volume && <span className="text-xs text-text-muted">{unitLabel(row.unit)}</span>}
+                </div>
               </DraftCell>
               <DraftCell label="Нетто">
                 {row.unitType === 'count' ? <output aria-label={`Нетто ${row.name}`} className="block py-2 tabular-nums text-text-secondary">
@@ -190,13 +177,16 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
                     <span className="whitespace-nowrap">{recipeQuantity(netGrams, 'г')}</span>
                     {pieceNet != null && <span className="block whitespace-nowrap text-xs text-text-muted">{qty(pieceNet, unitLabel(row.unit))}</span>}
                   </>}
-                </output> : <QuantityInput label={`Нетто ${row.name}`} value={netAmount} invalid={invalidNet}
-                  readOnly={processing && basis === 'gross'} onChange={(value) => {
-                  if (!processing) {
+                </output> : volume ? <VolumeNetFields label={`Нетто ${row.name}`} unit={unitLabel(row.unit)}
+                  grams={row.measuredNetWeightGrams ?? null} volume={netAmount} invalidVolume={invalidNet} disabled={disabled}
+                  onGrams={(measuredNetWeightGrams) => patch(index, { measuredNetWeightGrams })}
+                  onVolume={(value) => {
                     const amount = row.amount || value || 0;
                     const netAmount = value ?? amount;
                     patch(index, { amount, netAmount, lossPercent: lossFromAmounts(amount, netAmount) });
-                  } else patch(index, { processingBasis: basis, netAmount: value,
+                  }} /> : <QuantityInput label={`Нетто ${row.name}`} value={netAmount} invalid={invalidNet}
+                  readOnly={processing && basis === 'gross'} onChange={(value) => {
+                  patch(index, { processingBasis: basis, netAmount: value,
                     amount: processingQuantities(row.amount, value ?? 0, basis, retention).amount });
                 }} />}
               </DraftCell>

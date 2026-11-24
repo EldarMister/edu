@@ -13,7 +13,7 @@ import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, u
 import { getWarehouseBalance, resolveWarehouse, warehouseBalances } from './warehouse-location';
 import { IngredientsService } from './ingredients.service';
 import { lockRecipeGraph, RecipeResolver, warehouseKey } from './recipe-resolution';
-import { massProcessing, nonMassProcessing, processingSnapshot, processingStageResults, readProcessingStages } from './recipe-processing';
+import { massProcessing, measuredVolumeNetWeight, nonMassProcessing, processingSnapshot, processingStageResults, readProcessingStages } from './recipe-processing';
 import { ProcessingOptionsDto } from './recipe-processing.dto';
 import { postStockMovement } from './stock-posting';
 import { inventoryReversalBlockedReason } from './closed-inventory-period';
@@ -116,9 +116,11 @@ export class PreparationProductionService {
         const unit = item.unit as UnitCode;
         const stages = readProcessingStages(item.processingStages);
         const cost = itemCosts.get(item.ingredientId);
+        const measuredNetWeightGrams = item.measuredNetWeightGrams == null ? null : Number(item.measuredNetWeightGrams);
         return { ingredientId: item.ingredientId, name: item.ingredient.name, lineCost: cost?.known ? Number(cost.cost.toDecimalPlaces(2)) : null,
           costKnown: cost?.known ?? false, quantity: fromBase(Number(item.amount), unit),
           netAmount: item.netAmount == null ? null : fromBase(Number(item.netAmount), unit), lossPercent: Number(item.lossPercent),
+          measuredNetWeightGrams, netWeightGrams: measuredNetWeightGrams,
           processingMethod: item.processingMethod, processingStages: stages, processingBasis: item.processingBasis,
           processingStageResults: processingStageResults(stages, item.amount, unit), unit: item.unit };
       }) ?? [] };
@@ -181,6 +183,7 @@ export class PreparationProductionService {
       const processing = this.inputProcessing(input, gross, saved.ingredient, saved);
       matches = matches && saved.unit === gross.unit && saved.amount.eq(processing.amount) &&
         (processing.netAmount == null ? saved.netAmount == null : saved.netAmount?.eq(processing.netAmount) === true) &&
+        (processing.measuredNetWeightGrams == null ? saved.measuredNetWeightGrams == null : saved.measuredNetWeightGrams?.eq(processing.measuredNetWeightGrams) === true) &&
         saved.processingMethod === processing.processingMethod && saved.processingBasis === processing.processingBasis &&
         JSON.stringify(readProcessingStages(saved.processingStages)) === JSON.stringify(processing.processingStages);
     }
@@ -189,8 +192,10 @@ export class PreparationProductionService {
 
   private inputProcessing(input: PreparationInputDto, gross: { amount: Prisma.Decimal; unit: UnitCode },
     ingredient: Prisma.IngredientGetPayload<{}>, previous?: Prisma.PreparationRecipeItemGetPayload<{}>) {
-    return ingredient.unitType === 'mass' ? massProcessing(gross.amount, gross.unit, input, previous, ingredient.processingLosses)
+    const processing = ingredient.unitType === 'mass' ? massProcessing(gross.amount, gross.unit, input, previous, ingredient.processingLosses)
       : { amount: gross.amount, ...nonMassProcessing(gross.amount, gross.unit, input, previous), processingStages: [], processingBasis: null };
+    return { ...processing, measuredNetWeightGrams: measuredVolumeNetWeight(ingredient.unitType, gross.amount,
+      input.measuredNetWeightGrams, previous?.measuredNetWeightGrams) };
   }
 
   private async writeRecipe(tx: Prisma.TransactionClient, id: string, dto: PreparationRecipeDto) {

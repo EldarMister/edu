@@ -202,6 +202,9 @@ test(
             user.permissions.actions.warehouseRecipes = false;
             assert.throws(() => guard.canActivate(context(controller.saveDraft)), /нет доступа/);
             assert.equal(guard.canActivate(context(controller.getDraft)), true);
+            assert.equal(guard.canActivate(context(controller.revisions)), true);
+            user.permissions.sections.warehouse = false;
+            assert.throws(() => guard.canActivate(context(controller.revisions)), /нет доступа/);
             const redacted = redactWarehouseCosts(await service.getDraft(dish.id));
             assert.equal(redacted.recipe.foodCost, null);
             assert.equal(redacted.recipe.items[0].lineCost, null);
@@ -266,6 +269,61 @@ test(
             (await service.getDraft(dish.id)).recipe.metadata.instructions,
             'Параллельная правка',
           );
+        });
+        await t.test('composition history keeps prior measured amounts, archived names and dates without exposing price fields', async () => {
+          const volume = await db.ingredient.create({ data: { name: 'Молоко в старой версии', unitType: 'volume', displayUnit: 'l', avgCost: 5 } });
+          const mass = await db.ingredient.create({ data: { name: 'Весовая норма', unitType: 'mass', displayUnit: 'kg' } });
+          const target = await db.dish.create({ data: { name: 'История состава', categoryId: category.id, price: 175,
+            variants: { create: { name: 'Большая', price: 225 } } }, include: { variants: true } });
+          const variantId = target.variants[0].id;
+          assert.deepEqual(await service.compositionRevisions(target.id), []);
+          await service.saveDraft(target.id, { expectedVersion: 1, metadata: { outputQuantity: 320, outputUnit: 'г', instructions: 'Смешать' },
+            items: [{ ingredientId: volume.id, unit: 'l', amount: 0.2, netAmount: 0.19, measuredNetWeightGrams: 195,
+              variantAmounts: { [variantId]: 0.28 } }, { ingredientId: mass.id, amount: 0.25, netAmount: 0.2, unit: 'kg', processingBasis: 'net',
+              processingStages: [{ method: 'cleaning', lossPercent: 20 }] }],
+            modifiers: { allowIngredientExclusions: false, groups: [{ name: 'Молоко', options: [{
+              name: 'Дополнительное молоко', ingredientId: volume.id, price: 20, amount: 30, unit: 'ml',
+            }] }] },
+          });
+          await service.saveDraft(target.id, { expectedVersion: 2, items: [{ ingredientId: volume.id, amount: 0.3, unit: 'l' }] });
+          await db.ingredient.update({ where: { id: volume.id }, data: { name: 'Новое название' } });
+          const controller = new RecipesController(service);
+          const [old, first] = await controller.revisions(target.id, 'composition');
+          assert.deepEqual([old.version, first.version], [2, 1]);
+          assert.deepEqual(old.savedAt, first.replacedAt);
+          assert.ok(old.replacedAt >= old.savedAt);
+          assert.equal(first.savedAt, null);
+          const oldVolume = old.items.find(({ ingredientId }) => ingredientId === volume.id);
+          assert.deepEqual(oldVolume, { ingredientId: volume.id, name: 'Молоко в старой версии', unit: 'l', amount: 0.2, netAmount: 0.19,
+            measuredNetWeightGrams: 195, lossPercent: 5, processingMethod: null, processingBasis: null, processingStages: [],
+            variantAmounts: [{ variantId, name: 'Большая', amount: 0.28 }] });
+          const oldMass = old.items.find(({ ingredientId }) => ingredientId === mass.id);
+          assert.deepEqual([oldMass.amount, oldMass.netAmount, oldMass.processingBasis, oldMass.processingStages],
+            [0.25, 0.2, 'net', [{ method: 'cleaning', lossPercent: 20 }]]);
+          assert.deepEqual(old.output, { amount: 320, unit: 'г' });
+          assert.equal(old.instructions, 'Смешать');
+          assert.equal(old.modifierGroups[0].options[0].ingredient.amount, 30);
+          assert.doesNotMatch(JSON.stringify(old), /price|cost|actor|snapshot/i);
+          const [raw] = await controller.revisions(target.id);
+          assert.ok(raw.snapshot.items.length && raw.snapshot.modifierGroups[0].options[0].price);
+
+          const set = await db.dish.create({ data: { name: 'История сета', categoryId: category.id, price: 300, isSet: true,
+            setComponents: { create: { dishId: target.id, dishVariantId: variantId, quantity: 2 } } } });
+          const missingId = randomUUID();
+          await db.recipeRevision.create({ data: { dishId: set.id, version: 1, snapshot: { items: [
+            { ingredientId: volume.id, amount: '200', amountUnit: 'l', netAmount: null },
+            { ingredientId: missingId, amount: '0', amountUnit: 'pcs' },
+          ] } } });
+          const [legacy] = await service.compositionRevisions(set.id);
+          assert.equal(legacy.components, null);
+          assert.deepEqual(legacy.items.map(({ ingredientId, name, amount, netAmount }) => [ingredientId, name, amount, netAmount]),
+            [[volume.id, 'Новое название', 0.2, null], [missingId, null, 0, null]]);
+          await db.dish.update({ where: { id: set.id }, data: { recipeVersion: 3 } });
+          await service.updateSettings(set.id, { metadata: { instructions: 'Новая инструкция' } });
+          const [setVersion] = await service.compositionRevisions(set.id);
+          assert.equal(setVersion.savedAt, null, 'gaps should not be filled with a guessed date');
+          assert.deepEqual(setVersion.components.map(({ name, variantName, quantity }) => [name, variantName, quantity]),
+            [[target.name, 'Большая', 2]]);
         });
         await t.test('ingredient usage reports direct and variant sales, preparation recipes and archived modifiers', async () => {
           const ingredient = await db.ingredient.create({ data: { name: 'Сливки для связей', unitType: 'volume', displayUnit: 'l' } });

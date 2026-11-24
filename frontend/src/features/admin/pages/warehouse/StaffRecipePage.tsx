@@ -7,7 +7,7 @@ import { Spinner } from '@/components/Spinner';
 import { Select } from '@/components/Select';
 import { EditorPage, useEditorDirty } from './EditorPage';
 import { RecipeDraftFields } from './RecipeDraftFields';
-import { recipeDraftPayload, recipeDraftRows, recipePreviewItems, validRecipeRows } from './recipe-draft-values';
+import { recipeDraftPayload, recipeDraftRows, recipePreviewItems, recipeQuantity, validRecipeRows } from './recipe-draft-values';
 import { RecipeCostSummary } from './RecipeCostSummary';
 import { useRecipePreview, type RecipePreview } from './recipe-preview-api';
 import type { ModifierDraft } from './ModifierDraftFields';
@@ -305,6 +305,7 @@ function RecipeReadOnly({ recipe, costs, preview }: { recipe: Recipe; costs: boo
               const unit = source ? unitLabel(source.amountUnit) : row.unit;
               const gross = source?.amount ?? row.amount;
               const net = source ? source.netAmount : row.netAmount;
+              const netWeight = source ? source.netWeightGrams : row.netWeightGrams;
               return <tr className="border-b border-border" key={row.id}>
                 <td className="py-4 pr-3">
                   <span className="font-medium">{row.name}</span>
@@ -322,7 +323,10 @@ function RecipeReadOnly({ recipe, costs, preview }: { recipe: Recipe; costs: boo
                   {recipeProcessingLabel(row) || 'Без обработки'}
                 </td>
                 <td className="px-3">{qty(gross, unit)}</td>
-                <td className="px-3">{net == null ? '—' : qty(net, unit)}</td>
+                <td className="px-3">{netWeight == null ? (net == null ? '—' : qty(net, unit)) : <>
+                  {recipeQuantity(netWeight, 'г')}
+                  {net != null && <span className="block text-xs text-text-muted">{recipeQuantity(net, unit)}</span>}
+                </>}</td>
                 {costs && <td className="pl-3 text-right">{costLabel(source?.lineCost)}</td>}
               </tr>;
             })}

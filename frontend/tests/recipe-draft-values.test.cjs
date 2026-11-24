@@ -10,7 +10,7 @@ const draft = {};
 new Function('exports', code.outputText)(draft);
 const { displayedProcessingStages, grossFromLoss, lossFromAmounts, netFromLoss, parsePieceWeightGrams, pieceNetWeight,
   preparationYieldBase, processingQuantities, processingRetention, recipeDraftPayload, recipeDraftRows,
-  recipePreviewItems, supportsProcessing, validRecipeRows } = draft;
+  recipePreviewItems, supportsProcessing, validMeasuredNetWeight, validRecipeRows } = draft;
 
 const potato = { ingredientId: 'potato', name: 'Картофель', unit: 'g', unitType: 'mass', amount: 200, netAmount: 160,
   lossPercent: 20, warehouseId: 'kitchen' };
@@ -119,4 +119,32 @@ test('copying a legacy non-mass recipe carries its measured yield and variant no
   const [source] = recipeDraftRows([legacy]);
   assert.equal(source.processingMethod, 'boiling');
   assert.equal(source.netAmount, null);
+});
+
+test('measured liquid net grams stay separate from charge, legacy volume, and variant ratio', () => {
+  const milk = { ingredientId: 'milk', name: 'Молоко', unit: 'ml', unitType: 'volume', amount: 150,
+    netAmount: 135, measuredNetWeightGrams: 210, variantAmounts: { small: 75, excluded: 0 } };
+  assert.equal(validRecipeRows([milk]), true);
+  const [payload] = recipeDraftPayload([milk]);
+  assert.equal(payload.amount, 150);
+  assert.equal(payload.netAmount, 135);
+  assert.equal(payload.measuredNetWeightGrams, 210);
+  const [small] = recipePreviewItems([milk], [], 'small');
+  assert.deepEqual([small.amount, small.netAmount, small.measuredNetWeightGrams], [75, 67.5, 105]);
+  const [excluded] = recipePreviewItems([milk], [], 'excluded');
+  assert.equal(excluded.measuredNetWeightGrams, 0);
+  assert.equal(recipeDraftPayload([{ ...milk, measuredNetWeightGrams: null }])[0].measuredNetWeightGrams, null);
+  assert.equal(validRecipeRows([{ ...milk, unitType: 'mass' }]), false);
+  assert.equal(validMeasuredNetWeight(0), true);
+  assert.equal(validMeasuredNetWeight(0.1234), false);
+});
+
+test('preparation can sum measured liquid, mass and weighted pieces in grams without assuming density', () => {
+  const milk = { unitType: 'volume', unitFactor: 1, netAmount: 135, measuredNetWeightGrams: 210 };
+  const coffee = { unitType: 'mass', unitFactor: 1, netAmount: 8 };
+  const pieces = { unitType: 'count', unitFactor: 1, netAmount: 2, pieceWeightGrams: 40 };
+  assert.equal(preparationYieldBase('mass', [milk, coffee, pieces]), 298);
+  assert.equal(preparationYieldBase('volume', [milk]), 135);
+  assert.equal(preparationYieldBase('mass', [{ ...milk, measuredNetWeightGrams: 0 }]), 0);
+  assert.equal(preparationYieldBase('mass', [{ ...milk, measuredNetWeightGrams: null }, coffee]), null);
 });

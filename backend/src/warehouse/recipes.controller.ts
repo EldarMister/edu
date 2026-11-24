@@ -57,8 +57,8 @@ export class RecipesController {
   }
 
   @Get('dishes/:dishId/recipe-revisions')
-  revisions(@Param('dishId') dishId: string) {
-    return this.recipes.revisions(dishId);
+  revisions(@Param('dishId') dishId: string, @Query('view') view?: string) {
+    return view === 'composition' ? this.recipes.compositionRevisions(dishId) : this.recipes.revisions(dishId);
   }
 }
 

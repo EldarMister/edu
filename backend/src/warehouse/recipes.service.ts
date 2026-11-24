@@ -8,9 +8,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RecipeCostsQuery, RecipeDraftDto, RecipeItemInputDto, RecipeItemUpdateDto, RecipePreviewDto, RecipeSettingsDto } from './recipes.dto';
 import { MenuModifiersService } from './menu-modifiers';
 import { lockRecipeGraph } from './recipe-resolution';
-import { massProcessing, nonMassProcessing, readProcessingStages } from './recipe-processing';
+import { massProcessing, measuredVolumeNetWeight, nonMassProcessing, readProcessingStages } from './recipe-processing';
 import { addRecipeValue, RecipeCalculator, recipeMetrics, recipeOutput, type RecipeCostRow } from './recipe-calculation';
 import { assertUnitMatchesType, normalizeUnit, toBase, type UnitCode } from './units';
+import { archiveDishRecipe, readCompositionRevisions } from './recipe-revisions';
 
 const recipeDishInclude = {
   variants: { orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] },
@@ -313,13 +314,15 @@ export class RecipesService {
     return this.prisma.recipeRevision.findMany({ where: { dishId }, orderBy: { version: 'desc' }, take: 100 });
   }
 
+  async compositionRevisions(dishId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      await this.assertDish(tx, dishId);
+      return readCompositionRevisions(tx, dishId);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
   async archiveRevision(tx: Prisma.TransactionClient, dishId: string) {
-    const dish = await tx.dish.findUniqueOrThrow({ where: { id: dishId }, include: { recipeItems: true, variants: true, modifierGroups: { include: { options: true } } } });
-    await tx.recipeRevision.upsert({
-      where: { dishId_version: { dishId, version: dish.recipeVersion } },
-      create: { dishId, version: dish.recipeVersion, snapshot: JSON.parse(JSON.stringify({ modifierGroups: dish.modifierGroups, allowIngredientExclusions: dish.allowIngredientExclusions, metadata: dish.recipeMetadata, stockIngredientId: dish.stockIngredientId, stockAmount: dish.stockAmount, items: dish.recipeItems, variants: dish.variants.map(({ id, name, stockIngredientId, stockAmount }) => ({ id, name, stockIngredientId, stockAmount })) })) },
-      update: {},
-    });
+    await archiveDishRecipe(tx, dishId);
   }
 
   private async assertDish(tx: Prisma.TransactionClient, dishId: string) {
@@ -351,6 +354,7 @@ export class RecipesService {
     const processing = unitType === 'mass' ? massProcessing(amount, unit, dto, previous, processingLosses)
       : { amount, ...nonMassProcessing(amount, unit, dto, previous), processingStages: [], processingBasis: null };
     return { ...processing, processingStages: processing.processingStages.length ? processing.processingStages : Prisma.DbNull,
+      measuredNetWeightGrams: measuredVolumeNetWeight(unitType, amount, dto.measuredNetWeightGrams, previous?.measuredNetWeightGrams),
       amountUnit: unit, fromCommonWarehouse: dto.fromCommonWarehouse, warehouseId, variantAmounts };
   }
 }

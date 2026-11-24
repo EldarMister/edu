@@ -1405,6 +1405,7 @@ model RecipeItem {
   processingBasis String? @map("processing_basis")
   variantAmounts Json? @map("variant_amounts")
   netAmount Decimal? @map("net_amount") @db.Decimal(14, 3)
+  measuredNetWeightGrams Decimal? @map("measured_net_weight_grams") @db.Decimal(14, 3)
   lossPercent Decimal @default(0) @map("loss_percent") @db.Decimal(20, 2)
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
@@ -1544,6 +1545,7 @@ model PreparationRecipeItem {
   amount Decimal @db.Decimal(14, 3)
   unit String
   netAmount Decimal? @map("net_amount") @db.Decimal(14, 3)
+  measuredNetWeightGrams Decimal? @map("measured_net_weight_grams") @db.Decimal(14, 3)
   lossPercent Decimal @default(0) @map("loss_percent") @db.Decimal(20, 2)
   processingMethod String? @map("processing_method")
   processingStages Json? @map("processing_stages")

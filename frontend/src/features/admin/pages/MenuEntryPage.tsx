@@ -22,6 +22,7 @@ import { useRecipePreview } from './warehouse/recipe-preview-api';
 import { ModifierDraftFields, type ModifierDraft } from './warehouse/ModifierDraftFields';
 import { normalizeUnitLabel, unitLabelOptions } from './warehouse/units';
 import { useWarehousePolicy } from './warehouse/settings-api';
+import { salePrice } from './menu-sale-price';
 
 type MenuEntry = {
   dish: Omit<AdminDish, 'variants'> & {
@@ -43,12 +44,6 @@ const emptyModifiers: ModifierDraft = { allowIngredientExclusions: false, groups
 
 function newVariant(): VariantDraft {
   return { key: crypto.randomUUID(), name: '', price: '', unit: 'шт' };
-}
-
-function salePrice(value: string): number | null {
-  const normalized = value.trim().replace(',', '.').replace(/^0+(?=\d)/, '');
-  if (!/^(?:\d{1,8}(?:\.\d{1,2})?|\.\d{1,2})$/.test(normalized)) return null;
-  return Number(normalized);
 }
 
 export function MenuEntryPage({ id, kind, categoryId, onClose, initialTab = 'main', initialVariantId, copy = false }: {

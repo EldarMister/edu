@@ -233,9 +233,10 @@ export function useStatistics(params: StatsPeriodParams, enabled = true) {
   });
 }
 
-type ProductStats = {
+export type ProductStats = {
   id: string; name: string; categoryId: string; category: string; waiterId: string; waiter: string;
   quantity: number; gross: number; discount: number; revenue: number; cost: number | null; profit: number | null;
+  productKey: string; variantKey: string; baseName: string; costBasis: number | null; profitBasis: number | null;
 };
 
 export interface StatisticsReports {

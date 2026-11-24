@@ -33,12 +33,29 @@ test('daily sales, payment splits and report dimensions aggregate the same close
   const result = buildStatisticsReports([order], [movement], true);
   assert.deepEqual(result.sales, [{ date: '2026-11-16', orders: 1, paidAmount: 60, refundedAmount: 0, revenue: 60, discount: 5, avgCheck: 60 }]);
   assert.deepEqual(result.payments, [{ date: '2026-11-16', orders: 1, cash: 20, card: 40, qr: 0, other: 0, total: 60 }]);
-  const [product] = result.products;
+  const [{ productKey, variantKey, baseName, costBasis, profitBasis, ...product }] = result.products;
+  assert.deepEqual([baseName, costBasis, profitBasis], ['Эспрессо', 8, 47]);
+  assert.equal(typeof productKey, 'string');
+  assert.equal(typeof variantKey, 'string');
   assert.deepEqual({ ...product, id: undefined }, { id: undefined, name: 'Эспрессо · Двойной',
     categoryId: 'coffee-category', category: 'Кофе', waiterId: 'alice', waiter: 'Алиса', quantity: 2,
     gross: 60, discount: 5, revenue: 55, cost: 8, profit: 47 });
   assert.deepEqual(result.categories, [{ id: 'coffee-category', name: 'Кофе', quantity: 2, revenue: 55, cost: 8, tax: 0, profit: 47 }]);
   assert.deepEqual(result.staff, [{ id: 'alice', name: 'Алиса', orders: 1, revenue: 60, avgCheck: 60, avgSeconds: 60, profit: 52 }]);
+});
+
+test('sold product rows identify the same dish and variant across waiters without losing sale evidence', () => {
+  const other = { ...order, id: 'order-b', waiterId: 'bob', waiter: { name: 'Борис' }, items: [{ ...item, id: 'other-espresso' }] };
+  const single = { ...item, id: 'single', dishVariantId: 'single', dishVariantNameSnapshot: 'Одинарный' };
+  const variant = { ...order, id: 'order-c', items: [single] };
+  const [first, second, third] = buildStatisticsReports([order, other, variant], [], false).products;
+  assert.equal(first.productKey, second.productKey);
+  assert.equal(first.productKey, third.productKey);
+  assert.equal(first.variantKey, second.variantKey);
+  assert.notEqual(first.variantKey, third.variantKey);
+  assert.notEqual(first.id, second.id);
+  assert.equal(first.costBasis, null);
+  assert.equal(first.profitBasis, null);
 });
 
 test('costs follow split line origin and return; historical payment fallback retains disabled methods', () => {

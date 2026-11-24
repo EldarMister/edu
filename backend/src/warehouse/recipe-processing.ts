@@ -1,10 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { processingBases, processingMethods, type ProcessingBasis, type ProcessingOptionsDto, type ProcessingStage } from './recipe-processing.dto';
-import { toBase, type UnitCode } from './units';
+import { toBase, type UnitCode, type UnitType } from './units';
 
 type SavedProcessing = { processingMethod: string | null; lossPercent: Prisma.Decimal; netAmount: Prisma.Decimal | null; amount: Prisma.Decimal;
-  processingStages?: Prisma.JsonValue | null; processingBasis?: string | null };
+  processingStages?: Prisma.JsonValue | null; processingBasis?: string | null; measuredNetWeightGrams?: Prisma.Decimal | null };
 
 const zero = new Prisma.Decimal(0);
 const one = new Prisma.Decimal(1);
@@ -46,9 +46,34 @@ export function processingStageResults(stages: ProcessingStage[], gross: Prisma.
   });
 }
 
-export function processingSnapshot(row: Pick<SavedProcessing, 'processingStages' | 'processingBasis'>) {
+export function processingSnapshot(row: Pick<SavedProcessing, 'processingStages' | 'processingBasis' | 'measuredNetWeightGrams'>) {
   const stages = readProcessingStages(row.processingStages);
-  return { ...(stages.length ? { processingStages: stages } : {}), ...(row.processingBasis ? { processingBasis: row.processingBasis } : {}) };
+  return { ...(stages.length ? { processingStages: stages } : {}), ...(row.processingBasis ? { processingBasis: row.processingBasis } : {}),
+    ...(row.measuredNetWeightGrams != null ? { measuredNetWeightGrams: row.measuredNetWeightGrams.toString() } : {}) };
+}
+
+export function measuredVolumeNetWeight(unitType: UnitType, gross: Prisma.Decimal, input: number | null | undefined,
+  previous: Prisma.Decimal | null | undefined) {
+  if (unitType !== 'volume') {
+    if (input != null) throw new BadRequestException('Измеренное нетто в граммах доступно для объёмных ингредиентов');
+    return null;
+  }
+  if (input === null) return null;
+  let weight = previous ?? null;
+  if (input !== undefined) {
+    if (!Number.isFinite(input) || input < 0) throw new BadRequestException('Укажите неотрицательное нетто в граммах');
+    weight = new Prisma.Decimal(input);
+    if (weight.decimalPlaces() > 3 || weight.gte(100_000_000_000)) throw new BadRequestException('Укажите нетто в граммах с точностью до 0,001 г');
+  }
+  if (weight?.gt(0) && gross.isZero()) throw new BadRequestException('Укажите брутто больше нуля для положительного нетто в граммах');
+  return weight;
+}
+
+export function volumeNetWeightForGross(measured: Prisma.Decimal | null, baseGross: Prisma.Decimal, gross: Prisma.Decimal) {
+  if (measured == null) return null;
+  if (baseGross.eq(gross)) return measured;
+  if (gross.isZero()) return zero;
+  return baseGross.gt(0) ? measured.mul(gross).div(baseGross).toDecimalPlaces(3) : null;
 }
 
 export function massProcessing(gross: Prisma.Decimal, unit: UnitCode, input: ProcessingOptionsDto, previous?: SavedProcessing,

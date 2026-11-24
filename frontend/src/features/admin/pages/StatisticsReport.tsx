@@ -9,6 +9,7 @@ import type { StatisticsReports } from '../api';
 import { WorkspaceHeaderActions, WorkspaceHeaderCount } from './WorkspaceHeader';
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { STATISTICS_NAV, type StatisticsView } from './statisticsViews';
+import { groupProductSales, productSalesMetrics } from './product-sales-report';
 
 type Report = Exclude<StatisticsView, 'overview' | 'taxes'>;
 type Row = Record<string, string | number | null>;
@@ -21,13 +22,15 @@ const revenue = cash('revenue', 'Выручка');
 const profit = cash('profit', 'Прибыль');
 const cost = cash('cost', 'Себестоимость');
 const foodCost = { key: 'foodCost', label: 'Фудкост', format: 'percent' } as const;
+const markup = { key: 'markup', label: 'Наценка', format: 'percent' } as const;
 const avgCheck = cash('avgCheck', 'Средний чек');
 const methods = [cash('cash', 'Наличные'), cash('card', 'Карта'), cash('qr', 'QR-код'), cash('other', 'Другие оплаты')];
 
 const columns: Record<Report, Column[]> = {
   sales: [date, orders, cash('paidAmount', 'Продажи до возвратов'), cash('refundedAmount', 'Возвраты'), revenue, avgCheck, cash('discount', 'Скидка')],
-  products: [{ key: 'category', label: 'Категория' }, { key: 'name', label: 'Товар' }, { key: 'waiter', label: 'Официант' },
-    quantity, cash('gross', 'Валовый оборот'), cash('discount', 'Скидка'), revenue, cost, profit, foodCost],
+  products: [{ key: 'name', label: 'Товар' }, { key: 'category', label: 'Категория' }, { key: 'waiter', label: 'Официант' },
+    quantity, cash('gross', 'Валовый оборот'), cash('discount', 'Скидка'), revenue, cost, profit, foodCost,
+    cash('averagePrice', 'Средняя цена продажи'), cash('averageCost', 'Средняя себестоимость'), markup],
   staff: [{ key: 'name', label: 'Официант' }, revenue, profit, orders, avgCheck,
     { key: 'avgSeconds', label: 'Среднее время', format: 'duration' }],
   categories: [{ key: 'name', label: 'Категория' }, quantity, cost, revenue, cash('tax', 'Сумма налога'), profit,
@@ -36,6 +39,9 @@ const columns: Record<Report, Column[]> = {
 };
 const firstColumn = { sales: 'date', products: 'name', staff: 'name', categories: 'name', payments: 'date' };
 const defaultSort = { sales: 'date', products: 'quantity', staff: 'name', categories: 'revenue', payments: 'date' };
+const rateColumns = ['averagePrice', 'averageCost', 'foodCost', 'markup'] as const;
+const optionalProductColumns = 'averagePrice,averageCost,markup';
+const protectedColumns = new Set(['cost', 'profit', 'foodCost', 'averageCost', 'markup']);
 const number = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 });
 const currency = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const shortDate = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
@@ -57,8 +63,11 @@ function totalFor(rows: Row[], column: Column) {
   const { key, format } = column;
   if (format === 'date' || format === 'duration' || ['name', 'category', 'waiter'].includes(key)) return null;
   if (key === 'avgCheck') return sum(rows, 'orders') ? sum(rows, 'revenue') / sum(rows, 'orders') : null;
-  if (key === 'foodCost') return rows.some((row) => row.cost == null) || sum(rows, 'revenue') <= 0
-    ? null : 100 * sum(rows, 'cost') / sum(rows, 'revenue');
+  const rate = rateColumns.find((column) => column === key);
+  if (rate) return productSalesMetrics({ quantity: sum(rows, 'quantity'), revenue: sum(rows, 'revenue'),
+    cost: rows.some((row) => row.cost == null) ? null : sum(rows, 'cost'),
+    profit: rows.some((row) => row.profit == null) ? null : sum(rows, 'profit'),
+  })[rate];
   return rows.some((row) => row[key] == null) ? null : sum(rows, key);
 }
 
@@ -78,16 +87,24 @@ export function StatisticsReport({ report, data, periodControl }: { report: Repo
   const [category, setCategory] = useState('');
   const [employee, setEmployee] = useState('');
   const [payment, setPayment] = useState('');
-  const [hiddenColumns, setHiddenColumns] = useColumnPreference(`statistics-${report}`);
+  const [productBreakdown, setProductBreakdown] = useColumnPreference('statistics-products-breakdown');
+  const grouping = productBreakdown.split(',').filter(Boolean);
+  const showVariants = grouping.includes('variants');
+  const showWaiters = grouping.includes('waiters');
+  function setGrouping(key: 'variants' | 'waiters', checked: boolean) {
+    setProductBreakdown((checked ? [...grouping, key] : grouping.filter((entry) => entry !== key)).join(','));
+  }
+  const [hiddenColumns, setHiddenColumns] = useColumnPreference(`statistics-${report}`, report === 'products' ? optionalProductColumns : '');
   const hidden = hiddenColumns.split(',').filter(Boolean);
   const [sort, setSort] = useState({ key: defaultSort[report], ascending: report === 'staff' });
   const [printBlocked, setPrintBlocked] = useState(false);
   const title = t(STATISTICS_NAV.find(({ key }) => key === report)?.label ?? 'Статистика');
-  const source: Row[] = report === 'categories' || report === 'products' ? data[report].map((row) => ({
+  const source: Row[] = report === 'categories' ? data.categories.map((row) => ({
     ...row, foodCost: row.cost != null && row.revenue > 0 ? 100 * row.cost / row.revenue : null,
   })) : data[report];
   const allColumns = columns[report].filter(({ key }) => {
-    if (key === 'cost' || key === 'profit' || key === 'foodCost') return seeCosts;
+    if (protectedColumns.has(key)) return seeCosts;
+    if (report === 'products' && key === 'waiter') return showWaiters || !!employee;
     if (report !== 'payments') return true;
     if (payment) return key === 'date' || key === payment;
     return key !== 'other' || source.some((row) => row.other !== 0);
@@ -95,12 +112,15 @@ export function StatisticsReport({ report, data, periodControl }: { report: Repo
   const visible = allColumns.filter(({ key }) => !hidden.includes(key));
   const effectiveSort = visible.some(({ key }) => key === sort.key) ? sort : { key: defaultSort[report], ascending: false };
   const text = search.trim().toLocaleLowerCase('ru');
-  const rows = source.filter((row) => {
+  const matchesFilters = (row: Row) => {
     if (category && row[report === 'categories' ? 'id' : 'categoryId'] !== category) return false;
     if (employee && row[report === 'staff' ? 'id' : 'waiterId'] !== employee) return false;
     if (payment && !row[payment]) return false;
     return !text || ['name', 'category', 'waiter'].some((key) => String(row[key] ?? '').toLocaleLowerCase('ru').includes(text));
-  }).sort((a, b) => {
+  };
+  const filtered: Row[] = report === 'products' ? groupProductSales(data.products.filter(matchesFilters), showVariants, showWaiters)
+    : source.filter(matchesFilters);
+  const rows = filtered.sort((a, b) => {
     const left = a[effectiveSort.key], right = b[effectiveSort.key];
     if (left == null || right == null) return left == null ? (right == null ? 0 : 1) : -1;
     const difference = typeof left === 'number' && typeof right === 'number' ? left - right : String(left).localeCompare(String(right), 'ru');
@@ -131,6 +151,16 @@ export function StatisticsReport({ report, data, periodControl }: { report: Repo
       {report !== 'payments' && <details className="relative">
         <summary className="btn-secondary btn-md cursor-pointer list-none">{t('Столбцы')}</summary>
         <div className="absolute right-0 z-20 mt-1 grid min-w-44 gap-2 rounded-xl border border-border bg-card p-3 shadow-card">
+          {report === 'products' && <div className="grid gap-2 border-b border-border pb-2">
+            <label className="flex items-center gap-2 whitespace-nowrap text-sm">
+              <input type="checkbox" checked={showVariants} onChange={(event) => setGrouping('variants', event.target.checked)} />
+              {t('Варианты отдельными строками')}
+            </label>
+            <label className="flex items-center gap-2 whitespace-nowrap text-sm">
+              <input type="checkbox" checked={showWaiters} onChange={(event) => setGrouping('waiters', event.target.checked)} />
+              {t('Официанты отдельными строками')}
+            </label>
+          </div>}
           {allColumns.map(({ key, label }) => <label key={key} className="flex items-center gap-2 whitespace-nowrap text-sm">
             <input type="checkbox" checked={!hidden.includes(key)} disabled={key === firstColumn[report]}
               onChange={(event) => setHiddenColumns((event.target.checked ? hidden.filter((entry) => entry !== key) : [...hidden, key]).join(','))} />

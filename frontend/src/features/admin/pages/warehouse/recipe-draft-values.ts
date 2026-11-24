@@ -48,16 +48,26 @@ export function pieceNetWeight(pieces: number | null | undefined, gramsPerPiece:
   return Number((pieces * gramsPerPiece).toFixed(6));
 }
 
+export function validMeasuredNetWeight(grams: number) {
+  return Number.isFinite(grams) && grams >= 0 && grams < 100_000_000_000 && Number(grams.toFixed(3)) === grams;
+}
+
 type YieldRow = {
   unitType: UnitType | null;
   unitFactor: number;
   netAmount: number | null;
   pieceWeightGrams?: number | null;
+  measuredNetWeightGrams?: number | null;
 };
 
 export function preparationYieldBase(outputType: UnitType, rows: readonly YieldRow[]) {
   let total = 0;
   for (const row of rows) {
+    if (outputType === 'mass' && row.unitType === 'volume' && row.measuredNetWeightGrams != null) {
+      if (!validMeasuredNetWeight(row.measuredNetWeightGrams)) return null;
+      total += row.measuredNetWeightGrams;
+      continue;
+    }
     if (row.netAmount == null || !Number.isFinite(row.netAmount) || row.netAmount < 0) return null;
     if (row.netAmount === 0) continue;
     if (row.unitType === outputType) total += row.netAmount * row.unitFactor;
@@ -88,6 +98,9 @@ export function recipeDraftRows(items: RecipeItem[], copying = false): RecipeDra
       amount: row.amount,
       unit: row.amountUnit,
       netAmount: copyNonMass ? row.netAmount ?? netFromLoss(row.amount, row.lossPercent ?? 0) : row.netAmount,
+      ...(row.unitType === 'volume' && row.measuredNetWeightGrams !== undefined && {
+        measuredNetWeightGrams: row.measuredNetWeightGrams,
+      }),
       lossPercent: copyNonMass ? undefined : row.lossPercent,
       processingMethod: copyNonMass ? undefined : row.processingMethod,
       processingStages: !copyNonMass && row.processingStages?.length ? row.processingStages : undefined,
@@ -114,7 +127,11 @@ export function recipePreviewItems(rows: readonly RecipeDraftRow[], savedVariant
     const variantAmounts = Object.fromEntries(Object.entries(row.variantAmounts ?? {}).filter(([id]) => savedIds.has(id)));
     const netAmount = amount != null && row.netAmount != null && row.amount > 0
       ? Number((row.netAmount * amount / row.amount).toFixed(6)) : row.netAmount;
-    return { ...row, amount: amount ?? row.amount, netAmount, variantAmounts };
+    const measured = row.measuredNetWeightGrams;
+    return { ...row, amount: amount ?? row.amount, netAmount, variantAmounts,
+      ...(measured != null && amount != null && row.amount > 0 && {
+        measuredNetWeightGrams: Number((measured * amount / row.amount).toFixed(3)),
+      }) };
   });
 }
 
@@ -131,8 +148,9 @@ export function lossFromAmounts(gross: number, net: number) {
 }
 
 export function validRecipeRows(rows: readonly RecipeDraftRow[]) {
-  return rows.every(({ amount, netAmount, lossPercent = 0, unitType, processingStages, processingBasis }) => {
+  return rows.every(({ amount, netAmount, measuredNetWeightGrams, lossPercent = 0, unitType, processingStages, processingBasis }) => {
     if (!Number.isFinite(amount) || amount <= 0 || (netAmount != null && (!Number.isFinite(netAmount) || netAmount < 0))) return false;
+    if (measuredNetWeightGrams != null && (unitType !== 'volume' || !validMeasuredNetWeight(measuredNetWeightGrams))) return false;
     if (!supportsProcessing(unitType)) return (netAmount ?? 0) <= amount && lossPercent >= 0 && lossPercent <= 100
       && (lossPercent < 100 || (netAmount ?? 0) === 0);
     if ((processingStages == null && (!Number.isFinite(lossPercent) || lossPercent < -1e16 || lossPercent > 100)) ||

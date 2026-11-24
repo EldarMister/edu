@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { createPortal } from 'react-dom';
 import { Navigate, useLocation } from 'react-router-dom';
 import { Modal } from '@/components/Modal';
@@ -33,6 +34,7 @@ import { WarehouseMultiFilter, warehouseMultiFilterValues } from './warehouse/Wa
 import { filterMenuGoods, MenuAdditionalFilters, MenuGoodsActions, menuGoodsColumns, menuListFilters,
   useMenuGoodsColumns, type MenuGoodsColumn } from './MenuGoodsControls';
 import { MenuEntryPage } from './MenuEntryPage';
+import { InlineMenuPrice } from './InlineMenuPrice';
 import { MenuFoodCostPage } from './MenuFoodCostPage';
 import { costPercent, menuOutputLabel, useMenuCosts, type MenuCostRow } from './menu-cost-api';
 import { dishTaxInput, dishTaxValue, effectiveMenuTaxId, MenuTaxSelect } from '../../settings/MenuTaxSelect';
@@ -91,7 +93,8 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
   const listQ = isGoods ? goodsQ : dishesQ;
   const { columns, saveColumns } = useMenuGoodsColumns(isGoods);
   const dataColumns = columns.filter((column): column is MenuGoodsColumn => column !== 'name');
-  const { remove } = useDishMutations();
+  const { remove, update } = useDishMutations();
+  const queryClient = useQueryClient();
   const push = useNotifications((state) => state.push);
   const { can } = usePermissions();
   const editable = can('actions.editMenu');
@@ -134,10 +137,16 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
   const stationOptions = [...stations.map((station) => ({ value: station.id, label: station.name })), { value: 'none', label: 'Без цеха' }];
   const unitOptions = [...new Set(goodsQ.data?.flatMap((item) => item.goodsUnits))].sort((a, b) => a.localeCompare(b, 'ru'))
     .map((unit) => ({ value: unit, label: unit }));
+  const priceCell = (dish: AdminDish, display: string) => editable && !dish.isSet && !dish.isWeighted && !dish.variants.length
+    ? <InlineMenuPrice name={dish.name} price={Number(dish.price)} display={display} onSave={async (price) => {
+      await update.mutateAsync({ id: dish.id, price });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'menu-entry', dish.id] });
+      push({ message: 'Цена сохранена', at: new Date().toISOString() });
+    }} /> : display;
   const goodsCell = (dish: AdminGood, column: MenuGoodsColumn) => {
     switch (column) {
       case 'category': return dish.category.name;
-      case 'price': return `${dish.variants.length ? 'от ' : ''}${balanceMoney(dish.goodsPrice)}`;
+      case 'price': return priceCell(dish, `${dish.variants.length ? 'от ' : ''}${balanceMoney(dish.goodsPrice)}`);
       case 'station': return stationOptions.find((option) => option.value === dish.goodsStation)?.label ?? dish.goodsStation;
       case 'unit': return dish.goodsUnits.join(', ');
       case 'weighted': return dish.isWeighted ? 'Да' : 'Нет';
@@ -304,7 +313,7 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
                       {recipeMetric(costsByDish.get(dish.id), 'foodCost', balanceMoney)}
                     </td>}
                     <td className="whitespace-nowrap px-4 py-3 text-right">
-                      {dish.variants.length ? `от ${balanceMoney(minDishUnitPrice(dish))}` : balanceMoney(Number(dish.price))}
+                      {priceCell(dish, dish.variants.length ? `от ${balanceMoney(minDishUnitPrice(dish))}` : balanceMoney(Number(dish.price)))}
                     </td>
                     {showRecipeCosts && <>
                       <td className="px-4 py-3 text-right tabular-nums">{recipeMetric(costsByDish.get(dish.id), 'markupPercent', costPercent)}</td>

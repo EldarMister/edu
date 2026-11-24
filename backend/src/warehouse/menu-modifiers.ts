@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { lockRecipeGraph } from './recipe-resolution';
+import { archiveDishRecipe } from './recipe-revisions';
 import { assertUnitMatchesType, fromBase, normalizeUnit, toBase, UnitCode } from './units';
 
 class ModifierOptionDto {
@@ -94,7 +95,7 @@ export class MenuModifiersService {
   async saveInTransaction(tx: Prisma.TransactionClient, dishId: string, dto: MenuModifiersDto, archive = true) {
       const dish = await tx.dish.findUnique({ where: { id: dishId }, include: { recipeItems: true, variants: true, modifierGroups: { include: { options: true } } } });
       if (!dish) throw new NotFoundException('Блюдо не найдено');
-      if (archive) await tx.recipeRevision.upsert({ where: { dishId_version: { dishId, version: dish.recipeVersion } }, update: {}, create: { dishId, version: dish.recipeVersion, snapshot: JSON.parse(JSON.stringify({ modifierGroups: dish.modifierGroups, allowIngredientExclusions: dish.allowIngredientExclusions, metadata: dish.recipeMetadata, stockIngredientId: dish.stockIngredientId, stockAmount: dish.stockAmount, items: dish.recipeItems, variants: dish.variants })) } });
+      if (archive) await archiveDishRecipe(tx, dishId, 'full');
       const groupIds = new Set(dish.modifierGroups.map((group) => group.id));
       const existingOptions = new Map(dish.modifierGroups.flatMap((group) => group.options.map((option) => [option.id, option] as const)));
       const keptGroups: string[] = [], seenOptions = new Set<string>();
