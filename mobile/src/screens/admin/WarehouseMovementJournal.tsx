@@ -123,9 +123,9 @@ export function WarehouseMovementJournal({
       <Card style={styles.card}>
         <View style={styles.toolbar}>
         <View style={styles.filters}>
-          {canExport && <Button title="Экспорт CSV" size="md" variant="secondary" style={styles.button} loading={outputAction === 'csv'}
+          {canExport && <Button icon="export" title="Экспорт CSV" size="md" variant="secondary" style={styles.button} loading={outputAction === 'csv'}
             disabled={!rangeReady || !report.isSuccess || outputAction !== null} onPress={() => void runOutput('csv')} />}
-          <Button title="Печать" size="md" variant="secondary" style={styles.button} loading={outputAction === 'print'}
+          <Button icon="adminPrinter" title="Печать" size="md" variant="secondary" style={styles.button} loading={outputAction === 'print'}
             disabled={!rangeReady || !report.isSuccess || outputAction !== null} onPress={() => void runOutput('print')} />
         </View>
         <View style={styles.filters}>

@@ -143,8 +143,8 @@ export function CashHandoverRegister({ initialFilter, allowExport }: {
       <WarehouseMultiSelect label="Столбцы" value={preference} onChange={(keys) => { if (keys.length) savePreference(keys); }}
         options={specs.map(({ key, label }) => ({ value: key, label }))} />
       {allowExport ? <>
-        <Button title="Экспорт" variant="secondary" size="md" disabled={!rows.length || !!outputAction} onPress={() => void output('csv')} />
-        <Button title="Печать" variant="secondary" size="md" disabled={!rows.length || !!outputAction} onPress={() => void output('print')} />
+        <Button icon="export" title="Экспорт" variant="secondary" size="md" disabled={!rows.length || !!outputAction} onPress={() => void output('csv')} />
+        <Button icon="adminPrinter" title="Печать" variant="secondary" size="md" disabled={!rows.length || !!outputAction} onPress={() => void output('print')} />
       </> : null}
     </View>
     {rows.length === 0 ? <EmptyState text={daily ? 'За этот период сдачу наличных не проводили' : 'За этот период нет наличных к сдаче'} />

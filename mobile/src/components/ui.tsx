@@ -3,7 +3,7 @@ import React from 'react';
 import { Animated, Easing, StyleSheet, type TextInputProps, type TextStyle, type ViewStyle } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
 import { colors, radius, spacing, fontSize, cardShadow, waiterLayout } from '@/theme';
-import { PwaIcon } from './PwaIcon';
+import { PwaIcon, type PwaIconName } from './PwaIcon';
 import { FastPressable } from './FastPressable';
 
 type ButtonVariant = 'primary' | 'secondary' | 'danger';
@@ -19,6 +19,7 @@ export function Button({
   loading,
   disabled,
   danger,
+  icon,
   style,
 }: {
   title: string;
@@ -30,6 +31,7 @@ export function Button({
   disabled?: boolean;
   /** Вторичная кнопка с красным текстом (как «Выйти»). */
   danger?: boolean;
+  icon?: PwaIconName;
   style?: ViewStyle;
 }) {
   const isDisabled = disabled || loading;
@@ -56,14 +58,19 @@ export function Button({
       {loading ? (
         <ActivityIndicator color={fg} />
       ) : (
-        <Text
-          style={[
-            styles.btnText,
-            { color: fg, fontSize: size === 'lg' ? fontSize.base : fontSize.sm, fontWeight },
-          ]}
-         translate>
-          {title}
-        </Text>
+        <>
+          {icon && <PwaIcon name={icon} size={20} color={fg} />}
+          <Text
+            style={[
+              styles.btnText,
+              icon && styles.btnIconText,
+              { color: fg, fontSize: size === 'lg' ? fontSize.base : fontSize.sm, fontWeight },
+            ]}
+            translate
+          >
+            {title}
+          </Text>
+        </>
       )}
     </FastPressable>
   );
@@ -301,6 +308,7 @@ const styles = StyleSheet.create({
   },
   btnSecondary: { borderWidth: 1, borderColor: colors.border },
   btnText: { fontWeight: '500' },
+  btnIconText: { flexShrink: 1, textAlign: 'center' },
   card: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,

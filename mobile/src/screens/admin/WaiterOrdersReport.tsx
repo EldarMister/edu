@@ -137,7 +137,7 @@ export function WaiterOrdersReport({ staff, staffLoading = false }: { staff: Pic
         {tab === 'orders' && <View style={styles.toolbar}>
           <WarehouseDirectorySearch label="Поиск по заказам" placeholder="Блюдо или № заказа" value={search} onChange={setSearch} />
           <WarehouseMultiSelect label="Столбцы" value={shown} options={optionalColumns} onChange={saveColumns} />
-          {canAction('exportReports') && <Button title="Экспорт CSV" size="md" variant="secondary" disabled={!visibleRows.length}
+          {canAction('exportReports') && <Button icon="export" title="Экспорт CSV" size="md" variant="secondary" disabled={!visibleRows.length}
             loading={exporting} onPress={() => void exportReport()} />}
         </View>}
       </View>

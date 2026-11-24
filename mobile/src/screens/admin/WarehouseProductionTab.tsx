@@ -162,7 +162,7 @@ export function ProductionBatchPage({ id, locations, onClose }: { id: string; lo
             </View>
           </> : <Button title="Отменить проведение" variant="secondary" size="md" onPress={() => { setError(''); setConfirm(true); }} />}
         </Card> : null}
-        <View style={styles.actions}><Button title="Печать" variant="secondary" size="md"
+        <View style={styles.actions}><Button icon="adminPrinter" title="Печать" variant="secondary" size="md"
           onPress={() => { setError(''); void printBatch(batch, location, showCosts).catch((failure) => setError(apiError(failure))); }} /></View>
       </> : null}
       {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}

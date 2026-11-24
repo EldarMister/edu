@@ -550,7 +550,10 @@ export function OrderDetailScreen() {
           {canPrintPreliminary && order.status !== 'served' ? (
             <FastPressable disabled={print.isPending} onPress={requestPreliminaryReceipt}
               style={[styles.preReceiptBtn, print.isPending && styles.preReceiptBtnDisabled]}>
-              {print.isPending ? <ActivityIndicator color={colors.primary} /> : <Text style={styles.preReceiptText} translate>Счёт</Text>}
+              {print.isPending ? <ActivityIndicator color={colors.primary} /> : <>
+                <PwaIcon name="adminPrinter" size={20} color={colors.primary} />
+                <Text style={styles.preReceiptText} translate>Счёт</Text>
+              </>}
             </FastPressable>
           ) : null}
           <View style={{ flex: 1, minWidth: 0 }}>{mainAction()}</View>
@@ -1041,6 +1044,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.primary,
     backgroundColor: colors.white,
+    flexDirection: 'row',
+    gap: spacing.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },

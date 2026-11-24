@@ -39,6 +39,7 @@ export type PwaIconName =
   | 'adminJournal'
   | 'adminSettings'
   | 'adminPrinter'
+  | 'export'
   | 'adminWarehouse'
   | 'logout';
 
@@ -195,6 +196,7 @@ export function PwaIcon({
       {name === 'adminJournal' && <><Path d="M4 5a2 2 0 0 1 2-2h11a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2Z" {...common} /><Path d="M4 5a2 2 0 0 0 2 2h12M8 11h7M8 15h5" {...common} /></>}
       {name === 'adminSettings' && <><Circle cx="12" cy="12" r="3" {...common} /><Path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.2.62.78 1.05 1.43 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" {...common} /></>}
       {name === 'adminPrinter' && <><Path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" {...common} /><Rect x="6" y="14" width="12" height="8" rx="1" {...common} /></>}
+      {name === 'export' && <Path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7M12 15V3m-4 4 4-4 4 4" {...common} />}
       {name === 'adminWarehouse' && <><Path d="M3 21V8l9-5 9 5v13M3 21h18" {...common} /><Rect x="8" y="13" width="8" height="8" rx="1" {...common} /><Path d="M8 17h8" {...common} /></>}
       {name === 'logout' && <><Path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" {...common} /><Path d="M16 17l5-5-5-5M21 12H9" {...common} /></>}
     </Svg>

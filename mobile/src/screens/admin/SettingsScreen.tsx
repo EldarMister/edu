@@ -155,7 +155,7 @@ function PrinterSettings({ narrow }: { narrow: boolean }) {
     </View>
     <View style={styles.printerPanel}>
       <Text style={styles.helper} translate>Выберите принтер в системном окне печати.</Text>
-      <Button title="Пробная печать" size="md" variant="secondary" loading={printing} onPress={() => void testPrint()} />
+      <Button icon="adminPrinter" title="Пробная печать" size="md" variant="secondary" loading={printing} onPress={() => void testPrint()} />
       {printError && <Text accessibilityRole="alert" style={styles.errorText} translate>Пробная печать не выполнена.</Text>}
       <View style={styles.nested}><ThemeSwitch /></View>
     </View>

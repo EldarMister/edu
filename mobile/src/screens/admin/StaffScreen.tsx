@@ -230,7 +230,7 @@ export function StaffScreen({ initialTab = 'current', onOpenCashHandover }: {
               <Text style={styles.toolbarLabel} translate>Дата смены:</Text>
               <View style={{ width: 152 }}><DateField style={{ height: 36 }} value={date} onChangeText={setDate} maximumDate={new Date()} accessibilityLabel="Дата смены" /></View>
               <Button title="Обновить" size="md" style={styles.toolbarButton} variant="secondary" loading={reportQ.isFetching || staffQ.isFetching} onPress={() => { void reportQ.refetch(); void staffQ.refetch(); }} />
-              {canAction('exportReports') ? <Button title="Экспорт" size="md" style={styles.toolbarButton} variant="secondary" disabled={!rows.length} loading={exporting} onPress={() => void exportReport()} /> : null}
+              {canAction('exportReports') ? <Button icon="export" title="Экспорт" size="md" style={styles.toolbarButton} variant="secondary" disabled={!rows.length} loading={exporting} onPress={() => void exportReport()} /> : null}
             </> : null}
             {mayManageStaff ? <FastPressable style={styles.addStaff} onPress={() => setEditing('new')}><PwaIcon name="plus" size={16} color={colors.white} /><Text style={styles.addStaffText} translate>Добавить сотрудника</Text></FastPressable> : null}
           </View>
@@ -289,7 +289,7 @@ export function StaffScreen({ initialTab = 'current', onOpenCashHandover }: {
               loading={historyQ.isFetching}
               onRefresh={() => historyQ.refetch()}
             />
-            {canAction('exportReports') ? <Button title="Экспорт CSV" variant="secondary" disabled={!historyQ.data?.items.length} loading={exporting} onPress={() => void exportReport()} /> : null}
+            {canAction('exportReports') ? <Button icon="export" title="Экспорт CSV" variant="secondary" disabled={!historyQ.data?.items.length} loading={exporting} onPress={() => void exportReport()} /> : null}
             {historyQ.isError ? <Text style={{ color: colors.danger }}>{apiError(historyQ.error)}</Text> : null}
             <ShiftHistoryList
               data={historyQ.data}

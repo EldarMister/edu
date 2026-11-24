@@ -145,8 +145,8 @@ export function TransactionRegister({ data, allowExport }: { data: FinanceData; 
       <View style={financeStyles.toolbar}>
         <WarehouseMultiSelect label="Столбцы" value={visibleColumns.map(({ key }) => key)} onChange={changeColumns}
           options={permittedColumns.map(({ key, label }) => ({ value: key, label }))} />
-        {allowExport ? <Button title="Экспорт" size="md" variant="secondary" disabled={!rows.length || !!exporting} loading={exporting === 'csv'} onPress={() => void output('csv')} /> : null}
-        {allowExport ? <Button title="Печать" size="md" variant="secondary" disabled={!rows.length || !!exporting} loading={exporting === 'print'} onPress={() => void output('print')} /> : null}
+        {allowExport ? <Button icon="export" title="Экспорт" size="md" variant="secondary" disabled={!rows.length || !!exporting} loading={exporting === 'csv'} onPress={() => void output('csv')} /> : null}
+        {allowExport ? <Button icon="adminPrinter" title="Печать" size="md" variant="secondary" disabled={!rows.length || !!exporting} loading={exporting === 'print'} onPress={() => void output('print')} /> : null}
         {canCreate ? <Button title="Добавить транзакцию" size="md" onPress={() => setEditing('create')} /> : null}
       </View>
       {rows.length ? (

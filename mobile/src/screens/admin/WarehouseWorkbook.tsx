@@ -46,5 +46,5 @@ export function WarehouseWorkbook({ url, filename, disabled }: { url: string; fi
       setLoading(false);
     }
   }
-  return <Button title="Экспорт" variant="secondary" size="md" disabled={disabled} loading={loading} onPress={() => void download()} />;
+  return <Button icon="export" title="Экспорт" variant="secondary" size="md" disabled={disabled} loading={loading} onPress={() => void download()} />;
 }

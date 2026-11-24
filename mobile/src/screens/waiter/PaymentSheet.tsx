@@ -395,7 +395,7 @@ export function PaymentSheet({
           showSuccess || wide ? undefined : showReceipt ? (
             <View style={styles.receiptActions}>
               <Button title="Готово" variant="secondary" onPress={close} style={{ flex: 1 }} />
-              {canPrint || activeOrder.waiter && canAction('requestReceiptPrints') ? <Button title="Печать чека" loading={printingDirect || print.isPending} onPress={() => void requestPrint()} style={{ flex: 1 }} /> : null}
+              {canPrint || activeOrder.waiter && canAction('requestReceiptPrints') ? <Button icon="adminPrinter" title="Печать чека" loading={printingDirect || print.isPending} onPress={() => void requestPrint()} style={{ flex: 1 }} /> : null}
             </View>
           ) : isPaymentComplete ? (
             <Button title="Готово" variant="secondary" onPress={close} />

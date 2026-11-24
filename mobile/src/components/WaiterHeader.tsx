@@ -33,7 +33,7 @@ export function WaiterHeader() {
           left={<BrandLogo />}
           right={
             <View style={styles.status}>
-              {canPrint && <Button title="Печать чека" size="md" variant="secondary" onPress={() => setPrintOpen(true)} />}
+              {canPrint && <Button icon="adminPrinter" title="Печать чека" size="md" variant="secondary" onPress={() => setPrintOpen(true)} />}
               <ConnectionBadge online />
               {trackShift && <Text style={[styles.shift, { color: active ? colors.success : colors.textMuted }]} translate>
                 {active ? 'Смена активна' : 'Нет смены'}

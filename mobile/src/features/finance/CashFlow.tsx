@@ -90,7 +90,7 @@ export function CashFlowRegister({ data, flow, from, to, accounts, onAccounts, a
       <View style={financeStyles.toolbar}>
         <WarehouseMultiSelect label="Счета" value={accounts} onChange={onAccounts} options={data.accounts.map(choice)} />
         <WarehouseMultiSelect label="Столбцы" value={columns} onChange={saveColumns} options={columnOptions} />
-        {allowExport ? <Button title="Экспорт" size="md" variant="secondary" loading={exporting} onPress={() => void exportFlow()} /> : null}
+        {allowExport ? <Button icon="export" title="Экспорт" size="md" variant="secondary" loading={exporting} onPress={() => void exportFlow()} /> : null}
       </View>
       <View style={financeStyles.card}>
         <SheetScrollView horizontal>

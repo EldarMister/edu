@@ -57,7 +57,7 @@ export function TableQrModal({
 
   return (
     <BottomSheet visible onClose={onClose} title={`QR-код · ${label}`} footer={<View><Button title="Поделиться ссылкой" size="md" style={{ marginTop: spacing.lg, alignSelf: 'stretch' }} onPress={share} />
-        <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm, alignSelf: 'stretch' }}><Button title="Сохранить QR" variant="secondary" size="md" loading={busy} disabled={busy} onPress={() => void qrAction('save')} style={{ flex: 1 }} /><Button title="Печать" size="md" disabled={busy} onPress={() => void qrAction('print')} style={{ flex: 1 }} /></View></View>}>
+        <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm, alignSelf: 'stretch' }}><Button title="Сохранить QR" variant="secondary" size="md" loading={busy} disabled={busy} onPress={() => void qrAction('save')} style={{ flex: 1 }} /><Button icon="adminPrinter" title="Печать" size="md" disabled={busy} onPress={() => void qrAction('print')} style={{ flex: 1 }} /></View></View>}>
       <View style={styles.wrap}>
         <PaperView style={styles.qrBox}>
           <QRCode value={menuUrl} size={220} quietZone={16} ecl="M" getRef={(ref: Svg) => { qrRef.current = ref; }} />

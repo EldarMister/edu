@@ -87,7 +87,7 @@ export function TaxReportScreen() {
           { value: '', label: 'Все операции' }, ...Object.entries(TAX_REPORT_LABELS).map(([value, label]) => ({ value, label })),
         ]} onChange={setKind} />
         {canExport && <WarehouseWorkbook url={`${TAX_REPORT_ENDPOINT}/export.xlsx?${url}`} filename="Налоги с продаж.xlsx" disabled={!rows.length} />}
-        <Button title="Печать" size="md" variant="secondary" disabled={!rows.length} loading={printing} onPress={() => void print()} />
+        <Button icon="adminPrinter" title="Печать" size="md" variant="secondary" disabled={!rows.length} loading={printing} onPress={() => void print()} />
       </View>
       {period === 'custom' && <View style={styles.toolbar}>
         <DateField value={from} accessibilityLabel="Начало периода" onChangeText={(next) => { setFrom(next); if (next > to) setTo(next); }} />

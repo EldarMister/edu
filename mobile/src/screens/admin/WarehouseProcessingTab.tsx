@@ -91,7 +91,7 @@ export function WarehouseProcessingTab({ warehouseId, locations, warehouseFilter
           onChangeText={(value) => { setSearch(value); setPage(1); }} />
         <Select title="Период" value={period} options={periods} onChange={choosePeriod} style={styles.select} />
         {warehouseFilter}
-        {canAction('exportReports') && <Button title="Экспорт CSV" size="md" variant="secondary" disabled={!documents.length} onPress={exportDocuments} />}
+        {canAction('exportReports') && <Button icon="export" title="Экспорт CSV" size="md" variant="secondary" disabled={!documents.length} onPress={exportDocuments} />}
         {canAction('warehouseProduce') && <Button title="Добавить" size="md" disabled={!locations.length} onPress={() => setEditor({})} />}
       </View>
       {period === 'custom' && <View style={styles.toolbar}>

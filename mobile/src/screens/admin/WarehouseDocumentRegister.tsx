@@ -128,7 +128,7 @@ export function WarehouseDocumentRegister({
       <View style={styles.wrap}>
         {inventory && query.isSuccess ? <Text style={styles.muted}>Всего: {rows.length}</Text> : null}
         {inventory ? periodControl : null}
-        {canExport && <Button title="Экспорт CSV" variant="secondary" size="md" disabled={!rows.length} onPress={() => {
+        {canExport && <Button icon="export" title="Экспорт CSV" variant="secondary" size="md" disabled={!rows.length} onPress={() => {
           void shareCsv('Перемещения', [columns.slice(0, -1), ...rows.map(cells)])
             .catch((error) => Alert.alert('Экспорт перемещений', apiError(error)));
         }} />}

@@ -203,9 +203,9 @@ export function StatisticsReport({ view, data, periodLabel }: { view: ReportView
           options={optionalColumns.map(({ key, label }) => ({ value: key, label }))}
           onChange={(shown) => setHidden(optionalColumns.map(({ key }) => key).filter((key) => !shown.includes(key)))} />}
         {canAction('exportReports') &&
-          <Button size="md" variant="secondary" title="Экспорт CSV" loading={output === 'csv'} disabled={!visible.length || output !== null} onPress={() => void exportReport('csv')} />
+          <Button icon="export" size="md" variant="secondary" title="Экспорт CSV" loading={output === 'csv'} disabled={!visible.length || output !== null} onPress={() => void exportReport('csv')} />
         }
-        <Button size="md" variant="secondary" title="Печать" loading={output === 'print'} disabled={!visible.length || output !== null} onPress={() => void exportReport('print')} />
+        <Button icon="adminPrinter" size="md" variant="secondary" title="Печать" loading={output === 'print'} disabled={!visible.length || output !== null} onPress={() => void exportReport('print')} />
       </View>
       {view === 'payments' && <View style={styles.controls}>
         <Select title="Оплаты" value={payment} onChange={(value) => { setPayment(value); setPage(0); }}
