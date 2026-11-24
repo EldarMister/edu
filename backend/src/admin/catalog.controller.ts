@@ -1,9 +1,11 @@
-import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Put, Query, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Put, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { GoodsExportQuery } from './goods-xlsx';
 import { hasPermission, resolvePermissions } from '../common/permissions';
 import { MenuEntryService } from './menu-entry.service';
 import { MenuEntryDto } from './menu-entry.dto';
+import type { MenuImportFile } from './menu-import';
 import { MenuPriceBatchDto } from './menu-prices.dto';
 import { Role } from '@prisma/client';
 import { CatalogService } from './catalog.service';
@@ -40,6 +42,16 @@ export class CatalogController {
 
   @Put('menu/entries/:id') @RequirePermission('sections.menu', 'actions.editMenu')
   updateMenuEntry(@Param('id') id: string, @Body() dto: MenuEntryDto, @CurrentUser() user: AuthUser) { this.assertRecipePermission(dto, user); return this.entries.save(id, dto, user); }
+
+  @Post('menu/import/:kind') @RequirePermission('sections.menu', 'actions.editMenu')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024, files: 1, fields: 0 } }))
+  importMenu(@Param('kind') kind: string, @Query('apply') apply: string | undefined, @CurrentUser() user: AuthUser, @UploadedFile() file?: MenuImportFile) {
+    if (kind !== 'goods' && kind !== 'recipe') throw new BadRequestException('Выберите товары или техкарты.');
+    if (!file) throw new BadRequestException('Выберите файл для импорта.');
+    const canEditRecipe = user.role === Role.OWNER ||
+      hasPermission(user.permissions ?? resolvePermissions(user.role as Role, null), 'actions.warehouseRecipes');
+    return this.entries.importCatalogue(kind, file, apply === 'true', canEditRecipe, user);
+  }
 
   @Post('menu/food-cost/prices') @RequirePermission('sections.menu', 'actions.editMenu')
   applyMenuPrices(@Body() dto: MenuPriceBatchDto, @CurrentUser() user: AuthUser) { return this.catalog.applyMenuPrices(dto, user); }

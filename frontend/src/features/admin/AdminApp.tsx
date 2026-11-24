@@ -37,7 +37,8 @@ import { StatisticsPage } from './pages/StatisticsPage';
 import { STATISTICS_NAV, statisticsView, type StatisticsView } from './pages/statisticsViews';
 import { OrdersPage } from './pages/OrdersPage';
 import { TablesPage } from './pages/TablesPage';
-import { MenuCategoriesPage, MenuPage } from './pages/MenuPage';
+import { MenuPage } from './pages/MenuPage';
+import { MenuCategoryWorkspace } from './pages/MenuCategoryWorkspace';
 import { StaffPage } from './pages/StaffPage';
 import { WorkspaceLinks } from '@/components/WorkspaceLinks';
 import { PositionsPage } from './pages/PositionsPage';
@@ -52,7 +53,6 @@ import { useWarehousePolicy } from './pages/warehouse/settings-api';
 import { useWarehouseLocations } from './pages/warehouse/api';
 import { useWorkspaceScroll } from './pages/warehouse/workspace-route';
 import { StationsPage } from './pages/StationsPage';
-import { IngredientCategoriesPage } from './pages/IngredientCategoriesPage';
 import { WorkspaceHeaderProvider, WorkspaceTitleSlot, WorkspaceActionsSlot } from './pages/WorkspaceHeader';
 import { SettingsPage } from '../settings/SettingsPage';
 import { ReceiptSettingsPage } from '../settings/ReceiptSettingsPage';
@@ -256,7 +256,8 @@ export function AdminApp() {
   const [collapsedSection, setCollapsedSection] = useState<Section | null>(null);
   const statsView = statisticsView(route.get('view'));
   const warehouseView = (WAREHOUSE_NAV.some((item) => item.key === route.get('view')) ? route.get('view') : 'balances') as WarehouseView;
-  const menuView = (MENU_NAV.some((item) => item.key === route.get('view')) ? route.get('view') : 'goods') as MenuView;
+  const requestedMenuView = route.get('view') === 'ingredientCategories' ? 'categories' : route.get('view');
+  const menuView = MENU_NAV.find((item) => item.key === requestedMenuView)?.key ?? 'goods';
   const financeView = financeNav.find(({ key }) => key === route.get('view'))?.key ?? financeNav[0]?.key;
   const staffView = personnelNav.find(({ key }) => key === route.get('view'))?.key ?? 'employees';
   const staffTab = route.get('view') === 'waiter-report' ? 'waiter-orders' : 'employees';
@@ -504,7 +505,7 @@ export function AdminApp() {
               : s.key === 'menu'
                 ? MENU_NAV.filter((item) => item.key === 'foodCost'
                   ? canSection('warehouse') && can('actions.warehouseCosts')
-                  : !['preparations', 'ingredients', 'ingredientCategories'].includes(item.key) || canSection('warehouse'))
+                  : !['preparations', 'ingredients'].includes(item.key) || canSection('warehouse'))
                 : s.key === 'stats' ? STATISTICS_NAV
                   : s.key === 'finance' ? financeNav : s.key === 'staff' ? personnelNav
                     : s.key === 'requests' ? requestsNav : s.key === 'settings' ? SETTINGS_NAV : [];
@@ -709,9 +710,7 @@ export function AdminApp() {
               {section === 'receipts' && canHandlePrintRequests && <ReceiptPrintsPage />}
               {section === 'tables' && canSection('tables') && <TablesPage />}
               {section === 'menu' && canSection('menu') && <>
-                {menuView === 'categories' && <MenuCategoriesPage />}
-                {menuView === 'ingredientCategories' && canSection('warehouse') && <IngredientCategoriesPage />}
-                {menuView !== 'categories' && menuView !== 'ingredientCategories' && <MenuPage view={menuView} />}
+                {menuView === 'categories' ? <MenuCategoryWorkspace /> : <MenuPage view={menuView} />}
               </>}
               {section === 'warehouse' && canSection('warehouse') && (
                 <WarehouseSection

@@ -6,6 +6,7 @@ import { warehouseMultiFilterValues } from './warehouse/WarehouseMultiFilter';
 import type { AdminGood } from '../api';
 import { effectiveMenuTaxId } from '../../settings/MenuTaxSelect';
 import { ColumnButton } from '../components/ColumnControl';
+import { IconExport } from '../components/icons';
 
 export const menuGoodsColumns = {
   name: 'Название', category: 'Категория', price: 'Цена', station: 'Цех',
@@ -95,12 +96,10 @@ export function MenuGoodsActions({ filters, columns, saveColumns, ready, canExpo
     finally { setExporting(false); }
   }
   return <>
-    <div className="flex flex-wrap items-center gap-1">
-      <ColumnButton onClick={() => setColumnsOpen(true)} />
-      {canExport && <button type="button" className="supply-header-action" disabled={!ready || exporting}
-        onClick={() => void exportGoods()}>{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
-      {error && <p className="basis-full text-sm text-danger" role="alert">{error}</p>}
-    </div>
+    <ColumnButton onClick={() => setColumnsOpen(true)} />
+    {canExport && <button type="button" className="supply-header-action" disabled={!ready || exporting} title="Экспорт"
+      onClick={() => void exportGoods()}><IconExport aria-hidden="true" /><span className="catalogue-action-label">{exporting ? 'Выгрузка…' : 'Экспорт'}</span></button>}
+    {error && <p className="basis-full text-sm text-danger" role="alert">{error}</p>}
     {columnsOpen && <WarehouseColumnSettings columns={columns} defaults={columnOptions} resetColumns={defaults}
       label={(key) => menuGoodsColumns[key]} onClose={() => setColumnsOpen(false)}
       onApply={(selected) => { saveColumns(selected); setColumnsOpen(false); }} />}

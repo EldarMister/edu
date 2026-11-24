@@ -20,6 +20,8 @@ import { MenuEntryDto } from './menu-entry.dto';
 import { MAIN_SCREEN, ensureMainMenuCategory } from './main-menu-category';
 import { dishTaxFields } from '../settings/order-taxes';
 import { createHash } from 'node:crypto';
+import { getCafeId } from '../tenant/tenant-context';
+import { prepareMenuImport, readMenuImport, type ImportKind, type MenuImportFile } from './menu-import';
 
 @Injectable()
 export class MenuEntryService {
@@ -55,6 +57,42 @@ export class MenuEntryService {
   }
 
   async save(id: string | null, dto: MenuEntryDto, actor: AuditActor) {
+    const result = await this.writeEntry(id, dto, actor);
+    await this.notifySaved(id, dto, actor, result);
+    return this.get(result.id);
+  }
+
+  async importCatalogue(kind: ImportKind, file: MenuImportFile, apply: boolean, canEditRecipe: boolean, actor: AuditActor) {
+    const cafeId = getCafeId();
+    if (!cafeId) throw new BadRequestException('Заведение не назначено.');
+    const rows = readMenuImport(file, kind);
+    const prepare = (tx: Prisma.TransactionClient) => prepareMenuImport(tx, cafeId, kind, rows, canEditRecipe);
+    if (!apply) {
+      const { preview, errors, entries } = await this.prisma.$transaction(prepare, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+      return { rows: preview, errors, count: entries.length };
+    }
+    const count = await this.importEntries(actor, async (tx) => {
+      const { entries, errors } = await prepare(tx);
+      if (errors.length) throw new BadRequestException(`Строка ${errors[0].row}. ${errors[0].message}`);
+      return entries;
+    });
+    return { count };
+  }
+
+  private async importEntries(actor: AuditActor, prepare: (tx: Prisma.TransactionClient) => Promise<MenuEntryDto[]>) {
+    const saved = await this.prisma.$transaction(async (tx) => {
+      await lockRecipeGraph(tx);
+      await lockStationRouting(tx);
+      const entries = await prepare(tx);
+      const results: { dto: MenuEntryDto; result: { id: string; replay: boolean } }[] = [];
+      for (const dto of entries) results.push({ dto, result: await this.writeEntry(null, dto, actor, tx) });
+      return results;
+    }, { timeout: 60000 });
+    for (const { dto, result } of saved) await this.notifySaved(null, dto, actor, result);
+    return saved.length;
+  }
+
+  private async writeEntry(id: string | null, dto: MenuEntryDto, actor: AuditActor, transaction?: Prisma.TransactionClient) {
     if (!id && !dto.requestKey?.trim())
       throw new BadRequestException('Не указан ключ создания позиции');
     const fingerprint = createHash('sha256')
@@ -72,8 +110,7 @@ export class MenuEntryService {
     const createKey = `${dto.requestKey}:${fingerprint}`;
     const imageUrl =
       dto.dish.imageUrl === undefined ? undefined : await normalizeDishImage(dto.dish.imageUrl);
-    const result = await this.prisma.$transaction(
-      async (tx) => {
+    const write = async (tx: Prisma.TransactionClient) => {
         // Match stock/recipe and station writers' lock order. All children commit together.
         await lockRecipeGraph(tx);
         await lockStationRouting(tx);
@@ -409,9 +446,11 @@ export class MenuEntryService {
             data: { recipeVersion: { increment: 1 } },
           });
         return { id: dish.id, replay: false };
-      },
-      { timeout: 30000 },
-    );
+    };
+    return transaction ? write(transaction) : this.prisma.$transaction(write, { timeout: 30000 });
+  }
+
+  private async notifySaved(id: string | null, dto: MenuEntryDto, actor: AuditActor, result: { id: string; replay: boolean }) {
     if (!result.replay) {
       this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, {
         dishId: result.id,
@@ -425,7 +464,6 @@ export class MenuEntryService {
         newValue: { catalogKind: dto.catalogKind, name: dto.dish.name },
       });
     }
-    return this.get(result.id);
   }
 }
 

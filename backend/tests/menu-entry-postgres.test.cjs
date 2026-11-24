@@ -665,6 +665,60 @@ test(
   },
 );
 
+test('PostgreSQL: menu import previews, saves stock and recipe composition, retries and rolls back a failed batch', { skip: !url }, async () => {
+  const db = new PrismaClient({ datasourceUrl: url });
+  db.$use(tenantPrismaMiddleware);
+  db.$use((params, next) => {
+    if (params.model === 'Dish' && params.action === 'create' && params.args.data.name === 'Ошибка записи QA') {
+      throw new Error('Ошибка записи QA');
+    }
+    return next(params);
+  });
+  const cafe = await db.cafe.create({ data: { name: 'Menu import QA ' + randomUUID() } });
+  const actor = { id: randomUUID(), role: 'OWNER', name: 'QA', cafeId: cafe.id };
+  const service = new MenuEntryService(db, new RecipesService(db), new MenuModifiersService(db), { emitBroadcast() {} }, { async log() {} });
+  const file = (lines) => ({ originalname: 'menu.csv', buffer: Buffer.from(lines.join('\n')) });
+  try {
+    await runWithTenant({ cafeId: cafe.id }, async () => {
+      const ingredient = await db.ingredient.create({ data: { name: 'Мука QA', unitType: 'mass', displayUnit: 'kg' } });
+      const recipes = file(['Название;Цена;Компонент;Брутто;Ед. измерения', 'Лепёшка QA;70,5;Мука QA;0,09;кг']);
+      const preview = await service.importCatalogue('recipe', recipes, false, true, actor);
+      assert.equal(preview.count, 1);
+      assert.deepEqual(preview.errors, []);
+      assert.equal(await db.dish.count(), 0);
+      await assert.rejects(service.importCatalogue('recipe', recipes, true, false, actor), /нет права изменять состав/);
+      assert.deepEqual(await service.importCatalogue('recipe', recipes, true, true, actor), { count: 1 });
+      const item = await db.recipeItem.findFirstOrThrow({ where: { ingredientId: ingredient.id } });
+      assert.equal(Number(item.amount), 90);
+      assert.deepEqual(await service.importCatalogue('recipe', recipes, true, true, actor), { count: 0 });
+
+      const goods = file(['Название;Цена;Ед. измерения', 'Вода QA;40;шт']);
+      const results = await Promise.all([
+        service.importCatalogue('goods', goods, true, true, actor),
+        service.importCatalogue('goods', goods, true, true, actor),
+      ]);
+      assert.deepEqual(results.map(({ count }) => count).sort(), [0, 1]);
+      const product = await db.dish.findFirstOrThrow({ where: { name: 'Вода QA' } });
+      const stock = await db.ingredient.findUniqueOrThrow({ where: { id: product.stockIngredientId } });
+      assert.equal(stock.kind, 'goods');
+      assert.equal(Number(stock.stock), 0);
+
+      const failed = file(['Название;Цена', 'Не сохранится QA;25', 'Ошибка записи QA;30']);
+      await assert.rejects(service.importCatalogue('goods', failed, true, true, actor), /Ошибка записи QA/);
+      assert.equal(await db.dish.count(), 2);
+      assert.equal(await db.ingredient.count(), 2);
+    });
+  } finally {
+    await db.$transaction([
+      db.dish.deleteMany({ where: { cafeId: cafe.id } }),
+      db.category.deleteMany({ where: { cafeId: cafe.id } }),
+      db.ingredient.deleteMany({ where: { cafeId: cafe.id } }),
+      db.cafe.delete({ where: { id: cafe.id } }),
+    ]);
+    await db.$disconnect();
+  }
+});
+
 test('PostgreSQL: food-cost basket updates menu list prices atomically with tenant and editor guards', { skip: !url }, async () => {
   const db = new PrismaClient({ datasourceUrl: url });
   db.$use(tenantPrismaMiddleware);

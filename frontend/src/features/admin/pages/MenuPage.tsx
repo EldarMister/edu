@@ -12,7 +12,8 @@ import { ColumnButton } from '../components/ColumnControl';
 import { minDishUnitPrice, taxRateLabel, variantNamesLine } from '@/lib/format';
 import { resolveApiImage } from '@/lib/image';
 import { useT } from '@/lib/i18n';
-import { WorkspaceHeaderCount } from './WorkspaceHeader';
+import { WorkspaceHeaderActions, WorkspaceHeaderCount } from './WorkspaceHeader';
+import { printReport } from '@/lib/report-output';
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { apiError } from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -24,7 +25,7 @@ import {
   usePreparationStationUpdates,
   type PreparationStation,
 } from '@/features/kitchen/stations';
-import { IconEdit, IconTrash, IconPlus } from '../components/icons';
+import { IconEdit, IconPrinter, IconTrash, IconPlus } from '../components/icons';
 import type { MenuView } from './warehouse/navigation';
 import { MenuStockCatalogue } from './warehouse/MenuStockCatalogue';
 import { DishComposition } from './warehouse/CatalogueDetails';
@@ -37,6 +38,7 @@ import { visibleWarehouseColumns, WarehouseColumnSettings } from './warehouse/Wa
 import { filterMenuGoods, MenuAdditionalFilters, MenuGoodsActions, menuGoodsColumns, menuListFilters,
   useMenuGoodsColumns, type MenuGoodsColumn } from './MenuGoodsControls';
 import { MenuEntryPage } from './MenuEntryPage';
+import { MenuImportButton } from './MenuImportButton';
 import { MenuCategoryFields, useMenuCategoryDraft } from './MenuCategoryFields';
 import { menuCategoryOptions } from '@/lib/menu-category-scope';
 import { InlineMenuPrice } from './InlineMenuPrice';
@@ -60,7 +62,7 @@ import {
 
 const MenuFoodCostPage = lazy(() => import('./MenuFoodCostPage').then(({ MenuFoodCostPage }) => ({ default: MenuFoodCostPage })));
 
-export function MenuPage({ view }: { view: Exclude<MenuView, 'categories' | 'ingredientCategories'> }) {
+export function MenuPage({ view }: { view: Exclude<MenuView, 'categories'> }) {
   const { editor, openEditor } = useEditorRoute();
   const { can } = usePermissions();
   if (view === 'foodCost') {
@@ -169,10 +171,13 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
       void queryClient.invalidateQueries({ queryKey: ['admin', 'menu-entry', dish.id] });
       push({ message: 'Цена сохранена', at: new Date().toISOString() });
     }} /> : display;
-  const goodsCell = (dish: AdminGood, column: MenuGoodsColumn) => {
+  const goodsCell = (dish: AdminGood, column: MenuGoodsColumn, interactive = true) => {
     switch (column) {
       case 'category': return categoryLabels.get(dish.categoryId) ?? dish.category.name;
-      case 'price': return priceCell(dish, `${dish.variants.length ? 'от ' : ''}${balanceMoney(dish.goodsPrice)}`);
+      case 'price': {
+        const label = `${dish.variants.length ? 'от ' : ''}${balanceMoney(dish.goodsPrice)}`;
+        return interactive ? priceCell(dish, label) : label;
+      }
       case 'station': return stationOptions.find((option) => option.value === dish.goodsStation)?.label ?? dish.goodsStation;
       case 'unit': return dish.goodsUnits.join(', ');
       case 'weighted': return dish.isWeighted ? 'Да' : 'Нет';
@@ -180,18 +185,32 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
       case 'tax': return taxCell(dish);
     }
   };
-  const recipeCell = (dish: AdminDish, column: RecipeColumn) => {
+  const recipeCell = (dish: AdminDish, column: RecipeColumn, interactive = true) => {
     const costs = costsByDish.get(dish.id);
     switch (column) {
       case 'category': return categoryLabels.get(dish.categoryId) ?? dish.category.name;
       case 'tax': return taxCell(dish);
       case 'output': return dishOutput(dish, costs);
-      case 'price': return priceCell(dish, dish.variants.length ? `от ${balanceMoney(minDishUnitPrice(dish))}` : balanceMoney(Number(dish.price)));
+      case 'price': {
+        const label = dish.variants.length ? `от ${balanceMoney(minDishUnitPrice(dish))}` : balanceMoney(Number(dish.price));
+        return interactive ? priceCell(dish, label) : label;
+      }
       case 'foodCost': return recipeMetric(costs, column, balanceMoney);
       case 'markupPercent':
       case 'foodCostPercent': return recipeMetric(costs, column, costPercent);
     }
   };
+  function printList() {
+    const headers = isGoods ? dataColumns.map((column) => menuGoodsColumns[column]) : recipeDataColumns.map((column) => recipeColumnLabels[column]);
+    const values = visibleRows.map((dish) => {
+      const cells = isGoods ? dataColumns.map((column) => goodsCell(dish as AdminGood, column, false))
+        : recipeDataColumns.map((column) => recipeCell(dish, column, false));
+      return [dish.name, ...cells.map((cell) => typeof cell === 'string' ? cell : '—')];
+    });
+    const printed = printReport(isGoods ? 'Товары' : 'Техкарты',
+      !isGoods && recipePages > 1 ? `Страница ${recipePage} из ${recipePages}` : '', ['Название', ...headers], values);
+    if (!printed) push({ message: 'Разрешите всплывающие окна для печати.', at: new Date().toISOString() });
+  }
   async function onDelete(dish: AdminDish) {
     if (remove.isPending || !confirm(`Удалить «${dish.name}» из меню?`)) return;
     const playEffect = captureDeletionEffect(`menu-entry-${dish.id}`);
@@ -245,14 +264,21 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
           options={stationOptions} />
         <MenuAdditionalFilters filters={filters} update={updateFilters} goods={isGoods} units={unitOptions}
           taxes={isGoods || displayTax ? taxFilters : []} />
-        {!editor && (
-          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+      </div>
+      {!editor && (
+        <WorkspaceHeaderActions>
+          <div className="catalogue-header-actions">
             {isGoods && <MenuGoodsActions filters={filters} columns={columns} saveColumns={saveColumns}
               ready={goodsQ.isSuccess} canExport={can('actions.exportReports')} />}
             {!isGoods && <ColumnButton onClick={() => setRecipeColumnsOpen(true)} />}
             {canExportRecipes && <RecipeExportButton kind="recipes" ids={rows.map(({ id }) => id)} pending={!dishesQ.isSuccess} />}
-            {!isGoods && editable && <button type="button" className="btn-ghost flex items-center gap-2 text-primary"
-              onClick={() => openEditor({ type: 'recipeTrash' })}><IconTrash aria-hidden="true" /> Корзина</button>}
+            {editable && <MenuImportButton kind={isGoods ? 'goods' : 'recipe'} />}
+            <button type="button" className="supply-header-action" title="Печать" onClick={printList}
+              disabled={!listQ.isSuccess || !visibleRows.length || showRecipeCosts && costQuery.isPending}>
+              <IconPrinter aria-hidden="true" /><span className="catalogue-action-label">Печать</span>
+            </button>
+            {!isGoods && editable && <button type="button" className="supply-header-action" title="Корзина"
+              onClick={() => openEditor({ type: 'recipeTrash' })}><IconTrash aria-hidden="true" /><span className="catalogue-action-label">Корзина</span></button>}
             {!isGoods && editable && (
               <MenuActions
                 ariaLabel="Другие действия"
@@ -260,12 +286,13 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
                 options={[{ value: 'set', label: 'Добавить сет' }]}
               />
             )}
-            {editable && <button type="button" className="btn-primary btn-md" onClick={() => openEditor({ type: 'entry' })}>
-              {t(isGoods ? 'Добавить товар' : 'Добавить блюдо')}
+            {editable && <button type="button" className="catalogue-add" aria-label={t(isGoods ? 'Добавить товар' : 'Добавить блюдо')}
+              onClick={() => openEditor({ type: 'entry' })}>
+              Добавить
             </button>}
           </div>
-        )}
-      </div>
+        </WorkspaceHeaderActions>
+      )}
       {!isGoods && recipeColumnsOpen && <WarehouseColumnSettings columns={recipeColumns} defaults={recipeDefaults}
         label={(column) => recipeColumnLabels[column]} onClose={() => setRecipeColumnsOpen(false)}
         onApply={(selected, reset) => {
@@ -588,16 +615,18 @@ export function MenuCategoriesPage() {
       <WorkspaceHeaderCount count={categoriesQ.isSuccess ? rows.length : undefined} />
       <div className="poster-toolbar">
         <WorkspaceSearch label="Поиск категорий меню" value={search} onChange={setSearch} />
-        {editable && (
-          <button
+      </div>
+      {editable && !editor && <WorkspaceHeaderActions>
+        <div className="catalogue-header-actions">
+          <button type="button"
             aria-label="Добавить категорию"
-            className="btn-primary btn-md ml-auto"
+            className="catalogue-add"
             onClick={() => openEditor({ type: 'category' })}
           >
             Добавить
           </button>
-        )}
-      </div>
+        </div>
+      </WorkspaceHeaderActions>}
       {categoriesQ.isPending ? (
         <WorkspacePending />
       ) : categoriesQ.isError ? (
