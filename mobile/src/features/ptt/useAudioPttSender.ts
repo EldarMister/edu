@@ -1,12 +1,21 @@
 import React from 'react';
 import { AppState } from 'react-native';
+import { requireOptionalNativeModule } from 'expo';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import { getSocket } from '@/services/socket';
 import { PTT_EVENTS, type PttChannel, type PttDeniedPayload } from './types';
 
 const SEGMENT_MS = 300;
+const PCM_INTERVAL_MS = 150;
 const MIME_TYPE = 'audio/mp4';
+const continuousCapture = requireOptionalNativeModule<{
+  start(token: number): Promise<boolean>;
+  take(token: number): string | null;
+  finish(token: number): string[] | string | null;
+  addListener?(event: 'onChunkReady' | 'onCaptureEnded', handler: (payload: { token: number }) => void): { remove(): void };
+}>('EduRadioCapture');
+let nextCaptureToken = Date.now();
 
 const RECORDING_OPTIONS: Audio.RecordingOptions = {
   isMeteringEnabled: true,
@@ -41,6 +50,7 @@ type Attempt = {
   requested: boolean;
   released: boolean;
   wake?: () => void;
+  finishCapture?: () => void;
 };
 
 function configureAudio(recording: boolean) {
@@ -53,10 +63,10 @@ function configureAudio(recording: boolean) {
   });
 }
 
-function waitForSegment(attempt: Attempt) {
+function waitForSegment(attempt: Attempt, interval = SEGMENT_MS) {
   return new Promise<void>((resolve) => {
     const done = () => { clearTimeout(timer); attempt.wake = undefined; resolve(); };
-    const timer = setTimeout(done, SEGMENT_MS);
+    const timer = setTimeout(done, interval);
     attempt.wake = done;
     if (attempt.released) done();
   });
@@ -70,6 +80,10 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
     const attempt = current.current;
     if (!attempt) return;
     attempt.released = true;
+    if (attempt.finishCapture) {
+      attempt.finishCapture();
+      if (current.current === attempt) current.current = null;
+    }
     attempt.wake?.();
     setTalking(false);
   }, []);
@@ -84,8 +98,14 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
     let audioConfigured = false;
     let sendFiles = Promise.resolve();
     const connected = () => socket.connected && socket.id === attempt.connection;
+    const releaseChannel = () => {
+      if (attempt.requested && connected()) socket.emit(PTT_EVENTS.STOP_TALK, { channel });
+      attempt.requested = false;
+    };
     try {
-      const permission = await Audio.requestPermissionsAsync();
+      const existing = await Audio.getPermissionsAsync();
+      // Opening Android's permission dialog interrupts the current press.
+      const permission = existing.granted ? existing : await Audio.requestPermissionsAsync();
       if (!permission.granted) {
         setDeniedReason('Разрешите доступ к микрофону');
         return false;
@@ -99,9 +119,59 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
         return false;
       }
       if (attempt.released || !connected()) return false;
+      let sequence = 0;
+      if (continuousCapture) {
+        const token = ++nextCaptureToken;
+        const send = (chunk: string | null) => {
+          if (chunk && connected()) {
+            socket.emit(PTT_EVENTS.CHUNK, { channel, seq: sequence++, mimeType: 'audio/wav', chunk });
+          }
+        };
+        const subscriptions: { remove(): void }[] = [];
+        const removeListeners = () => { subscriptions.splice(0).forEach(subscription => subscription.remove()); };
+        const finish = () => {
+          if (!attempt.finishCapture) return;
+          attempt.finishCapture = undefined;
+          try {
+            removeListeners();
+            const tail = continuousCapture.finish(token);
+            if (Array.isArray(tail)) tail.forEach(send);
+            else send(tail);
+          }
+          catch { setDeniedReason('Не удалось передать окончание фразы'); }
+          finally { releaseChannel(); }
+        };
+        attempt.finishCapture = finish;
+        if (continuousCapture.addListener) {
+          subscriptions.push(continuousCapture.addListener('onChunkReady', (event) => {
+            if (event.token === token && !attempt.released && connected()) send(continuousCapture.take(token));
+          }));
+          subscriptions.push(continuousCapture.addListener('onCaptureEnded', (event) => {
+            if (event.token !== token || current.current !== attempt) return;
+            setDeniedReason('Запись с микрофона прервалась');
+            stop();
+          }));
+        }
+        const opened = await continuousCapture.start(token).catch(() => false);
+        if (opened) {
+          try {
+            if (!attempt.released) setTalking(true);
+            while (!attempt.released && connected()) {
+              await waitForSegment(attempt, subscriptions.length ? 1000 : PCM_INTERVAL_MS);
+              if (!attempt.released && connected()) send(continuousCapture.take(token));
+            }
+          } finally {
+            finish();
+          }
+          return true;
+        }
+        removeListeners();
+        attempt.finishCapture = undefined;
+      }
+      // Older builds, Expo Go and devices without this input use the file recorder.
+      if (attempt.released || !connected()) return false;
       await configureAudio(true);
       audioConfigured = true;
-      let sequence = 0;
       while (!attempt.released && connected()) {
         const recording = new Audio.Recording();
         await recording.prepareToRecordAsync(RECORDING_OPTIONS);
@@ -132,13 +202,13 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
       if (!attempt.released) setDeniedReason('Не удалось начать или продолжить передачу');
       return false;
     } finally {
-      setTalking(false);
+      if (current.current === attempt) setTalking(false);
       if (audioConfigured) await configureAudio(false).catch(() => undefined);
       await sendFiles;
-      if (attempt.requested && connected()) socket.emit(PTT_EVENTS.STOP_TALK, { channel });
+      releaseChannel();
       if (current.current === attempt) current.current = null;
     }
-  }, [channel, enabled]);
+  }, [channel, enabled, stop]);
 
   React.useEffect(() => {
     if (!enabled) stop();

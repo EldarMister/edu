@@ -1,0 +1,13 @@
+apply plugin: 'com.android.library'
+
+group = 'kg.edupos.radio.playback'
+version = '1.0.0'
+
+apply from: new File(project(':expo-modules-core').projectDir, 'ExpoModulesCorePlugin.gradle')
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useDefaultAndroidSdkVersions()
+
+android {
+  namespace 'kg.edupos.radio.playback'
+}
