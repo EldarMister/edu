@@ -375,7 +375,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
     {goodsBindingPending ? <p className="text-sm text-text-secondary">Складская привязка появится после сохранения.</p>
       : <RecipeCostSummary preview={preview} showCosts={canCosts} showPriceMetrics={previewPrice != null && (!activeVariants.length || !!costVariant)}
         showMissing={isGoods || hasStockBinding || !!dish?.isSet || !canRecipe}
-        showError={isGoods || hasStockBinding || !!dish?.isSet || !canRecipe} compactMetrics={!isGoods} />}
+        showError={isGoods || hasStockBinding || !!dish?.isSet || !canRecipe} />}
   </div>;
   const outputDetails = <RecipeOutput preview={preview.data} pending={preview.pending} metadata={metadata}
     manualApplies={!hasVariantNorms} editable={canEdit && !busy && !costVariant}

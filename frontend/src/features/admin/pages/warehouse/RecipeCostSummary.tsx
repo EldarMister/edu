@@ -12,14 +12,12 @@ export function RecipeStockBasis({ stockItem }: { stockItem: NonNullable<RecipeP
   </p>;
 }
 
-export function RecipeCostSummary({ preview, showCosts, showPriceMetrics = true, showMissing = true, showError = true,
-  compactMetrics = false }: {
+export function RecipeCostSummary({ preview, showCosts, showPriceMetrics = true, showMissing = true, showError = true }: {
   preview: ReturnType<typeof useRecipePreview>;
   showCosts: boolean;
   showPriceMetrics?: boolean;
   showMissing?: boolean;
   showError?: boolean;
-  compactMetrics?: boolean;
 }) {
   const match = preview.data;
   const stockItem = match?.stockItem;
@@ -29,8 +27,6 @@ export function RecipeCostSummary({ preview, showCosts, showPriceMetrics = true,
     { key: 'markup', label: 'Наценка', value: match.markupPercent, format: taxRateLabel },
     { key: 'margin', label: 'Маржа', value: match.marginAmount, format: money },
   ].filter(({ value }) => value != null && Number.isFinite(value)) : [];
-  const primary = compactMetrics ? metrics.filter(({ key }) => key === 'food') : metrics;
-  const secondary = compactMetrics ? metrics.filter(({ key }) => key !== 'food') : [];
   if (!showCosts && !stockItem) return null;
   return <div className="space-y-2 text-sm">
     {showCosts && <dl className="flex flex-wrap gap-x-5 gap-y-2" aria-live="polite">
@@ -38,18 +34,10 @@ export function RecipeCostSummary({ preview, showCosts, showPriceMetrics = true,
         <dd className="font-medium tabular-nums">{match?.foodCost == null
           ? preview.pending ? 'Расчёт…' : match && !match.accountingConfigured ? 'Не настроена' : 'Не рассчитана'
           : money(match.foodCost)}</dd></div>
-      {primary.map(({ key, label, value, format }) => <div key={key}>
+      {metrics.map(({ key, label, value, format }) => <div key={key}>
         <dt className="text-text-muted">{label}</dt><dd className="font-medium tabular-nums">{format(value!)}</dd>
       </div>)}
     </dl>}
-    {showCosts && secondary.length > 0 && <details>
-      <summary className="w-fit cursor-pointer text-sm text-primary">Подробнее</summary>
-      <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
-        {secondary.map(({ key, label, value, format }) => <div key={key}>
-          <dt className="text-text-muted">{label}</dt><dd className="font-medium tabular-nums">{format(value!)}</dd>
-        </div>)}
-      </dl>
-    </details>}
     {stockItem && <RecipeStockBasis stockItem={stockItem} />}
     {showCosts && showMissing && !!missing?.length && <p className="text-text-secondary" role="status">
       Калькуляция неполная. Нет данных о себестоимости для {missing.join(', ')}.
