@@ -1,0 +1,6 @@
+{
+  "platforms": ["android"],
+  "android": {
+    "modules": ["kg.edupos.radio.capture.RadioCaptureModule"]
+  }
+}

@@ -18,7 +18,7 @@ import { onRadioInput, radioInputActive } from './radioAudioGate';
 
 export type PttPlayingSpeaker = { id: string; name?: string; role?: string };
 
-export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
+export function useAudioPttReceiver(channel: PttChannel, enabled: boolean, nativeWav = false) {
   const userId = useAuth((s) => s.user?.id);
   const workspace = useAuth((s) => s.workspace);
   const [legacySpeaker, setLegacySpeaker] = React.useState<PttPlayingSpeaker | null>(null);
@@ -73,6 +73,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
       }, Math.ceil(playback.remainingMs()));
     }
     function onLegacyAudio(payload: PttAudioPayload) {
+      if (nativeWav) return;
       // The Android service handles legacy whole-file messages while backgrounded.
       if (Platform.OS === 'android' && AppState.currentState !== 'active') return;
       if (!radioInputActive() && hears(payload.channel, payload.senderId)) legacy.enqueue(payload);
@@ -198,7 +199,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
       playback.stop();
       setLiveSpeaker(null);
     };
-  }, [channel, enabled, userId, workspace]);
+  }, [channel, enabled, nativeWav, userId, workspace]);
 
   const speaker = liveSpeaker ?? legacySpeaker;
   return { receiving: !!speaker, speaker };

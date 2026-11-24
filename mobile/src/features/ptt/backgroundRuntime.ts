@@ -28,13 +28,14 @@ import {
 } from './types';
 import { setPttBackgroundRuntimeActive } from './backgroundFlag';
 import { PttPlaybackQueue } from './audioPlayback';
-import { PTT_CODEC_CAPABILITIES } from './opusAudio';
+import { radioJoinOptions } from './androidWavRadio';
 
 const DEFAULT_CHANNEL: PttChannel = 'general';
 const JOIN_INTERVAL_MS = 15_000;
 const RECONNECT_INTERVAL_MS = 4_000;
 
 let currentChannel: PttChannel = DEFAULT_CHANNEL;
+let nativeWavActive = false;
 let subscribedToAudio = false;
 let subscribedToRealtime = false;
 const playback = new PttPlaybackQueue();
@@ -69,11 +70,11 @@ async function readStoredChannel(): Promise<PttChannel> {
 function emitJoin(channel: PttChannel) {
   const sock = getSocket();
   if (!sock.connected) sock.connect();
-  sock.emit(PTT_EVENTS.JOIN, { channel, codecs: PTT_CODEC_CAPABILITIES, sequenced: true });
+  sock.emit(PTT_EVENTS.JOIN, radioJoinOptions(channel));
 }
 
 function onBackgroundAudio(payload: PttAudioPayload) {
-  if (Platform.OS !== 'android' || AppState.currentState === 'active') return;
+  if (nativeWavActive || Platform.OS !== 'android' || AppState.currentState === 'active') return;
   const userId = useAuth.getState().user?.id;
   if (!userId || !useAuth.getState().accessToken) return;
   if ((payload.channel !== currentChannel && payload.channel !== 'general') || payload.senderId === userId) return;
@@ -278,6 +279,11 @@ export function updatePttBackgroundChannel(channel: PttChannel) {
   }
 }
 
+export function setPttBackgroundWavMode(enabled: boolean) {
+  nativeWavActive = enabled;
+  if (enabled) playback.clear();
+}
+
 export async function startPttBackgroundRuntime(channel: PttChannel) {
   currentChannel = channel;
   if (Platform.OS !== 'android') return;
@@ -320,6 +326,7 @@ export async function startPttBackgroundRuntime(channel: PttChannel) {
 
 export async function stopPttBackgroundRuntime() {
   runtimeEpoch += 1;
+  nativeWavActive = false;
   voicedOrders.clear();
   setPttBackgroundRuntimeActive(false);
   removeBackgroundAudioSubscription();

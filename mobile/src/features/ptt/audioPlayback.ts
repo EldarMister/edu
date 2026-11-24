@@ -43,7 +43,7 @@ export class PttPlaybackQueue {
       while (epoch === this.epoch && this.queue.length) {
         const next = this.queue.shift()!;
         this.onSpeaker?.(next);
-        const extension = next.mimeType.includes('webm') ? 'webm' : next.mimeType.includes('mpeg') ? 'mp3' : 'm4a';
+        const extension = next.mimeType.includes('wav') ? 'wav' : next.mimeType.includes('webm') ? 'webm' : next.mimeType.includes('mpeg') ? 'mp3' : 'm4a';
         const path = `${FileSystem.cacheDirectory}ptt-${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`;
         try {
           await FileSystem.writeAsStringAsync(path, next.chunk, { encoding: FileSystem.EncodingType.Base64 });

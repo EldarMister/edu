@@ -209,6 +209,7 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean, workspa
   }, [channel, enabled, complete, fail]);
 
   React.useEffect(() => {
+    if (!enabled) return;
     const socket = getSocket();
     function onDenied(payload: PttDeniedPayload) {
       const attempt = attemptRef.current;

@@ -76,6 +76,8 @@ export const PTT_EVENTS = {
   CHANNEL_BUSY: 'ptt_channel_busy',
   CHANNEL_FREE: 'ptt_channel_free',
   AUDIO_MESSAGE: 'ptt_audio_message',
+  NATIVE_CHUNK: 'ptt_chunk',
+  NATIVE_STREAM: 'ptt_audio_stream',
   AUDIO_PACKET: 'ptt_audio_packet',
   AUDIO_BATCH: 'ptt_audio_batch',
   AUDIO_SYNC: 'ptt_audio_sync',

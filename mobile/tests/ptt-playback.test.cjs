@@ -331,7 +331,7 @@ test('logout cancels a background runtime waiting for native audio initializatio
     '@/lib/sound': { configureAudioPlayback: () => configuring.promise },
     '@/utils/format': { displayOrderNumber: String },
     './types': { PTT_CHANNELS: [{ key: 'general' }], PTT_EVENTS: { AUDIO_MESSAGE: 'audio' } },
-    './opusAudio': { PTT_CODEC_CAPABILITIES: ['opus-hq'] },
+    './androidWavRadio': { radioJoinOptions: channel => ({ channel, codecs: ['opus-hq'], sequenced: true }) },
     './backgroundFlag': { setPttBackgroundRuntimeActive: value => flags.push(value) },
     './audioPlayback': { PttPlaybackQueue: class { clear() {} } },
   });

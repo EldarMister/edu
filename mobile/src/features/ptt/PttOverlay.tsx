@@ -23,6 +23,7 @@ import { getSocket, useConnectionStatus } from '@/services/socket';
 import { useAuth } from '@/store/auth';
 import { workspaceRole } from '@/lib/workspaces';
 import {
+  setPttBackgroundWavMode,
   startPttBackgroundRuntime,
   stopPttBackgroundRuntime,
   updatePttBackgroundChannel,
@@ -30,7 +31,9 @@ import {
 import { useRadioVisibility } from './radioVisibility';
 import { useAudioPttReceiver } from './useAudioPttReceiver';
 import { useAudioPttSender } from './useAudioPttSender';
-import { PTT_CODEC_CAPABILITIES } from './opusAudio';
+import { useAndroidWavReceiver } from './useAndroidWavReceiver';
+import { useAndroidWavSender } from './useAndroidWavSender';
+import { radioJoinOptions } from './androidWavRadio';
 import {
   PTT_CHANNEL_STORAGE_KEY,
   PTT_CHANNELS,
@@ -318,8 +321,15 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
   const [channel, setChannel] = React.useState<PttChannel>(() => defaultChannelForRole(role));
   const [onlineCount, setOnlineCount] = React.useState(0);
   const [busySpeaker, setBusySpeaker] = React.useState<{ id: string; name?: string } | null>(null);
-  const sender = useAudioPttSender(channel, !!user?.id, workspace);
-  const { speaker: playingSpeaker } = useAudioPttReceiver(channel, !!user?.id);
+  const [joined, setJoined] = React.useState<{ channel: PttChannel; wav: boolean } | null>(null);
+  const ready = !!user?.id && connected && joined?.channel === channel;
+  const nativeWav = ready && joined.wav;
+  const opusSender = useAudioPttSender(channel, ready && !nativeWav, workspace);
+  const wavSender = useAndroidWavSender(channel, nativeWav);
+  const sender = nativeWav ? wavSender : opusSender;
+  const opusReceiver = useAudioPttReceiver(channel, !!user?.id, nativeWav);
+  const wavReceiver = useAndroidWavReceiver(channel, nativeWav);
+  const playingSpeaker = wavReceiver.speaker ?? opusReceiver.speaker;
   const stopRadio = sender.stop;
   const closeRadio = React.useCallback(() => {
     stopRadio();
@@ -361,24 +371,30 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
 
   const joinSeqRef = React.useRef(0);
   const joinChannel = React.useCallback(() => {
+    if (!user?.id) return;
     const sock = getSocket();
     // Сервер аутентифицирует сокет асинхронно (JWT + БД), поэтому join сразу
     // после connect может отвергнуться — ретраим с паузой несколько раз.
     // seq отменяет устаревшие ретраи при смене канала/переподключении.
     const seq = ++joinSeqRef.current;
+    setJoined(null);
     const attempt = (retriesLeft: number) => {
       if (joinSeqRef.current !== seq) return;
-      sock.timeout(5000).emit(PTT_EVENTS.JOIN, { channel, codecs: PTT_CODEC_CAPABILITIES, sequenced: true }, (error: Error | null, ack: { ok?: boolean; onlineCount?: number } | undefined) => {
+      const options = radioJoinOptions(channel);
+      sock.timeout(5000).emit(PTT_EVENTS.JOIN, options, (error: Error | null, ack: { ok?: boolean; onlineCount?: number; nativeWav?: boolean } | undefined) => {
         if (joinSeqRef.current !== seq) return;
         if (!error && ack?.ok) {
           if (typeof ack.onlineCount === 'number') setOnlineCount(ack.onlineCount);
+          const wav = options.nativeWav && ack.nativeWav === true;
+          setJoined({ channel, wav });
+          setPttBackgroundWavMode(wav);
           return;
         }
         if (retriesLeft > 0) setTimeout(() => attempt(retriesLeft - 1), 1000);
       });
     };
     attempt(5);
-  }, [channel]);
+  }, [channel, user?.id]);
 
   // Последний выбранный канал переживает перезапуск приложения.
   React.useEffect(() => {
@@ -431,6 +447,7 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
       if (payload.channel === channel || payload.channel === 'general') setBusySpeaker(null);
     };
     const onDisconnect = () => {
+      setJoined(null);
       setBusySpeaker(null);
       setOnlineCount(0);
     };
@@ -474,7 +491,7 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
         ? 'Вы говорите'
         : state === 'speakingOther'
           ? `Говорит: ${speakerName}`
-          : sender.preparing ? 'Подготовка микрофона…' : 'Готово к разговору';
+          : !ready ? 'Подключение к каналу…' : sender.preparing ? 'Подготовка микрофона…' : 'Готово к разговору';
 
   const statusHint =
     state === 'error'
@@ -517,7 +534,7 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
       >
         <PushToTalkCircle
           state={state}
-          disabled={state === 'error' || receivingFromOther}
+          disabled={!ready || state === 'error' || receivingFromOther}
           onPressStart={() => void sender.start()}
           onPressStop={sender.stop}
         />
