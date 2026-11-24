@@ -367,6 +367,7 @@ export class OrdersService {
             businessDate,
             tableId: table.id,
             waiterId,
+            payrollOpenedById: waiterId,
             waiterShiftId: activeShift?.id ?? null,
             source: delivery ? 'delivery' : 'pos',
             deliveryCustomerName: delivery?.customerName || undefined,
@@ -731,6 +732,7 @@ export class OrdersService {
         },
         data: {
           waiterId: actor.id,
+          payrollOpenedById: actor.id,
           waiterShiftId: activeShift?.id ?? null,
         },
       });
@@ -2383,6 +2385,7 @@ export class OrdersService {
       }
       const newOrder = await tx.order.create({ data: {
         cafeId: source.cafeId, tableId: source.tableId, waiterId: source.waiterId, waiterShiftId: source.waiterShiftId,
+        payrollOpenedById: source.payrollOpenedById,
         splitFromOrderId: source.splitFromOrderId ?? source.id,
         businessDate: source.businessDate, orderNumber: await this.nextOrderNumber(tx, source.businessDate),
         status: source.status, source: 'pos', comment: source.comment,
@@ -2574,6 +2577,7 @@ export class OrdersService {
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       });
       await recordOrderTaxes(tx, orderId, latest.cafeId, taxItems, closedAt, roundedPayable);
+      await this.snapshotPayrollCategories(tx, orderId, latest.items);
       await this.updateTableAfterClosingCheck(tx, latest);
       const updated = await tx.order.update({
         where: { id: orderId },
@@ -2616,6 +2620,24 @@ export class OrdersService {
     });
 
     return updated;
+  }
+
+  private async snapshotPayrollCategories(
+    tx: Prisma.TransactionClient, orderId: string, items: { dishId: string | null }[],
+  ) {
+    const dishIds = [...new Set(items.flatMap(({ dishId }) => dishId ? [dishId] : []))];
+    if (!dishIds.length) return;
+    const dishes = await tx.dish.findMany({ where: { id: { in: dishIds } }, select: { id: true, categoryId: true } });
+    const groups = new Map<string, string[]>();
+    for (const { id, categoryId } of dishes) {
+      if (!categoryId) continue;
+      const group = groups.get(categoryId) ?? [];
+      group.push(id);
+      groups.set(categoryId, group);
+    }
+    for (const [categoryId, ids] of groups) {
+      await tx.orderItem.updateMany({ where: { orderId, dishId: { in: ids } }, data: { payrollCategoryId: categoryId } });
+    }
   }
 
   /** Ручная корректировка статуса заказа администратором/владельцем. */
@@ -3413,6 +3435,18 @@ export class OrdersService {
       }
       const shift = await this.shifts.shiftForTerminalOrder(waiterId, db);
       const ids = orders.map(({ id }) => id);
+      const uncaptured = new Map<string, string[]>();
+      for (const order of orders) {
+        if (order.payrollOpenedById) continue;
+        const previousOwner = order.waiterId ?? waiterId;
+        const list = uncaptured.get(previousOwner) ?? [];
+        list.push(order.id);
+        uncaptured.set(previousOwner, list);
+      }
+      for (const [opener, orderIds] of uncaptured) {
+        await db.order.updateMany({ where: { id: { in: orderIds }, payrollOpenedById: null },
+          data: { payrollOpenedById: opener } });
+      }
       await db.order.updateMany({ where: { id: { in: ids } }, data: { waiterId, waiterShiftId: shift?.id ?? null } });
       const assigned = await db.order.findMany({ where: { id: { in: ids } }, include: orderInclude,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });

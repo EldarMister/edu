@@ -36,11 +36,14 @@ export class WarehouseDocumentsController {
   writeoffPreview(@Body() dto: WriteoffPreviewDto) { return this.documents.writeoffPreview(dto); }
 
   @Get(':id')
-  get(@Param('id') id: string, @Query('includeInventoryContext') includeInventoryContext?: string) {
+  get(@Param('id') id: string, @Query('includeInventoryContext') includeInventoryContext?: string,
+    @Query('inventoryIngredientId') inventoryIngredientId?: string) {
     if (includeInventoryContext !== undefined && includeInventoryContext !== 'true' && includeInventoryContext !== 'false') {
       throw new BadRequestException('Параметр includeInventoryContext принимает true или false');
     }
-    return this.documents.get(id, includeInventoryContext === 'true');
+    if (inventoryIngredientId && (typeof inventoryIngredientId !== 'string' || inventoryIngredientId.length > 160))
+      throw new BadRequestException('Некорректный идентификатор складской позиции');
+    return this.documents.get(id, includeInventoryContext === 'true', inventoryIngredientId);
   }
 
   @Post()

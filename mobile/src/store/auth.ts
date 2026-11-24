@@ -22,6 +22,7 @@ interface AuthState {
   hydrated: boolean;
   setHydrated: () => void;
   setSession: (data: { user: AuthUser; accessToken: string; refreshToken: string }) => void;
+  updateUser: (user: AuthUser) => void;
   setTokens: (accessToken: string, refreshToken: string) => void;
   logout: () => void;
 }
@@ -41,6 +42,7 @@ export const useAuth = create<AuthState>()(
           refreshToken: data.refreshToken,
         }),
       setTokens: (accessToken, refreshToken) => set({ accessToken, refreshToken }),
+      updateUser: (user) => set((state) => state.user?.id === user.id ? { user } : state),
       logout: () => {
         // Чистим кэш, чтобы при входе другого пользователя не «мигали» чужие данные.
         queryClient.clear();

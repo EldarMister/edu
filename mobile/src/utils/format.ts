@@ -3,11 +3,7 @@
 /** Сумма: «1 250 с» или «1 250,50 с». */
 export function money(value: string | number): string {
   const n = typeof value === 'string' ? Number(value) : value;
-  const rounded = Math.round(n * 100) / 100;
-  const intPart = Math.trunc(rounded);
-  const formatted = intPart.toLocaleString('ru-RU');
-  const frac = Math.round((rounded - intPart) * 100);
-  return frac > 0 ? `${formatted},${String(frac).padStart(2, '0')} с` : `${formatted} с`;
+  return n.toLocaleString('ru-RU', { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 }) + ' с';
 }
 
 /** Номер заказа без ведущих нулей: №000006 → №6. */

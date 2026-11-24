@@ -15,6 +15,10 @@
 .poster-balance-filter button:focus-visible, .poster-balance-filter-panel button:focus-visible { outline: 2px solid light-dark(#005bff, rgb(var(--edu-link))); outline-offset: 2px; }
 .poster-workspace .poster-balance-reset { min-height: 32px; padding: 0 4px; color: rgb(var(--edu-text-muted)); font-size: 13px; }
 .poster-workspace .poster-balance-surface .poster-balance-table > tbody > tr > td[data-column='limit'] { color: light-dark(#8793a2, rgb(var(--edu-text-muted))); }
+.poster-workspace .poster-balance-surface .poster-balance-table > thead > tr > th:is([data-column='lastPurchasePrice'], [data-column='retailValue']) {
+  white-space: normal;
+  line-height: 1.2;
+}
 .poster-workspace .poster-balance-supplies th, .poster-workspace .poster-balance-supplies td { overflow-wrap: anywhere; }
 .poster-workspace .poster-balance-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 16px; padding-top: 12px; font-size: 13px; }
 .poster-workspace .poster-balance-pagination button { min-height: 32px; color: rgb(var(--edu-link)); }

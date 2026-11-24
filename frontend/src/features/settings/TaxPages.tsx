@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from 'react';
+import { useId, useRef, useState, type FormEvent } from 'react';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
@@ -155,13 +155,17 @@ function TaxEditor({ tax, onClose }: { tax?: MenuTax; onClose: () => void }) {
   const [rate, setRate] = useState(tax ? String(tax.rate) : '');
   const initialType = tax?.type ?? 'turnover';
   const [type, setType] = useState<MenuTaxType>(initialType);
+  const submitting = useRef(false);
   const percent = parseRate(rate);
-  const close = () => { if (!save.isPending) onClose(); };
   const dirty = name !== (tax?.name ?? '') || rate !== (tax ? String(tax.rate) : '') || type !== initialType;
   const { markSaved } = useEditorDirty(dirty, saveTax);
+  const close = () => {
+    if (!submitting.current && (!dirty || window.confirm('Закрыть форму без сохранения?'))) onClose();
+  };
 
   async function saveTax() {
-    if (!name.trim() || percent === undefined || save.isPending) return false;
+    if (!name.trim() || percent === undefined || submitting.current) return false;
+    submitting.current = true;
     try {
       await save.mutateAsync({ id: tax?.id, name: name.trim(), rate: percent, type });
       markSaved();
@@ -169,6 +173,8 @@ function TaxEditor({ tax, onClose }: { tax?: MenuTax; onClose: () => void }) {
       return true;
     } catch {
       return false;
+    } finally {
+      submitting.current = false;
     }
   }
 

@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -20,6 +21,7 @@ import { PurchaseExportQuery, PurchaseListQuery, purchaseDateRange } from './pur
 import { purchaseExportColumns, writePurchaseWorkbook } from './purchases-xlsx';
 import { parseStockEffectiveAt } from './stock-effective-time';
 import { receiptMovementValue, replayHistoricalStock } from './historical-stock-replay';
+import { lockPurchaseRow, purchaseFundingAccounts, purchaseSettlement, purchaseSettlementHistory, purchaseSettlementTotals } from './purchase-settlement';
 
 const postingTransaction = { timeout: 30_000 };
 
@@ -118,35 +120,46 @@ export class PurchasesService {
     return rows.sort((a, b) => order * ((a.effectiveAt ?? a.stockPostedAt ?? a.date).getTime() - (b.effectiveAt ?? b.stockPostedAt ?? b.date).getTime() || a.number - b.number));
   }
 
-  async findAll(params: PurchaseListQuery) {
-    const where = await this.listWhere(this.prisma, params);
-    const purchases = await this.prisma.purchase.findMany({
-      where,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      include: {
-        _count: { select: { items: true } },
-        items: {
-          take: 3,
-          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-          select: { ingredient: { select: { name: true } } },
+  async findAll(params: PurchaseListQuery, includeFundingAccounts = false) {
+    return this.prisma.$transaction(async (tx) => {
+      const where = await this.listWhere(tx, params);
+      const purchases = await tx.purchase.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        include: {
+          _count: { select: { items: true } },
+          items: {
+            take: 3,
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+            select: { ingredient: { select: { name: true } } },
+          },
         },
-      },
-    });
-    return this.sortByOperationDate(purchases, params.dateSort).map(({ items, ...purchase }) => ({
-      ...this.serialize(purchase),
-      productNames: [...new Set(items.map((item) => item.ingredient.name))],
-    }));
+      });
+      const totals = await purchaseSettlementTotals(tx, purchases);
+      const rows = this.sortByOperationDate(purchases, params.dateSort).map(({ items, ...purchase }) => ({
+        ...this.serialize(purchase), ...purchaseSettlement(purchase, totals.get(purchase.id)),
+        productNames: [...new Set(items.map((item) => item.ingredient.name))],
+      })).filter((purchase) => !params.paymentStatus || purchase.paymentStatus === params.paymentStatus);
+      if (!includeFundingAccounts) return rows;
+      const accounts = await purchaseFundingAccounts(tx, purchases);
+      return rows.map((row) => ({ ...row, fundingAccounts: [...(accounts.get(row.id) ?? [])] }));
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
-  async exportXlsx(params: PurchaseExportQuery) {
+  async exportXlsx(params: PurchaseExportQuery, includeFundingAccounts = false) {
     const columns = purchaseExportColumns(params.columns);
+    if (columns.includes('fundingAccounts') && !includeFundingAccounts) throw new ForbiddenException('Нет доступа к финансовым счетам');
     const data = await this.prisma.$transaction(async (tx) => {
       const where = await this.listWhere(tx, params);
       const purchases = await tx.purchase.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], include: {
         items: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], include: { ingredient: { select: { name: true, category: true } } } },
       } });
       const warehouses = await tx.warehouse.findMany({ select: { id: true, name: true, isDefault: true } });
-      return { purchases, warehouses };
+      const totals = await purchaseSettlementTotals(tx, purchases);
+      const rows = purchases.map((purchase) => ({ ...purchase, ...purchaseSettlement(purchase, totals.get(purchase.id)) }))
+        .filter((purchase) => !params.paymentStatus || purchase.paymentStatus === params.paymentStatus);
+      const accounts = columns.includes('fundingAccounts') ? await purchaseFundingAccounts(tx, rows) : null;
+      return { purchases: rows.map((row) => ({ ...row, fundingAccounts: accounts?.get(row.id) })), warehouses };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     return writePurchaseWorkbook(this.sortByOperationDate(data.purchases, params.dateSort), new Map(data.warehouses.map(({ id, name }) => [id, name])),
       data.warehouses.find(({ isDefault }) => isDefault)?.name ?? 'Основной склад', columns);
@@ -169,7 +182,7 @@ export class PurchasesService {
     return { count: completed.length, suppliers: suppliers.size, sum };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, includeSettlement = false) {
     return this.prisma.$transaction(async (tx) => {
     const purchase = await tx.purchase.findUnique({
       where: { id },
@@ -212,7 +225,10 @@ export class PurchasesService {
         actorName: movement.actorName, reason: movement.comment, before: snapshot.before, after: snapshot.after }] : [];
     }).sort((a, b) => +b.createdAt - +a.createdAt || b.id.localeCompare(a.id));
     const postedAt = purchase.stockPostedAt ?? eligibility.stockPostedAt;
-    return { ...this.serialize(purchase), canCorrectStock: eligibility.canCorrectStock, historicalStockCorrection: eligibility.historicalAt !== null,
+    const totals = await purchaseSettlementTotals(tx, [purchase]);
+    const settlementHistory = includeSettlement ? await purchaseSettlementHistory(tx, purchase) : undefined;
+    return { ...this.serialize(purchase), ...purchaseSettlement(purchase, totals.get(purchase.id)), ...settlementHistory,
+      canCorrectStock: eligibility.canCorrectStock, historicalStockCorrection: eligibility.historicalAt !== null,
       correctionBlockedReason: eligibility.correctionBlockedReason, stockPostedAt: postedAt, postedAt, returnableItems, corrections };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
@@ -376,8 +392,17 @@ export class PurchasesService {
     if (dto.discount !== undefined && !normalized) throw new BadRequestException('Для изменения скидки передайте позиции прихода');
     const discount = new Prisma.Decimal(dto.discount ?? purchase.discount).toDecimalPlaces(2);
     const items = normalized ? this.discountItems(normalized, discount) : undefined;
-    const supplier = dto.supplier !== undefined || dto.supplierId !== undefined
+    const changeSupplier = dto.supplierId ? dto.supplierId !== purchase.supplierId
+      : dto.supplier !== undefined && dto.supplier.trim() !== purchase.supplier;
+    const supplier = changeSupplier
       ? await resolveWarehouseSupplier(tx, { ...dto, required: true }) : undefined;
+    // Keep settlements attributed to the supplier who actually received them.
+    if (supplier && (purchase.supplierId ? supplier.supplierId !== purchase.supplierId : supplier.supplier !== purchase.supplier)) {
+      const settlements = await tx.financeEntry.aggregate({ where: { purchaseId: purchase.id }, _sum: { amount: true } });
+      if (!(purchase.settlementOpeningPaid ?? new Prisma.Decimal(0)).sub(settlements._sum.amount ?? 0).isZero()) {
+        throw new ConflictException('Перед изменением поставщика отмените связанные платежи');
+      }
+    }
     const plans = new Map<string, { ingredientId: string; warehouse: typeof previousWarehouse; quantity: Prisma.Decimal; value: Prisma.Decimal }>();
     const add = (line: { ingredientId: string; quantityBase: Prisma.Decimal; total: Prisma.Decimal }, warehouse: typeof previousWarehouse, sign: number) => {
       const key = `${warehouse?.id ?? 'default'}:${line.ingredientId}`;
@@ -489,10 +514,8 @@ export class PurchasesService {
     return this.findOne(id);
   }
 
-  private async lockPurchase(tx: Prisma.TransactionClient, id: string) {
-    const cafeId = getCafeId();
-    const tenant = cafeId ? Prisma.sql` AND cafe_id = ${cafeId}` : Prisma.empty;
-    await tx.$queryRaw`SELECT id FROM purchases WHERE id = ${id}${tenant} FOR UPDATE`;
+  private lockPurchase(tx: Prisma.TransactionClient, id: string) {
+    return lockPurchaseRow(tx, id);
   }
 
   private async completePurchase(tx: Prisma.TransactionClient, purchase: Prisma.PurchaseGetPayload<{ include: { items: true } }>, actor?: Pick<AuthUser, 'id' | 'name' | 'role'>) {
@@ -537,7 +560,7 @@ export class PurchasesService {
     }
     await tx.purchase.update({
       where: { id: purchase.id },
-      data: { status: PurchaseStatus.completed, totalAmount: total, warehouseId: warehouse?.id ?? null, stockPostedAt },
+      data: { status: PurchaseStatus.completed, totalAmount: total, warehouseId: warehouse?.id ?? null, stockPostedAt, settlementKnownAt: postedAt },
     });
   }
 

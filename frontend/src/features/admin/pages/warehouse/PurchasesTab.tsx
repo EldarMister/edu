@@ -13,6 +13,7 @@ import { DocumentField, DocumentFooter } from './WarehouseUi';
 import { DocumentProductPicker } from './DocumentProductPicker';
 import { focusDocumentInput } from './document-focus';
 import { StockOperationDateField } from './StockOperationDateField';
+import { PurchaseSettlementPanel } from './PurchaseSettlementPanel';
 import { inventoryLocalTime, inventoryTimeDisplay, inventoryTimingError, inventoryTimingFor, inventoryTimingValue } from './inventory-time';
 import './document-workspace.css';
 import './inventory-workspace.css';
@@ -49,6 +50,8 @@ export function PurchaseModal({
   onClose,
   onReturn,
   onOpenDocument,
+  onProcessPayment,
+  openPayment = false,
   edit = false,
 }: {
   id?: string;
@@ -57,13 +60,15 @@ export function PurchaseModal({
   onClose: () => void;
   onReturn?: (id: string, warehouseId: string) => void;
   onOpenDocument?: (id: string) => void;
+  onProcessPayment?: (id: string) => void;
+  openPayment?: boolean;
   edit?: boolean;
 }) {
   const query = usePurchase(id ?? null);
   const permissions = usePermissions();
   const [requestedCorrection, setCorrecting] = useState(edit);
   const correcting = requestedCorrection && query.data?.status === 'completed' &&
-    permissions.canAction('warehouseReceive') && permissions.canAction('warehouseCosts');
+    permissions.canEditSection('warehouse') && permissions.canAction('warehouseReceive') && permissions.canAction('warehouseCosts');
   return (
     <EditorPage
       open
@@ -92,6 +97,8 @@ export function PurchaseModal({
           onClose={onClose}
           onReturn={onReturn}
           onOpenDocument={onOpenDocument}
+          onProcessPayment={onProcessPayment}
+          openPayment={openPayment}
           correcting={correcting}
           onCorrecting={setCorrecting}
         />
@@ -116,6 +123,8 @@ function PurchaseForm({
   onClose,
   onReturn,
   onOpenDocument,
+  onProcessPayment,
+  openPayment,
   correcting,
   onCorrecting,
 }: {
@@ -125,13 +134,16 @@ function PurchaseForm({
   onClose: () => void;
   onReturn?: (id: string, warehouseId: string) => void;
   onOpenDocument?: (id: string) => void;
+  onProcessPayment?: (id: string) => void;
+  openPayment: boolean;
   correcting: boolean;
   onCorrecting: (value: boolean) => void;
 }) {
   const purchaseSnapshot = useRef(latestPurchase).current;
   const purchase = !correcting && latestPurchase?.status === 'completed' ? latestPurchase : purchaseSnapshot;
-  const { can } = usePermissions();
+  const { can, canEditSection } = usePermissions();
   const costs = can('actions.warehouseCosts');
+  const canReceive = canEditSection('warehouse') && can('actions.warehouseReceive') && costs;
   const [requestKey] = useState(() => crypto.randomUUID());
   const [location, setLocation] = useState(purchase?.warehouseId ?? warehouseId);
   const suppliers = useSuppliers();
@@ -165,7 +177,7 @@ function PurchaseForm({
   const mutations = usePurchaseMutations();
   const ingredients = useIngredients('', location);
   const byId = new Map((ingredients.data ?? []).map((item) => [item.id, item]));
-  const editable = can('actions.warehouseReceive') && costs && (!purchase || purchase.status === 'draft' || correcting);
+  const editable = canReceive && (!purchase || purchase.status === 'draft' || correcting);
   const stockEditable = editable && (purchase?.status !== 'completed' || purchase.canCorrectStock === true);
   const historicalCorrection = correcting && purchase?.historicalStockCorrection === true;
   const compositionEditable = stockEditable && !historicalCorrection;
@@ -241,7 +253,7 @@ function PurchaseForm({
       total: undefined,
     });
   }
-  async function save(complete: boolean) {
+  async function save(complete: boolean, processPayment = false) {
     if (busy || !editable || (stockEditable && !catalogReady) || !dateValid || !date || !timingReady) return;
     setError('');
     setValidationAttempt((attempt) => attempt + 1);
@@ -298,14 +310,15 @@ function PurchaseForm({
           };
         }),
       };
-      if (purchase) {
-        await mutations.update.mutateAsync({ id: purchase.id,
+      const saved = purchase
+        ? await mutations.update.mutateAsync({ id: purchase.id,
           ...(purchase.status === 'completed' && !stockEditable ? { date: body.date, supplier: body.supplier, supplierId: body.supplierId, note: body.note } : body),
-          expectedUpdatedAt: purchase.updatedAt, complete: purchase.status === 'completed' ? false : complete });
-      } else await mutations.create.mutateAsync({ ...body, complete, requestKey });
+          expectedUpdatedAt: purchase.updatedAt, complete: purchase.status === 'completed' ? false : complete })
+        : await mutations.create.mutateAsync({ ...body, complete, requestKey });
       markSaved();
       push({ type: 'success', at: new Date().toISOString(), message: correcting ? 'Исправления поставки сохранены' : complete ? 'Поставка проведена. Остатки обновлены.' : 'Черновик сохранён. Остатки не изменились.' });
-      onClose();
+      if (processPayment && onProcessPayment) onProcessPayment(saved.id);
+      else onClose();
     } catch (err) {
       setError(apiError(err));
     }
@@ -718,6 +731,7 @@ function PurchaseForm({
           </div>
         </details>
       )}
+      {purchase?.status === 'completed' && !correcting && <PurchaseSettlementPanel purchase={purchase} openPayment={openPayment} />}
       {purchase?.status === 'completed' && <section className="space-y-3 border-t border-border pt-4">
         <h3 className="font-medium">Возвраты по поставке</h3>
         {returns.isPending && <p className="text-sm text-text-muted">Загрузка возвратов…</p>}
@@ -752,6 +766,10 @@ function PurchaseForm({
             >
               {correcting ? 'Сохранить исправление' : 'Сохранить'}
             </button>
+            {!correcting && onProcessPayment && total > 0 && canEditSection('finance') && canEditSection('warehouse') &&
+              <button type="button" className="btn-secondary btn-md"
+                disabled={busy || (stockEditable && !catalogReady) || !dateValid || !date || !timingReady}
+                onClick={() => void save(true, true)}>Сохранить и перейти к оплате</button>}
             {correcting ? <button type="button" className="btn-secondary btn-md" disabled={busy} onClick={() => { markSaved(); onCorrecting(false); }}>Отменить изменения</button> : <button
               type="button"
               className="btn-secondary btn-md"
@@ -770,8 +788,8 @@ function PurchaseForm({
                   ? 'Черновик'
                   : 'Поставка проведена'}
             </span>
-            {purchase?.status === 'completed' && can('actions.warehouseReceive') && costs && <button type="button" className="btn-primary btn-md" onClick={() => onCorrecting(true)}>{purchase.canCorrectStock ? 'Исправить' : 'Исправить реквизиты'}</button>}
-            {purchase?.status === 'completed' && can('actions.warehouseReceive') && costs && onReturn && (
+            {purchase?.status === 'completed' && canReceive && <button type="button" className="btn-primary btn-md" onClick={() => onCorrecting(true)}>{purchase.canCorrectStock ? 'Исправить' : 'Исправить реквизиты'}</button>}
+            {purchase?.status === 'completed' && canReceive && onReturn && (
               <button
                 type="button"
                 className="btn-secondary btn-md"

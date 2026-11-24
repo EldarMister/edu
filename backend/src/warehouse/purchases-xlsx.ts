@@ -2,26 +2,35 @@ import { BadRequestException } from '@nestjs/common';
 import { Prisma, PurchaseStatus } from '@prisma/client';
 import * as XLSX from 'xlsx';
 import { normalizeUnit, unitLabel } from './units';
+import type { PurchasePaymentStatus } from './purchase-settlement';
 
 const columns = {
   number: { label: '№', width: 17 },
   date: { label: 'Дата', width: 22 },
   supplier: { label: 'Поставщик', width: 30 },
   warehouse: { label: 'Склад', width: 25 },
+  fundingAccounts: { label: 'Счёт', width: 28 },
   products: { label: 'Товары', width: 55 },
   note: { label: 'Комментарий', width: 40 },
   status: { label: 'Статус', width: 16 },
   totalAmount: { label: 'Сумма', width: 18 },
+  paymentStatus: { label: 'Оплата', width: 23 },
+  paidAmount: { label: 'Оплачено', width: 18 },
+  debtAmount: { label: 'Задолженность', width: 18 },
 };
 type Column = keyof typeof columns;
+const legacyColumns: Column[] = ['number', 'date', 'supplier', 'warehouse', 'products', 'note', 'status', 'totalAmount'];
 type ExportPurchase = Prisma.PurchaseGetPayload<{
   include: { items: { include: { ingredient: { select: { name: true; category: true } } } } };
-}>;
+}> & { paymentStatus: PurchasePaymentStatus | null; paidAmount: number | null; debtAmount: number | null; fundingAccounts?: Set<string> };
 const statuses: Record<PurchaseStatus, string> = { draft: 'Черновик', completed: 'Проведена', cancelled: 'Отменена' };
+const paymentStatuses: Record<PurchasePaymentStatus, string> = {
+  untracked: 'Требует сверки', unpaid: 'Не оплачена', partly_paid: 'Частично оплачена', paid: 'Оплачена', overpaid: 'Переплата',
+};
 const excelDate = (date: Date) => (date.getTime() + 6 * 60 * 60 * 1000) / 86400000 + 25569;
 
 export function purchaseExportColumns(selection?: string): Column[] {
-  const requested = selection === undefined ? Object.keys(columns) : selection.split(',').map((value) => value.trim());
+  const requested = selection === undefined ? legacyColumns : selection.split(',').map((value) => value.trim());
   if (!requested.length || requested.some((key) => !Object.prototype.hasOwnProperty.call(columns, key)) || new Set(requested).size !== requested.length) {
     throw new BadRequestException('Укажите допустимые столбцы поставок без повторов');
   }
@@ -38,14 +47,16 @@ export function writePurchaseWorkbook(purchases: ExportPurchase[], warehouseName
     const number = `ЗКП-${String(purchase.number).padStart(6, '0')}`;
     const warehouse = purchase.warehouseId ? warehouseNames.get(purchase.warehouseId) ?? 'Склад недоступен' : defaultWarehouseName;
     const date = excelDate(purchase.effectiveAt ?? purchase.stockPostedAt ?? purchase.date);
-    const row = { number, date, supplier: purchase.supplier, warehouse,
+    const row = { number, date, supplier: purchase.supplier, warehouse, fundingAccounts: [...(purchase.fundingAccounts ?? [])].join(', '),
       products: [...new Set(purchase.items.map(({ ingredient }) => ingredient.name))].join(', '),
-      note: purchase.note ?? '', status: statuses[purchase.status], totalAmount: Number(purchase.totalAmount) };
+      note: purchase.note ?? '', status: statuses[purchase.status], totalAmount: Number(purchase.totalAmount),
+      paymentStatus: purchase.paymentStatus ? paymentStatuses[purchase.paymentStatus] : '',
+      paidAmount: purchase.paidAmount, debtAmount: purchase.debtAmount };
     XLSX.utils.sheet_add_aoa(sheet, [selection.map((key) => row[key])], { origin: { r: index + 1, c: 0 } });
     selection.forEach((key, c) => {
       const cell = sheet[XLSX.utils.encode_cell({ r: index + 1, c })];
       if (key === 'date') cell.z = 'dd.mm.yyyy hh:mm';
-      if (key === 'totalAmount') cell.z = '#,##0.00 "с"';
+      if (cell && ['totalAmount', 'paidAmount', 'debtAmount'].includes(key)) cell.z = '#,##0.00 "с"';
     });
     for (const item of purchase.items) {
       let unit: string;

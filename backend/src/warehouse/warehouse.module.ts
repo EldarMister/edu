@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
 import { IngredientsController } from './ingredients.controller';
 import { IngredientsService } from './ingredients.service';
-import { RecipesController } from './recipes.controller';
+import { RecipePreviewController, RecipesController } from './recipes.controller';
 import { RecipesService } from './recipes.service';
 import { PurchasesController } from './purchases.controller';
 import { PurchasesService } from './purchases.service';
+import { PurchaseSettlementService } from './purchase-settlement';
 import { MovementsController } from './movements.controller';
 import { MovementsService } from './movements.service';
 import { IngredientStockService } from './ingredient-stock.service';
@@ -28,6 +29,7 @@ import { MenuModifiersController, MenuModifiersService } from './menu-modifiers'
   controllers: [
     IngredientsController,
     RecipesController,
+    RecipePreviewController,
     PurchasesController,
     MovementsController,
     WarehouseOverviewController,
@@ -41,6 +43,7 @@ import { MenuModifiersController, MenuModifiersService } from './menu-modifiers'
     IngredientsService,
     RecipesService,
     PurchasesService,
+    PurchaseSettlementService,
     MovementsService,
     WarehouseOverviewService,
     WarehouseLocationsService,

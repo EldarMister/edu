@@ -1,6 +1,7 @@
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Modal } from '@/components/Modal';
+import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { api, apiError } from '@/lib/api';
 import { clientId } from '@/lib/id';
 import { cashShiftKey, financeKey, type FinanceCategory } from './api';
@@ -42,6 +43,10 @@ export function CashOperationDialog({ shiftId, operation, cashier = false, onClo
   const [note, setNote] = useState(operation?.note ?? '');
   const initialTime = operation ? localTime(operation.occurredAt) : '';
   const [dateTime, setDateTime] = useState(initialTime);
+  const submitted = useRef(false);
+  const dirty = kind !== (operation?.kind ?? 'expense') || amount !== (operation ? String(Math.abs(operation.amount)) : '')
+    || categoryId !== (operation?.categoryId ?? '') || note !== (operation?.note ?? '') || dateTime !== initialTime;
+  const { markSaved } = useEditorDirty(dirty);
   const base = cashier ? '/cash-shifts' : '/admin/cash-shifts';
   const categories = useQuery({
     queryKey: [...cashShiftKey, 'operation-categories', base],
@@ -60,18 +65,27 @@ export function CashOperationDialog({ shiftId, operation, cashier = false, onClo
     },
     onSuccess: async () => {
       await Promise.all([cache.invalidateQueries({ queryKey: cashShiftKey }), cache.invalidateQueries({ queryKey: financeKey })]);
+      markSaved();
       onClose();
     },
+    onSettled: () => { submitted.current = false; },
   });
   const label = operation ? 'Сохранить' : cashier ? 'Создать' : 'Добавить';
   const disabled = parsed == null || parsed <= 0 || save.isPending;
-  const close = () => { if (!save.isPending) onClose(); };
+  const close = () => {
+    if (!submitted.current && (!dirty || window.confirm('Закрыть форму без сохранения?'))) onClose();
+  };
   return <Modal open title={operation ? 'Редактирование транзакции' : 'Создать транзакцию'} onClose={close}
     footer={<div className="flex flex-wrap gap-2">
       <button type="submit" form={formId} className="btn-primary btn-md" disabled={disabled}>{label}</button>
       <button type="button" className="btn-secondary btn-md" onClick={close} disabled={save.isPending}>Отмена</button>
     </div>}>
-    <form id={formId} onSubmit={(event) => { event.preventDefault(); if (!disabled) save.mutate(); }}>
+    <form id={formId} onSubmit={(event) => {
+      event.preventDefault();
+      if (disabled || submitted.current) return;
+      submitted.current = true;
+      save.mutate();
+    }}>
       <fieldset disabled={save.isPending} className="grid gap-4">
         <fieldset className="grid grid-cols-3 rounded-md border border-border">
           <legend className="sr-only">Тип транзакции</legend>

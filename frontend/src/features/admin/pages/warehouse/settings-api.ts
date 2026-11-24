@@ -18,6 +18,16 @@ export function useSuppliers(enabled = true) {
     queryFn: async () => (await api.get<Supplier[]>('/admin/warehouse/suppliers')).data,
   });
 }
+
+export function useSupplierSettlements(enabled: boolean) {
+  return useQuery({
+    enabled,
+    queryKey: [...KEY, 'suppliers', 'settlements'],
+    queryFn: async () => (await api.get<{
+      supplierId: string; purchaseTotal: number; knownDebt: number; missingSettlementCount: number;
+    }[]>('/admin/warehouse/suppliers/settlements')).data,
+  });
+}
 export function useSupplierMutations() {
   const qc = useQueryClient();
   const invalidate = () => qc.invalidateQueries({ queryKey: KEY });

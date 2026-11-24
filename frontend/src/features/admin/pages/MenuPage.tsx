@@ -33,6 +33,8 @@ import { WarehouseMultiFilter, warehouseMultiFilterValues } from './warehouse/Wa
 import { filterMenuGoods, MenuAdditionalFilters, MenuGoodsActions, menuGoodsColumns, menuListFilters,
   useMenuGoodsColumns, type MenuGoodsColumn } from './MenuGoodsControls';
 import { MenuEntryPage } from './MenuEntryPage';
+import { MenuFoodCostPage } from './MenuFoodCostPage';
+import { costPercent, menuOutputLabel, useMenuCosts, type MenuCostRow } from './menu-cost-api';
 import { dishTaxInput, dishTaxValue, effectiveMenuTaxId, MenuTaxSelect } from '../../settings/MenuTaxSelect';
 import { useMenuTaxOptions } from '../../settings/taxes-api';
 import {
@@ -49,14 +51,26 @@ import {
 } from '../api';
 
 export function MenuPage({ view }: { view: Exclude<MenuView, 'categories' | 'ingredientCategories'> }) {
+  const { editor, openEditor } = useEditorRoute();
+  const { can } = usePermissions();
+  if (view === 'foodCost') {
+    if (!can('sections.warehouse') || !can('actions.warehouseCosts'))
+      return <p className="card p-8 text-center text-text-muted">Нет доступа к себестоимости.</p>;
+    if (!editor) return <MenuFoodCostPage onOpen={(row) => openEditor({ type: row.isSet ? 'set' : 'entry',
+      id: row.dishId, itemId: row.variantId ?? undefined, action: row.catalogKind === 'goods' ? 'goods' : 'recipe' })} />;
+    return <MenuDishList view={editor.action === 'goods' ? 'goods' : 'recipes'} />;
+  }
   if (view === 'ingredients' || view === 'preparations')
     return <MenuStockCatalogue key={view} view={view} />;
   return <MenuDishList key={view} view={view} />;
 }
-function MenuDishList({ view }: { view: MenuView }) {
+const recipePageSize = 24;
+
+function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
   const t = useT();
   const isGoods = view === 'goods';
-  const [filters, updateFilters] = usePageFilters(menuListFilters);
+  const [filters, setFilters] = usePageFilters({ ...menuListFilters, recipePage: '1' });
+  const updateFilters = (patch: Partial<typeof filters>) => setFilters({ recipePage: '1', ...patch });
   const { category: categoryId, search, availability, station: stationId, nameSort } = filters;
   const taxSort = filters.taxSort === 'asc' || filters.taxSort === 'desc' ? filters.taxSort : '';
   const [compositionId, setCompositionId] = useState<string | null>(null);
@@ -81,7 +95,8 @@ function MenuDishList({ view }: { view: MenuView }) {
   const push = useNotifications((state) => state.push);
   const { can } = usePermissions();
   const editable = can('actions.editMenu');
-  const filtered = Object.entries(filters).some(([key, value]) => key !== 'nameSort' && key !== 'taxSort' && value);
+  const showRecipeCosts = !isGoods && can('sections.warehouse') && can('actions.warehouseCosts');
+  const filtered = Object.entries(filters).some(([key, value]) => !['nameSort', 'taxSort', 'recipePage'].includes(key) && value);
   function clearFilters() {
     updateFilters({ ...menuListFilters, nameSort, taxSort });
   }
@@ -105,6 +120,17 @@ function MenuDishList({ view }: { view: MenuView }) {
     Налог {taxSort && <span aria-hidden>{taxSort === 'desc' ? '↓' : '↑'}</span>}
   </button>;
   const taxAriaSort = taxSort ? taxSort === 'asc' ? 'ascending' : 'descending' : undefined;
+  const recipePages = Math.max(1, Math.ceil(rows.length / recipePageSize));
+  const recipePage = Math.min(recipePages, Math.max(1, Number.parseInt(filters.recipePage, 10) || 1));
+  const visibleRows = isGoods ? rows : rows.slice((recipePage - 1) * recipePageSize, recipePage * recipePageSize);
+  const costQuery = useMenuCosts({ dishIds: visibleRows.map(({ id }) => id).join(','), limit: recipePageSize },
+    showRecipeCosts && !editor && visibleRows.length > 0);
+  const costsByDish = new Map<string, MenuCostRow[]>();
+  for (const row of costQuery.data?.rows ?? []) {
+    const entries = costsByDish.get(row.dishId) ?? [];
+    entries.push(row);
+    costsByDish.set(row.dishId, entries);
+  }
   const stationOptions = [...stations.map((station) => ({ value: station.id, label: station.name })), { value: 'none', label: 'Без цеха' }];
   const unitOptions = [...new Set(goodsQ.data?.flatMap((item) => item.goodsUnits))].sort((a, b) => a.localeCompare(b, 'ru'))
     .map((unit) => ({ value: unit, label: unit }));
@@ -150,6 +176,7 @@ function MenuDishList({ view }: { view: MenuView }) {
       kind={isGoods ? 'goods' : 'recipe'}
       categoryId={selectedCategories.length === 1 ? selectedCategories[0] : ''}
       initialTab={editor.action === 'recipe' ? 'recipe' : 'main'}
+      initialVariantId={editor.itemId}
       onClose={closeEditor}
     />;
   }
@@ -192,6 +219,8 @@ function MenuDishList({ view }: { view: MenuView }) {
           pending={categoriesQ.isFetching}
         />
       )}
+      {showRecipeCosts && costQuery.isError && <ListLoadError error={costQuery.error}
+        onRetry={() => void costQuery.refetch()} pending={costQuery.isFetching} />}
       {listQ.isPending ? (
         <WorkspacePending />
       ) : listQ.isError ? (
@@ -218,7 +247,12 @@ function MenuDishList({ view }: { view: MenuView }) {
                     <th className="px-4 py-3 font-normal">Категория</th>
                     {displayTax && <th scope="col" className="px-4 py-3 font-normal" aria-sort={taxAriaSort}>{taxHeader}</th>}
                     <th className="px-4 py-3 text-right font-normal">Выход</th>
+                    {showRecipeCosts && <th className="px-4 py-3 text-right font-normal">Себестоимость</th>}
                     <th className="px-4 py-3 text-right font-normal">Цена</th>
+                    {showRecipeCosts && <>
+                      <th className="px-4 py-3 text-right font-normal">Наценка</th>
+                      <th className="px-4 py-3 text-right font-normal">Фудкост</th>
+                    </>}
                   </>}
                 <th>
                   <span className="sr-only">Действия</span>
@@ -226,7 +260,7 @@ function MenuDishList({ view }: { view: MenuView }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map((dish) => (
+              {visibleRows.map((dish) => (
                 <Fragment key={dish.id}>
                 <tr id={`menu-entry-${dish.id}`} className="border-b border-border hover:bg-background/40" data-expanded={compositionId === dish.id ? 'true' : undefined}>
                   <td className="py-3 pr-4">
@@ -264,14 +298,21 @@ function MenuDishList({ view }: { view: MenuView }) {
                   </td>) : <>
                     <td className="px-4 py-3 text-text-secondary">{dish.category.name}</td>
                     {displayTax && <td className="px-4 py-3 text-text-secondary">{taxCell(dish)}</td>}
-                    <td className="whitespace-nowrap px-4 py-3 text-right text-text-secondary">{dishOutput(dish)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right text-text-secondary">{dishOutput(dish, costsByDish.get(dish.id))}</td>
+                    {showRecipeCosts && <td className="min-w-28 px-4 py-3 text-right tabular-nums">
+                      {recipeMetric(costsByDish.get(dish.id), 'foodCost', balanceMoney)}
+                    </td>}
                     <td className="whitespace-nowrap px-4 py-3 text-right">
                       {dish.variants.length ? `от ${balanceMoney(minDishUnitPrice(dish))}` : balanceMoney(Number(dish.price))}
                     </td>
+                    {showRecipeCosts && <>
+                      <td className="px-4 py-3 text-right tabular-nums">{recipeMetric(costsByDish.get(dish.id), 'markupPercent', costPercent)}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{recipeMetric(costsByDish.get(dish.id), 'foodCostPercent', costPercent)}</td>
+                    </>}
                   </>}
                   <td className="w-px px-3 py-3 text-right">
                     <div className="poster-row-actions">
-                      {!isGoods && !dish.isSet && can('sections.warehouse') && (
+                      {!isGoods && can('sections.warehouse') && (
                         <button
                           type="button"
                           className="text-xs text-primary hover:underline"
@@ -307,7 +348,7 @@ function MenuDishList({ view }: { view: MenuView }) {
                   </td>
                 </tr>
                 {compositionId === dish.id && (
-                  <tr className="poster-catalogue-detail-row"><td colSpan={displayTax ? 6 : 5}>
+                  <tr className="poster-catalogue-detail-row"><td colSpan={5 + Number(displayTax) + (showRecipeCosts ? 3 : 0)}>
                     <div id={`${compositionPanelId}-${dish.id}`} className="poster-catalogue-detail" aria-label={`Состав: ${dish.name}`}><DishComposition dish={dish} /></div>
                   </td></tr>
                 )}
@@ -315,6 +356,13 @@ function MenuDishList({ view }: { view: MenuView }) {
               ))}
             </tbody>
           </table>
+          {!isGoods && recipePages > 1 && <nav aria-label="Страницы техкарт" className="flex items-center justify-end gap-2 py-3 text-sm">
+            <button type="button" className="btn-secondary btn-md" aria-label="Предыдущая страница" disabled={recipePage <= 1}
+              onClick={() => updateFilters({ recipePage: String(recipePage - 1) })}>‹</button>
+            <span>Страница {recipePage} из {recipePages}</span>
+            <button type="button" className="btn-secondary btn-md" aria-label="Следующая страница" disabled={recipePage >= recipePages}
+              onClick={() => updateFilters({ recipePage: String(recipePage + 1) })}>›</button>
+          </nav>}
           {!rows.length && (
             <div className="space-y-3 py-12 text-center text-sm text-text-muted" role="status">
               <p>
@@ -344,13 +392,22 @@ function MenuDishList({ view }: { view: MenuView }) {
     </div>
   );
 }
-function dishOutput(dish: AdminDish) {
+function recipeMetric(rows: MenuCostRow[] | undefined, metric: 'foodCost' | 'markupPercent' | 'foodCostPercent',
+  format: (value: number) => string) {
+  if (!rows?.length) return '—';
+  const values = rows.flatMap((row) => row[metric] == null ? [] : [row[metric]]);
+  if (!values.length) return '—';
+  if (values.length !== rows.length) return 'По вариантам';
+  const min = Math.min(...values), max = Math.max(...values);
+  return min === max ? format(min) : `${format(min)} – ${format(max)}`;
+}
+function dishOutput(dish: AdminDish, costs?: MenuCostRow[]) {
   const metadata = (
     dish as AdminDish & { recipeMetadata?: { outputQuantity?: number; outputUnit?: string } | null }
   ).recipeMetadata;
   return metadata?.outputQuantity != null
     ? balanceQuantity(metadata.outputQuantity, metadata.outputUnit ? normalizeUnitLabel(metadata.outputUnit) : '')
-    : '—';
+    : costs?.length === 1 ? menuOutputLabel(costs[0].output) : '—';
 }
 function ListLoadError({
   error,

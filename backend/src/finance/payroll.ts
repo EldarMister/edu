@@ -1,7 +1,7 @@
-import { netOrderAmount } from '../orders/order-net';
 import { BadRequestException } from '@nestjs/common';
 import { OrderStatus, Prisma, Role, WaiterShiftStatus } from '@prisma/client';
 import { warehouseDateRange, warehouseDay } from '../warehouse/report-range';
+import { categoryCommissions, payrollOrderSelect, payrollSale, salesBetween, salesCommission, type CommissionKind, type PayrollSale } from './payroll-sales';
 
 type Db = Prisma.TransactionClient;
 const DAY = 86_400_000;
@@ -13,14 +13,14 @@ const staffLabels: Partial<Record<Role, string>> = {
 
 export type SalaryRates = { hourly: number; perShift: number; monthly: number; personalPercent: number; shiftPercent: number };
 
-export function salaryRates(rate?: Record<keyof SalaryRates, Prisma.Decimal>): SalaryRates {
+export function salaryRates(rate?: Record<keyof SalaryRates, Prisma.Decimal> | null): SalaryRates {
   return {
     hourly: Number(rate?.hourly ?? 0), perShift: Number(rate?.perShift ?? 0), monthly: Number(rate?.monthly ?? 0),
     personalPercent: Number(rate?.personalPercent ?? 0), shiftPercent: Number(rate?.shiftPercent ?? 0),
   };
 }
 
-type ClosedShift = { startedAt: Date; endedAt: Date | null };
+type ClosedShift = { id?: string; startedAt: Date; endedAt: Date | null };
 type TimeSpan = { start: number; end: number };
 type PayrollWindow = ReturnType<typeof payrollMonth>;
 
@@ -68,7 +68,7 @@ export function calculatePayroll(
   rates: SalaryRates, work: ReturnType<typeof payrollWorkTime>, monthDays: number,
   personalSales: Prisma.Decimal, shiftSales: Prisma.Decimal,
 ) {
-  return Object.values(payrollAmounts(rates, work, monthDays, personalSales, shiftSales))
+  return Object.values(roundPayrollAmounts(payrollAmounts(rates, work, monthDays, personalSales, shiftSales)))
     .reduce((sum, amount) => sum.add(amount), zero);
 }
 
@@ -76,30 +76,92 @@ function payrollAmounts(
   rates: SalaryRates, work: ReturnType<typeof payrollWorkTime>, monthDays: number,
   personalSales: Prisma.Decimal, shiftSales: Prisma.Decimal,
 ) {
-  let total = zero;
-  function roundedComponent(amount: Prisma.Decimal) {
-    const before = total.toDecimalPlaces(2);
-    total = total.add(amount);
-    return total.toDecimalPlaces(2).sub(before);
-  }
   return {
-    hourlyPay: roundedComponent(new Prisma.Decimal(rates.hourly).mul(work.milliseconds).div(HOUR)),
-    shiftPay: roundedComponent(new Prisma.Decimal(rates.perShift).mul(work.shifts)),
-    monthlyPay: roundedComponent(new Prisma.Decimal(rates.monthly).mul(work.days).div(monthDays)),
-    personalCommission: roundedComponent(personalSales.mul(rates.personalPercent).div(100)),
-    shiftCommission: roundedComponent(shiftSales.mul(rates.shiftPercent).div(100)),
+    hourlyPay: new Prisma.Decimal(rates.hourly).mul(work.milliseconds).div(HOUR),
+    shiftPay: new Prisma.Decimal(rates.perShift).mul(work.shifts),
+    monthlyPay: new Prisma.Decimal(rates.monthly).mul(work.days).div(monthDays),
+    personalCommission: personalSales.mul(rates.personalPercent).div(100),
+    shiftCommission: shiftSales.mul(rates.shiftPercent).div(100),
   };
 }
 
-export async function payrollReport(db: Db, cafeId: string, month: string, onlyUserId?: string, window = payrollMonth(month)) {
+type SalarySnapshot = Pick<Prisma.EmployeeSalaryRateGetPayload<object>,
+  'effectiveDay' | 'positionId' | 'positionName' | 'hourly' | 'perShift' | 'monthly' | 'personalPercent' | 'shiftPercent' | 'categoryRates'>;
+type PayrollAmounts = ReturnType<typeof payrollAmounts>;
+
+function roundPayrollAmounts(raw: PayrollAmounts) {
+  let total = zero;
+  const rounded = { ...raw };
+  for (const key of Object.keys(raw) as (keyof PayrollAmounts)[]) {
+    const previous = total.toDecimalPlaces(2);
+    total = total.add(raw[key]);
+    rounded[key] = total.toDecimalPlaces(2).sub(previous);
+  }
+  return rounded;
+}
+
+function calculatePayrollIntervals(
+  window: PayrollWindow, employeeRates: SalarySnapshot[], shifts: ClosedShift[], personal: PayrollSale[],
+  allSales: PayrollSale[], details: boolean,
+) {
+  const startDay = warehouseDay(new Date(window.start));
+  const atStart = employeeRates.filter((rate) => rate.effectiveDay <= startDay).at(-1);
+  const laterRates = employeeRates.filter((rate) => rate.effectiveDay > startDay);
+  const spans = [
+    { start: window.start, rate: atStart },
+    ...laterRates.map((rate) => ({ start: warehouseDateRange(rate.effectiveDay)?.gte?.getTime() ?? window.end, rate })),
+  ].filter(({ start }) => start < window.end);
+  const raw = { hourlyPay: zero, shiftPay: zero, monthlyPay: zero, personalCommission: zero, shiftCommission: zero };
+  let personalSales = zero;
+  let shiftSales = zero;
+  const rateIntervals = spans.map(({ start, rate }, index) => {
+    const end = spans[index + 1]?.start ?? window.end;
+    const rates = salaryRates(rate);
+    const work = payrollWorkTime(shifts, { ...window, start, end });
+    const categories = categoryCommissions(rate?.categoryRates);
+    const byCategory = new Map(categories.map((row) => [row.categoryId, row]));
+    const sales: {
+      orderId: string; number: string; closedAt: string; kind: CommissionKind; openerRecorded: boolean;
+      categoryId: string | null; categoryName?: string; base: number; percent: number; amount: number;
+    }[] = [];
+    const components = payrollAmounts(rates, work, window.days, zero, zero);
+    const apply = (entries: PayrollSale[], kind: CommissionKind) => {
+      for (const sale of entries) {
+        if (kind === 'personalPercent') personalSales = personalSales.add(sale.amount);
+        else shiftSales = shiftSales.add(sale.amount);
+        const key = kind === 'personalPercent' ? 'personalCommission' : 'shiftCommission';
+        for (const part of salesCommission(sale, kind, rates[kind], byCategory)) {
+          components[key] = components[key].add(part.amount);
+          if (details) sales.push({
+            orderId: sale.id, number: sale.number, closedAt: new Date(sale.at).toISOString(), kind, openerRecorded: sale.openerRecorded,
+            categoryId: part.categoryId, base: part.base.toNumber(), percent: part.percent, amount: part.amount.toNumber(),
+          });
+        }
+      }
+    };
+    apply(salesBetween(personal, start, end), 'personalPercent');
+    for (const span of work.periods) apply(salesBetween(allSales, span.start, span.end), 'shiftPercent');
+    for (const key of Object.keys(raw) as (keyof PayrollAmounts)[]) raw[key] = raw[key].add(components[key]);
+    return {
+      from: warehouseDay(new Date(start)), to: warehouseDay(new Date(end - 1)), effectiveDay: rate?.effectiveDay ?? null,
+      position: rate?.positionName ?? null, rates, categoryRates: categories,
+      hours: Math.round(work.milliseconds / HOUR * 100) / 100, shifts: work.shifts, days: work.days,
+      sales,
+    };
+  });
+  return { amounts: roundPayrollAmounts(raw), personalSales, shiftSales, rateIntervals };
+}
+
+export async function payrollReport(
+  db: Db, cafeId: string, month: string, onlyUserId?: string, window = payrollMonth(month), details = false,
+) {
+  const paidInPeriod = { cafeId, status: OrderStatus.paid, closedAt: { gte: new Date(window.start), lt: new Date(window.end) } };
   const [employees, accruals, shifts, employeeRates] = await Promise.all([
     db.user.findMany({
       where: { cafeId, role: { not: Role.OWNER }, ...(onlyUserId ? { id: onlyUserId } : {}), OR: [
         { isActive: true }, { waiterShifts: { some: {
           cafeId, status: WaiterShiftStatus.closed, startedAt: { lt: new Date(window.end) }, endedAt: { gt: new Date(window.start) },
-        } } }, { orders: { some: {
-          cafeId, status: OrderStatus.paid, closedAt: { gte: new Date(window.start), lt: new Date(window.end) },
-        } } },
+        } } }, { orders: { some: paidInPeriod } }, { openedPayrollOrders: { some: paidInPeriod } },
       ] },
       select: { id: true, name: true, role: true, isActive: true, position: { select: { id: true, name: true } } },
       orderBy: { name: 'asc' },
@@ -112,44 +174,41 @@ export async function payrollReport(db: Db, cafeId: string, month: string, onlyU
     db.waiterShift.findMany({
       where: { cafeId, status: WaiterShiftStatus.closed,
         startedAt: { lt: new Date(window.end) }, endedAt: { gt: new Date(window.start) }, ...(onlyUserId ? { waiterId: onlyUserId } : {}) },
-      select: { waiterId: true, startedAt: true, endedAt: true },
+      select: { id: true, waiterId: true, startedAt: true, endedAt: true },
     }),
     db.employeeSalaryRate.findMany({
-      where: { cafeId, effectiveMonth: { lte: month }, ...(onlyUserId ? { userId: onlyUserId } : {}) },
-      orderBy: { effectiveMonth: 'desc' }, distinct: ['userId'],
+      where: { cafeId, effectiveDay: { lte: warehouseDay(new Date(window.end - 1)) }, ...(onlyUserId ? { userId: onlyUserId } : {}) },
+      orderBy: { effectiveDay: 'asc' },
     }),
   ]);
-  const ratesByEmployee = new Map(employeeRates.map((rate) => [rate.userId, rate]));
+  const ratesByEmployee = new Map<string, SalarySnapshot[]>();
+  for (const rate of employeeRates) {
+    const list = ratesByEmployee.get(rate.userId) ?? [];
+    list.push(rate);
+    ratesByEmployee.set(rate.userId, list);
+  }
   const employeeIds = employees.map(({ id }) => id);
   const hasClosedShifts = shifts.length > 0;
-  const paidByEmployee = new Map<string, Prisma.Decimal>();
-  const paidOrders: { at: number; cumul: Prisma.Decimal }[] = [];
+  const paidByEmployee = new Map<string, PayrollSale[]>();
+  const paidOrders: PayrollSale[] = [];
   if (employeeIds.length) {
     const orders = await db.order.findMany({
-      where: { cafeId, status: OrderStatus.paid, closedAt: { gte: new Date(window.start), lt: new Date(window.end) },
-        ...(hasClosedShifts ? {} : { waiterId: { in: employeeIds } }) },
-      select: { closedAt: true, waiterId: true, finalAmount: true, refundedAmount: true },
-      orderBy: { closedAt: 'asc' },
+      where: { ...paidInPeriod, ...(hasClosedShifts ? {} : { OR: [
+        { payrollOpenedById: { in: employeeIds } }, { payrollOpenedById: null, waiterId: { in: employeeIds } },
+      ] }) },
+      select: payrollOrderSelect,
+      orderBy: [{ closedAt: 'asc' }, { id: 'asc' }],
     });
-    let cumul = zero;
     for (const order of orders) {
-      if (order.waiterId) paidByEmployee.set(order.waiterId, (paidByEmployee.get(order.waiterId) ?? zero).add(netOrderAmount(order)));
-      if (hasClosedShifts && order.closedAt) {
-        cumul = cumul.add(netOrderAmount(order));
-        paidOrders.push({ at: order.closedAt.getTime(), cumul });
+      if (!order.closedAt) continue;
+      const sale = payrollSale(order);
+      if (sale.openerId) {
+        const personal = paidByEmployee.get(sale.openerId) ?? [];
+        personal.push(sale);
+        paidByEmployee.set(sale.openerId, personal);
       }
+      if (hasClosedShifts) paidOrders.push(sale);
     }
-  }
-
-  function priorSales(time: number) {
-    let left = 0;
-    let right = paidOrders.length;
-    while (left < right) {
-      const mid = Math.floor((left + right) / 2);
-      if (paidOrders[mid].at < time) left = mid + 1;
-      else right = mid;
-    }
-    return paidOrders[left - 1]?.cumul ?? zero;
   }
 
   const byEmployee = new Map<string, ClosedShift[]>();
@@ -173,12 +232,14 @@ export async function payrollReport(db: Db, cafeId: string, month: string, onlyU
     return { ...record, amount: Number(record.amount), paidAmount: Number(paid) };
   });
   const staff = employees.map((employee) => {
-    const rate = ratesByEmployee.get(employee.id);
+    const employeeRates = ratesByEmployee.get(employee.id) ?? [];
+    const rate = employeeRates.at(-1);
     const rates = salaryRates(rate);
-    const work = payrollWorkTime(byEmployee.get(employee.id) ?? [], window);
-    const personalSales = paidByEmployee.get(employee.id) ?? zero;
-    const shiftSales = work.periods.reduce((total, { start, end }) => total.add(priorSales(end).sub(priorSales(start))), zero);
-    const amounts = payrollAmounts(rates, work, window.days, personalSales, shiftSales);
+    const shifts = byEmployee.get(employee.id) ?? [];
+    const work = payrollWorkTime(shifts, window);
+    const { amounts, personalSales, shiftSales, rateIntervals } = calculatePayrollIntervals(
+      window, employeeRates, shifts, paidByEmployee.get(employee.id) ?? [], paidOrders, details,
+    );
     const estimate = Object.values(amounts).reduce((total, amount) => total.add(amount), zero);
     const booked = totals.get(employee.id) ?? emptyTotals();
     const tracked = true;
@@ -188,7 +249,8 @@ export async function payrollReport(db: Db, cafeId: string, month: string, onlyU
       timeTrackingAvailable: tracked,
       hours: tracked ? Math.round(work.milliseconds / HOUR * 100) / 100 : null,
       shifts: tracked ? work.shifts : null, days: tracked ? work.days : null,
-      rateMonth: rate?.effectiveMonth ?? null, rates,
+      rateMonth: rate?.effectiveDay.slice(0, 7) ?? null, rates, rateIntervals,
+      workShifts: details ? shifts.map(({ id, startedAt, endedAt }) => ({ id, startedAt, endedAt })) : [],
       hourlyPay: Number(amounts.hourlyPay), shiftPay: Number(amounts.shiftPay), monthlyPay: Number(amounts.monthlyPay),
       personalCommission: Number(amounts.personalCommission), shiftCommission: Number(amounts.shiftCommission),
       personalSales: Number(personalSales), shiftSales: Number(shiftSales), estimate: Number(estimate),
@@ -205,11 +267,21 @@ export async function payrollReport(db: Db, cafeId: string, month: string, onlyU
     staff.push({
       userId: record.userId, name: record.employeeName, positionId: null, position: '',
       timeTrackingAvailable: false,
-      hours: null, shifts: null, days: null, rateMonth: null, rates: salaryRates(), personalSales: 0, shiftSales: 0,
+      hours: null, shifts: null, days: null, rateMonth: null, rates: salaryRates(), rateIntervals: [], workShifts: [],
+      personalSales: 0, shiftSales: 0,
       hourlyPay: 0, shiftPay: 0, monthlyPay: 0, personalCommission: 0, shiftCommission: 0,
       estimate: 0, available: 0, baseAccrued: Number(booked.baseAccrued), supplementalAccrued: Number(booked.supplementalAccrued),
       accrued: Number(booked.accrued), paid: Number(booked.paid), due: Number(booked.accrued.sub(booked.paid)),
     });
+  }
+  if (details) {
+    const sales = staff.flatMap((row) => row.rateIntervals.flatMap((interval) => interval.sales));
+    const ids = [...new Set(sales.flatMap(({ categoryId }) => categoryId ? [categoryId] : []))];
+    if (ids.length) {
+      const categories = await db.category.findMany({ where: { cafeId, id: { in: ids } }, select: { id: true, name: true } });
+      const names = new Map(categories.map(({ id, name }) => [id, name]));
+      for (const sale of sales) if (sale.categoryId) sale.categoryName = names.get(sale.categoryId) ?? 'Архивная категория';
+    }
   }
   return { staff: staff.sort((a, b) => a.name.localeCompare(b.name, 'ru')), records };
 }
@@ -234,13 +306,13 @@ const totalsKeys = ['hourlyPay', 'shiftPay', 'monthlyPay', 'personalCommission',
   'personalSales', 'shiftSales', 'estimate', 'available', 'baseAccrued', 'supplementalAccrued', 'accrued', 'paid', 'due'] as const;
 const activityKeys = ['hours', 'shifts', 'days'] as const;
 
-export async function payrollPeriodReport(db: Db, cafeId: string, from: string, to: string) {
+export async function payrollPeriodReport(db: Db, cafeId: string, from: string, to: string, userId?: string, details = false) {
   const periods = payrollPeriods(from, to);
   const staff = new Map<string, Awaited<ReturnType<typeof payrollReport>>['staff'][number]>();
   const ratesByEmployee = new Map<string, { month: string; rates: SalaryRates }[]>();
   const records: Awaited<ReturnType<typeof payrollReport>>['records'] = [];
   for (const { month, window } of periods) {
-    const report = await payrollReport(db, cafeId, month, undefined, window);
+    const report = await payrollReport(db, cafeId, month, userId, window, details);
     records.push(...report.records);
     for (const row of report.staff) {
       const ratesByMonth = ratesByEmployee.get(row.userId) ?? [];
@@ -253,6 +325,8 @@ export async function payrollPeriodReport(db: Db, cafeId: string, from: string, 
         for (const key of activityKeys) {
           if (previous[key] !== null || row[key] !== null) row[key] = Number(((previous[key] ?? 0) + (row[key] ?? 0)).toFixed(2));
         }
+        row.rateIntervals = [...previous.rateIntervals, ...row.rateIntervals];
+        row.workShifts = [...new Map([...previous.workShifts, ...row.workShifts].map((shift) => [shift.id, shift])).values()];
       }
       staff.set(row.userId, row);
     }

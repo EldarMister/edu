@@ -2,11 +2,14 @@ import React from 'react';
 import { View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { useQuery } from '@tanstack/react-query';
 import { Loading } from '@/components/ui';
+import { WorkShiftGate } from '@/components/WorkShiftControls';
 import { colors } from '@/theme';
 import { useAuth } from '@/store/auth';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { registerForPushNotifications } from '@/services/push';
+import { fetchMe } from '@/services/api/auth';
 import { PttOverlay } from '@/features/ptt/PttOverlay';
 import { LoginScreen } from '@/screens/auth/LoginScreen';
 import { WaiterNavigator } from './WaiterNavigator';
@@ -19,12 +22,19 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 /** Подключает глобальную realtime-синхронизацию в авторизованной зоне. */
 function AuthedArea({ children }: { children: React.ReactNode }) {
   useRealtimeSync();
+  const userId = useAuth((state) => state.user?.id);
+  const updateUser = useAuth((state) => state.updateUser);
+  const identity = useQuery({ queryKey: ['auth', 'me', userId], queryFn: fetchMe, refetchInterval: 30_000,
+    enabled: !!userId });
+  React.useEffect(() => {
+    if (identity.data) updateUser(identity.data);
+  }, [identity.data, updateUser]);
   React.useEffect(() => {
     void registerForPushNotifications();
   }, []);
   return (
     <View style={{ flex: 1 }}>
-      {children}
+      <WorkShiftGate>{children}</WorkShiftGate>
       <PttOverlay />
     </View>
   );

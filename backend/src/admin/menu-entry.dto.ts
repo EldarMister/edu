@@ -16,6 +16,9 @@ import { RecipeItemInputDto, RecipeMetadataDto } from '../warehouse/recipes.dto'
 import { MenuModifiersDto } from '../warehouse/menu-modifiers';
 
 export class MenuRecipeDto {
+  @IsOptional() @IsString() @MaxLength(160)
+  producedStockIngredientId?: string | null;
+
   @IsOptional()
   @ValidateNested()
   @Type(() => RecipeMetadataDto)

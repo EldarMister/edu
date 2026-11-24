@@ -9,7 +9,7 @@ import { CreateIngredientDto, UpdateIngredientDto } from './dto';
 import { assertWarehousePermission } from './warehouse-permissions';
 import { IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { Type } from 'class-transformer';
-import { BalanceExportQuery } from './balance-xlsx';
+import { BalanceExportQuery, BalanceListQuery } from './balance-xlsx';
 
 class RenameIngredientCategoryDto {
   @IsString() @IsNotEmpty() @MaxLength(120)
@@ -68,6 +68,11 @@ export class IngredientsController {
     response.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     response.setHeader('Content-Disposition', 'attachment; filename="warehouse-balances.xlsx"');
     response.send(workbook);
+  }
+
+  @Get('balances')
+  balances(@Query() query: BalanceListQuery) {
+    return this.ingredients.balances(query);
   }
 
   @Get(':id')

@@ -1,12 +1,14 @@
 import { useId, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
+import { DatePicker } from '@/components/DatePicker';
 import { apiError } from '@/lib/api';
 import { ACTION_LABELS, ACTION_KEYS, getDefaultPermissionsByRole, READ_ONLY_SECTION_KEYS, resolvePermissions, SECTION_KEYS, SECTION_LABELS, SECTION_WRITE_ACTIONS } from '@/lib/permissions';
 import type { ActionKey, EmployeePermissions, SectionKey } from '@/types';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { DocumentField } from './warehouse/WarehouseUi';
-import { parseMoney } from './finance/finance-format';
+import { financeDay, parseMoney } from './finance/finance-format';
+import { useCategories } from '@/features/waiter/api';
 import { SECTION_ACTIONS } from './position-permissions';
 import { useStaffPositionMutations, type PositionRole, type PositionSalary, type StaffPosition } from './positions-api';
 
@@ -15,6 +17,10 @@ const payFields: { key: keyof PositionSalary; label: string; percent?: boolean }
   { key: 'personalPercent', label: 'Процент от личных продаж', percent: true },
   { key: 'shiftPercent', label: 'Процент от продаж за смену', percent: true },
 ];
+const commissions = [
+  { key: 'personalPercent', label: 'Личный процент' },
+  { key: 'shiftPercent', label: 'Процент за смену' },
+] as const;
 const terminalActions: ActionKey[] = [
   'acceptOrderPayments', 'printReceipts', 'requestReceiptPrints', 'createDeliveryOrders', 'financeCashShifts',
 ];
@@ -87,6 +93,16 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
   const [permissions, setPermissions] = useState(() => initialPermissions(position));
   const [rates, setRates] = useState(() => Object.fromEntries(payFields.map(({ key }) =>
     [key, position?.salary?.[key] ? String(position.salary[key]) : ''])) as Record<keyof PositionSalary, string>);
+  const tomorrow = financeDay(new Date(Date.now() + 86_400_000));
+  const scheduledDay = position?.salaryEffectiveDay && position.salaryEffectiveDay >= tomorrow ? position.salaryEffectiveDay : null;
+  const [effectiveDay, setEffectiveDay] = useState(scheduledDay ?? tomorrow);
+  const [effectiveDayValid, setEffectiveDayValid] = useState(true);
+  const initialCategoryRates = () => (position?.categoryRates ?? []).map((rate) => ({
+    categoryId: rate.categoryId, personalPercent: String(rate.personalPercent ?? ''), shiftPercent: String(rate.shiftPercent ?? ''),
+  }));
+  const [categoryRates, setCategoryRates] = useState(initialCategoryRates);
+  const categoryQuery = useCategories();
+  const categories = categoryQuery.data ?? [];
   const { save } = useStaffPositionMutations();
   const production = role === 'KITCHEN' || role === 'BAR';
   const canChangeWorkspaces = !position?.fixedWorkspace;
@@ -97,12 +113,20 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
     const value = rates[key].trim() ? parseMoney(rates[key]) : 0;
     return [key, value !== null && value >= 0 && (!percent || value <= 100) ? value : null] as const;
   });
-  const validSalary = parsed.every(([, value]) => value !== null);
+  const parsedCategories = categoryRates.map(({ categoryId, personalPercent, shiftPercent }) => ({
+    categoryId, personalPercent: personalPercent.trim() ? parseMoney(personalPercent) : undefined,
+    shiftPercent: shiftPercent.trim() ? parseMoney(shiftPercent) : undefined,
+  }));
+  const validSalary = parsed.every(([, value]) => value !== null) && parsedCategories.every((row) =>
+    (row.personalPercent !== undefined || row.shiftPercent !== undefined) && commissions.every(({ key }) =>
+      row[key] === undefined || (row[key] !== null && row[key] >= 0 && row[key] <= 100)));
+  const changesSalary = payFields.some(({ key }) => rates[key] !== (position?.salary?.[key] ? String(position.salary[key]) : ''))
+    || JSON.stringify(categoryRates) !== JSON.stringify(initialCategoryRates()) || effectiveDay !== (scheduledDay ?? tomorrow);
   const dirty = name !== (position?.name ?? '') || role !== (position?.role ?? 'ADMIN')
     || JSON.stringify(permissions) !== JSON.stringify(initialPermissions(position))
-    || payFields.some(({ key }) => rates[key] !== (position?.salary?.[key] ? String(position.salary[key]) : ''));
+    || changesSalary;
   const { markSaved } = useEditorDirty(dirty);
-  const valid = !!name.trim() && !!hasAccess && validSalary;
+  const valid = !!name.trim() && !!hasAccess && validSalary && (!changesSalary || (effectiveDayValid && effectiveDay >= tomorrow));
   const tabs = editorTabs.filter(({ key }) => key === 'general'
     || (key === 'admin' && adminEnabled)
     || (key === 'terminal' && terminalEnabled));
@@ -148,7 +172,11 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!valid || save.isPending) return;
-    save.mutate({ id: position?.id, name: name.trim(), role, permissions, salary: Object.fromEntries(parsed) as PositionSalary },
+    save.mutate({ id: position?.id, name: name.trim(), role, permissions,
+      ...(changesSalary ? { salary: Object.fromEntries(parsed) as PositionSalary, salaryEffectiveDay: effectiveDay,
+        categoryRates: parsedCategories.map((row) => ({ categoryId: row.categoryId,
+          personalPercent: row.personalPercent ?? undefined, shiftPercent: row.shiftPercent ?? undefined })) } : {}),
+    },
       { onSuccess: () => { markSaved(); onClose(); } });
   }
   function tabPanel(key: EditorTab, children: ReactNode) {
@@ -220,7 +248,34 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
           <div className="grid gap-3 sm:grid-cols-2">{payFields.filter(({ percent }) => percent).map(({ key, label }) => <label key={key} className="grid gap-1 text-sm">{label}
             <input className="input min-w-0" inputMode="decimal" placeholder="0%" value={rates[key]} onChange={(event) => setRates({ ...rates, [key]: event.target.value })} />
           </label>)}</div>
-          <p className="text-xs text-text-muted">Ставки складываются. Изменения относятся ко всему текущему месяцу и будущим месяцам; прошлые месяцы сохраняются.</p>
+          {position?.salaryEffectiveDay && <p className="text-xs text-text-muted">
+            Показанные ставки действуют с {position.salaryEffectiveDay.split('-').reverse().join('.')}.
+          </p>}
+          <div className="space-y-2">
+            <h5 className="font-medium">Проценты по категориям</h5>
+            {categoryRates.map((row) => <div key={row.categoryId} className="grid items-end gap-2 rounded-lg border border-border p-3 sm:grid-cols-[minmax(0,1fr)_1fr_1fr_auto]">
+              <span className="self-center font-medium">{categories.find(({ id }) => id === row.categoryId)?.name ?? 'Архивная категория'}</span>
+              {commissions.map(({ key, label }) => <label key={key} className="grid gap-1 text-xs">{label}
+                <input className="input min-w-0" inputMode="decimal" placeholder="Общий" value={row[key]}
+                  onChange={(event) => setCategoryRates((current) => current.map((entry) =>
+                    entry.categoryId === row.categoryId ? { ...entry, [key]: event.target.value } : entry))} />
+              </label>)}
+              <button type="button" className="btn-secondary btn-md" onClick={() =>
+                setCategoryRates((current) => current.filter(({ categoryId }) => categoryId !== row.categoryId))}>Убрать</button>
+            </div>)}
+            <Select ariaLabel="Добавить категорию" placeholder="Добавить категорию" value="" disabled={!categoryQuery.isSuccess}
+              options={categories.filter(({ id }) => !categoryRates.some(({ categoryId }) => categoryId === id))
+                .map(({ id, name }) => ({ value: id, label: name }))}
+              onChange={(categoryId) => setCategoryRates((current) => [...current, { categoryId, personalPercent: '', shiftPercent: '' }])} />
+            {categoryQuery.isError && <p role="alert" className="text-xs text-danger">
+              Категории не загрузились. <button type="button" className="underline" onClick={() => void categoryQuery.refetch()}>Повторить</button>
+            </p>}
+            {categoryRates.length > 0 && <p className="text-xs text-text-muted">Пустое поле использует общий процент. Ноль исключает категорию из расчёта.</p>}
+          </div>
+          {(changesSalary || scheduledDay) && <DocumentField label="Начало действия ставок">
+            <DatePicker aria-label="Начало действия ставок" value={effectiveDay} min={tomorrow} onChange={setEffectiveDay}
+              onValidityChange={setEffectiveDayValid} className="input w-full" />
+          </DocumentField>}
         </div>
       </fieldset>)}
       {adminEnabled && tabPanel('admin', <fieldset disabled={save.isPending} className="min-w-0">

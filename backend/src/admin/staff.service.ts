@@ -44,6 +44,8 @@ const STAFF_SELECT = {
   id: true,
   name: true,
   phone: true,
+  login: true,
+  lastLoginAt: true,
   role: true,
   positionId: true,
   position: { select: staffPositionSelect },
@@ -154,6 +156,7 @@ export class StaffService {
             OR: [
               { name: { contains: params.search, mode: 'insensitive' } },
               { phone: { contains: params.search } },
+              { login: { contains: params.search, mode: 'insensitive' } },
             ],
           }
         : {}),
@@ -220,7 +223,7 @@ export class StaffService {
         data: { name: dto.name, phone, role, prepStation, passwordHash, positionId },
         select: STAFF_SELECT,
       });
-      if (actor.cafeId && role !== Role.OWNER) await syncEmployeeSalary(tx, actor.cafeId, [created.id]);
+      if (actor.cafeId && role !== Role.OWNER) await syncEmployeeSalary(tx, actor.cafeId, [created.id], warehouseDay(new Date()));
       return created;
     });
     await this.audit.log({
@@ -344,7 +347,7 @@ export class StaffService {
       const scope = actor.cafeId ? { cafeId: actor.cafeId } : {};
       const history = await Promise.all([
         tx.user.findFirst({ where: { id, OR: [
-          { orders: { some: {} } }, { waiterShifts: { some: {} } }, { payments: { some: {} } },
+          { orders: { some: {} } }, { openedPayrollOrders: { some: {} } }, { waiterShifts: { some: {} } }, { payments: { some: {} } },
           { kitchenEvents: { some: {} } }, { penalties: { some: {} } }, { assignedRewards: { some: {} } },
           { incidentsOwned: { some: {} } }, { incidentsMade: { some: {} } }, { auditLogs: { some: {} } },
           { receiptPrintRequests: { some: {} } }, { cashReports: { some: {} } },

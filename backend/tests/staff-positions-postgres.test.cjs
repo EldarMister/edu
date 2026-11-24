@@ -12,6 +12,7 @@ const { runWithTenant, tenantPrismaMiddleware } = require('../src/tenant/tenant-
 const { currentPayrollMonth, payrollPeriodReport } = require('../src/finance/payroll.ts');
 const { WaiterShiftsService } = require('../src/waiter-shifts/waiter-shifts.service.ts');
 const { CashShiftsService } = require('../src/cash-shifts/cash-shifts.module.ts');
+const { warehouseDay } = require('../src/warehouse/report-range.ts');
 
 const databaseUrl = process.env.ORDER_FEATURE_TEST_DATABASE_URL;
 if (databaseUrl && (!['localhost', '127.0.0.1'].includes(new URL(databaseUrl).hostname)
@@ -76,6 +77,23 @@ test('PostgreSQL: positions determine employee access, support safe reassignment
             if (action.startsWith('warehouse')) assert.equal(allowed, false, action);
           }
         }
+      });
+
+      await t.test('a rate can be scheduled ahead of an existing future rate without repricing past work', async () => {
+        const day = (offset) => warehouseDay(new Date(Date.now() + offset * 86_400_000));
+        const category = await db.category.create({ data: { id: 'legacy-' + randomUUID(), name: 'Салаты' } });
+        const firstRate = { hourly: 100, perShift: 0, monthly: 0, personalPercent: 5, shiftPercent: 0 };
+        const position = await positions.create(ownerActor, { name: 'График ставок', role: 'WAITER', salary: firstRate });
+        const employee = await staff.create(input(position.id), ownerActor);
+        const nextRate = { name: position.name, salary: { ...firstRate, hourly: 200 },
+          categoryRates: [{ categoryId: category.id, personalPercent: 0 }] };
+        await positions.update(ownerActor, position.id, { ...nextRate, salaryEffectiveDay: day(12) });
+        await positions.update(ownerActor, position.id, { ...nextRate, salaryEffectiveDay: day(4) });
+        const employeeRates = await db.employeeSalaryRate.findMany({ where: { userId: employee.id }, orderBy: { effectiveDay: 'asc' } });
+        assert.deepEqual(employeeRates.map((rate) => [rate.effectiveDay, +rate.hourly]),
+          [[day(0), 100], [day(4), 200], [day(12), 200]]);
+        assert.equal(employeeRates[1].categoryRates[0].personalPercent, 0);
+        await assert.rejects(positions.update(ownerActor, position.id, { ...nextRate, salaryEffectiveDay: day(0) }), { status: 400 });
       });
 
       await t.test('manager can choose custom positions within own access but cannot escalate', async () => {
@@ -164,7 +182,9 @@ test('PostgreSQL: positions determine employee access, support safe reassignment
         assert.equal(changed.role, 'KITCHEN');
         assert.equal(changed.positionId, cook.id);
         assert.equal(await db.staffPosition.findUnique({ where: { id: source.id } }), null);
-        assert.equal((await db.employeeSalaryRate.findFirst({ where: { userId: employee.id } })).positionId, cook.id);
+        const rates = await db.employeeSalaryRate.findMany({ where: { userId: employee.id }, orderBy: { effectiveDay: 'desc' } });
+        assert.equal(rates[0].positionId, cook.id);
+        assert.equal(rates.length, 2);
       });
 
       await t.test('legacy role-only clients always obtain a real position or an explicit error', async () => {
@@ -273,6 +293,7 @@ test('PostgreSQL: positions determine employee access, support safe reassignment
     await db.cashShift.deleteMany({ where: { cafeId: { in: [cafe.id, foreignCafe.id] } } });
     await db.settings.deleteMany({ where: { cafeId: { in: [cafe.id, foreignCafe.id] } } });
     await db.user.deleteMany({ where: { cafeId: { in: [cafe.id, foreignCafe.id] } } });
+    await db.category.deleteMany({ where: { cafeId: { in: [cafe.id, foreignCafe.id] } } });
     await db.cafe.deleteMany({ where: { id: { in: [cafe.id, foreignCafe.id] } } });
     await db.$disconnect();
   }

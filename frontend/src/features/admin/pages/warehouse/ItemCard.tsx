@@ -21,6 +21,7 @@ import {
 import { useSuppliers } from './settings-api';
 import { DocumentField, DocumentFooter } from './WarehouseUi';
 import { UNIT_OPTIONS, unitLabel, type UnitCode } from './units';
+import { IngredientUsageTable } from './CatalogueDetails';
 
 export function ItemCard({
   id,
@@ -354,11 +355,7 @@ function ItemForm({
                   : `${money(item.lastPurchasePrice)} / ${item.unit}`}
               </p>
             )}
-            {!!item.usedInDishes?.length && (
-              <p className="mt-3 text-sm text-text-secondary">
-                Используется в меню: {item.usedInDishes.map((dish) => dish.name).join(', ')}
-              </p>
-            )}
+            <div className="mt-5"><IngredientUsageTable item={item} /></div>
             <div className="poster-row-actions mt-3">
               {onHistory && can('actions.warehouseReports') && costs && (
                 <button type="button" onClick={() => onHistory(item.id)}>

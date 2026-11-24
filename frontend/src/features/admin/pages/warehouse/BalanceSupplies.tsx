@@ -4,6 +4,7 @@ import { api, apiError } from '@/lib/api';
 import { Spinner } from '@/components/Spinner';
 import type { UnitType } from './units';
 import { balanceMoney, balanceQuantity } from './balance-format';
+import { useEditorRoute } from './workspace-route';
 
 interface SupplyRow {
   purchaseId: string;
@@ -28,6 +29,7 @@ interface SuppliesPage {
 
 const supplyDate = (date: string) => new Date(date).toLocaleString('ru-RU', {
   day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  timeZone: 'Asia/Bishkek',
 });
 
 export function BalanceSupplies({
@@ -40,6 +42,11 @@ export function BalanceSupplies({
   unitType: UnitType;
 }) {
   const [page, setPage] = useState(1);
+  const { openEditor } = useEditorRoute();
+  const documentLink = (row: SupplyRow) => <button type="button" className="text-left text-primary"
+    onClick={() => openEditor({ type: 'source', action: 'purchase', id: row.purchaseId })}>
+    <time dateTime={row.date}>{supplyDate(row.date)}</time>{row.number > 0 && <span className="ml-2 text-xs">№ {row.number}</span>}
+  </button>;
   const query = useQuery({
     queryKey: ['admin', 'warehouse', 'ingredient-supplies', ingredientId, warehouseId, page],
     queryFn: async () =>
@@ -82,7 +89,7 @@ export function BalanceSupplies({
             {query.data.rows.map((row) => (
               <tr key={row.purchaseId}>
                 <td className="whitespace-nowrap">
-                  <time dateTime={row.date}>{supplyDate(row.date)}</time>
+                  {documentLink(row)}
                 </td>
                 <td>{row.warehouseName}</td>
                 <td>{row.supplier || '—'}</td>
@@ -101,7 +108,7 @@ export function BalanceSupplies({
       </div>
       <div className="poster-balance-supply-mobile">
         {query.data.rows.map((row) => <article key={row.purchaseId}>
-          <time dateTime={row.date}>{supplyDate(row.date)}</time>
+          {documentLink(row)}
           <dl>
             <dt>Склад</dt><dd>{row.warehouseName}</dd>
             <dt>Поставщик</dt><dd>{row.supplier || '—'}</dd>

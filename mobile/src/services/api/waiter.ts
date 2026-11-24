@@ -52,27 +52,34 @@ export function useOrderDetails(id: string | null) {
 export function useCurrentShift(enabled = true) {
   return useQuery({
     queryKey: ['waiter', 'shift', 'current'],
-    queryFn: async () => (await api.get<WaiterShift | null>('/waiter/shifts/current')).data,
+    queryFn: async ({ signal }) => (await api.get<WaiterShift | null>('/staff/shifts/current', { signal })).data || null,
     enabled,
+    refetchInterval: 30_000,
   });
 }
 
 export function useStartShift() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => (await api.post<WaiterShift>('/waiter/shifts/start')).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['waiter', 'shift'] }),
+    mutationFn: async () => (await api.post<WaiterShift>('/staff/shifts/start')).data,
+    onSuccess: async (shift) => {
+      await qc.cancelQueries({ queryKey: ['waiter', 'shift', 'current'], exact: true });
+      qc.setQueryData(['waiter', 'shift', 'current'], shift);
+    },
+    onError: () => qc.invalidateQueries({ queryKey: ['waiter', 'shift'] }),
   });
 }
 
 export function useEndShift() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => (await api.post<WaiterShift>('/waiter/shifts/end')).data,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
+    mutationFn: async () => (await api.post<WaiterShift>('/staff/shifts/end')).data,
+    onSuccess: async () => {
+      await qc.cancelQueries({ queryKey: ['waiter', 'shift', 'current'], exact: true });
+      qc.setQueryData(['waiter', 'shift', 'current'], null);
       qc.invalidateQueries({ queryKey: ['orders'] });
     },
+    onError: () => qc.invalidateQueries({ queryKey: ['waiter', 'shift'] }),
   });
 }
 
@@ -206,13 +213,17 @@ export function usePay() {
     mutationFn: async (p: {
       orderId: string;
       method: PaymentMethod;
+      expectedAmount: number;
       cashAmount?: number;
       qrAmount?: number;
+      cardAmount?: number;
     }) => (await api.post<Order>('/payments', p)).data,
+    retry: networkRetry,
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
       qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
+      qc.invalidateQueries({ queryKey: ['cash-shifts'] });
     },
   });
 }

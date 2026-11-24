@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Button, Card, EmptyState, Loading, SegmentTabs } from '@/components/ui';
 import { OrderBadge } from '@/components/StatusBadge';
 import { AppHeader } from '@/components/AppHeader';
+import { EndWorkShiftControl, useWorkShiftRequired } from '@/components/WorkShiftControls';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { REJECT_REASONS } from '@/theme/status';
@@ -49,6 +50,7 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
   const [now, setNow] = useState(() => Date.now());
   const orders = useKitchenOrders(tab, station);
   const logout = useAuth((s) => s.logout);
+  const workShiftRequired = useWorkShiftRequired();
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -84,6 +86,7 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
         }
       />
 
+      {workShiftRequired ? <View style={styles.tabsBar}><EndWorkShiftControl compact /></View> : null}
       <View style={styles.tabsBar}>
         <SegmentTabs items={TABS} value={tab} onChange={setTab} count={list.length} />
       </View>

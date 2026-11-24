@@ -11,13 +11,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { Button, Loading, PillTabs } from '@/components/ui';
+import { Loading, PillTabs } from '@/components/ui';
 import { colors, fontSize, radius, spacing, softShadow } from '@/theme';
 import { TABLE_STATUS } from '@/theme/status';
 import { useAuth } from '@/store/auth';
-import { useHalls, useCurrentShift, useStartShift, useActiveOrders } from '@/services/api/waiter';
+import { useHalls, useActiveOrders } from '@/services/api/waiter';
 import { useCart } from '@/store/cart';
-import { apiError } from '@/lib/api';
 import type { TableStatus, TableItem, Order } from '@/types';
 
 const LEGEND: TableStatus[] = ['free', 'occupied', 'accepted', 'ready', 'waiting_payment'];
@@ -25,15 +24,11 @@ const LEGEND: TableStatus[] = ['free', 'occupied', 'accepted', 'ready', 'waiting
 export function TablesScreen() {
   const navigation = useNavigation<any>();
   const user = useAuth((s) => s.user);
-  const shiftQuery = useCurrentShift();
-  const startShift = useStartShift();
   const halls = useHalls();
   const ordersQ = useActiveOrders();
   const selectTable = useCart((s) => s.selectTable);
   const selectedTableId = useCart((s) => s.tableId);
   const [hallId, setHallId] = useState<string | null>(null);
-
-  const activeShift = shiftQuery.data?.status === 'active';
 
   const currentHall = useMemo(() => {
     if (!halls.data?.length) return null;
@@ -59,26 +54,6 @@ export function TablesScreen() {
     );
     navigation.navigate('Menu');
   };
-
-  if (shiftQuery.isLoading) return <Loading text="Загрузка…" />;
-
-  if (!activeShift) {
-    return (
-      <SafeAreaView style={styles.safe} edges={[]}>
-        <View style={styles.shiftGate}>
-          <Text style={styles.gateTitle}>Смена не начата</Text>
-          <Text style={styles.muted}>Чтобы принимать заказы, начните смену в профиле.</Text>
-          <Button
-            title="Начать смену"
-            loading={startShift.isPending}
-            onPress={() =>
-              startShift.mutate(undefined, { onError: (e) => Alert.alert('Ошибка', apiError(e)) })
-            }
-          />
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   const tables = currentHall?.tables ?? [];
 
@@ -162,9 +137,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
   },
   editBtnText: { fontSize: fontSize.sm, color: colors.textLight, fontWeight: '500' },
-  muted: { color: colors.textMuted, fontSize: fontSize.base, textAlign: 'center' },
-  shiftGate: { flex: 1, justifyContent: 'center', padding: spacing.xl, gap: spacing.lg, backgroundColor: colors.white },
-  gateTitle: { fontSize: fontSize.xl, fontWeight: '700', color: colors.textPrimary, textAlign: 'center' },
 
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, paddingBottom: spacing.md },
   table: {

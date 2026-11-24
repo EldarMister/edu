@@ -26,12 +26,12 @@ test('PostgreSQL: salary history survives reassignment and deletion, final settl
     const oldPosition = await db.staffPosition.create({ data: { cafeId, name: 'Официант тест', role: 'WAITER', permissions: {} } });
     const newPosition = await db.staffPosition.create({ data: { cafeId, name: 'Старший официант', role: 'WAITER', permissions: {} } });
     for (const [positionId, hourly] of [[oldPosition.id, 100], [newPosition.id, 200]]) {
-      await db.staffPositionSalaryRate.create({ data: { cafeId, positionId, effectiveMonth: previousMonth, hourly } });
+      await db.staffPositionSalaryRate.create({ data: { cafeId, positionId, effectiveDay: previousMonth + '-01', hourly } });
     }
     const worker = await db.user.create({ data: {
       cafeId, name: 'Сотрудник', role: 'WAITER', phone: randomUUID(), passwordHash: 'fixture', positionId: oldPosition.id,
     } });
-    await syncEmployeeSalary(db, cafeId, [worker.id], previousMonth);
+    await syncEmployeeSalary(db, cafeId, [worker.id], previousMonth + '-01');
     for (const month of [previousMonth, currentMonth]) {
       await db.waiterShift.create({ data: {
         cafeId, waiterId: worker.id, status: 'closed',
@@ -39,7 +39,11 @@ test('PostgreSQL: salary history survives reassignment and deletion, final settl
       } });
     }
     await db.user.update({ where: { id: worker.id }, data: { positionId: newPosition.id, isActive: false } });
-    await syncEmployeeSalary(db, cafeId, [worker.id]);
+    await syncEmployeeSalary(db, cafeId, [worker.id], currentMonth + '-02');
+    await db.waiterShift.create({ data: {
+      cafeId, waiterId: worker.id, status: 'closed',
+      startedAt: new Date(currentMonth + '-02T10:00:00+06:00'), endedAt: new Date(currentMonth + '-02T12:00:00+06:00'),
+    } });
     await db.staffPosition.delete({ where: { id: oldPosition.id } });
     const oldReport = await payrollReport(db, cafeId, previousMonth);
     const oldRow = oldReport.staff.find(({ userId }) => userId === worker.id);
@@ -52,17 +56,17 @@ test('PostgreSQL: salary history survives reassignment and deletion, final settl
     await finance.accrueCalculated(owner, { userId: worker.id, month: previousMonth, amount: 200, requestKey: randomUUID() });
     await finance.accrue(owner, { userId: worker.id, month: currentMonth, amount: 50, supplemental: true, requestKey: randomUUID() });
     const before = (await payrollReport(db, cafeId, currentMonth)).staff.find(({ userId }) => userId === worker.id);
-    assert.equal(before.estimate, 400);
-    assert.equal(before.available, 400);
+    assert.equal(before.estimate, 600);
+    assert.equal(before.available, 600);
     assert.equal(before.supplementalAccrued, 50);
-    const base = await finance.accrueCalculated(owner, { userId: worker.id, month: currentMonth, amount: 400, requestKey: randomUUID() });
+    const base = await finance.accrueCalculated(owner, { userId: worker.id, month: currentMonth, amount: 600, requestKey: randomUUID() });
     const account = await db.financeAccount.create({ data: { cafeId, name: 'Банк', type: 'noncash' } });
     await finance.paySalary(owner, base.id, { accountId: account.id, amount: 100, requestKey: randomUUID() });
     const after = (await payrollReport(db, cafeId, currentMonth)).staff.find(({ userId }) => userId === worker.id);
     assert.equal(after.available, 0);
-    assert.equal(after.accrued, 450);
+    assert.equal(after.accrued, 650);
     assert.equal(after.paid, 100);
-    assert.equal(after.due, 350);
+    assert.equal(after.due, 550);
   } finally {
     await db.financeEntry.deleteMany({ where: { cafeId } });
     await db.waiterShift.deleteMany({ where: { cafeId } });

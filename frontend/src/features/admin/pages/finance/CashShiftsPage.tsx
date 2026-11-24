@@ -84,7 +84,7 @@ export function CashShiftsPage() {
             <button type="button" className="btn-secondary btn-md inline-flex items-center gap-2" disabled={!rows.length}
               onClick={() => setPrintBlocked(!printRegister('Кассовые смены', [columns, ...rows.map((shift) => [
                 shift.number, financeDateTime(shift.openedAt), shift.closedAt ? financeDateTime(shift.closedAt) : 'Не закрыта',
-                shift.openingAmount, shift.collectionAmount || null, shift.actualAmount, shift.difference,
+                shift.openingAmount, shift.collectionAmount, shift.actualAmount, shift.difference,
               ])]))}><IconPrinter className="h-4 w-4" aria-hidden="true" />Распечатать</button>
             {period}
           </div>
@@ -113,7 +113,7 @@ export function CashShiftsPage() {
                 </button>,
                 shift.closedAt ? <ShiftJournalTime time={shift.closedAt} /> : <span className="font-medium">Не закрыта</span>,
                 financeMoney(shift.openingAmount),
-                financeMoney(shift.collectionAmount || null),
+                financeMoney(shift.collectionAmount),
                 financeMoney(shift.actualAmount),
                 <span className={difference < 0 ? 'font-semibold text-danger' : difference > 0 ? 'font-semibold' : undefined}>
                   {difference > 0 ? '+' : ''}{financeMoney(shift.difference)}
@@ -141,6 +141,25 @@ type ShiftEntry = {
   reconciliation: 'open' | 'close' | null;
 };
 
+type CashShiftDetail = {
+  movements: ShiftEntry[];
+  summary: {
+    openingAmount: number;
+    cashSales: number;
+    cashRefunds: number;
+    noncashSales: number;
+    noncashRefunds: number;
+    deposits: number;
+    expenses: number;
+    collections: number;
+    otherTransfers: number;
+    adjustments: number;
+    expectedAmount: number;
+    actualAmount: number | null;
+    difference: number | null;
+  };
+};
+
 function CashShiftDetails({ shift, canManage }: { shift: CashShift; canManage: boolean }) {
   const [editCount, setEditCount] = useState<'openingAmount' | 'actualAmount' | null>(null);
   const [operation, setOperation] = useState<'create' | CashOperation | null>(null);
@@ -148,31 +167,31 @@ function CashShiftDetails({ shift, canManage }: { shift: CashShift; canManage: b
   const cache = useQueryClient();
   const endpoint = '/admin/cash-shifts/' + shift.id;
   const entries = useQuery({
-    queryKey: [...cashShiftKey, 'movements', shift.id],
-    queryFn: async () => (await api.get<ShiftEntry[]>(endpoint + '/movements')).data,
+    queryKey: [...cashShiftKey, 'details', shift.id],
+    queryFn: async () => (await api.get<CashShiftDetail>(endpoint + '/details')).data,
   });
   const refresh = () => Promise.all([cache.invalidateQueries({ queryKey: cashShiftKey }), cache.invalidateQueries({ queryKey: financeKey })]);
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(endpoint + '/operations/' + id),
     onSuccess: async () => { await refresh(); setDeleteOperation(null); },
   });
-  const movements = entries.data?.filter((entry) => !entry.reconciliation && !entry.deletedAt) ?? [];
-  const sum = (predicate: (entry: ShiftEntry) => boolean) =>
-    Math.round(movements.reduce((total, entry) => total + (predicate(entry) ? entry.amount : 0), 0) * 100) / 100;
   const revenue = (entry: ShiftEntry) => entry.kind === 'sale' || entry.kind === 'refund';
-  const otherTransfers = sum((entry) => entry.kind === 'transfer' && !entry.collection);
-  const metrics = [
-    { label: 'Открытие смены', amount: shift.openingAmount, key: 'openingAmount' as const },
-    { label: 'Наличная выручка', amount: sum((entry) => entry.cash && revenue(entry)) },
-    { label: 'Безналичная выручка', amount: sum((entry) => !entry.cash && revenue(entry)) },
-    { label: 'Внесения', amount: sum((entry) => entry.kind === 'income') },
-    { label: 'Расходы', amount: -sum((entry) => entry.kind === 'expense' || entry.kind === 'salary') },
-    { label: 'Инкассация', amount: shift.collectionAmount },
-    ...(otherTransfers ? [{ label: 'Другие переводы', amount: otherTransfers }] : []),
-    { label: 'Книжный баланс', amount: shift.expectedAmount },
-    { label: 'Фактический баланс', amount: shift.actualAmount, key: 'actualAmount' as const },
-    { label: 'Разница', amount: shift.difference },
-  ];
+  const summary = entries.data?.summary;
+  const metrics = summary ? [
+    { label: 'Открытие смены', amount: summary.openingAmount, key: 'openingAmount' as const },
+    { label: 'Продажи наличными', amount: summary.cashSales },
+    { label: 'Возвраты наличными', amount: summary.cashRefunds },
+    { label: 'Безналичные продажи', amount: summary.noncashSales },
+    { label: 'Безналичные возвраты', amount: summary.noncashRefunds },
+    { label: 'Внесения', amount: summary.deposits },
+    { label: 'Расходы', amount: summary.expenses },
+    { label: 'Инкассация', amount: summary.collections },
+    ...(summary.otherTransfers ? [{ label: 'Другие переводы', amount: summary.otherTransfers }] : []),
+    ...(summary.adjustments ? [{ label: 'Корректировки', amount: summary.adjustments }] : []),
+    { label: 'Книжный баланс', amount: summary.expectedAmount },
+    { label: 'Фактический баланс', amount: summary.actualAmount, key: 'actualAmount' as const },
+    { label: 'Разница', amount: summary.difference },
+  ] : [];
   return <div className="finance-register space-y-5">
     <div className="flex flex-wrap gap-x-8 gap-y-2 border-b border-border px-4 py-3 text-sm text-text-muted">
       <span>Открыта <ShiftTime time={shift.openedAt} name={shift.openedByName} /></span>
@@ -197,7 +216,7 @@ function CashShiftDetails({ shift, canManage }: { shift: CashShift; canManage: b
             {canManage && <button type="button" className="text-sm text-primary hover:underline" onClick={() => setOperation('create')}>+ Добавить транзакцию</button>}
           </div>
           <FinanceTable headers={['Дата и время', 'Тип', 'Категория', 'Сотрудник', 'Комментарий', 'Сумма', '']} amounts={[5]}
-        rows={(entries.data ?? []).map((entry) => ({ key: entry.id, deleted: !!entry.deletedAt, cells: [
+        rows={(entries.data?.movements ?? []).map((entry) => ({ key: entry.id, deleted: !!entry.deletedAt, cells: [
           financeDateTime(entry.occurredAt), entry.reconciliation === 'open' ? 'Сверка при открытии'
             : entry.reconciliation === 'close' ? 'Сверка при закрытии'
               : entry.collection ? 'Инкассация'
@@ -221,7 +240,7 @@ function CashShiftDetails({ shift, canManage }: { shift: CashShift; canManage: b
     </QueryState>
     {canManage && operation && <CashOperationDialog shiftId={shift.id} operation={operation === 'create' ? undefined : operation}
       onClose={() => setOperation(null)} />}
-    {canManage && editCount && <CountDialog endpoint={endpoint} field={editCount} amount={shift[editCount] ?? 0}
+    {canManage && editCount && summary && <CountDialog endpoint={endpoint} field={editCount} amount={summary[editCount] ?? 0}
       onClose={() => setEditCount(null)} onSuccess={refresh} />}
     {canManage && deleteOperation && <Modal open title="Удалить транзакцию?" onClose={() => { if (!remove.isPending) setDeleteOperation(null); }}
       footer={<div className="flex gap-2">

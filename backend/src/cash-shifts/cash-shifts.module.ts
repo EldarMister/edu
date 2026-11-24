@@ -41,8 +41,13 @@ class CloseCashShiftDto extends OpenCashShiftDto {
 }
 
 class CashShiftsSettingDto {
+  @IsOptional()
   @IsBoolean()
-  enabled!: boolean;
+  enabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  requireClosedOrders?: boolean;
 }
 
 class CashShiftHistoryDto {
@@ -103,7 +108,7 @@ const openKey = 'cash-open:';
 const closeKey = 'cash-close:';
 
 export function cashShiftEnabled(tx: Prisma.TransactionClient, cafeId: string) {
-  return tx.settings.findFirst({ where: { cafeId }, select: { cashShiftsEnabled: true } });
+  return tx.settings.findFirst({ where: { cafeId }, select: { cashShiftsEnabled: true, cashShiftRequireClosedOrders: true } });
 }
 
 async function drawerDelta(tx: Prisma.TransactionClient, shift: CashShift) {
@@ -273,6 +278,7 @@ export class CashShiftsService {
       });
       return {
         enabled: settings?.cashShiftsEnabled ?? false,
+        requireClosedOrders: settings?.cashShiftRequireClosedOrders ?? false,
         current: current ? named(serialize(current, current.openingAmount.add(await drawerDelta(tx, current))), total) : null,
         history: history.map((shift, index) => named(serialize(shift), earlier + history.length - index)),
       };
@@ -280,6 +286,10 @@ export class CashShiftsService {
   }
 
   async movements(cafeId: string, id: string) {
+    return (await this.details(cafeId, id)).movements;
+  }
+
+  async details(cafeId: string, id: string) {
     return this.db.$transaction(async (db) => {
       const shift = await findShift(db, cafeId, id);
       const [rows, deleted] = await Promise.all([
@@ -308,15 +318,37 @@ export class CashShiftsService {
         && (accountId === shift.accountId || kind === 'sale' || kind === 'refund'))
         .map(({ category, counterparty, accountId, actorId, sourceKey, ...row }) => ({
           ...row, category: category?.name ?? null, categoryId: category?.id ?? null,
-          actorName: actorId ? names.get(actorId) ?? null : null, amount: row.amount.toNumber(),
+          actorName: actorId ? names.get(actorId) ?? null : null,
           cash: accountId === shift.accountId, editable: !!sourceKey?.startsWith(posKey),
           collection: row.kind === 'transfer' && row.amount.lt(0) && counterparty?.isCollection === true,
           reconciliation: sourceKey?.startsWith(openKey) ? 'open' : sourceKey?.startsWith(closeKey) ? 'close' : null,
         }));
-      return [...active, ...deleted.map((row) => ({
+      const journal = active.filter(({ reconciliation }) => !reconciliation);
+      const sum = (include: (row: (typeof journal)[number]) => boolean, outflow = false) => journal.reduce(
+        (total, row) => include(row) ? (outflow ? total.sub(row.amount) : total.add(row.amount)) : total,
+        new Prisma.Decimal(0)).toNumber();
+      const expected = shift.closedAt ? shift.expectedAmount ?? shift.openingAmount
+        : shift.openingAmount.add(await drawerDelta(db, shift));
+      const summary = {
+        openingAmount: shift.openingAmount.toNumber(),
+        cashSales: sum((row) => row.cash && row.kind === 'sale'),
+        cashRefunds: sum((row) => row.cash && row.kind === 'refund', true),
+        noncashSales: sum((row) => !row.cash && row.kind === 'sale'),
+        noncashRefunds: sum((row) => !row.cash && row.kind === 'refund', true),
+        deposits: sum((row) => row.cash && row.kind === 'income'),
+        expenses: sum((row) => row.cash && (row.kind === 'expense' || row.kind === 'salary'), true),
+        collections: sum((row) => row.collection, true),
+        otherTransfers: sum((row) => row.cash && row.kind === 'transfer' && !row.collection),
+        adjustments: sum((row) => row.cash && row.kind === 'adjustment'),
+        expectedAmount: expected.toNumber(),
+        actualAmount: shift.actualAmount?.toNumber() ?? null,
+        difference: shift.difference?.toNumber() ?? null,
+      };
+      const movements = [...active.map((row) => ({ ...row, amount: row.amount.toNumber() })), ...deleted.map((row) => ({
         ...row, amount: row.amount.toNumber(), categoryId: null, cash: true, editable: false,
         collection: row.kind === 'transfer', reconciliation: null,
       }))].sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime() || a.id.localeCompare(b.id));
+      return { summary, movements };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
@@ -429,16 +461,19 @@ export class CashShiftsService {
     return { id };
   }
 
-  async setting(cafeId: string, enabled: boolean) {
+  async setting(cafeId: string, enabled?: boolean, requireClosedOrders?: boolean) {
+    if (enabled == null && requireClosedOrders == null) throw new BadRequestException('Укажите настройку кассовых смен');
     return this.db.$transaction(async (tx) => {
       await lockFinance(tx, cafeId);
-      if (!enabled && await tx.cashShift.findFirst({ where: { cafeId, closedAt: null } })) {
+      if (enabled === false && await tx.cashShift.findFirst({ where: { cafeId, closedAt: null } })) {
         throw new ConflictException('Сначала закройте кассовую смену');
       }
-      await tx.settings.upsert({
-        where: { cafeId }, create: { cafeId, cashShiftsEnabled: enabled }, update: { cashShiftsEnabled: enabled },
+      const values = { cashShiftsEnabled: enabled ?? undefined, cashShiftRequireClosedOrders: requireClosedOrders ?? undefined };
+      const setting = await tx.settings.upsert({
+        where: { cafeId }, create: { cafeId, ...values }, update: values,
+        select: { cashShiftsEnabled: true, cashShiftRequireClosedOrders: true },
       });
-      return { enabled };
+      return { enabled: setting.cashShiftsEnabled, requireClosedOrders: setting.cashShiftRequireClosedOrders };
     });
   }
 
@@ -491,6 +526,12 @@ export class CashShiftsService {
       if (!expectedAmount.eq(input.expectedAmount)) {
         throw new ConflictException('Остаток изменился. Обновите данные и пересчитайте деньги в кассе');
       }
+      const policy = await cashShiftEnabled(tx, cafeId);
+      if (policy?.cashShiftRequireClosedOrders && await tx.order.findFirst({
+        where: { cafeId, status: { notIn: CLOSED_ORDER_STATUSES } }, select: { id: true },
+      })) {
+        throw new ConflictException('Закройте открытые заказы перед закрытием кассовой смены');
+      }
       const difference = actualAmount.sub(expectedAmount);
       const closedAt = new Date();
       const closedShifts = closeEmployeeShifts ? await closeStaffShifts(tx, cafeId, closedAt) : [];
@@ -537,6 +578,12 @@ class CashShiftsController {
     return this.shifts.movements(this.access(user), id);
   }
 
+  @Get(':id/details')
+  @Roles(Role.OWNER, Role.ADMIN)
+  details(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.shifts.details(this.access(user), id);
+  }
+
   @Get('operation-categories')
   operationCategories(@CurrentUser() user: AuthUser) {
     return this.shifts.operationCategories(this.access(user), !canViewFinance(user));
@@ -569,7 +616,7 @@ class CashShiftsController {
   @Patch('setting')
   @Roles(Role.OWNER)
   setting(@CurrentUser() user: AuthUser, @Body() body: CashShiftsSettingDto) {
-    return this.shifts.setting(this.access(user, true), body.enabled);
+    return this.shifts.setting(this.access(user, true), body.enabled, body.requireClosedOrders);
   }
 
   @Post('open')

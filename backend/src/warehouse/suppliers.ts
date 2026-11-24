@@ -5,6 +5,7 @@ import { RequirePermission } from '../common/decorators/require-permission.decor
 import { Roles } from '../common/decorators/roles.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { getCafeId } from '../tenant/tenant-context';
+import { purchaseSettlement, purchaseSettlementTotals } from './purchase-settlement';
 
 function cafeId() {
   const value = getCafeId();
@@ -64,6 +65,32 @@ export class WarehouseSuppliersService {
       orderBy: [{ isActive: 'desc' }, { name: 'asc' }] });
   }
 
+  async settlements() {
+    const tenant = cafeId();
+    return this.prisma.$transaction(async (db) => {
+      const [suppliers, completed] = await Promise.all([
+        db.warehouseSupplier.findMany({ where: { cafeId: tenant }, select: { id: true, name: true } }),
+        db.purchase.findMany({ where: { cafeId: tenant, status: 'completed' }, select: {
+          id: true, supplier: true, supplierId: true, status: true, totalAmount: true, settlementKnownAt: true, settlementOpeningPaid: true,
+        } }),
+      ]);
+      const idsByName = new Map(suppliers.map(({ id, name }) => [name.trim().toLocaleLowerCase('ru'), id]));
+      const totals = await purchaseSettlementTotals(db, completed);
+      const rows = new Map(suppliers.map(({ id }) => [id, { supplierId: id, purchaseTotal: new Prisma.Decimal(0),
+        knownDebt: new Prisma.Decimal(0), missingSettlementCount: 0 }]));
+      for (const purchase of completed) {
+        const supplierId = purchase.supplierId ?? idsByName.get(purchase.supplier.trim().toLocaleLowerCase('ru'));
+        const row = supplierId ? rows.get(supplierId) : undefined;
+        if (!row) continue;
+        const settlement = purchaseSettlement(purchase, totals.get(purchase.id));
+        row.purchaseTotal = row.purchaseTotal.add(purchase.totalAmount);
+        if (settlement.debtAmount == null) row.missingSettlementCount += 1;
+        else row.knownDebt = row.knownDebt.add(settlement.debtAmount);
+      }
+      return [...rows.values()].map((row) => ({ ...row, purchaseTotal: Number(row.purchaseTotal), knownDebt: Number(row.knownDebt) }));
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
   async save(dto: SupplierDto, id?: string) {
     const tenant = cafeId(), name = dto.name.trim();
     if (!name) throw new BadRequestException('Укажите название поставщика');
@@ -97,6 +124,8 @@ export class WarehouseSuppliersService {
 class WarehouseSuppliersController {
   constructor(private readonly suppliers: WarehouseSuppliersService) {}
   @Get() list(@Query('includeInactive') all?: string) { return this.suppliers.list(all === 'true'); }
+  @Get('settlements') @RequirePermission('actions.warehouseCosts')
+  settlements() { return this.suppliers.settlements(); }
   @Post() @RequirePermission('actions.warehouseSettings')
   create(@Body() dto: SupplierDto) { return this.suppliers.save(dto); }
   @Patch(':id') @RequirePermission('actions.warehouseSettings')

@@ -5,6 +5,7 @@ import { exportCsv } from '@/lib/report-output';
 import {
   qty,
   useProductionJournal,
+  type ProductionBatch,
   type WarehouseLocation,
 } from './api';
 import { useStockDocuments, type StockDocument, type StockDocumentKind } from './stock-documents-api';
@@ -13,7 +14,7 @@ import { useListPeriod } from './ListPeriodFilter';
 import { balanceMoney } from './balance-format';
 import { QueryState } from './WarehouseUi';
 import { unitLabel } from './units';
-import { usePageFilter, usePageFilters } from './workspace-route';
+import { usePageFilters } from './workspace-route';
 import { WorkspaceHeaderActions, WorkspaceHeaderCount } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { warehouseDay } from './warehouse-period';
@@ -234,70 +235,95 @@ export function ProductionList({
   onOpen,
   onCreate,
 }: {
-  warehouseId: string;
+  warehouseId?: string;
   filters?: ReactNode;
   onOpen: (id: string) => void;
   onCreate: () => void;
 }) {
-  const query = useProductionJournal(warehouseId);
   const { can } = usePermissions();
-  const [search, setSearch] = usePageFilter('productionSearch');
-  const rows = (query.data ?? []).filter((m) =>
-    m.ingredientName.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
-  );
+  const costs = can('actions.warehouseCosts');
+  const [state, update] = usePageFilters({ productionSearch: '', productionStatus: '', productionSort: 'desc', productionPage: '1' });
+  const period = useListPeriod('production');
+  const sort = state.productionSort === 'asc' ? 'asc' : 'desc';
+  const status = ['posted', 'reversed'].includes(state.productionStatus) ? state.productionStatus : undefined;
+  const parsedPage = Number(state.productionPage);
+  const pageSize = 50;
+  const query = useProductionJournal({ warehouseId, search: state.productionSearch.trim().slice(0, 160) || undefined,
+    from: period.range.dateFrom, to: period.range.dateTo, status, sort,
+    page: Number.isSafeInteger(parsedPage) && parsedPage > 0 ? Math.min(parsedPage, 1000000) : 1, pageSize });
+  const rows = query.data?.rows ?? [];
+  const totalRows = query.data?.totalRows ?? 0;
+  const page = query.data?.page ?? 1;
+  const lastPage = Math.ceil(totalRows / pageSize);
+  const emptyLabel = state.productionSearch || status || period.active || warehouseId
+    ? 'По выбранным условиям производств нет.' : 'Производств пока нет.';
+  const fields = [
+    { title: 'Дата', show: (batch: ProductionBatch) => <time dateTime={batch.producedAt} title={formatDocumentDate(batch.producedAt)}>
+      {formatDocumentListDate(batch.producedAt)}</time> },
+    { title: 'Склад', show: (batch: ProductionBatch) => batch.warehouseName ?? '—' },
+    { title: 'Техкарты и полуфабрикаты', show: (batch: ProductionBatch) => <button type="button" className="text-primary text-left" onClick={() => onOpen(batch.id)}>
+      {batch.ingredientName}{batch.batchNumber && <span className="ml-2 text-xs text-text-muted">№ {batch.batchNumber}</span>}</button> },
+    { title: 'Комментарий', show: (batch: ProductionBatch) => batch.comment ?? '—' },
+    { title: 'Кол-во', show: (batch: ProductionBatch) => qty(batch.actualQuantity, unitLabel(batch.unit)), numeric: true },
+    ...(costs ? [{ title: 'Сумма', show: (batch: ProductionBatch) => batch.totalCost == null ? '—' : balanceMoney(batch.totalCost), numeric: true }] : []),
+    { title: 'Сотрудник', show: (batch: ProductionBatch) => batch.actorName ?? '—' },
+    { title: 'Статус', show: (batch: ProductionBatch) => batch.reversedAt ? 'Сторнирована' : 'Проведена' },
+  ];
   return (
     <div>
-      <WorkspaceHeaderCount count={query.isSuccess ? rows.length : undefined} />
+      <WorkspaceHeaderCount count={query.isSuccess ? totalRows : undefined} />
       <div className="poster-toolbar">
-        <WorkspaceSearch label="Поиск производства" value={search} onChange={setSearch} />
+        <WorkspaceSearch label="Поиск производства" value={state.productionSearch} onChange={(value) => update({ productionSearch: value, productionPage: '1' })} />
+        {period.filter}
         {filters}
+        <Select ariaLabel="Статус производства" className="poster-filter h-9 min-w-36" value={status ?? ''}
+          onChange={(value) => update({ productionStatus: value, productionPage: '1' })}
+          options={[{ value: '', label: 'Все статусы' }, { value: 'posted', label: 'Проведена' }, { value: 'reversed', label: 'Сторнирована' }]} />
         {can('actions.warehouseProduce') && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Произвести</button>}
       </div>
       <QueryState pending={query.isPending} error={query.error}>
-        <div className="overflow-x-auto">
-          <table className="poster-table w-full min-w-[650px] text-left text-sm">
+        <div className="hidden overflow-x-auto md:block">
+          <table className="poster-table w-full min-w-[980px] text-left text-sm">
             <thead>
               <tr>
-                <th>Дата</th>
-                <th>Полуфабрикат</th>
-                <th>Количество</th>
-                <th>Статус</th>
-                <th />
+                {fields.map((field) => field.title === 'Дата'
+                  ? <th key={field.title} scope="col" aria-sort={sort === 'asc' ? 'ascending' : 'descending'}>
+                    <button type="button" onClick={() => update({ productionSort: sort === 'asc' ? 'desc' : 'asc', productionPage: '1' })}>
+                      Дата <span aria-hidden>{sort === 'asc' ? '↑' : '↓'}</span></button></th>
+                  : <th key={field.title} scope="col" className={field.numeric ? 'text-right' : undefined}>{field.title}</th>)}
               </tr>
             </thead>
             <tbody>
               {!rows.length && (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-text-muted">
-                    {search ? 'Производства не найдены. Измените поиск.' : 'Производств пока нет.'}
+                  <td colSpan={fields.length} className="py-12 text-center text-text-muted">
+                    {emptyLabel}
                   </td>
                 </tr>
               )}
-              {rows.map((m) => (
-                <tr key={m.id}>
-                  <td className="whitespace-nowrap">
-                    <time dateTime={m.producedAt} title={formatDocumentDate(m.producedAt)}>
-                      {formatDocumentListDate(m.producedAt)}
-                    </time>
-                  </td>
-                  <td>
-                    <button className="text-primary" onClick={() => onOpen(m.id)}>
-                      {m.ingredientName}
-                    </button>
-                    {m.batchNumber && <span className="ml-2 text-xs text-text-muted">№ {m.batchNumber}</span>}
-                  </td>
-                  <td>{qty(m.actualQuantity, unitLabel(m.unit))}</td>
-                  <td>{m.reversedAt ? 'Сторнирована' : 'Проведена'}</td>
-                  <td>
-                    <div className="poster-row-actions">
-                      <button onClick={() => onOpen(m.id)}>Открыть</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {rows.map((row) => <tr key={row.id}>{fields.map((field) => <td key={field.title}
+                className={field.numeric ? 'whitespace-nowrap text-right tabular-nums' : 'break-words'}>{field.show(row)}</td>)}</tr>)}
             </tbody>
           </table>
         </div>
+        <div className="divide-y divide-border md:hidden">
+          {rows.length > 0 && <button type="button" className="py-2 text-sm text-primary"
+            onClick={() => update({ productionSort: sort === 'asc' ? 'desc' : 'asc', productionPage: '1' })}>
+            {sort === 'asc' ? 'Сначала старые' : 'Сначала новые'}
+          </button>}
+          {rows.map((row) => <article key={row.id} className="py-3">
+            <button type="button" className="font-medium text-primary" onClick={() => onOpen(row.id)}>{row.ingredientName}
+              {row.batchNumber && <span className="ml-2 text-xs text-text-muted">№ {row.batchNumber}</span>}</button>
+            <dl className="poster-balance-mobile-values mt-2">{fields.filter(({ title }) => title !== 'Техкарты и полуфабрикаты')
+              .map((field) => <div key={field.title}><dt>{field.title}</dt><dd className="break-words">{field.show(row)}</dd></div>)}</dl>
+          </article>)}
+          {!rows.length && <p className="py-10 text-center text-sm text-text-muted">{emptyLabel}</p>}
+        </div>
+        {lastPage > 1 && <nav className="poster-balance-pagination" aria-label="Страницы производства">
+          <button type="button" disabled={page <= 1} onClick={() => update({ productionPage: String(page - 1) })}>Назад</button>
+          <span>{(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalRows)} из {totalRows}</span>
+          <button type="button" disabled={page >= lastPage} onClick={() => update({ productionPage: String(page + 1) })}>Вперёд</button>
+        </nav>}
       </QueryState>
     </div>
   );

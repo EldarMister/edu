@@ -26,6 +26,7 @@ import { OrderDetailsModal } from '../../components/OrderDetailsModal';
 import { ItemCard } from './ItemCard';
 import { useWarehouseLocations, useIngredients, type Ingredient } from './api';
 import { useWarehousePolicy } from './settings-api';
+import { SourceDocumentModal } from './SourceDocumentModal';
 
 export function WarehouseSection({
   view = 'balances',
@@ -49,7 +50,7 @@ export function WarehouseSection({
     movementDocuments: '',
     movementClosedGroups: '',
     movementWarehouses: '',
-    supplyPage: '1', supplyExpanded: '', transferPage: '1', writeoffPage: '1', inventoryPage: '1',
+    supplyPage: '1', supplyExpanded: '', transferPage: '1', writeoffPage: '1', inventoryPage: '1', productionPage: '1', balancePage: '1', balanceExpanded: '',
   });
   const {
     warehouse: warehouseId,
@@ -64,7 +65,8 @@ export function WarehouseSection({
     patch: Partial<Pick<typeof conditions, 'warehouse' | 'stockPeriod' | 'stockFrom' | 'stockTo'>>,
   ) {
     updateConditions({ ...patch, movementPage: '1', movementRange: '', movementExpanded: '', movementDocuments: '', movementClosedGroups: '',
-      ...(patch.warehouse !== undefined ? { supplyPage: '1', supplyExpanded: '', transferPage: '1', writeoffPage: '1', inventoryPage: '1' } : {}),
+      ...(patch.warehouse !== undefined ? { supplyPage: '1', supplyExpanded: '', transferPage: '1', writeoffPage: '1', inventoryPage: '1',
+        productionPage: '1', balancePage: '1', balanceExpanded: '' } : {}),
     });
   }
   const setWarehouseId = (value: string) => setReportConditions({ warehouse: value });
@@ -88,7 +90,7 @@ export function WarehouseSection({
       warehouseViewAllowed(v, permissions),
   );
   const allowed = allowedViews.some((v) => v.key === view);
-  const aggregate = ['balances', 'movement', 'supplies', 'processing', 'transfers', 'writeoffs', 'inventory'].includes(view);
+  const aggregate = ['balances', 'movement', 'supplies', 'processing', 'transfers', 'writeoffs', 'inventory', 'production'].includes(view);
   const scopedWarehouse = aggregate ? warehouseId || undefined : warehouse?.id;
   const movementWarehouseSelection = conditions.movementWarehouses
     ? conditions.movementWarehouses.split(',')
@@ -195,7 +197,7 @@ export function WarehouseSection({
                   {view === 'production' && (
                     <ProductionList
                       filters={warehouseFilter}
-                      warehouseId={warehouse.id}
+                      warehouseId={scopedWarehouse}
                       onOpen={(id) => setActive({ type: 'batch', id })}
                       onCreate={() => setActive({ type: 'chooseProduction' })}
                     />
@@ -232,6 +234,7 @@ export function WarehouseSection({
           />
         )}
         {active?.type === 'order' && active.id && <SourceOrder id={active.id} onClose={close} />}
+        {active?.type === 'source' && active.id && active.action && <SourceDocumentModal type={active.action} id={active.id} onClose={close} />}
         {(active?.type === 'batch' || active?.type === 'productionBatch') && active.id && (
           <ProductionBatchModal id={active.id} onClose={close} />
         )}
@@ -277,6 +280,8 @@ export function WarehouseSection({
                 warehouseId={warehouse.id}
                 locations={locations}
                 onClose={close}
+                  openPayment={active.action === 'payment'}
+                  onProcessPayment={(id) => setActive({ type: 'purchase', id, action: 'payment' }, true)}
                 onReturn={(id, warehouseId) =>
                   setActive({ type: 'start', action: 'supplier_return', id, warehouseId })
                 }
@@ -320,6 +325,7 @@ export function WarehouseSection({
                   name: 'Заготовка',
                 }}
                 onBatch={(id) => setActive({ type: 'batch', id })}
+                onProduced={(id) => setActive({ type: 'batch', id }, true)}
                 warehouse={warehouse}
                 onClose={close}
               />

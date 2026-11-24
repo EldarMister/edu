@@ -1,9 +1,11 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, HttpCode, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { RecipesService } from './recipes.service';
+import { CurrentUser, type AuthUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
-import { RecipeDraftDto, RecipeItemInputDto, RecipeItemUpdateDto, RecipeSettingsDto } from './recipes.dto';
+import { hasPermission } from '../common/permissions';
+import { RecipeCostsQuery, RecipeDraftDto, RecipeItemInputDto, RecipeItemUpdateDto, RecipePreviewDto, RecipeSettingsDto } from './recipes.dto';
 
 @Controller('admin/warehouse')
 @Roles(Role.ADMIN, Role.OWNER, Role.KITCHEN, Role.BAR)
@@ -13,6 +15,10 @@ export class RecipesController {
 
   @Get('dishes')
   listDishes(@Query('search') search?: string) { return this.recipes.listDishes(search); }
+
+  @Get('recipe-costs')
+  @RequirePermission('actions.warehouseCosts')
+  costs(@Query() query: RecipeCostsQuery) { return this.recipes.costSummary(query); }
 
   @Get('dishes/:dishId/recipe-draft')
   getDraft(@Param('dishId') dishId: string) { return this.recipes.getDraft(dishId); }
@@ -53,5 +59,19 @@ export class RecipesController {
   @Get('dishes/:dishId/recipe-revisions')
   revisions(@Param('dishId') dishId: string) {
     return this.recipes.revisions(dishId);
+  }
+}
+
+@Controller('admin/warehouse')
+@Roles(Role.ADMIN, Role.OWNER, Role.KITCHEN, Role.BAR)
+export class RecipePreviewController {
+  constructor(private readonly recipes: RecipesService) {}
+
+  @Post('recipe-preview')
+  @HttpCode(200)
+  preview(@Body() dto: RecipePreviewDto, @CurrentUser() user: AuthUser) {
+    // The body carries a read-only draft. WarehouseCostInterceptor masks money without cost access.
+    if (user.role !== Role.OWNER && !hasPermission(user.permissions, 'sections.warehouse')) throw new ForbiddenException();
+    return this.recipes.preview(dto);
   }
 }

@@ -1,16 +1,18 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { usePageFilter, useEditorRoute } from './workspace-route';
-import { EditorPage } from './EditorPage';
+import { EditorPage, useEditorDirty } from './EditorPage';
+import { Modal } from '@/components/Modal';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { Select } from '@/components/Select';
 import { apiError } from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
-import { useSuppliers, useSupplierMutations, type Supplier } from './settings-api';
+import { useSuppliers, useSupplierMutations, useSupplierSettlements, type Supplier } from './settings-api';
 import { useWarehouseLocationMutations, type WarehouseLocations, type WarehouseLocation } from './api';
 import { usePackages, usePackageMutations, type PackageUnit } from './extended-api';
 import { UNIT_OPTIONS, unitLabel, type UnitCode } from './units';
 import { DocumentField, DocumentFooter, QueryState } from './WarehouseUi';
+import { balanceMoney } from './balance-format';
 
 function DirectoryNameHeader({ ascending, onToggle, children = 'Название' }: {
   ascending: boolean;
@@ -37,7 +39,8 @@ function DirectoryActions({
   label: string;
 }) {
   const menuId = useId();
-  const editable = usePermissions().can('actions.warehouseSettings');
+  const permissions = usePermissions();
+  const editable = permissions.canEditSection('warehouse') && permissions.canAction('warehouseSettings');
   const trigger = useRef<HTMLButtonElement>(null);
   const popup = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
@@ -142,8 +145,11 @@ function MissingDirectoryItem({
 }
 
 export function SuppliersPage() {
-  const editable = usePermissions().can('actions.warehouseSettings');
+  const permissions = usePermissions();
+  const editable = permissions.canEditSection('warehouse') && permissions.canAction('warehouseSettings');
+  const canReadCosts = permissions.canAction('warehouseCosts');
   const q = useSuppliers();
+  const settlement = useSupplierSettlements(canReadCosts);
   const mutations = useSupplierMutations();
   const [search, setSearch] = usePageFilter('search');
   const [sort, setSort] = usePageFilter('sort', 'asc');
@@ -160,20 +166,8 @@ export function SuppliersPage() {
       setError(apiError(failure));
     }
   }
-  if (editor?.type === 'supplier') {
-    const supplier = q.data?.find((item) => item.id === editor.id);
-    if (editor.id && !supplier)
-      return (
-        <MissingDirectoryItem onClose={closeEditor} title="Поставщик недоступен">
-          <QueryState pending={q.isPending} error={q.error}>
-            <p className="text-sm text-text-secondary">
-              Поставщик не найден или находится в архиве. Вернитесь к списку поставщиков.
-            </p>
-          </QueryState>
-        </MissingDirectoryItem>
-      );
-    return <SupplierForm key={editor.id ?? 'new'} supplier={supplier} onClose={closeEditor} />;
-  }
+  const supplier = editor?.type === 'supplier' && editor.id ? q.data?.find((item) => item.id === editor.id) : undefined;
+  const totals = new Map(settlement.data?.map((row) => [row.supplierId, row]));
   return (
     <div className="poster-directory-surface">
       <div className="poster-toolbar">
@@ -185,21 +179,24 @@ export function SuppliersPage() {
           {error}
         </p>
       )}
+      {canReadCosts && settlement.isError && <p role="alert" className="py-3 text-danger">Не удалось загрузить взаиморасчёты. <button type="button" className="text-primary" onClick={() => void settlement.refetch()}>Повторить</button></p>}
       <QueryState pending={q.isPending} error={q.error}>
         <div className="overflow-x-auto">
-          <table className="poster-table poster-directory-table poster-directory-table--suppliers w-full min-w-[760px]">
-            <colgroup><col style={{ width: '26%' }} /><col style={{ width: '18%' }} /><col style={{ width: '25%' }} /><col /><col style={{ width: 110 }} /></colgroup>
+          <table className={`poster-table poster-directory-table poster-directory-table--suppliers w-full ${canReadCosts ? 'min-w-[920px]' : 'min-w-[760px]'}`}>
             <thead>
               <tr>
                 <DirectoryNameHeader ascending={sort !== 'desc'} onToggle={() => setSort(sort === 'desc' ? 'asc' : 'desc')}>Имя</DirectoryNameHeader>
                 <th>Телефон</th>
                 <th>Адрес</th>
                 <th>Комментарий</th>
+                {canReadCosts && <><th className="text-right">Сумма поставок</th><th className="text-right">Задолженность</th></>}
                 <th><span className="sr-only">Действия</span></th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((supplier) => (
+              {rows.map((supplier) => {
+                const result = totals.get(supplier.id);
+                return (
                 <tr key={supplier.id}>
                   <td>
                     <button
@@ -214,6 +211,13 @@ export function SuppliersPage() {
                   <td><span className="block truncate" title={supplier.phone || undefined}>{supplier.phone || '—'}</span></td>
                   <td><span className="block truncate" title={supplier.address || undefined}>{supplier.address || '—'}</span></td>
                   <td><span className="block truncate" title={supplier.note || undefined}>{supplier.note || '—'}</span></td>
+                  {canReadCosts && <>
+                    <td className="text-right tabular-nums">{result ? balanceMoney(result.purchaseTotal) : '—'}</td>
+                    <td className="text-right tabular-nums">
+                      {result ? balanceMoney(result.knownDebt) : '—'}
+                      {!!result?.missingSettlementCount && <span className="block text-xs text-text-muted">По сверенным. Требуют сверки: {result.missingSettlementCount}</span>}
+                    </td>
+                  </>}
                   <td>
                     <DirectoryActions
                       label={supplier.name}
@@ -223,10 +227,11 @@ export function SuppliersPage() {
                     />
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {!rows.length && (
                 <tr>
-                  <td colSpan={5} className="poster-directory-empty text-center text-text-muted">
+                  <td colSpan={canReadCosts ? 7 : 5} className="poster-directory-empty text-center text-text-muted">
                     {search ? 'Поставщики не найдены' : 'Здесь будут ваши поставщики'}
                   </td>
                 </tr>
@@ -235,11 +240,17 @@ export function SuppliersPage() {
           </table>
         </div>
       </QueryState>
+      {editor?.type === 'supplier' && (editor.id && !supplier ? <Modal open onClose={closeEditor} title="Поставщик недоступен">
+        <QueryState pending={q.isPending} error={q.error}>
+          <p className="text-sm text-text-secondary">Поставщик не найден или находится в архиве.</p>
+        </QueryState>
+      </Modal> : <SupplierForm key={editor.id ?? 'new'} supplier={supplier} onClose={closeEditor} />)}
     </div>
   );
 }
 function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () => void }) {
-  const editable = usePermissions().can('actions.warehouseSettings');
+  const permissions = usePermissions();
+  const editable = permissions.canEditSection('warehouse') && permissions.canAction('warehouseSettings');
   const formId = useId();
   const { save } = useSupplierMutations();
   const [form, setForm] = useState({
@@ -250,25 +261,39 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
     note: supplier?.note ?? '',
     email: supplier?.email ?? '',
   });
+  const initial = useRef(JSON.stringify(form));
+  const dirty = editable && JSON.stringify(form) !== initial.current;
+  const { markSaved } = useEditorDirty(dirty);
   const [error, setError] = useState('');
+  function close() {
+    if (save.isPending || dirty && !confirm('Закрыть форму и отменить изменения?')) return;
+    markSaved();
+    onClose();
+  }
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!editable || save.isPending || !form.name.trim()) return;
     try {
       await save.mutateAsync({ id: supplier?.id, ...form, name: form.name.trim() });
+      markSaved();
       onClose();
     } catch (err) {
       setError(apiError(err));
     }
   }
   return (
-    <EditorPage
+    <Modal
       open
-      onClose={onClose}
+      onClose={close}
       title={supplier ? editable ? 'Редактирование поставщика' : 'Поставщик' : 'Новый поставщик'}
+      panelClassName="max-w-lg"
+      footer={editable && <div className="flex justify-end gap-2">
+        <button type="button" className="btn-secondary btn-sm" onClick={close} disabled={save.isPending}>Отмена</button>
+        <button type="submit" form={formId} className="btn-primary btn-sm" disabled={save.isPending || !form.name.trim()}>Сохранить</button>
+      </div>}
     >
       <form id={formId} className="poster-form poster-form--directory poster-document--modern" onSubmit={submit}>
-        <fieldset disabled={!editable} className="min-w-0">
+        <fieldset disabled={!editable || save.isPending} className="min-w-0">
         <div className="poster-document-panel">
         {(
           [
@@ -290,6 +315,7 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
               <input
                 className="input w-full"
                 type={key === 'phone' ? 'tel' : 'text'}
+                autoFocus={editable && key === 'name'}
                 required={key === 'name'}
                 value={form[key]}
                 onChange={(e) => setForm({ ...form, [key]: e.target.value })}
@@ -316,24 +342,15 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
           </p>
         )}
         </div>
-        {editable && <DocumentFooter>
-          <button
-            type="submit"
-            form={formId}
-            className="btn-primary btn-md"
-            disabled={save.isPending || !form.name.trim()}
-          >
-            Сохранить
-          </button>
-        </DocumentFooter>}
         </fieldset>
       </form>
-    </EditorPage>
+    </Modal>
   );
 }
 
 export function LocationsPage({ data }: { data: WarehouseLocations }) {
-  const editable = usePermissions().can('actions.warehouseSettings');
+  const permissions = usePermissions();
+  const editable = permissions.canEditSection('warehouse') && permissions.canAction('warehouseSettings');
   const { editor, openEditor, closeEditor } = useEditorRoute();
   const [search, setSearch] = usePageFilter('search');
   const [sort, setSort] = usePageFilter('sort', 'asc');
@@ -349,16 +366,7 @@ export function LocationsPage({ data }: { data: WarehouseLocations }) {
       setError(apiError(failure));
     }
   }
-  if (editor?.type === 'location') {
-    const location = data.locations.find((item) => item.id === editor.id);
-    if (editor.id && !location)
-      return (
-        <MissingDirectoryItem onClose={closeEditor} title="Склад недоступен">
-          <p className="text-sm text-text-secondary">Склад не найден. Вернитесь к списку складов.</p>
-        </MissingDirectoryItem>
-      );
-    return <LocationForm key={editor.id ?? 'new'} location={location} onClose={closeEditor} />;
-  }
+  const location = editor?.type === 'location' && editor.id ? data.locations.find((item) => item.id === editor.id) : undefined;
   return (
     <div className="poster-directory-surface">
       <div className="poster-toolbar">
@@ -435,37 +443,53 @@ export function LocationsPage({ data }: { data: WarehouseLocations }) {
           )}
         </div>
       </details>
+      {editor?.type === 'location' && (editor.id && !location ? <Modal open onClose={closeEditor} title="Склад недоступен">
+        <p className="text-sm text-text-secondary">Склад не найден.</p>
+      </Modal> : <LocationForm key={editor.id ?? 'new'} location={location} onClose={closeEditor} />)}
     </div>
   );
 }
 function LocationForm({ location, onClose }: { location?: WarehouseLocation; onClose: () => void }) {
-  const editable = usePermissions().can('actions.warehouseSettings');
+  const permissions = usePermissions();
+  const editable = permissions.canEditSection('warehouse') && permissions.canAction('warehouseSettings');
   const formId = useId();
   const [name, setName] = useState(location?.name ?? '');
   const [address, setAddress] = useState(location?.address ?? '');
+  const dirty = editable && (name !== (location?.name ?? '') || address !== (location?.address ?? ''));
+  const { markSaved } = useEditorDirty(dirty);
   const [error, setError] = useState('');
   const { save } = useWarehouseLocationMutations();
+  function close() {
+    if (save.isPending || dirty && !confirm('Закрыть форму и отменить изменения?')) return;
+    markSaved();
+    onClose();
+  }
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!editable || save.isPending || !name.trim()) return;
     try {
       await save.mutateAsync({ id: location?.id, name: name.trim(), address });
+      markSaved();
       onClose();
     } catch (err) {
       setError(apiError(err));
     }
   }
   return (
-    <EditorPage
+    <Modal
       open
-      onClose={onClose}
+      onClose={close}
       title={location ? editable ? 'Редактирование склада' : 'Склад' : 'Новый склад'}
+      footer={editable && <div className="flex justify-end gap-2">
+        <button type="button" className="btn-secondary btn-sm" onClick={close} disabled={save.isPending}>Отмена</button>
+        <button type="submit" form={formId} className="btn-primary btn-sm" disabled={save.isPending || !name.trim()}>Сохранить</button>
+      </div>}
     >
       <form id={formId} className="poster-form poster-form--directory poster-document--modern" onSubmit={submit}>
-        <fieldset disabled={!editable} className="min-w-0">
+        <fieldset disabled={!editable || save.isPending} className="min-w-0">
         <div className="poster-document-panel">
         <DocumentField label="Название">
-          <input className="input w-full" required value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="input w-full" required autoFocus={editable} value={name} onChange={(e) => setName(e.target.value)} />
         </DocumentField>
         <DocumentField label="Адрес">
           <textarea
@@ -480,19 +504,9 @@ function LocationForm({ location, onClose }: { location?: WarehouseLocation; onC
           </p>
         )}
         </div>
-        {editable && <DocumentFooter>
-          <button
-            type="submit"
-            form={formId}
-            className="btn-primary btn-md"
-            disabled={save.isPending || !name.trim()}
-          >
-            Сохранить
-          </button>
-        </DocumentFooter>}
         </fieldset>
       </form>
-    </EditorPage>
+    </Modal>
   );
 }
 

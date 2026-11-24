@@ -98,6 +98,8 @@ export interface StaffMember {
   id: string;
   name: string;
   phone: string;
+  login?: string | null;
+  lastLoginAt?: string | null;
   role: Role;
   isActive: boolean;
   createdAt: string;

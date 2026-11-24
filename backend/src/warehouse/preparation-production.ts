@@ -1,7 +1,7 @@
 import { BadRequestException, Body, ConflictException, Controller, Get, Injectable, Module, NotFoundException, Param, Post, Put, Query } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { createHash, randomUUID } from 'node:crypto';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
@@ -15,6 +15,7 @@ import { IngredientsService } from './ingredients.service';
 import { lockRecipeGraph, RecipeResolver, warehouseKey } from './recipe-resolution';
 import { postStockMovement } from './stock-posting';
 import { inventoryReversalBlockedReason } from './closed-inventory-period';
+import { warehouseDateRange } from './report-range';
 
 class CreatePreparationDto {
   @IsString() @IsNotEmpty() @MaxLength(120) name: string;
@@ -41,6 +42,7 @@ class PreparationCardDto extends PreparationRecipeDto {
   @IsString() @MaxLength(16) unit: string;
   @IsOptional() @IsString() @MaxLength(120) category?: string | null;
   @IsOptional() @IsString() @MaxLength(100) requestKey?: string;
+  @IsOptional() @IsIn(['preparation', 'prepared_dish']) kind?: 'preparation' | 'prepared_dish';
 }
 class ProducePreparationDto {
   @IsNumber() @Min(0.000001) quantity: number;
@@ -51,6 +53,17 @@ class ProducePreparationDto {
   @IsOptional() @IsString() @MaxLength(100) requestKey?: string;
   @IsOptional() @IsString() @MaxLength(100) batchNumber?: string;
   @IsOptional() @IsString() @MaxLength(40) expiresAt?: string;
+  @IsOptional() @IsString() @MaxLength(1000) comment?: string;
+}
+class ProductionJournalQuery {
+  @IsOptional() @IsString() @MaxLength(160) warehouseId?: string;
+  @IsOptional() @IsString() @MaxLength(160) search?: string;
+  @IsOptional() @IsString() @MaxLength(10) from?: string;
+  @IsOptional() @IsString() @MaxLength(10) to?: string;
+  @IsOptional() @IsIn(['posted', 'reversed']) status?: 'posted' | 'reversed';
+  @IsOptional() @IsIn(['asc', 'desc']) sort?: 'asc' | 'desc';
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(1000000) page?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) pageSize?: number;
 }
 class ReversePreparationDto {
   @IsString() @IsNotEmpty() @MaxLength(1000) reason: string;
@@ -97,7 +110,8 @@ export class PreparationProductionService {
       }
       totalCost = totalCost.add(rowCost); itemCosts.set(item.ingredientId, { cost: rowCost, known: rowKnown });
     }
-    return { id, updatedAt: ingredient.updatedAt.toISOString(), name: ingredient.name, category: ingredient.category, displayUnit: ingredient.displayUnit, unitType: ingredient.unitType, mode: ingredient.preparationMode,
+    return { id, updatedAt: ingredient.updatedAt.toISOString(), name: ingredient.name, category: ingredient.category, displayUnit: ingredient.displayUnit,
+      unitType: ingredient.unitType, mode: ingredient.preparationMode, kind: ingredient.kind === 'prepared_dish' ? 'prepared_dish' as const : 'preparation' as const,
       instructions: recipe?.instructions ?? '', outputQuantity: recipe ? fromBase(Number(recipe.outputAmount), outputUnit) : 1, outputUnit, totalCost: missingCosts.size || !recipe?.items.length ? null : Number(totalCost.toDecimalPlaces(2)), costKnown: !missingCosts.size && !!recipe?.items.length, missingCosts: [...missingCosts],
       items: recipe?.items.map((item) => ({ ingredientId: item.ingredientId, name: item.ingredient.name, lineCost: itemCosts.get(item.ingredientId)?.known ? Number(itemCosts.get(item.ingredientId)!.cost.toDecimalPlaces(2)) : null, costKnown: itemCosts.get(item.ingredientId)?.known ?? false, quantity: fromBase(Number(item.amount), item.unit as UnitCode), netAmount: item.netAmount == null ? null : fromBase(Number(item.netAmount), item.unit as UnitCode), lossPercent: Number(item.lossPercent), processingMethod: item.processingMethod, unit: item.unit })) ?? [] };
   }
@@ -114,6 +128,7 @@ export class PreparationProductionService {
   async saveCard(dto: PreparationCardDto, id?: string) {
     const cafeId = this.cafeId();
     if (!dto.name?.trim()) throw new BadRequestException('Укажите название полуфабриката');
+    if (dto.kind === 'prepared_dish' && dto.mode !== 'stocked') throw new BadRequestException('Для готового блюда включите складской выпуск');
     const unit = normalizeUnit(dto.unit);
     const targetId = id ?? (dto.requestKey
       ? 'preparation:' + createHash('sha256').update(cafeId + ':' + dto.requestKey).digest('hex')
@@ -127,6 +142,7 @@ export class PreparationProductionService {
         if (!existing?.isPrepared || !existing.isActive) throw new NotFoundException('Полуфабрикат не найден');
         if (dto.expectedUpdatedAt !== existing.updatedAt.toISOString()) throw new ConflictException('Полуфабрикат уже изменён. Обновите страницу перед сохранением.');
         if (existing.displayUnit !== unit) throw new BadRequestException('Единица измерения существующего полуфабриката не меняется');
+        if (dto.kind !== undefined && existing.kind !== dto.kind) throw new BadRequestException('Тип существующей складской позиции не меняется в техкарте');
         await tx.ingredient.update({ where: { id, cafeId }, data: { name: dto.name.trim(), category: dto.category?.trim() || null } });
       } else if (existing) {
         // The same create request may arrive after a response was lost. It must
@@ -135,7 +151,7 @@ export class PreparationProductionService {
         return;
       } else {
         await tx.ingredient.create({ data: { id: targetId, cafeId, name: dto.name.trim(), category: dto.category?.trim() || null,
-          unitType: unitTypeOf(unit), displayUnit: unit, kind: 'preparation', isPrepared: true, preparationMode: dto.mode ?? 'virtual' } });
+          unitType: unitTypeOf(unit), displayUnit: unit, kind: dto.kind ?? 'preparation', isPrepared: true, preparationMode: dto.mode ?? 'virtual' } });
       }
       await this.writeRecipe(tx, targetId, dto);
     });
@@ -146,7 +162,7 @@ export class PreparationProductionService {
     const ingredient = await this.prepared(tx, id);
     const recipe = await tx.preparationRecipe.findUnique({ where: { ingredientId: id }, include: { items: { include: { ingredient: true } } } });
     const amount = (quantity: number, unit: string) => new Prisma.Decimal(quantity).mul(toBase(1, normalizeUnit(unit))).toDecimalPlaces(3);
-    let matches = ingredient.name === dto.name.trim() && ingredient.category === (dto.category?.trim() || null) &&
+    let matches = ingredient.name === dto.name.trim() && ingredient.category === (dto.category?.trim() || null) && ingredient.kind === (dto.kind ?? 'preparation') &&
       ingredient.displayUnit === normalizeUnit(dto.unit) && ingredient.preparationMode === (dto.mode ?? 'virtual') &&
       recipe?.outputUnit === normalizeUnit(dto.outputUnit) && recipe.outputAmount.eq(amount(dto.outputQuantity, dto.outputUnit)) &&
       (recipe.instructions ?? '') === (dto.instructions ?? '') && recipe.items.length === dto.items.length;
@@ -169,6 +185,8 @@ export class PreparationProductionService {
     const { unit: outputUnit, amount: outputAmount } = this.amount(dto.outputQuantity, dto.outputUnit, output.unitType);
     const mode = dto.mode ?? output.preparationMode;
     if (!['virtual', 'stocked'].includes(mode)) throw new BadRequestException('Неизвестный режим заготовки');
+    if (output.kind === 'prepared_dish' && mode === 'virtual' && output.preparationMode !== 'virtual')
+      throw new BadRequestException('Для готового блюда включите складской выпуск');
     if (mode === 'virtual' && output.preparationMode !== mode) {
       const balances = await tx.warehouseStock.findMany({ where: { ingredientId: id } });
       if (!output.stock.isZero() || balances.some((balance) => !balance.stock.isZero())) throw new BadRequestException('Сначала израсходуйте или спишите остаток заготовки перед переходом в режим без остатка');
@@ -252,6 +270,7 @@ export class PreparationProductionService {
       let totalCost = new Prisma.Decimal(0);
       let costKnown = true;
       const batchId = randomUUID(), actualItems: Prisma.InputJsonValue[] = [];
+      const producedAt = new Date();
       for (const { ingredient, amount: unrounded } of grouped.values()) {
         const consumed = unrounded.toDecimalPlaces(3);
         if (consumed.lte(0)) throw new BadRequestException('Увеличьте объём партии: расход меньше точности учёта');
@@ -264,36 +283,61 @@ export class PreparationProductionService {
         actualItems.push({ ingredientId: ingredient.id, name: ingredient.name, amount: consumed.toString(), unit: ingredient.displayUnit,
           quantity: fromBase(Number(consumed), ingredient.displayUnit as UnitCode), cost: cost.toString(), costAtMoment: balance.avgCost.toString(), costKnown: balance.valuationKnown });
         await postStockMovement(tx, { ingredientId: ingredient.id, warehouse, change: consumed.negated(),
-          movement: { type: 'production', sourceType: 'production', sourceId: batchId, actorId: actor?.id, actorName: actor?.name,
+          movement: { type: 'production', sourceType: 'production', sourceId: batchId, actorId: actor?.id, actorName: actor?.name, createdAt: producedAt,
             comment: 'Производство ' + (dto.batchNumber ?? batchId) + ': сырьё для «' + output.name + '»' } });
       }
       await postStockMovement(tx, { ingredientId: id, warehouse, change: amount, cost: totalCost.div(amount), costKnown, valuation: 'average',
-        movement: { type: 'production', sourceType: 'production', sourceId: batchId, actorId: actor?.id, actorName: actor?.name,
+        movement: { type: 'production', sourceType: 'production', sourceId: batchId, actorId: actor?.id, actorName: actor?.name, createdAt: producedAt,
           comment: 'Производство ' + (dto.batchNumber ?? batchId) + ': выпуск «' + output.name + '»' } });
       const batch = await tx.preparationBatch.create({ data: { id: batchId, cafeId, warehouseId: warehouse.id, ingredientId: id, requestKey,
         plannedQuantity: planned, actualQuantity: amount, totalCost: totalCost.toDecimalPlaces(2), costKnown, items: { requestFingerprint, actual: actualItems,
           recipe: recipe.items.map((item) => ({ ingredientId: item.ingredientId, amount: item.amount.toString(), unit: item.unit, netAmount: item.netAmount?.toString() ?? null, lossPercent: item.lossPercent.toString(), processingMethod: item.processingMethod })),
           recipeInstructions: recipe.instructions, recipeOutputAmount: recipe.outputAmount.toString(), preparationRecipes: [...new Map(parts.flatMap((part) => part.preparations).map((snapshot) => [snapshot.signature, snapshot])).values()],
-          actorId: actor?.id ?? null, actorName: actor?.name ?? null }, expiresAt, batchNumber: dto.batchNumber } });
-      return this.serializeBatch(batch, output, unit);
+          actorId: actor?.id ?? null, actorName: actor?.name ?? null, ingredientName: output.name, warehouseName: warehouse.name },
+        producedAt, expiresAt, batchNumber: dto.batchNumber?.trim() || null, comment: dto.comment?.trim() || null } });
+      return this.serializeBatch(batch, output, unit, warehouse.name);
     });
   }
 
   async journal(warehouseId?: string) {
+    return (await this.readJournal({ warehouseId }, 200)).rows;
+  }
+
+  async journalPage(query: ProductionJournalQuery) {
+    return this.readJournal(query, query.pageSize ?? 50);
+  }
+
+  private async readJournal(query: ProductionJournalQuery, pageSize: number) {
     const cafeId = this.cafeId();
     return this.prisma.$transaction(async (tx) => {
-      const warehouse = warehouseId === undefined ? null : await resolveWarehouse(tx, warehouseId);
+      const warehouse = query.warehouseId === undefined ? null : await resolveWarehouse(tx, query.warehouseId);
+      const search = query.search?.trim();
+      const names = search ? await tx.ingredient.findMany({ where: { cafeId, name: { contains: search, mode: 'insensitive' } }, select: { id: true } }) : [];
+      const contains = search ? { contains: search, mode: 'insensitive' as const } : undefined;
+      const where: Prisma.PreparationBatchWhereInput = {
+        cafeId, ...(warehouse ? { warehouseId: warehouse.id } : {}),
+        producedAt: warehouseDateRange(query.from, query.to),
+        reversedAt: query.status === 'reversed' ? { not: null } : query.status === 'posted' ? null : undefined,
+        ...(contains ? { OR: [{ ingredientId: { in: names.map(({ id }) => id) } }, { batchNumber: contains }, { comment: contains }] } : {}),
+      };
+      const totalRows = await tx.preparationBatch.count({ where });
+      const page = Math.min(query.page ?? 1, Math.max(1, Math.ceil(totalRows / pageSize)));
+      const sort = query.sort ?? 'desc';
       const batches = await tx.preparationBatch.findMany({
-        where: { cafeId, ...(warehouse ? { warehouseId: warehouse.id } : {}) },
-        orderBy: [{ producedAt: 'desc' }, { id: 'desc' }], take: 200,
+        where, orderBy: [{ producedAt: sort }, { id: sort }], skip: (page - 1) * pageSize, take: pageSize,
       });
-      const ingredients = await tx.ingredient.findMany({ where: { cafeId, id: { in: [...new Set(batches.map((batch) => batch.ingredientId))] } } });
+      const [ingredients, warehouses] = await Promise.all([
+        tx.ingredient.findMany({ where: { cafeId, id: { in: [...new Set(batches.map((batch) => batch.ingredientId))] } } }),
+        tx.warehouse.findMany({ where: { cafeId, id: { in: [...new Set(batches.map((batch) => batch.warehouseId))] } } }),
+      ]);
       const byId = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient]));
-      return batches.map((batch) => {
+      const warehouseNames = new Map(warehouses.map(({ id, name }) => [id, name]));
+      const rows = batches.map((batch) => {
         const ingredient = byId.get(batch.ingredientId);
         if (!ingredient) throw new NotFoundException('Складская позиция производственной партии не найдена');
-        return this.serializeBatch(batch, ingredient);
+        return this.serializeBatch(batch, ingredient, undefined, warehouseNames.get(batch.warehouseId));
       });
+      return { rows, totalRows, page, pageSize };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
@@ -311,7 +355,8 @@ export class PreparationProductionService {
       select: { ingredientId: true, warehouseId: true },
     });
     const reversalBlockedReason = await this.reversalBlockedReason(this.prisma, batch, movements);
-    return { ...this.serializeBatch(batch, ingredient), ...(reversalBlockedReason ? { reversalBlockedReason } : {}) };
+    const warehouse = await this.prisma.warehouse.findFirst({ where: { id: batch.warehouseId, cafeId: batch.cafeId } });
+    return { ...this.serializeBatch(batch, ingredient, undefined, warehouse?.name), ...(reversalBlockedReason ? { reversalBlockedReason } : {}) };
   }
 
   async reverse(id: string, reason: string, actor: Pick<AuthUser, 'id' | 'name'>) {
@@ -357,15 +402,19 @@ export class PreparationProductionService {
     if (date && !Number.isFinite(date.getTime())) throw new BadRequestException('Укажите действительную дату срока годности');
     return createHash('sha256').update(JSON.stringify({ id, quantity: base(dto.quantity, dto.unit), planned: base(dto.plannedQuantity ?? dto.quantity, dto.unit), warehouseId: dto.warehouseId ?? null,
       items: dto.items?.map((item) => ({ ingredientId: item.ingredientId, amount: base(item.quantity, item.unit) })).sort((a, b) => a.ingredientId.localeCompare(b.ingredientId)) ?? null,
-      batchNumber: dto.batchNumber?.trim() ?? '', expiresAt: date?.toISOString() ?? null })).digest('hex');
+      batchNumber: dto.batchNumber?.trim() ?? '', expiresAt: date?.toISOString() ?? null,
+      ...(dto.comment?.trim() ? { comment: dto.comment.trim() } : {}) })).digest('hex');
   }
-  private serializeBatch(batch: Prisma.PreparationBatchGetPayload<{}>, ingredient: Prisma.IngredientGetPayload<{}>, unit = ingredient.displayUnit as UnitCode) {
-    const savedItems = batch.items as { actual?: Record<string, unknown>[] } | null;
+  private serializeBatch(batch: Prisma.PreparationBatchGetPayload<{}>, ingredient: Prisma.IngredientGetPayload<{}>,
+    unit = ingredient.displayUnit as UnitCode, warehouseName?: string) {
+    const savedItems = batch.items as { actual?: Record<string, unknown>[]; actorName?: string | null; ingredientName?: string; warehouseName?: string } | null;
     const items = savedItems && { ...savedItems, actual: savedItems.actual?.map((item) => {
       const known = typeof item.costKnown === 'boolean' ? item.costKnown : batch.costKnown;
       return { ...item, costKnown: known, cost: known ? item.cost : null, costAtMoment: known ? item.costAtMoment : null };
     }) };
-    return { ...batch, items, batchId: batch.id, ingredientName: ingredient.name, quantity: fromBase(Number(batch.actualQuantity), unit), unit,
+    return { ...batch, items, batchId: batch.id, ingredientName: savedItems?.ingredientName ?? ingredient.name, kind: ingredient.kind,
+      warehouseName: savedItems?.warehouseName ?? warehouseName ?? null, actorName: savedItems?.actorName ?? null,
+      quantity: fromBase(Number(batch.actualQuantity), unit), unit,
       plannedQuantity: fromBase(Number(batch.plannedQuantity), unit), actualQuantity: fromBase(Number(batch.actualQuantity), unit),
       yieldDifference: fromBase(Number(batch.actualQuantity.sub(batch.plannedQuantity)), unit), totalCost: batch.costKnown ? Number(batch.totalCost) : null,
       unitCost: batch.costKnown ? Number(batch.totalCost.div(batch.actualQuantity).mul(toBase(1, unit)).toDecimalPlaces(2)) : null };
@@ -400,6 +449,8 @@ class PreparationProductionController {
   updateCard(@Param('id') id: string, @Body() dto: PreparationCardDto) { return this.preparation.saveCard(dto, id); }
   @Get('batches')
   journal(@Query('warehouseId') warehouseId?: string) { return this.preparation.journal(warehouseId); }
+  @Get('journal')
+  journalPage(@Query() query: ProductionJournalQuery) { return this.preparation.journalPage(query); }
   @Get('batches/:batchId') batch(@Param('batchId') id: string) { return this.preparation.batch(id); }
   @Post('batches/:batchId/reverse') @Roles(Role.OWNER, Role.ADMIN) @RequirePermission('actions.warehouseApprove')
   reverse(@Param('batchId') id: string, @Body() dto: ReversePreparationDto, @CurrentUser() actor: AuthUser) { return this.preparation.reverse(id, dto.reason, actor); }

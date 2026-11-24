@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import type { PositionSalary } from '../positions-api';
+import type { PositionCategoryRate, PositionSalary } from '../positions-api';
 
 export type AccountType = 'cash' | 'noncash';
 export type CategoryKind = 'income' | 'expense' | 'both';
@@ -41,6 +41,7 @@ export interface FinanceEntry {
   occurredAt: string;
   actorName?: string;
   sourceKey?: string;
+  purchaseId?: string | null;
   cashShiftId?: string;
   editable?: boolean;
   detailsEditable?: boolean;
@@ -329,6 +330,13 @@ export interface PayrollStaffRow {
   rateMonth: string | null;
   rates: PositionSalary;
   ratesByMonth?: { month: string; rates: PositionSalary }[];
+  rateIntervals: {
+    from: string; to: string; effectiveDay: string | null; position: string | null; rates: PositionSalary;
+    categoryRates: PositionCategoryRate[]; hours: number; shifts: number; days: number;
+    sales: { orderId: string; number: string; closedAt: string; kind: 'personalPercent' | 'shiftPercent';
+      openerRecorded: boolean; categoryId: string | null; categoryName?: string; base: number; percent: number; amount: number }[];
+  }[];
+  workShifts: { id: string; startedAt: string; endedAt: string }[];
   personalSales: number;
   shiftSales: number;
   hourlyPay: number;
@@ -353,13 +361,15 @@ export interface PayrollReport {
   })[];
 }
 
-export function usePayroll(period: string | { from: string; to: string }, enabled = true) {
+export type PayrollPeriod = string | { from: string; to: string };
+
+export function usePayroll(period: PayrollPeriod, enabled = true, userId?: string) {
   const params = typeof period === 'string' ? { month: period } : period;
   const valid = typeof period === 'string' ? /^\d{4}-(0[1-9]|1[0-2])$/.test(period)
     : Boolean(period.from && period.to && period.from <= period.to);
   return useQuery({
-    queryKey: [...financeKey, 'payroll', params], enabled: enabled && valid,
-    queryFn: async () => (await api.get<PayrollReport>(entrypoint + '/payroll', { params })).data,
+    queryKey: [...financeKey, 'payroll', params, userId], enabled: enabled && valid,
+    queryFn: async () => (await api.get<PayrollReport>(entrypoint + '/payroll' + (userId ? '/employees/' + userId : ''), { params })).data,
   });
 }
 

@@ -38,7 +38,7 @@ test('PostgreSQL: shift settlement posts sales and both collection legs once and
       };
     };
     async function pay(methods) {
-      const order = await db.order.create({ data: { cafeId, tableId: table.id, orderNumber: randomUUID() } });
+      const order = await db.order.create({ data: { cafeId, tableId: table.id, orderNumber: randomUUID(), status: 'paid' } });
       await db.payment.createMany({ data: methods.map(([method, amount]) =>
         ({ cafeId, orderId: order.id, cashierId: waiter.id, method, amount })) });
       await db.$transaction((tx) => recordOrderReceipts(tx, cafeId, order.id, waiter.id, new Date()));
@@ -139,11 +139,34 @@ test('PostgreSQL: shift settlement posts sales and both collection legs once and
     const nextEmployeeShift = await db.waiterShift.create({ data: { cafeId, waiterId: waiter.id } });
     await db.order.create({ data: { cafeId, tableId: table.id, orderNumber: randomUUID(), waiterId: waiter.id,
       waiterShiftId: nextEmployeeShift.id, status: 'waiting_payment' } });
+    await shifts.setting(cafeId, undefined, true);
+    assert.equal((await shifts.list(cafeId, true)).requireClosedOrders, true);
+    await assert.rejects(shifts.close(cafeId, waiter.id, { shiftId: nextShift.id, amount: 0, expectedAmount: -15 }),
+      /Закройте открытые заказы/);
+    assert.equal((await shifts.list(cafeId, true)).current.id, nextShift.id);
+    await shifts.setting(cafeId, undefined, false);
     const cashOnly = await shifts.close(cafeId, waiter.id, { shiftId: nextShift.id, amount: 0, expectedAmount: -15 });
     assert.equal(cashOnly.closingComment, null);
     assert.equal((await db.waiterShift.findUniqueOrThrow({ where: { id: nextEmployeeShift.id } })).status, 'active');
     assert.equal(staffEvents.length, 2);
     assert.deepEqual(await balance(), { cash: 0, card: 0, safe: 100 });
+
+    const arithmetic = await shifts.open(cafeId, waiter.id, 1000);
+    assert.equal((await shifts.list(cafeId, true)).current.collectionAmount, 0);
+    await pay([['cash', 4500], ['card', 250]]);
+    const refunded = await pay([['cash', 500]]);
+    await db.$transaction((tx) => reverseOrderReceipts(tx, cafeId, refunded.id, waiter.id));
+    await shifts.createOperation(cafeId, waiter, arithmetic.id, operation('income', 200));
+    await shifts.createOperation(cafeId, waiter, arithmetic.id, operation('expense', 700));
+    await shifts.createOperation(cafeId, waiter, arithmetic.id, operation('collection', 4000));
+    const { summary } = await shifts.details(cafeId, arithmetic.id);
+    assert.deepEqual(summary, {
+      openingAmount: 1000, cashSales: 5000, cashRefunds: 500, noncashSales: 250, noncashRefunds: 0,
+      deposits: 200, expenses: 700, collections: 4000, otherTransfers: 0, adjustments: 0,
+      expectedAmount: 1000, actualAmount: null, difference: null,
+    });
+    await shifts.close(cafeId, waiter.id, { shiftId: arithmetic.id, amount: 1000, expectedAmount: 1000 });
+    assert.deepEqual((await shifts.details(cafeId, arithmetic.id)).summary, { ...summary, actualAmount: 1000, difference: 0 });
   } finally {
     await db.financeEntry.deleteMany({ where: { cafeId } });
     await db.cashShift.deleteMany({ where: { cafeId } });

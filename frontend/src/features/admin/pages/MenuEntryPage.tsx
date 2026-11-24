@@ -1,11 +1,11 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { Toggle } from '@/components/Toggle';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { api, apiError } from '@/lib/api';
-import { money, taxRateLabel } from '@/lib/format';
 import { downscaleToDataUrl, resolveApiImage } from '@/lib/image';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
@@ -15,9 +15,13 @@ import { IconPlus } from '../components/icons';
 import { dishTaxInput, dishTaxValue, MenuTaxSelect } from '../../settings/MenuTaxSelect';
 import { useIngredients, type Ingredient, type Recipe, type RecipeMetadata } from './warehouse/api';
 import { EditorPage } from './warehouse/EditorPage';
-import { RecipeDraftFields, recipeDraftCost, recipeDraftPayload, recipeDraftRows } from './warehouse/RecipeDraftFields';
+import { RecipeDraftFields } from './warehouse/RecipeDraftFields';
+import { recipeDraftPayload, recipeDraftRows, recipePreviewItems, validRecipeRows } from './warehouse/recipe-draft-values';
+import { RecipeCostSummary } from './warehouse/RecipeCostSummary';
+import { useRecipePreview } from './warehouse/recipe-preview-api';
 import { ModifierDraftFields, type ModifierDraft } from './warehouse/ModifierDraftFields';
 import { normalizeUnitLabel, unitLabelOptions } from './warehouse/units';
+import { useWarehousePolicy } from './warehouse/settings-api';
 
 type MenuEntry = {
   dish: Omit<AdminDish, 'variants'> & {
@@ -33,7 +37,6 @@ type VariantDraft = {
   name: string;
   price: string;
   unit: string;
-  stockIngredientId?: string | null;
 };
 
 function newVariant(): VariantDraft {
@@ -46,12 +49,13 @@ function salePrice(value: string): number | null {
   return Number(normalized);
 }
 
-export function MenuEntryPage({ id, kind, categoryId, onClose, initialTab = 'main' }: {
+export function MenuEntryPage({ id, kind, categoryId, onClose, initialTab = 'main', initialVariantId }: {
   id?: string;
   kind: 'goods' | 'recipe';
   categoryId?: string;
   onClose: () => void;
   initialTab?: 'main' | 'recipe';
+  initialVariantId?: string;
 }) {
   const [next, setNext] = useState<{ count: number; categoryId: string }>();
   const query = useQuery({
@@ -69,16 +73,17 @@ export function MenuEntryPage({ id, kind, categoryId, onClose, initialTab = 'mai
     </EditorPage>;
   }
   return <MenuEntryForm key={id ?? next?.count ?? 'new'} incoming={query.data} kind={kind}
-    categoryId={next?.categoryId ?? categoryId} onClose={onClose} initialTab={initialTab}
+    categoryId={next?.categoryId ?? categoryId} onClose={onClose} initialTab={initialTab} initialVariantId={initialVariantId}
     onCreateAnother={(selectedCategory) => setNext((current) => ({ count: (current?.count ?? 0) + 1, categoryId: selectedCategory }))} />;
 }
 
-function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCreateAnother }: {
+function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initialVariantId, onCreateAnother }: {
   incoming?: MenuEntry;
   kind: 'goods' | 'recipe';
   categoryId?: string;
   onClose: () => void;
   initialTab: 'main' | 'recipe';
+  initialVariantId?: string;
   onCreateAnother: (categoryId: string) => void;
 }) {
   // The loaded version belongs to the current draft even if the query refreshes in the background.
@@ -94,7 +99,11 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
   const canEdit = can('actions.editMenu');
   const canRecipe = can('actions.warehouseRecipes');
   const canCosts = can('actions.warehouseCosts');
-  const stock = useIngredients('', undefined, isGoods && !!dish && canCosts && can('sections.warehouse')).data;
+  const canWarehouse = can('sections.warehouse');
+  const warehousePolicy = useWarehousePolicy(canWarehouse && !isGoods && canRecipe);
+  const productionEnabled = warehousePolicy.data?.warehouseProductionEnabled || warehousePolicy.data?.productionInUse;
+  const stockQuery = useIngredients('', undefined, canWarehouse && !isGoods && canRecipe && !!productionEnabled);
+  const stock = stockQuery.data;
   const qc = useQueryClient();
   const push = useNotifications((state) => state.push);
   const [requestKey] = useState(() => crypto.randomUUID());
@@ -124,12 +133,18 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
     name: variant.name,
     price: String(Number(variant.price)),
     unit: normalizeUnitLabel(variant.unit),
-    stockIngredientId: variant.stockIngredientId,
   })));
   const [withVariants, setWithVariants] = useState(variants.length > 0);
   const activeVariants = !isGoods || withVariants ? variants : [];
+  const [costVariantKey, setCostVariantKey] = useState(initialVariantId ?? '');
+  const costVariant = activeVariants.find((variant) => variant.key === costVariantKey) ?? (isGoods ? activeVariants[0] : undefined);
   const [rows, setRows] = useState(() => recipeDraftRows(initial?.recipe.items ?? []));
   const [metadata, setMetadata] = useState<RecipeMetadata>(() => initial?.recipe.metadata ?? {});
+  const [producedStockId, setProducedStockId] = useState(() => initial?.recipe.stockIngredientId ?? '');
+  const savedStockId = initial?.recipe.stockIngredientId ?? '';
+  const producedStock = stock?.find((item) => item.id === producedStockId && item.isPrepared);
+  const canBindProducedStock = !!productionEnabled && !isGoods && canWarehouse && canRecipe
+    && (!savedStockId || !!stock?.find((item) => item.id === savedStockId && item.isPrepared));
   const [modifiers, setModifiers] = useState<ModifierDraft>(
     () => initial?.modifiers ?? { allowIngredientExclusions: false, groups: [] },
   );
@@ -138,7 +153,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoUrl, setPhotoUrl] = useState(form.imageUrl.startsWith('http') ? form.imageUrl : '');
   const submission = useRef(false);
-  const snapshot = JSON.stringify([form, tax, activeVariants, withVariants, rows, metadata, modifiers, photoUrl]);
+  const snapshot = JSON.stringify([form, tax, activeVariants, withVariants, rows, metadata, modifiers, photoUrl, producedStockId]);
   const [baseline] = useState(snapshot);
   const { markSaved } = useEditorDirty(snapshot !== baseline || pending);
   const busy = pending || photoBusy;
@@ -149,12 +164,25 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
     value: String(amount), label: amount === 1000 ? '1 ' + largeUnit : amount + ' ' + smallUnit,
   }));
   const priceBasis = weightedPriceUnits.find((unit) => unit.value === String(form.weightedPriceBase))?.label;
-  const ingredientCost = (id?: string | null) => stock?.find((item) => item.id === id);
-  const baseCost = ingredientCost(dish?.stockIngredientId);
-  const productCost = form.isWeighted
-    ? baseCost?.avgCostBase != null ? baseCost.avgCostBase * form.weightedPriceBase : null
-    : baseCost?.avgCost;
-  const recipeCost = canCosts && !isGoods ? recipeDraftCost(rows) : undefined;
+  const hasStockBinding = !isGoods && !!producedStockId;
+  const validRows = validRecipeRows(rows);
+  const previewPrice = salePrice(costVariant?.price ?? form.price);
+  const goodsBindingPending = isGoods && (!!costVariant && !costVariant.id || !withVariants && !dish?.stockIngredientId);
+  const preview = useRecipePreview(canWarehouse && !goodsBindingPending && !!form.categoryId && (dish || rows.length || hasStockBinding)
+    && (validRows || hasStockBinding || isGoods) ? {
+      dishId: dish?.id,
+      categoryId: form.categoryId,
+      prepStation: form.prepStation === (dish?.prepStation ?? '') ? undefined : form.prepStation || null,
+      variantId: costVariant?.id,
+      price: previewPrice ?? 0,
+      ...dishTaxInput(tax),
+      ...(!isGoods && producedStockId !== savedStockId ? { producedStockIngredientId: producedStockId || null } : {}),
+      weightedPriceBase: form.isWeighted ? form.weightedPriceBase : undefined,
+      metadata: !isGoods ? { outputQuantity: metadata.outputQuantity, outputUnit: metadata.outputUnit } : undefined,
+      items: !isGoods && !dish?.isSet && validRows
+        ? recipePreviewItems(rows, activeVariants.flatMap(({ id }) => id ? [id] : []), costVariant?.id ? undefined : costVariant?.key)
+        : [],
+    } : null);
 
   useLayoutEffect(() => {
     if (initialTab === 'recipe' && canRecipe && !isGoods) {
@@ -197,9 +225,9 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
       setError('Укажите название и цену больше нуля для каждого варианта. В цене допускаются два знака после запятой.');
       return;
     }
-    if (canRecipe && !isGoods && rows.some((row) => row.amount <= 0 || (row.netAmount ?? row.amount) > row.amount)) {
+    if (canRecipe && !isGoods && !validRows) {
       recipeRef.current?.scrollIntoView({ block: 'start' });
-      setError('Укажите брутто больше нуля и нетто не больше брутто.');
+      setError('Проверьте нормы техкарты. Брутто должно быть больше нуля, нетто не больше брутто, а потери от 0 до 100%.');
       return;
     }
     const typedPhotoUrl = photoUrl.trim();
@@ -229,6 +257,9 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
                 .filter(([id]) => activeVariants.some((variant) => (variant.id ?? variant.key) === id))),
             })),
             metadata,
+            ...(producedStockId !== savedStockId || (producedStock && (form.isWeighted !== dish?.isWeighted ||
+              form.weightedMeasure !== dish?.weightedMeasure || form.weightedPriceBase !== dish?.weightedPriceBase))
+              ? { producedStockIngredientId: producedStockId || null } : {}),
           },
           ...(JSON.stringify(modifiers) !== JSON.stringify(initial?.modifiers ?? { allowIngredientExclusions: false, groups: [] })
             ? { modifiers } : {}),
@@ -274,8 +305,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
   const variantCards = <div className="space-y-3">
     {activeVariants.map((variant, index) => <VariantCard key={variant.key} value={variant} index={index}
       count={activeVariants.length} disabled={!canEdit || busy} unitLocked={isGoods && !!variant.id}
-      cost={canCosts && isGoods && variant.id ? ingredientCost(variant.stockIngredientId ?? dish?.stockIngredientId)?.avgCost : undefined}
-      showCost={canCosts && isGoods} onChange={(value) => changeVariant(variant.key, value)}
+      onChange={(value) => changeVariant(variant.key, value)}
       onMove={(direction) => moveVariant(index, index + direction)}
       onDragStart={canEdit && !busy ? () => { draggedVariant.current = index; } : undefined}
       onDragEnd={() => { draggedVariant.current = null; }}
@@ -289,10 +319,17 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
 
   const priceLabel = priceBasis && form.isWeighted ? 'Цена за ' + priceBasis : 'Цена продажи';
   const priceInput = <PriceInput label={priceLabel} value={form.price} onChange={(price) => patch({ price })} />;
-  const priceMetrics = canCosts && <PriceMetrics
-    cost={isGoods ? productCost : recipeCost?.complete ? recipeCost.total : null}
-    price={!activeVariants.length && (isGoods || !form.isWeighted) ? form.price : undefined}
-    costLabel={isGoods ? 'Себестоимость по складу' : 'Себестоимость базового состава'} />;
+  const priceMetrics = canWarehouse && (canCosts || preview.data?.stockItem) && <div className="space-y-3">
+    {activeVariants.length > 0 && <div className="max-w-sm">
+      <Select ariaLabel="Вариант для расчёта себестоимости" className="h-10 w-full" value={costVariant?.key ?? ''} onChange={setCostVariantKey}
+        options={[...(!isGoods ? [{ value: '', label: 'Базовая норма' }] : []),
+          ...activeVariants.map(({ key, name }, index) => ({ value: key, label: name || `Вариант ${index + 1}` }))]} />
+    </div>}
+    {goodsBindingPending ? <p className="text-sm text-text-secondary">Складская привязка появится после сохранения.</p>
+      : <RecipeCostSummary preview={preview} showCosts={canCosts} showPriceMetrics={previewPrice != null && (!activeVariants.length || !!costVariant)}
+        showMissing={isGoods || hasStockBinding || !!dish?.isSet || !canRecipe}
+        showError={isGoods || hasStockBinding || !!dish?.isSet || !canRecipe} />}
+  </div>;
 
   return (
     <EditorPage title={title} onClose={() => !busy && onClose()} footer={
@@ -397,11 +434,11 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
                     setWithVariants(true);
                     if (!variants.length) addVariant();
                   }} />
-                {withVariants && <div className="px-4 pb-4">{variantCards}</div>}
+                {withVariants && <div className="space-y-4 px-4 pb-4">{variantCards}{priceMetrics}</div>}
               </div>
             </div>
           </FormRow> : <div className="grid gap-4">
-            {(!activeVariants.length || canCosts) && <FormRow label={activeVariants.length ? 'Расчёт себестоимости' : priceLabel}>
+            {(!activeVariants.length || priceMetrics) && <FormRow label={activeVariants.length ? 'Расчёт себестоимости' : priceLabel}>
               <div className="flex flex-wrap items-start gap-x-5 gap-y-3">
                 {!activeVariants.length && <div className="w-full min-[480px]:w-44">{priceInput}</div>}
                 {priceMetrics}
@@ -428,9 +465,21 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
         </fieldset>
 
         {!isGoods && canRecipe && <fieldset ref={recipeRef} disabled={!canEdit || busy} className="min-w-0 scroll-mt-4 space-y-5">
+          {canBindProducedStock && <ProducedStockField items={stock ?? []} value={producedStockId} onChange={setProducedStockId}
+            savedStockId={savedStockId} canProduce={can('actions.warehouseProduce')} />}
+          {!!initial?.recipe.components?.length && <section className="space-y-2 rounded-xl border border-border p-4">
+            <h3 className="font-semibold">Состав сета</h3>
+            <ul className="divide-y divide-border text-sm">
+              {initial.recipe.components.map((component) => <li key={`${component.dishId}:${component.variantId ?? ''}`} className="py-2">
+                {component.dishName} × {component.quantity}
+              </li>)}
+            </ul>
+          </section>}
+          {!hasStockBinding && !dish?.isSet && <>
           <RecipeDraftFields rows={rows} onChange={setRows} showCosts={canCosts} disabled={!canEdit || busy}
             allowCreate={canEditSection('warehouse') && can('actions.warehouseReceive')}
-            variants={activeVariants.map((variant) => ({ id: variant.id ?? variant.key, name: variant.name }))} />
+            variants={activeVariants.map((variant) => ({ id: variant.id ?? variant.key, name: variant.name }))}
+            preview={preview} previewVariant={costVariant?.key} />
           <div className="grid gap-4 rounded-xl border border-border p-4 md:grid-cols-[220px_minmax(0,1fr)]">
             <Field label="Выход готового блюда">
               <div className="flex gap-2">
@@ -448,11 +497,39 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
                 onChange={(event) => setMetadata((current) => ({ ...current, instructions: event.target.value }))} />
             </Field>
           </div>
+          </>}
           <ModifierDraftFields value={modifiers} onChange={setModifiers} />
         </fieldset>}
       </form>
     </EditorPage>
   );
+}
+
+function ProducedStockField({ items, value, onChange, savedStockId, canProduce }: {
+  items: Ingredient[];
+  value: string;
+  onChange: (id: string) => void;
+  savedStockId: string;
+  canProduce: boolean;
+}) {
+  const options = items.filter((item) => item.isPrepared && item.preparationMode === 'stocked' &&
+    (item.recipeOutputQuantity != null || item.id === savedStockId));
+  const target = (action: 'recipe' | 'produce') => ({ search: new URLSearchParams({
+    section: 'warehouse', view: 'production', editor: 'preparation', action, id: value,
+  }).toString() });
+  return <div className="space-y-3 rounded-xl border border-border p-4">
+    <Field label="Складской учёт блюда">
+      <Select ariaLabel="Складской учёт блюда" value={value} onChange={onChange} options={[
+        { value: '', label: 'Списывать ингредиенты по техкарте' },
+        ...options.map((item) => ({ value: item.id, label: item.name })),
+      ]} />
+    </Field>
+    {value && <p className="text-sm text-text-secondary">При продаже списывается готовая продукция со склада.</p>}
+    {value && value === savedStockId && <div className="flex flex-wrap gap-3">
+      <Link className="text-sm text-primary" to={target('recipe')}>Рецептура выпуска</Link>
+      {canProduce && <Link className="text-sm text-primary" to={target('produce')}>Провести производство</Link>}
+    </div>}
+  </div>;
 }
 
 function FormRow({ label, htmlFor, children }: { label: string; htmlFor?: string; children: ReactNode }) {
@@ -490,19 +567,9 @@ function PriceInput({ label, value, onChange }: {
   </div>;
 }
 
-function PriceMetrics({ cost, price, costLabel = 'Себестоимость' }: { cost?: number | null; price?: string; costLabel?: string }) {
-  const amount = price == null ? null : salePrice(price);
-  const markup = cost != null && cost > 0 && amount !== null
-    ? taxRateLabel((amount / cost - 1) * 100) : '—';
-  return <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
-    <div><dt className="text-text-muted">{costLabel}</dt><dd className="font-medium">{cost == null ? '—' : money(cost)}</dd></div>
-    {price != null && <div><dt className="text-text-muted">Наценка</dt><dd className="font-medium">{markup}</dd></div>}
-  </dl>;
-}
-
-function VariantCard({ value, index, count, disabled, unitLocked, cost, showCost, onChange, onMove, onRemove, onDragStart, onDragEnd, onDrop }: {
+function VariantCard({ value, index, count, disabled, unitLocked, onChange, onMove, onRemove, onDragStart, onDragEnd, onDrop }: {
   value: VariantDraft; index: number; count: number; disabled: boolean; unitLocked: boolean;
-  cost?: Ingredient['avgCost']; showCost: boolean; onChange: (value: Partial<VariantDraft>) => void;
+  onChange: (value: Partial<VariantDraft>) => void;
   onMove: (direction: -1 | 1) => void; onRemove: () => void;
   onDragStart?: () => void; onDragEnd: () => void; onDrop: () => void;
 }) {
@@ -534,7 +601,6 @@ function VariantCard({ value, index, count, disabled, unitLocked, cost, showCost
           disabled={disabled || unitLocked} onChange={(unit) => onChange({ unit })} options={unitLabelOptions(value.unit)} />
       </Field>
     </div>
-    {showCost && <PriceMetrics cost={cost} price={value.price} costLabel="Себестоимость по складу" />}
   </div>;
 }
 

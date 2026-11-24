@@ -4,16 +4,15 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { balanceMoney as money, balanceQuantity as qty } from './balance-format';
 import { Select } from '@/components/Select';
 import type { AdminDish } from '../../api';
-import { PROCESSING_METHODS, useIngredient, usePreparationRecipe, useRecipe } from './api';
+import { PROCESSING_METHODS, useIngredient, usePreparationRecipe, useRecipe, type IngredientDetails, type IngredientUsage, type Recipe } from './api';
 import { normalizeUnitLabel, unitLabel } from './units';
 import { QueryState } from './WarehouseUi';
 
 export function CatalogueUsage({ id, prepared }: { id: string; prepared: boolean }) {
   const query = useIngredient(id);
   const item = query.data;
-  const { can, canSection } = usePermissions();
+  const { can } = usePermissions();
   const costs = can('actions.warehouseCosts');
-  const location = useLocation();
   return (
     <CatalogueState pending={query.isPending} error={query.error} onRetry={() => void query.refetch()}>
       {item && (
@@ -36,23 +35,53 @@ export function CatalogueUsage({ id, prepared }: { id: string; prepared: boolean
               </table></div>
             </>
           )}
-          <h3 className={`${prepared ? '' : 'mt-5 '}mb-3 font-medium`}>Используется в тех. картах:</h3>
-          {item.usedInDishes.length ? (
-            <table className="poster-table poster-catalogue-detail-table w-full">
-              <thead><tr><th>Название</th></tr></thead>
-              <tbody>{item.usedInDishes.map((dish) => <tr key={dish.id}><td>
-                {canSection('menu') ? <Link className="text-primary hover:underline"
-                  to={{ pathname: location.pathname, search: new URLSearchParams({ section: 'menu', view: 'recipes', editor: 'entry', id: dish.id }).toString() }}
-                  state={{ editorFrom: location.pathname + location.search }}>
-                  {dish.name}
-                </Link> : dish.name}
-              </td></tr>)}</tbody>
-            </table>
-          ) : <p className="text-sm text-text-muted">Пока не используется в тех. картах.</p>}
+          <div className={prepared ? undefined : 'mt-5'}><IngredientUsageTable item={item} /></div>
         </>
       )}
     </CatalogueState>
   );
+}
+
+const uses: Record<IngredientUsage['kind'], string> = {
+  recipe: 'Техкарта', stock: 'Прямая продажа', variant: 'Вариант', preparation: 'Рецептура выпуска', modifier: 'Модификатор',
+};
+
+function MenuUsageLink({ id, kind, children }: { id: string; kind: 'recipe' | 'goods' | 'set' | 'preparation'; children: ReactNode }) {
+  const { canSection } = usePermissions();
+  const location = useLocation();
+  if (!canSection('menu')) return children;
+  const view = kind === 'preparation' ? 'preparations' : kind === 'goods' ? 'goods' : 'recipes';
+  const editor = kind === 'set' || kind === 'preparation' ? kind : 'entry';
+  const search = new URLSearchParams({ section: 'menu', view, editor, id });
+  return <Link className="text-primary hover:underline" to={{ pathname: location.pathname, search: search.toString() }}
+    state={{ editorFrom: location.pathname + location.search }}>{children}</Link>;
+}
+
+export function IngredientUsageTable({ item }: { item: IngredientDetails }) {
+  const rows = item.usage;
+  const title = <h3 className="mb-3 font-medium">Где используется</h3>;
+  if (!rows && item.usedInDishes?.length) return <>
+    {title}
+    <ul className="space-y-2 text-sm">{item.usedInDishes.map((dish) => <li key={dish.id}>
+      <MenuUsageLink id={dish.id} kind="recipe">{dish.name}</MenuUsageLink>
+    </li>)}</ul>
+  </>;
+  return <>
+    {title}
+    {rows?.length ? <div className="overflow-x-auto"><table className="poster-table poster-catalogue-detail-table w-full min-w-[440px]">
+      <thead><tr><th scope="col">Позиция</th><th scope="col">Использование</th><th scope="col" className="text-right">Количество</th></tr></thead>
+      <tbody>{rows.map((row) => <tr key={`${row.kind}:${row.sourceId}`}>
+        <td><MenuUsageLink id={row.targetId} kind={row.kind === 'preparation' ? 'preparation' : row.isSet ? 'set' : row.catalogKind === 'goods' ? 'goods' : 'recipe'}>
+          {row.name}</MenuUsageLink>{!row.active && <span className="ml-2 text-xs text-text-muted">Неактивно</span>}</td>
+        <td>{uses[row.kind]}{row.label && <span className="block text-xs text-text-muted">{row.label}</span>}</td>
+        <td className="whitespace-nowrap text-right tabular-nums">{row.quantity == null || !row.unit ? '—' : recipeQuantity(row.quantity, row.unit)}</td>
+      </tr>)}</tbody>
+    </table></div> : <p className="text-sm text-text-muted">Нет связанных техкарт, вариантов или модификаторов.</p>}
+  </>;
+}
+
+function recipeQuantity(amount: number, unit: string) {
+  return `${amount.toLocaleString('ru-RU', { maximumFractionDigits: 6 })} ${unit}`.trim();
 }
 
 export function DishComposition({ dish }: { dish: AdminDish }) {
@@ -68,35 +97,62 @@ export function DishComposition({ dish }: { dish: AdminDish }) {
           options={dish.variants.map((variant) => ({ value: variant.id, label: variant.name }))} />}
       </div>
       <CatalogueState pending={query.isPending} error={query.error} onRetry={() => void query.refetch()}>
-        {query.data && <div className="overflow-x-auto">
-          <table className="poster-table poster-catalogue-detail-table w-full min-w-[620px]">
-            <thead><tr><th>Продукты</th><th>Метод приготовления</th><th className="text-right">Брутто</th><th className="text-right">Нетто</th>{costs && <th className="text-right">Себестоимость</th>}</tr></thead>
-            <tbody>
-              {query.data.items.map((item) => (
-                <tr key={item.id}>
-                  <td>{item.name}<span className="text-text-muted">, {item.unit}</span></td>
-                  <td>{PROCESSING_METHODS.find((method) => method.value === item.processingMethod)?.label ?? '—'}</td>
-                  <td className="text-right whitespace-nowrap">{qty(item.amount, item.unit, item.unitType)}</td>
-                  <td className="text-right whitespace-nowrap">{qty(!variantId && item.netAmount != null ? item.netAmount : item.amount * (1 - (item.lossPercent ?? 0) / 100), item.unit, item.unitType)}</td>
-                  {costs && <td className="text-right whitespace-nowrap">{item.lineCost == null ? '—' : money(item.lineCost)}</td>}
-                </tr>
-              ))}
-              {!query.data.items.length && <tr><td colSpan={costs ? 5 : 4}>Состав пока не задан.</td></tr>}
-            </tbody>
-            {query.data.items.length > 0 && <tfoot><tr>
-              <td colSpan={4}>
-                {query.data.metadata?.outputQuantity != null
-                  ? `Выход: ${qty(query.data.metadata.outputQuantity, query.data.metadata.outputUnit ? normalizeUnitLabel(query.data.metadata.outputUnit) : '')}`
-                  : 'Итого'}
-              </td>
-              {costs && <td className="text-right whitespace-nowrap">{query.data.foodCost == null ? '—' : money(query.data.foodCost)}</td>}
-            </tr></tfoot>}
-          </table>
-          {costs && !!query.data.missingCosts?.length && <p className="mt-2 text-xs text-text-muted">Нет закупочной цены: {query.data.missingCosts.join(', ')}.</p>}
-        </div>}
+        {query.data && <DishRecipeDetails recipe={query.data} variantSelected={!!variantId} costs={costs} />}
       </CatalogueState>
     </>
   );
+}
+
+function DishRecipeDetails({ recipe, variantSelected, costs }: { recipe: Recipe; variantSelected: boolean; costs: boolean }) {
+  const { items, stockItem, components, metadata, foodCost } = recipe;
+  const hasDetails = !!stockItem || !!components?.length || !!items.length;
+  const knownCost = (cost: number | null) => cost == null ? 'Не рассчитана' : money(cost);
+  return <>
+    {stockItem ? <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+      <div><dt className="text-text-muted">Списывается при продаже</dt><dd className="font-medium">
+        {stockItem.kind === 'preparation' || stockItem.kind === 'prepared_dish'
+          ? <MenuUsageLink kind="preparation" id={stockItem.id}>{stockItem.name}</MenuUsageLink>
+          : stockItem.name}</dd></div>
+      <div><dt className="text-text-muted">Склад</dt><dd>{stockItem.warehouseName ?? 'По маршруту блюда'}</dd></div>
+      <div><dt className="text-text-muted">Количество</dt><dd>{recipeQuantity(stockItem.amount, normalizeUnitLabel(stockItem.unit))}</dd></div>
+      {costs && <div><dt className="text-text-muted">Себестоимость</dt><dd>{knownCost(foodCost)}</dd></div>}
+    </dl> : components?.length ? <div className="overflow-x-auto">
+      <table className="poster-table poster-catalogue-detail-table w-full min-w-[400px]">
+        <thead><tr><th scope="col">Блюдо в сете</th><th scope="col" className="text-right">Количество</th>
+          {costs && <th scope="col" className="text-right">Себестоимость за единицу</th>}</tr></thead>
+        <tbody>{components.map((item, index) => <tr key={`${item.dishId}:${item.variantId ?? ''}:${index}`}>
+          <td><MenuUsageLink id={item.dishId} kind="recipe">{item.dishName}</MenuUsageLink>
+            {item.variantName && <span className="ml-2 text-xs text-text-muted">{item.variantName}</span>}
+            {!item.accountingConfigured && <span className="ml-2 text-xs text-text-muted">Складской учёт не настроен</span>}</td>
+          <td className="text-right tabular-nums">{item.quantity}</td>
+          {costs && <td className="whitespace-nowrap text-right">{knownCost(item.foodCost)}</td>}
+        </tr>)}</tbody>
+        {costs && <tfoot><tr><td colSpan={2}>Итого</td><td className="whitespace-nowrap text-right">{knownCost(foodCost)}</td></tr></tfoot>}
+      </table>
+    </div> : items.length ? <div className="overflow-x-auto">
+      <table className="poster-table poster-catalogue-detail-table w-full min-w-[650px]">
+        <thead><tr><th scope="col">Продукты</th><th scope="col">Склад</th><th scope="col">Обработка</th>
+          <th scope="col" className="text-right">Брутто</th><th scope="col" className="text-right">Нетто</th>
+          {costs && <th scope="col" className="text-right">Себестоимость</th>}</tr></thead>
+        <tbody>{items.map((item) => {
+          const useSavedNet = item.netAmount != null && (!variantSelected || item.baseAmount === item.amount);
+          const net = useSavedNet ? item.netAmount! : item.amount * (1 - (item.lossPercent ?? 0) / 100);
+          return <tr key={item.id}>
+            <td>{item.name}</td><td>{item.warehouseName ?? (item.fromCommonWarehouse ? 'Основной склад' : 'По маршруту блюда')}</td>
+            <td>{PROCESSING_METHODS.find((method) => method.value === item.processingMethod)?.label ?? '—'}</td>
+            <td className="whitespace-nowrap text-right">{recipeQuantity(item.amount, item.unit)}</td>
+            <td className="whitespace-nowrap text-right">{recipeQuantity(net, item.unit)}</td>
+            {costs && <td className="whitespace-nowrap text-right">{knownCost(item.lineCost)}</td>}
+          </tr>;
+        })}</tbody>
+        {(costs || metadata?.outputQuantity != null) && <tfoot><tr><td colSpan={5}>
+          {metadata?.outputQuantity != null ? `Выход ${recipeQuantity(metadata.outputQuantity, metadata.outputUnit ? normalizeUnitLabel(metadata.outputUnit) : '')}` : 'Итого'}
+        </td>{costs && <td className="whitespace-nowrap text-right">{knownCost(foodCost)}</td>}</tr></tfoot>}
+      </table>
+    </div> : <p className="text-sm text-text-muted">Состав пока не задан.</p>}
+    {hasDetails && costs && !!recipe.missingCosts?.length && <p className="mt-2 text-xs text-text-muted">
+      Нет данных для расчёта: {recipe.missingCosts.join(', ')}.</p>}
+  </>;
 }
 
 export function PreparationComposition({ id, warehouseId }: { id: string; warehouseId?: string }) {

@@ -8,6 +8,8 @@ const { PrismaClient } = require('@prisma/client');
 const { OrdersService } = require('../src/orders/orders.service.ts');
 const { OrderRefundsService } = require('../src/orders/order-refunds.service.ts');
 const { SettingsService } = require('../src/settings/settings.service.ts');
+const { TaxesService } = require('../src/settings/taxes.service.ts');
+const { PaymentsService } = require('../src/payments/payments.service.ts');
 const { IngredientStockService } = require('../src/warehouse/ingredient-stock.service.ts');
 const { tenantPrismaMiddleware, runWithTenant } = require('../src/tenant/tenant-context.ts');
 const { normalizeWaiterOrderPermissions } = require('../src/orders/order-policy.ts');
@@ -552,6 +554,36 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
           assert.equal(quote.amount, row.salesAmount.toFixed(2));
         }
         await settings.update({ taxesEnabled: false, roundOrderTotal: false }, owner);
+      });
+
+      await t.test('discounted VAT matches the receipt and refund report after the directory rate changes', async () => {
+        await settings.update({ taxesEnabled: true }, owner);
+        const taxes = new TaxesService(db, audit);
+        const tax = await taxes.save({ name: 'VAT snapshot', type: 'vat', rate: 12 }, owner);
+        const taxable = await db.category.create({ data: { name: 'VAT category', taxId: tax.id } });
+        const dish = await db.dish.create({ data: { categoryId: taxable.id, name: 'Discounted dish', price: 140,
+          discountType: 'percent', discountValue: 20 } });
+        const order = await newOrder([{ dishId: dish.id, quantity: 1 }]);
+        assert.equal(order.discountAmount.toString(), '28');
+        assert.equal(order.finalAmount.toString(), '112');
+        await db.orderItem.updateMany({ where: { orderId: order.id }, data: { status: 'served' } });
+        await db.order.update({ where: { id: order.id }, data: { status: 'served' } });
+        const paid = await orders.markPaid(order.id, waiter, 'cash');
+        assert.equal(paid.payments[0].amount.toString(), '112');
+
+        await taxes.save({ name: 'VAT snapshot', type: 'vat', rate: 15 }, owner, tax.id);
+        const receipt = await new PaymentsService(db, orders, settings).receipt(owner, order.id);
+        assert.deepEqual(receipt.taxes.map(({ rate, salesAmount, amount }) => [String(rate), String(salesAmount), String(amount)]),
+          [['12', '112', '12']]);
+        const refunds = new OrderRefundsService(db, audit, events, new IngredientStockService());
+        const quote = await refunds.quote(owner, order.id, {});
+        assert.equal(quote.amount, '112.00');
+        await refunds.create(owner, order.id, { requestId: randomUUID(), quoteVersion: quote.version,
+          reason: 'Full VAT receipt refund', approval: { fundsReturned: true } }, true);
+        const report = (await taxes.report({})).filter(({ taxId }) => taxId === tax.id);
+        assert.deepEqual(report.map(({ kind, rate, salesAmount, amount }) => [kind, rate, String(salesAmount), String(amount)]),
+          [['nonFiscal', 12, '112', '12'], ['reversal', 12, '-112', '-12']]);
+        await settings.update({ taxesEnabled: false }, owner);
       });
 
       await t.test('waiter history pages through tied timestamps and stays scoped to the waiter and cafe', async () => {

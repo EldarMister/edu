@@ -30,6 +30,8 @@ export function useRealtimeSync() {
     };
     const invalidateSettings = () => {
       qc.invalidateQueries({ queryKey: ['settings'] });
+      qc.invalidateQueries({ queryKey: ['auth', 'me'] });
+      qc.invalidateQueries({ queryKey: ['cash-shifts'] });
       invalidateOrders();
     };
 

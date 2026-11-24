@@ -1,5 +1,5 @@
 import { useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { EditorPage } from './EditorPage';
+import { EditorPage, useEditorDirty } from './EditorPage';
 import { ItemCard } from './ItemCard';
 import { DocumentProductPicker } from './DocumentProductPicker';
 import { useEditorRoute } from './workspace-route';
@@ -26,6 +26,7 @@ import {
 } from './api';
 import { DocumentField, DocumentFooter, QueryState } from './WarehouseUi';
 import { UNIT_OPTIONS, unitLabel, unitTypeOf, unitsForType, type UnitCode } from './units';
+import { inventoryTimeDisplay, inventoryTimeIso } from './inventory-time';
 
 type PreparationAction = {
   kind: 'recipe' | 'produce';
@@ -38,12 +39,14 @@ export function PreparationModal({
   warehouse,
   onClose,
   onBatch,
+  onProduced,
 }: {
   action: PreparationAction;
   onEditItem?: () => void;
   warehouse: WarehouseLocation;
   onClose: () => void;
   onBatch?: (id: string) => void;
+  onProduced?: (id: string) => void;
 }) {
   if (action.kind === 'recipe')
     return <PreparationCardPage id={action.id} warehouseId={warehouse.id} onClose={onClose} />;
@@ -54,6 +57,7 @@ export function PreparationModal({
       warehouse={warehouse}
       onClose={onClose}
       onBatch={onBatch}
+      onProduced={onProduced}
     />
   );
 }
@@ -73,6 +77,7 @@ export function PreparationCardPage({
     name: '',
     displayUnit: 'kg',
     unitType: 'mass',
+    kind: 'preparation',
     mode: 'virtual',
     outputQuantity: 0,
     outputUnit: 'kg',
@@ -110,19 +115,21 @@ function ProductionPage({
   warehouse,
   onClose,
   onBatch,
+  onProduced,
 }: {
   id: string;
   name: string;
   warehouse: WarehouseLocation;
   onClose: () => void;
   onBatch?: (id: string) => void;
+  onProduced?: (id: string) => void;
 }) {
   const query = usePreparationRecipe(id, warehouse.id);
   return (
     <EditorPage title={`Производство · ${query.data?.name ?? name}`} onClose={onClose}>
       <QueryState pending={query.isPending} error={query.error}>
         {query.data && (
-          <BatchForm recipe={query.data} warehouse={warehouse} onClose={onClose} onBatch={onBatch} />
+          <BatchForm recipe={query.data} warehouse={warehouse} onClose={onClose} onBatch={onBatch} onProduced={onProduced} />
         )}
       </QueryState>
     </EditorPage>
@@ -163,6 +170,7 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
     policy.data?.warehouseProductionEnabled || policy.data?.productionInUse || recipe.mode === 'stocked';
   const [expectedUpdatedAt] = useState(recipe.updatedAt);
   const [name, setName] = useState(recipe.name);
+  const [kind, setKind] = useState(recipe.kind ?? 'preparation');
   const [category, setCategory] = useState(recipe.category ?? '');
   const [mode, setMode] = useState(recipe.mode ?? 'virtual');
   const [instructions, setInstructions] = useState(recipe.instructions ?? '');
@@ -246,7 +254,8 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
         expectedUpdatedAt,
         name: name.trim(),
         category: category.trim() || null,
-        unit: recipe.displayUnit,
+        unit: recipe.id ? recipe.displayUnit : outputUnit,
+        ...(!recipe.id ? { kind } : {}),
         requestKey,
         outputQuantity: Number(outputQuantity),
         outputUnit,
@@ -263,7 +272,7 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
           }),
         ),
       });
-      push({ message: 'Полуфабрикат сохранён', at: new Date().toISOString() });
+      push({ message: kind === 'prepared_dish' ? 'Готовое блюдо сохранено' : 'Полуфабрикат сохранён', at: new Date().toISOString() });
       onClose();
     } catch (err) {
       setError(apiError(err));
@@ -273,6 +282,12 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
     <>
       <form id={formId} className="poster-form poster-form--preparation" onSubmit={submit}>
         <fieldset disabled={!editable} className="space-y-4">
+          {!recipe.id && production && <DocumentField label="Тип">
+            <Select ariaLabel="Тип продукции" value={kind} onChange={(value) => {
+              setKind(value as typeof kind);
+              if (value === 'prepared_dish') setMode('stocked');
+            }} options={[{ value: 'preparation', label: 'Полуфабрикат' }, { value: 'prepared_dish', label: 'Готовое блюдо' }]} />
+          </DocumentField>}
           <DocumentField label="Название">
             <input
               aria-label="Название"
@@ -530,7 +545,7 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
                   onChange={(e) => setCategory(e.target.value)}
                 />
               </DocumentField>
-              {production && (
+              {production && kind !== 'prepared_dish' && (
                 <DocumentField label="Использование">
                   <Select
                     ariaLabel="Использование полуфабриката"
@@ -590,11 +605,13 @@ function BatchForm({
   warehouse,
   onClose,
   onBatch,
+  onProduced,
 }: {
   recipe: PreparationRecipe;
   warehouse: WarehouseLocation;
   onClose: () => void;
   onBatch?: (id: string) => void;
+  onProduced?: (id: string) => void;
 }) {
   const formId = useId();
   const { produce } = usePreparationMutations();
@@ -607,9 +624,12 @@ function BatchForm({
   const [actual, setActual] = useState<Record<string, string>>({});
   const [number, setNumber] = useState('');
   const [expires, setExpires] = useState('');
+  const [comment, setComment] = useState('');
   const [requestKey] = useState(() => crypto.randomUUID());
   const [error, setError] = useState('');
   const { openEditor } = useEditorRoute();
+  const { markSaved } = useEditorDirty(quantity !== String(recipe.outputQuantity) || unit !== recipe.outputUnit || !!planned ||
+    !!number || !!expires || !!comment || Object.keys(actual).length > 0 || produce.isPending);
   const history = useProductionBatches(recipe.id);
   const factor =
     ((Number(effectivePlanned) || 0) * (unit === 'kg' || unit === 'l' ? 1000 : 1)) /
@@ -618,6 +638,11 @@ function BatchForm({
     event.preventDefault();
     if (produce.isPending || !can('actions.warehouseProduce')) return;
     setError('');
+    const expiresAt = inventoryTimeIso(expires);
+    if (expires && !expiresAt) {
+      setError('Укажите дату и время окончания срока годности.');
+      return;
+    }
     try {
       const batch = await produce.mutateAsync({
         id: recipe.id,
@@ -627,7 +652,8 @@ function BatchForm({
         unit,
         requestKey,
         batchNumber: number.trim() || undefined,
-        expiresAt: expires ? new Date(expires).toISOString() : undefined,
+        expiresAt,
+        comment: comment.trim() || undefined,
         items: Object.keys(actual).length
           ? recipe.items.map((item) => ({
               ingredientId: item.ingredientId,
@@ -642,7 +668,9 @@ function BatchForm({
           : 'Партия готова',
         at: new Date().toISOString(),
       });
-      onClose();
+      markSaved();
+      if (onProduced) onProduced(batch.batchId);
+      else onClose();
     } catch (err) {
       setError(apiError(err));
     }
@@ -690,6 +718,10 @@ function BatchForm({
           />
         </div>
       </DocumentField>
+      <label className="block text-sm">Комментарий
+        <textarea className="input mt-1 min-h-16 w-full" maxLength={1000} value={comment}
+          onChange={(event) => setComment(event.target.value)} />
+      </label>
       <details className="rounded-xl border border-border p-3">
         <summary className="cursor-pointer text-sm font-medium">Дополнительно</summary>
         <div className="mt-3 space-y-3">
@@ -749,7 +781,7 @@ function BatchForm({
               }
             >
               <span>
-                {batch.batchNumber ?? 'Партия'} · {new Date(batch.producedAt).toLocaleString('ru-RU')}
+                {batch.batchNumber ?? 'Партия'} · {inventoryTimeDisplay(batch.producedAt)}
               </span>
               <span>{qty(batch.actualQuantity, unitLabel(batch.unit))}</span>
             </button>
@@ -833,19 +865,22 @@ export function ProductionBatchModal({ id, onClose }: { id: string; onClose: () 
             </button>
           )}
           <p className="text-sm text-text-secondary">
-            {batch.batchNumber ?? batch.id} · {new Date(batch.producedAt).toLocaleString('ru-RU')}
+            {batch.batchNumber ? `Партия № ${batch.batchNumber} · ` : ''}{inventoryTimeDisplay(batch.producedAt)}
           </p>
           <div className="grid grid-cols-2 gap-3 text-sm">
+            <p>Склад: {batch.warehouseName ?? '—'}</p>
+            <p>Сотрудник: {batch.actorName ?? '—'}</p>
             <p>План: {qty(batch.plannedQuantity, unitLabel(batch.unit))}</p>
             <p>Факт: {qty(batch.actualQuantity, unitLabel(batch.unit))}</p>
             <p>Отклонение: {qty(batch.yieldDifference, unitLabel(batch.unit))}</p>
             {can('actions.warehouseCosts') && <p>Себестоимость: {costLabel(batch.totalCost)}</p>}
           </div>
+          {batch.comment && <p className="whitespace-pre-wrap break-words text-sm">Комментарий: {batch.comment}</p>}
           {batch.expiresAt && (
-            <p className="text-sm">Годен до {new Date(batch.expiresAt).toLocaleString('ru-RU')}</p>
+            <p className="text-sm">Годен до {inventoryTimeDisplay(batch.expiresAt)}</p>
           )}
           <h4 className="font-semibold">Фактически использовано</h4>
-          {batch.items.actual.map((item) => (
+          {(batch.items?.actual ?? []).map((item) => (
             <div
               key={item.ingredientId}
               className="flex justify-between gap-2 border-t border-border py-2 text-sm"

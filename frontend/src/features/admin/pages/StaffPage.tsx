@@ -3,7 +3,7 @@ import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'rea
 import type { Role } from '@/types';
 import { useAssignableStaffPositions } from './positions-api';
 import { positionAccessSummary } from './position-permissions';
-import { parseMoney } from './finance/finance-format';
+import { financeDateTime, parseMoney } from './finance/finance-format';
 import { Link } from 'react-router-dom';
 import { Modal } from '@/components/Modal';
 import { DeleteNameField } from '../components/DeleteNameField';
@@ -108,11 +108,14 @@ function fromDateTimeLocal(value: string) {
   return value ? new Date(value).toISOString() : null;
 }
 
-export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' | 'history' | 'waiter-orders' }) {
+type StaffTab = 'directory' | 'current' | 'history' | 'waiter-orders';
+
+export function StaffPage({ initialTab = 'directory' }: { initialTab?: StaffTab }) {
   const stations = usePreparationStations().data ?? [];
   usePreparationStationUpdates();
   const stationNames = new Map(stations.map(({ id, name }) => [id, name]));
-  const [tab, setTab] = useState<'current' | 'history' | 'waiter-orders'>(initialTab);
+  const [tab, setTab] = useState<StaffTab>(initialTab);
+  const [sortNamesAscending, setSortNamesAscending] = useState(true);
   const [employeeSearch, setEmployeeSearch] = useState('');
   const [employeePosition, setEmployeePosition] = useState('');
   const [employeeStatus, setEmployeeStatus] = useState('');
@@ -134,7 +137,7 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
   const historyQ = useShiftHistory(historyFilters, tab === 'history');
   const shiftActions = useShiftHistoryActions();
   const staffQ = useStaff('', '');
-  const reportEmployees = useReportEmployees(tab !== 'current');
+  const reportEmployees = useReportEmployees(tab === 'history' || tab === 'waiter-orders');
   const currentShiftLoading = reportQ.isFetching || staffQ.isFetching;
   const { remove } = useStaffMutations();
   const push = useNotifications((s) => s.push);
@@ -159,9 +162,14 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
       return (!employeePosition || (member && positionKey(member) === employeePosition))
         && (!employeeStatus || member?.isActive === (employeeStatus === 'active'))
         && (!employeeTerm || name.toLocaleLowerCase('ru').includes(employeeTerm)
+          || member?.login?.toLocaleLowerCase('ru').includes(employeeTerm)
           || (looksLikePhone && (member?.phone ?? '').replace(/[^\d]/g, '').includes(employeePhone)));
     })
     .sort((a, b) => Number(b.role === 'WAITER') - Number(a.role === 'WAITER') || a.name.localeCompare(b.name, 'ru'));
+  const directory = rows.flatMap(({ id }) => {
+    const member = memberById.get(id);
+    return member ? [member] : [];
+  }).sort((a, b) => (sortNamesAscending ? 1 : -1) * a.name.localeCompare(b.name, 'ru'));
   const editorMember = staffEditor?.id ? memberById.get(staffEditor.id) : undefined;
 
   useEffect(() => {
@@ -270,10 +278,23 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
     return <StaffEditor key={staffEditor.id ?? 'new'} member={editorMember ?? null} onClose={closeEditor} />;
   }
 
+  function directoryActions(member: StaffMember) {
+    if (!canEditMember(member)) return null;
+    return <div className="flex items-center justify-end gap-1">
+      <IconBtn title={tr('Редактировать')} onClick={() => openEditor({ type: 'employee', id: member.id })}>
+        <IconEdit className="h-4 w-4" />
+      </IconBtn>
+      {member.id !== currentUser?.id && <IconBtn title={tr('Удалить')} danger
+        onClick={() => setPendingDelete({ id: member.id, name: member.name, confirmation: '' })}>
+        <IconTrash className="h-4 w-4" />
+      </IconBtn>}
+    </div>;
+  }
+
   return (
     <div className="space-y-3">
       {tab !== 'waiter-orders' && <div className="flex flex-wrap items-start justify-between gap-3">
-        {tab === 'current' && <>
+        {(tab === 'current' || tab === 'directory') && <>
           <WorkspaceHeaderCount count={staffQ.data || reportQ.data ? rows.length : undefined} />
           <div className="flex flex-wrap items-center gap-2">
             <WorkspaceSearch label="Поиск сотрудников" placeholder="Поиск сотрудников" value={employeeSearch}
@@ -336,6 +357,9 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
       </div>}
 
       <div className="no-scrollbar flex items-center gap-5 overflow-x-auto border-b border-border">
+        <TabButton active={tab === 'directory'} onClick={() => setTab('directory')}>
+          Сотрудники
+        </TabButton>
         <TabButton active={tab === 'current'} onClick={() => setTab('current')}>
           Текущая смена
         </TabButton>
@@ -356,6 +380,51 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
 
       {tab === 'waiter-orders' ? (
         <WaiterOrdersReport staff={reportEmployees.data ?? staffQ.data ?? []} staffLoading={reportEmployees.isLoading && staffQ.isLoading} />
+      ) : tab === 'directory' ? (
+        <section aria-label="Сотрудники" className="overflow-hidden rounded-xl border border-border bg-white">
+          {staffQ.isError && <p role="alert" className="px-4 py-3 text-sm text-danger">
+            {apiError(staffQ.error)} <button type="button" className="underline" onClick={() => void staffQ.refetch()}>Повторить</button>
+          </p>}
+          {staffQ.isPending ? <WorkspacePending /> : directory.length === 0 ? (
+            <p className="py-12 text-center text-text-muted">Сотрудники не найдены</p>
+          ) : <>
+            <table className="hidden w-full text-sm sm:table">
+              <thead className="border-b border-border bg-background/40 text-left text-xs text-text-muted">
+                <tr>
+                  <th className="px-3 py-3 font-medium" aria-sort={sortNamesAscending ? 'ascending' : 'descending'}>
+                    <button type="button" onClick={() => setSortNamesAscending(!sortNamesAscending)}>
+                      Имя <span aria-hidden="true">{sortNamesAscending ? '↑' : '↓'}</span>
+                    </button>
+                  </th>
+                  {['Телефон', 'Логин', 'Должность', 'Последний вход', 'Статус', 'Действия'].map((label) =>
+                    <th key={label} scope="col" className="px-3 py-3 font-medium">{label}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {directory.map((member) => <tr key={member.id} className="border-b border-border last:border-b-0">
+                  <td className="px-3 py-3 font-medium">{member.name}</td>
+                  <td className="whitespace-nowrap px-3 py-3">{member.phone || '—'}</td>
+                  <td className="px-3 py-3">{member.login || '—'}</td>
+                  <td className="px-3 py-3">{positionLabel(member)}</td>
+                  <td className="px-3 py-3">{financeDateTime(member.lastLoginAt)}</td>
+                  <td className="px-3 py-3">{member.isActive ? 'Активен' : 'Неактивен'}</td>
+                  <td className="px-3 py-3">{directoryActions(member)}</td>
+                </tr>)}
+              </tbody>
+            </table>
+            <ul className="divide-y divide-border sm:hidden">
+              {directory.map((member) => <li key={member.id} className="flex items-start justify-between gap-3 p-3 text-sm">
+                <div className="min-w-0 space-y-1">
+                  <div className="break-words font-medium">{member.name}</div>
+                  <div className="text-text-secondary">{positionLabel(member)} · {member.isActive ? 'Активен' : 'Неактивен'}</div>
+                  <div>{member.phone || '—'}{member.login ? ' · ' + member.login : ''}</div>
+                  <div className="text-xs text-text-muted">Последний вход {financeDateTime(member.lastLoginAt)}</div>
+                </div>
+                {directoryActions(member)}
+              </li>)}
+            </ul>
+          </>}
+        </section>
       ) : tab === 'current' ? (
         <div className="overflow-hidden rounded-xl border border-border bg-white">
         {staffQ.isError && <p role="alert" className="px-4 py-2.5 text-sm text-danger">Список сотрудников не обновился. {apiError(staffQ.error)}</p>}
@@ -1102,7 +1171,7 @@ function StaffEditor({
       open
       onClose={close}
       title={isEdit ? 'Карточка сотрудника' : 'Добавление сотрудника'}
-      panelClassName="max-w-3xl"
+      panelClassName="max-w-xl"
       footer={
         <div className="flex flex-wrap justify-end gap-2">
           <button type="button" className="btn-secondary btn-md" disabled={pending} onClick={close}>Отмена</button>

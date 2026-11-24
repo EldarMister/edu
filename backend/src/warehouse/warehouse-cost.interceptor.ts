@@ -5,10 +5,11 @@ import { hasPermission, resolvePermissions } from '../common/permissions';
 
 const costFields = new Set(['recipeTotalCost', 'recipeUnitCost', 'avgCost', 'avgCostBase', 'costAtMoment', 'stockValue', 'foodCost', 'totalCost',
   'lineCost', 'cost', 'margin', 'marginAmount', 'marginPercent', 'foodCostPercent', 'directCost', 'ingredientCost', 'packagingCost',
+  'compositionFoodCost', 'productionCost', 'profit', 'markupPercent', 'taxAmount',
   'netRevenue', 'actualCost', 'grossMargin',
   'valuationAdjustment', 'totalValuationAdjustment',
   'openingAvgCost', 'openingValue', 'closingAvgCost', 'closingValue',
-  'unitCost', 'varianceValue', 'value', 'total', 'sourceTotal', 'ingredientWriteOffTotal', 'purchasesTotal', 'lossesTotal', 'lastPurchasePrice']);
+  'unitCost', 'varianceValue', 'value', 'total', 'sourceTotal', 'ingredientWriteOffTotal', 'purchasesTotal', 'lossesTotal', 'lastPurchasePrice', 'retailValue']);
 
 export function redactWarehouseCosts(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactWarehouseCosts);

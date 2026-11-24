@@ -55,11 +55,15 @@ export interface StockDocumentDetails extends StockDocument {
     rows: Array<{
       ingredientId: string;
       lastCountAt: string | null;
+      lastCountId?: string | null;
       openingQuantity: number;
       incomingQuantity: number;
       consumptionQuantity: number;
       writeoffQuantity: number;
       otherQuantity: number;
+      movementCount?: number;
+      movements?: { id: string; sourceType: string; sourceId: string | null; createdAt: string;
+        actorName: string | null; comment: string | null; change: number; bucket: string }[];
     }>;
   };
 }
@@ -97,11 +101,11 @@ export function useStockDocument(id: string) {
   });
 }
 
-export function useInventoryContext(id: string) {
+export function useInventoryContext(id: string, ingredientId?: string) {
   return useQuery({
-    queryKey: [...DOCUMENTS_KEY, 'detail', id, 'inventory-context'],
+    queryKey: [...DOCUMENTS_KEY, 'detail', id, 'inventory-context', ingredientId],
     queryFn: async () => (await api.get<StockDocumentDetails>(`${BASE_URL}/${encodeURIComponent(id)}`, {
-      params: { includeInventoryContext: true },
+      params: { includeInventoryContext: true, inventoryIngredientId: ingredientId },
     })).data,
     staleTime: 0,
   });

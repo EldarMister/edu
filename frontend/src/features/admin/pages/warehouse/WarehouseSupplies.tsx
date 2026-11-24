@@ -15,6 +15,7 @@ import { QueryState } from './WarehouseUi';
 import { visibleWarehouseColumns, WarehouseColumnSettings } from './WarehouseColumnSettings';
 import { WarehouseMultiFilter, warehouseMultiFilterValues } from './WarehouseMultiFilter';
 import { usePageFilters } from './workspace-route';
+import { purchasePaymentLabels } from './purchase-settlement-api';
 import './warehouse-supplies.css';
 
 const supplyColumns = {
@@ -22,13 +23,19 @@ const supplyColumns = {
   date: { label: 'Дата', width: 14 },
   supplier: { label: 'Поставщик', width: 13 },
   warehouse: { label: 'Склад', width: 11 },
+  fundingAccounts: { label: 'Счёт', width: 12 },
   products: { label: 'Товары', width: 16 },
   note: { label: 'Комментарий', width: 12 },
   status: { label: 'Статус', width: 11 },
   totalAmount: { label: 'Сумма', width: 9 },
+  paymentStatus: { label: 'Оплата', width: 12 },
+  paidAmount: { label: 'Оплачено', width: 9 },
+  debtAmount: { label: 'Задолженность', width: 11 },
 };
 type SupplyColumn = keyof typeof supplyColumns;
-const defaultColumns = Object.keys(supplyColumns) as SupplyColumn[];
+const allColumns = Object.keys(supplyColumns) as SupplyColumn[];
+const defaultColumns: SupplyColumn[] = ['number', 'date', 'supplier', 'warehouse', 'fundingAccounts', 'products', 'note', 'status', 'totalAmount', 'paymentStatus', 'debtAmount'];
+const moneyColumns: SupplyColumn[] = ['totalAmount', 'paidAmount', 'debtAmount'];
 const supplyPageSize = 25;
 const states = [
   { value: '', label: 'Все статусы' },
@@ -36,6 +43,7 @@ const states = [
   { value: 'completed', label: 'Проведённые' },
   { value: 'cancelled', label: 'Отменённые' },
 ];
+const paymentStates = [{ value: '', label: 'Любая оплата' }, ...Object.entries(purchasePaymentLabels).map(([value, label]) => ({ value, label }))];
 
 function purchaseStatus(status: string) {
   return status === 'draft' ? 'Черновик' : status === 'completed' ? 'Проведена' : 'Отменена';
@@ -53,26 +61,30 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
   onCreate: () => void;
 }) {
   const permissions = usePermissions();
-  const canEdit = permissions.canAction('warehouseReceive') && permissions.canAction('warehouseCosts');
+  const canEdit = permissions.canEditSection('warehouse') && permissions.canAction('warehouseReceive') && permissions.canAction('warehouseCosts');
   const canExport = permissions.canAction('warehouseCosts') && permissions.canAction('exportReports');
+  const canViewAccounts = permissions.canSection('finance');
+  const allowedColumns = canViewAccounts ? allColumns : allColumns.filter((key) => key !== 'fundingAccounts');
+  const resetColumns = canViewAccounts ? defaultColumns : defaultColumns.filter((key) => key !== 'fundingAccounts');
   const [conditions, update] = usePageFilters({
-    supplySearch: '', supplyStatus: '', supplySupplier: '', supplyCategories: '', supplyOrder: 'desc',
+    supplySearch: '', supplyStatus: '', supplyPayment: '', supplySupplier: '', supplyCategories: '', supplyOrder: 'desc',
     supplyExpanded: '', supplyColumns: '', supplyPage: '1', warehouse: '',
     supplyPeriod: 'all', supplyFrom: '', supplyTo: '',
   });
-  const { supplySearch: search, supplyStatus: status, supplySupplier: supplier, supplyCategories: categories } = conditions;
+  const { supplySearch: search, supplyStatus: status, supplyPayment: paymentStatus, supplySupplier: supplier, supplyCategories: categories } = conditions;
   const dateSort = conditions.supplyOrder === 'asc' ? 'asc' : 'desc';
   const period = useListPeriod('supply');
   const selectedSuppliers = warehouseMultiFilterValues(supplier);
   const selectedCategories = warehouseMultiFilterValues(categories);
   const [savedColumns, saveColumns] = useColumnPreference('warehouse-supplies');
-  const columns = visibleWarehouseColumns(conditions.supplyColumns || savedColumns, defaultColumns);
+  const columnSetting = conditions.supplyColumns || savedColumns;
+  const columns = columnSetting ? visibleWarehouseColumns(columnSetting, allowedColumns) : resetColumns;
   const expanded = new Set(conditions.supplyExpanded.split(',').filter(Boolean));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');
   const [statusFilterOpen, setStatusFilterOpen] = useState(false);
-  const params = { warehouseId, search, status, suppliers: selectedSuppliers, categories: selectedCategories,
+  const params = { warehouseId, search, status, paymentStatus, suppliers: selectedSuppliers, categories: selectedCategories,
     from: period.range.dateFrom, to: period.range.dateTo, dateSort } as const;
   const query = usePurchases(params);
   const suppliers = useSuppliers();
@@ -84,12 +96,18 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
     ...(query.data ?? []).map((purchase) => purchase.supplier)]);
   const categoryOptions = optionsFor([...selectedCategories, ...(ingredients.data ?? []).map((item) => item.category)]);
   const rows = query.data ?? [];
-  const total = rows.reduce((sum, purchase) => sum + purchase.totalAmount, 0);
+  const totals = {
+    totalAmount: rows.reduce((sum, purchase) => sum + Math.round(purchase.totalAmount * 100), 0) / 100,
+    paidAmount: rows.reduce((sum, purchase) => sum + Math.round((purchase.paidAmount ?? 0) * 100), 0) / 100,
+    debtAmount: rows.reduce((sum, purchase) => sum + Math.round((purchase.debtAmount ?? 0) * 100), 0) / 100,
+  };
+  const incomplete = rows.some(({ paymentStatus }) => paymentStatus === 'untracked');
+  const hasRecordedSettlement = rows.some(({ paidAmount }) => paidAmount != null);
   const pages = Math.max(1, Math.ceil(rows.length / supplyPageSize));
   const page = Math.max(1, Math.min(Math.trunc(Number(conditions.supplyPage)) || 1, pages));
   const offset = (page - 1) * supplyPageSize;
   const visible = rows.slice(offset, offset + supplyPageSize);
-  const hasFilters = Boolean(search || status || warehouseId || supplier || categories || period.active);
+  const hasFilters = Boolean(search || status || paymentStatus || warehouseId || supplier || categories || period.active);
   const actionWidth = 15;
   const totalWidth = actionWidth + columns.reduce((width, column) => width + supplyColumns[column].width, 0);
 
@@ -111,12 +129,25 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
       }
       case 'supplier': return <span title={purchase.supplier}>{purchase.supplier}</span>;
       case 'warehouse': return warehouseNames.get(purchase.warehouseId ?? defaultWarehouseId) ?? '—';
+      case 'fundingAccounts': {
+        const accountNames = purchase.fundingAccounts?.join(', ');
+        return <span title={accountNames}>{accountNames || '—'}</span>;
+      }
       case 'products': return <span title={purchase.productNames?.join(', ')}>{purchase.productNames?.join(', ') || '—'}
         {purchase.itemsCount > (purchase.productNames?.length ?? 0) && purchase.productNames?.length ? '…' : ''}</span>;
       case 'note': return <span title={purchase.note ?? undefined}>{purchase.note || '—'}</span>;
       case 'status': return <span className="document-status" data-status={purchase.status}>{purchaseStatus(purchase.status)}</span>;
       case 'totalAmount': return balanceMoney(purchase.totalAmount);
+      case 'paymentStatus': return purchase.paymentStatus ? purchasePaymentLabels[purchase.paymentStatus] : '—';
+      case 'paidAmount': return purchase.paidAmount == null ? '—' : balanceMoney(purchase.paidAmount);
+      case 'debtAmount': return purchase.debtAmount == null ? '—' : balanceMoney(purchase.debtAmount);
     }
+  }
+  function footer(key: SupplyColumn) {
+    if (key === 'totalAmount') return balanceMoney(totals.totalAmount);
+    if (key !== 'paidAmount' && key !== 'debtAmount') return null;
+    if (!hasRecordedSettlement) return '—';
+    return <>{balanceMoney(totals[key])}{incomplete && <span className="block text-xs font-normal text-text-muted">По сверенным</span>}</>;
   }
   function rowActions(purchase: Purchase) {
     return <div className="supply-actions">
@@ -152,10 +183,10 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
           onClick={() => void exportWorkbook()}>{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
         {period.filter}
       </WorkspaceHeaderActions>
-      {settingsOpen && <WarehouseColumnSettings columns={columns} defaults={defaultColumns}
+      {settingsOpen && <WarehouseColumnSettings columns={columns} defaults={allowedColumns} resetColumns={resetColumns}
         label={(key) => supplyColumns[key].label} onClose={() => setSettingsOpen(false)}
         onApply={(selected) => {
-          const value = selected.join(',') === defaultColumns.join(',') ? '' : selected.join(',');
+          const value = selected.join(',') === resetColumns.join(',') ? '' : selected.join(',');
           saveColumns(value);
           update({ supplyColumns: value });
           setSettingsOpen(false);
@@ -168,6 +199,8 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
         {filters}
         <WarehouseMultiFilter label="Категории" value={categories} options={categoryOptions}
           onChange={(value) => filter({ supplyCategories: value })} />
+        <Select ariaLabel="Оплата поставки" value={paymentStatus} options={paymentStates}
+          onChange={(value) => filter({ supplyPayment: value })} />
         {statusFilterOpen || status ? <div className="flex items-center gap-2">
           <Select ariaLabel="Статус поставки" value={status} options={states} onChange={(value) => filter({ supplyStatus: value })} />
           <button type="button" className="text-text-muted" aria-label="Убрать фильтр статуса" onClick={() => {
@@ -178,7 +211,7 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
           options={[{ value: 'status', label: 'Статус' }]} onChange={() => setStatusFilterOpen(true)} />}
         {hasFilters && <button type="button" className="text-sm text-primary" onClick={() => {
           setStatusFilterOpen(false);
-          filter({ supplySearch: '', supplyStatus: '', supplySupplier: '', supplyCategories: '', warehouse: '',
+          filter({ supplySearch: '', supplyStatus: '', supplyPayment: '', supplySupplier: '', supplyCategories: '', warehouse: '',
             supplyPeriod: 'all', supplyFrom: '', supplyTo: '' });
         }}>Сбросить всё</button>}
         {canEdit && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
@@ -198,7 +231,7 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
               <thead><tr>
                 {columns.map((key) => <th scope="col" key={key}
                   aria-sort={key === 'date' ? (dateSort === 'desc' ? 'descending' : 'ascending') : undefined}
-                  className={key === 'totalAmount' ? 'text-right' : undefined}>
+                  className={moneyColumns.includes(key) ? 'text-right' : undefined}>
                   {key === 'date' ? <button type="button" onClick={() => filter({ supplyOrder: dateSort === 'desc' ? 'asc' : 'desc' })}>
                     Дата <span aria-hidden="true">{dateSort === 'desc' ? '↓' : '↑'}</span>
                   </button> : supplyColumns[key].label}
@@ -207,7 +240,7 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
               </tr></thead>
               <tbody>{visible.map((purchase) => <Fragment key={purchase.id}>
                 <tr data-expanded={expanded.has(purchase.id)}>
-                  {columns.map((key) => <td key={key} className={key === 'totalAmount' ? 'whitespace-nowrap text-right font-medium tabular-nums' : 'truncate'}>
+                  {columns.map((key) => <td key={key} className={moneyColumns.includes(key) ? 'whitespace-nowrap text-right font-medium tabular-nums' : 'truncate'}>
                     {cell(purchase, key)}
                   </td>)}
                   <td>{rowActions(purchase)}</td>
@@ -216,10 +249,10 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
                   <td colSpan={columns.length + 1}><SupplyLines id={purchase.id} number={purchase.number} /></td>
                 </tr>}
               </Fragment>)}</tbody>
-              {columns.includes('totalAmount') && <tfoot><tr>
+              {columns.some((key) => moneyColumns.includes(key)) && <tfoot><tr>
                 <th scope="row">Итого</th>
                 {columns.slice(1).map((key) => <td key={key} className="text-right font-medium tabular-nums">
-                  {key === 'totalAmount' ? balanceMoney(total) : null}
+                  {footer(key)}
                 </td>)}
                 <td />
               </tr></tfoot>}
@@ -238,9 +271,9 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
               {rowActions(purchase)}
               {expanded.has(purchase.id) && <SupplyLines id={purchase.id} number={purchase.number} />}
             </article>)}
-            {columns.includes('totalAmount') && <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
-              <strong>Итого</strong><strong>{balanceMoney(total)}</strong>
-            </div>}
+            {columns.filter((key) => moneyColumns.includes(key)).map((key) => <div key={key} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+              <strong>{key === 'totalAmount' ? 'Итого' : supplyColumns[key].label}</strong><strong>{footer(key)}</strong>
+            </div>)}
           </div>
           {pages > 1 && <nav aria-label="Страницы поставок" className="report-pagination print:hidden">
             <span>{offset + 1}–{Math.min(offset + supplyPageSize, rows.length)} из {rows.length}</span>

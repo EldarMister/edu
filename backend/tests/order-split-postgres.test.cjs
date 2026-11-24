@@ -148,8 +148,10 @@ test('PostgreSQL: split checks keep quantities, stock, pricing, table occupation
         assert.equal(split.sourceOrder.finalAmount.add(split.newOrder.finalAmount).toString(), '32');
         assert.equal(split.sourceOrder.roundingAmount.add(split.newOrder.roundingAmount).toString(), '0.1');
         const selection = { id: { in: [original.id, split.newOrder.id] } };
+        assert.equal(split.newOrder.payrollOpenedById, waiter.id);
+        await db.order.update({ where: { id: original.id }, data: { payrollOpenedById: null } });
         await orders.transferTable(table.id, otherWaiter.id, waiter);
-        assert.equal(await db.order.count({ where: { ...selection, waiterId: otherWaiter.id } }), 2);
+        assert.equal(await db.order.count({ where: { ...selection, waiterId: otherWaiter.id, payrollOpenedById: waiter.id } }), 2);
         await orders.moveTable(table.id, target.id, otherWaiter);
         assert.equal(await db.order.count({ where: { ...selection, tableId: target.id } }), 2);
         assert.equal((await db.table.findUniqueOrThrow({ where: { id: table.id } })).status, 'free');

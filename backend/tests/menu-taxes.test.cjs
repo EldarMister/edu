@@ -28,6 +28,7 @@ test('VAT and turnover are calculated from prices after discounts and rounded on
 test('at payment a dish inherits the category rate, overrides it or can be exempt', async () => {
   let snapshot;
   const foreign = { ...vat, cafeId: 'another' };
+  const zero = { ...vat, id: 'zero', name: 'НДС 0%', rate: decimal(0) };
   const tx = {
     settings: { findFirst: async ({ where }) => {
       assert.deepEqual(where, { cafeId: 'cafe' });
@@ -37,6 +38,8 @@ test('at payment a dish inherits the category rate, overrides it or can be exemp
       { id: 'inherit', taxExempt: false, tax: null, category: { tax: vat } },
       { id: 'override', taxExempt: false, tax: turnover, category: { tax: vat } },
       { id: 'exempt', taxExempt: true, tax: null, category: { tax: vat } },
+      { id: 'zero', taxExempt: false, tax: zero, category: { tax: vat } },
+      { id: 'unassigned', taxExempt: false, tax: null, category: { tax: null } },
       { id: 'foreign', taxExempt: false, tax: foreign, category: { tax: null } },
     ] },
     orderTax: { createMany: async ({ data }) => { snapshot = data; } },
@@ -44,10 +47,12 @@ test('at payment a dish inherits the category rate, overrides it or can be exemp
   const soldAt = new Date('2026-11-21T12:00:00+06:00');
   const item = (dishId, finalPrice, status = 'served') => ({ id: 'line-' + dishId, dishId, finalPrice: decimal(finalPrice), status });
   await recordOrderTaxes(tx, 'order', 'cafe',
-    [item('inherit', '112'), item('override', '50'), item('exempt', '70'), item('foreign', '20'), item('inherit', '20', 'cancelled')],
+    [item('inherit', '112'), item('override', '50'), item('exempt', '70'), item('zero', '20'),
+      item('unassigned', '20'), item('foreign', '20'), item('inherit', '20', 'cancelled')],
     soldAt);
-  assert.deepEqual(snapshot.map((row) => [row.taxId, String(row.amount), row.soldAt]), [['vat', '12', soldAt], ['turnover', '2', soldAt]]);
-  assert.deepEqual(snapshot.map((row) => row.itemAmounts), [{ 'line-inherit': '112' }, { 'line-override': '50' }]);
+  assert.deepEqual(snapshot.map((row) => [row.taxId, String(row.amount), row.soldAt]),
+    [['vat', '12', soldAt], ['turnover', '2', soldAt], ['zero', '0', soldAt]]);
+  assert.deepEqual(snapshot.map((row) => row.itemAmounts), [{ 'line-inherit': '112' }, { 'line-override': '50' }, { 'line-zero': '20' }]);
   await recordOrderTaxes(tx, 'order', 'cafe',
     [item('exempt', '0.67'), item('inherit', '0.67'), item('override', '0.67')], soldAt, decimal(2));
   assert.deepEqual(snapshot.map((row) => [row.taxId, String(row.salesAmount), row.itemAmounts]), [

@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma, type CashShift } from '@prisma/client';
 
 export async function assertDrawerBalance(
@@ -18,6 +18,24 @@ export async function assertDrawerBalance(
 export async function lockFinance(tx: Prisma.TransactionClient, cafeId: string) {
   // Serialize finance writers without waiting on foreign keys from new payments.
   await tx.$queryRaw`SELECT id FROM cafes WHERE id = ${cafeId} FOR NO KEY UPDATE`;
+}
+
+export async function findAccount(db: Prisma.TransactionClient, cafeId: string, id: string) {
+  const account = await db.financeAccount.findFirst({ where: { cafeId, id, archivedAt: null } });
+  if (!account) throw new NotFoundException('Счёт не найден');
+  return account;
+}
+
+export async function shiftForEntry(db: Prisma.TransactionClient, cafeId: string, accountId: string, at: Date, amount?: Prisma.Decimal) {
+  const shift = await db.cashShift.findFirst({ where: { cafeId, accountId }, orderBy: [{ openedAt: 'desc' }, { id: 'desc' }] });
+  if (!shift) return undefined;
+  if (shift.closedAt) {
+    if (at < shift.closedAt) throw new ConflictException('Дата операции относится к закрытому кассовому периоду');
+    return undefined;
+  }
+  if (at < shift.openedAt) throw new BadRequestException('Дата операции раньше открытия кассовой смены');
+  if (amount) await assertDrawerBalance(db, shift, amount);
+  return shift.id;
 }
 
 export async function ensureFinanceAccounts(tx: Prisma.TransactionClient, cafeId: string) {

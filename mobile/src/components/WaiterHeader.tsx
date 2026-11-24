@@ -5,10 +5,12 @@ import { BrandLogo } from './BrandLogo';
 import { ConnectionStatus } from './ConnectionStatus';
 import { colors, fontSize } from '@/theme';
 import { useCurrentShift } from '@/services/api/waiter';
+import { useWorkShiftRequired } from './WorkShiftControls';
 
 /** Верхняя шапка официанта: логотип слева, соединение + статус смены справа. */
 export function WaiterHeader() {
-  const shiftQ = useCurrentShift();
+  const required = useWorkShiftRequired();
+  const shiftQ = useCurrentShift(required);
   const active = shiftQ.data?.status === 'active';
   return (
     <AppHeader
@@ -16,9 +18,9 @@ export function WaiterHeader() {
       right={
         <>
           <ConnectionStatus />
-          <Text style={[styles.shift, { color: active ? colors.success : colors.textMuted }]}>
+          {required ? <Text style={[styles.shift, { color: active ? colors.success : colors.textMuted }]}>
             {active ? 'Смена активна' : 'Нет смены'}
-          </Text>
+          </Text> : null}
         </>
       }
     />

@@ -19,17 +19,18 @@ const quantity = { key: 'quantity', label: 'Кол-во' };
 const revenue = cash('revenue', 'Выручка');
 const profit = cash('profit', 'Прибыль');
 const cost = cash('cost', 'Себестоимость');
+const foodCost = { key: 'foodCost', label: 'Фудкост', format: 'percent' } as const;
 const avgCheck = cash('avgCheck', 'Средний чек');
 const methods = [cash('cash', 'Наличные'), cash('card', 'Карта'), cash('qr', 'QR-код'), cash('other', 'Другие оплаты')];
 
 const columns: Record<Report, Column[]> = {
   sales: [date, orders, revenue, avgCheck, cash('discount', 'Скидка')],
   products: [{ key: 'category', label: 'Категория' }, { key: 'name', label: 'Товар' }, { key: 'waiter', label: 'Официант' },
-    quantity, cash('gross', 'Валовый оборот'), cash('discount', 'Скидка'), revenue, profit],
+    quantity, cash('gross', 'Валовый оборот'), cash('discount', 'Скидка'), revenue, cost, profit, foodCost],
   staff: [{ key: 'name', label: 'Официант' }, revenue, profit, orders, avgCheck,
     { key: 'avgSeconds', label: 'Среднее время', format: 'duration' }],
   categories: [{ key: 'name', label: 'Категория' }, quantity, cost, revenue, cash('tax', 'Сумма налога'), profit,
-    { key: 'foodCost', label: 'Food cost', format: 'percent' }],
+    foodCost],
   payments: [date, orders, ...methods, cash('total', 'Всего')],
 };
 const firstColumn = { sales: 'date', products: 'name', staff: 'name', categories: 'name', payments: 'date' };
@@ -55,7 +56,7 @@ function totalFor(rows: Row[], column: Column) {
   const { key, format } = column;
   if (format === 'date' || format === 'duration' || ['name', 'category', 'waiter'].includes(key)) return null;
   if (key === 'avgCheck') return sum(rows, 'orders') ? sum(rows, 'revenue') / sum(rows, 'orders') : null;
-  if (key === 'foodCost') return rows.some((row) => row.cost == null) || !sum(rows, 'revenue')
+  if (key === 'foodCost') return rows.some((row) => row.cost == null) || sum(rows, 'revenue') <= 0
     ? null : 100 * sum(rows, 'cost') / sum(rows, 'revenue');
   return rows.some((row) => row[key] == null) ? null : sum(rows, key);
 }
@@ -80,7 +81,7 @@ export function StatisticsReport({ report, data, periodControl }: { report: Repo
   const [sort, setSort] = useState({ key: defaultSort[report], ascending: report === 'staff' });
   const [printBlocked, setPrintBlocked] = useState(false);
   const title = t(STATISTICS_NAV.find(({ key }) => key === report)?.label ?? 'Статистика');
-  const source: Row[] = report === 'categories' ? data.categories.map((row) => ({
+  const source: Row[] = report === 'categories' || report === 'products' ? data[report].map((row) => ({
     ...row, foodCost: row.cost != null && row.revenue > 0 ? 100 * row.cost / row.revenue : null,
   })) : data[report];
   const allColumns = columns[report].filter(({ key }) => {

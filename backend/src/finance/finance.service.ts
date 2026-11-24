@@ -10,7 +10,7 @@ import {
   FinanceQueryDto, FinanceTransactionDto, SalaryAccrualDto, SalaryPaymentDto,
   FinanceTransactionEditDto, FinanceTransactionMetadataDto, PayrollReportDto, SalaryAccrualEditDto, SalaryCorrectionDto,
 } from './finance.dto';
-import { assertDrawerBalance, ensureFinanceAccounts, lockFinance } from './finance-ledger';
+import { ensureFinanceAccounts, findAccount, lockFinance, shiftForEntry } from './finance-ledger';
 import { cashHandoverKey } from './cash-custody';
 import { currentPayrollMonth, payrollPeriodReport, payrollReport } from './payroll';
 import { canReverseEntry, type AccountShift } from './entry-reversal';
@@ -68,24 +68,6 @@ function grantWhere(user: AuthUser): Prisma.FinanceCategoryWhereInput {
       OR: [{ userIds: { has: user.id } }, ...(user.positionId ? [{ positionIds: { has: user.positionId } }] : [])],
     }),
   };
-}
-
-async function findAccount(db: Db, cafeId: string, id: string) {
-  const account = await db.financeAccount.findFirst({ where: { cafeId, id, archivedAt: null } });
-  if (!account) throw new NotFoundException('Счёт не найден');
-  return account;
-}
-
-async function shiftForEntry(db: Db, cafeId: string, accountId: string, at: Date, amount?: Prisma.Decimal) {
-  const shift = await db.cashShift.findFirst({ where: { cafeId, accountId }, orderBy: [{ openedAt: 'desc' }, { id: 'desc' }] });
-  if (!shift) return undefined;
-  if (shift.closedAt) {
-    if (at < shift.closedAt) throw new ConflictException('Дата операции относится к закрытому кассовому периоду');
-    return undefined;
-  }
-  if (at < shift.openedAt) throw new BadRequestException('Дата операции раньше открытия кассовой смены');
-  if (amount) await assertDrawerBalance(db, shift, amount);
-  return shift.id;
 }
 
 const manualKey = 'manual:';
@@ -419,13 +401,13 @@ export class FinanceService {
           cafeId,
           AND: [
             { OR: [{ accountId: id }, { counterpartyAccountId: id }] },
-            { OR: [{ cashShiftId: { not: null } }, { kind: { in: ['sale', 'refund', 'salary'] } },
+            { OR: [{ cashShiftId: { not: null } }, { purchaseId: { not: null } }, { kind: { in: ['sale', 'refund', 'salary'] } },
               { sourceKey: { startsWith: cashHandoverKey } }] },
           ],
         },
         select: { id: true },
       });
-      if (linkedShift || linkedEntry) throw new ConflictException('Счёт связан с кассовой сменой, продажами или выплатой зарплаты');
+      if (linkedShift || linkedEntry) throw new ConflictException('Счёт связан с кассовой сменой, продажами, закупками или выплатой зарплаты');
       return db.financeAccount.update({ where: { cafeId, id }, data: { archivedAt: new Date() } });
     });
     if (result) await this.audit.log({
@@ -779,15 +761,15 @@ export class FinanceService {
     });
   }
 
-  async payroll(user: AuthUser, { month, from, to }: PayrollReportDto) {
+  async payroll(user: AuthUser, { month, from, to }: PayrollReportDto, employeeId?: string) {
     const cafeId = financeTenant(user, false);
     if (month && !from && !to) {
-      return this.prisma.$transaction((db) => payrollReport(db, cafeId, month), {
+      return this.prisma.$transaction((db) => payrollReport(db, cafeId, month, employeeId, undefined, !!employeeId), {
         isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
       });
     }
     if (month || !from || !to) throw new BadRequestException('Выберите период зарплаты');
-    return this.prisma.$transaction((db) => payrollPeriodReport(db, cafeId, from, to), {
+    return this.prisma.$transaction((db) => payrollPeriodReport(db, cafeId, from, to, employeeId, !!employeeId), {
       isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
       timeout: 15_000,
     });
@@ -815,11 +797,14 @@ export class FinanceService {
       if (row.available <= 0 || row.available !== input.amount) {
         throw new ConflictException('Сумма к начислению изменилась. Пересчитайте зарплату');
       }
-      const { rates, hours, shifts, days, personalSales, shiftSales, rateMonth, estimate } = row;
+      const { rates, hours, shifts, days, personalSales, shiftSales, rateMonth, estimate,
+        hourlyPay, shiftPay, monthlyPay, personalCommission, shiftCommission, rateIntervals } = row;
       return db.salaryAccrual.create({ data: {
         cafeId, userId: row.userId, employeeName: row.name, month: input.month,
         amount: row.available, note: description, actorId: user.id, requestKey: input.requestKey,
-        calculation: { rates, hours, shifts, days, personalSales, shiftSales, rateMonth, estimate },
+        calculation: { rates, hours, shifts, days, personalSales, shiftSales, rateMonth, estimate,
+          hourlyPay, shiftPay, monthlyPay, personalCommission, shiftCommission,
+          rateIntervals: rateIntervals.map(({ sales, ...interval }) => interval) },
       } });
     });
   }

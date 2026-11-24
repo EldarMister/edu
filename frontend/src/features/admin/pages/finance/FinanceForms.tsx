@@ -1,9 +1,11 @@
 import { useId, useRef, useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { Modal } from '@/components/Modal';
 import { DatePicker } from '@/components/DatePicker';
 import { Select } from '@/components/Select';
 import { apiError } from '@/lib/api';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
+import { usePermissions } from '@/hooks/usePermissions';
 import { EditorPage } from '../warehouse/EditorPage';
 import { DocumentField } from '../warehouse/WarehouseUi';
 import {
@@ -318,6 +320,7 @@ export function TransactionDetail({ entry, accounts, categories, owner, onClose 
   onClose: () => void;
 }) {
   const { editTransaction } = useFinanceWrites();
+  const permissions = usePermissions();
   const [categoryId, setCategory] = useState(entry.categoryId ?? '');
   const [note, setNote] = useState(entry.note ?? '');
   const [showReverse, setShowReverse] = useState(false);
@@ -337,6 +340,10 @@ export function TransactionDetail({ entry, accounts, categories, owner, onClose 
     </> : <DocumentField label="Счёт"><p>{primary}</p></DocumentField>}
     <DocumentField label="Сумма"><p className="font-semibold tabular-nums">{financeMoney(entry.amount)}</p></DocumentField>
     <DocumentField label="Сотрудник"><p>{entry.actorName || '—'}</p></DocumentField>
+    {entry.purchaseId && permissions.canSection('warehouse') && permissions.canAction('warehouseCosts') &&
+      <DocumentField label="Основание"><Link className="text-primary" to={{ search: new URLSearchParams({
+        section: 'warehouse', view: 'supplies', editor: 'purchase', id: entry.purchaseId,
+      }).toString() }}>Открыть поставку</Link></DocumentField>}
     {entry.editable ? <>
       <TransactionChoice label="Категория" value={categoryId} onChange={setCategory} options={eligible}
         placeholder="Выберите категорию" optional={owner} />

@@ -25,9 +25,12 @@ export interface StaffPosition {
   employees: number;
   salary?: PositionSalary;
   salaryEffectiveMonth?: string | null;
+  salaryEffectiveDay?: string | null;
+  categoryRates?: PositionCategoryRate[];
 }
 
 export type PositionSalary = { hourly: number; perShift: number; monthly: number; personalPercent: number; shiftPercent: number };
+export type PositionCategoryRate = { categoryId: string; personalPercent?: number; shiftPercent?: number };
 
 const key = ['admin', 'positions'];
 const endpoint = '/admin/positions';
@@ -45,8 +48,8 @@ export function useStaffPositionMutations() {
     ]);
   }
   const save = useMutation({
-    mutationFn: ({ id, name, role, permissions, salary }: Pick<StaffPosition, 'name' | 'role' | 'permissions' | 'salary'> & { id?: string }) =>
-      id ? api.patch(endpoint + '/' + id, { name, permissions, salary }) : api.post(endpoint, { name, role, permissions, salary }),
+    mutationFn: ({ id, role, ...data }: Pick<StaffPosition, 'name' | 'role' | 'permissions' | 'salary' | 'salaryEffectiveDay' | 'categoryRates'> & { id?: string }) =>
+      id ? api.patch(endpoint + '/' + id, data) : api.post(endpoint, { ...data, role }),
     onSuccess: refresh,
   });
   const remove = useMutation({

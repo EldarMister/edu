@@ -3,12 +3,16 @@ import { PurchaseStatus } from '@prisma/client';
 import { Transform } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsIn, IsNotEmpty, IsOptional, IsString, MaxLength, isISO8601 } from 'class-validator';
 import { warehouseDateRange } from './report-range';
+import type { PurchasePaymentStatus } from './purchase-settlement';
 
 const repeated = ({ value }: { value: unknown }) => typeof value === 'string' ? [value] : value;
 
 export class PurchaseListQuery {
   @IsOptional() @IsIn(Object.values(PurchaseStatus))
   status?: PurchaseStatus;
+
+  @IsOptional() @IsIn(['untracked', 'unpaid', 'partly_paid', 'paid', 'overpaid'])
+  paymentStatus?: PurchasePaymentStatus;
 
   @IsOptional() @IsString() @MaxLength(160)
   search?: string;

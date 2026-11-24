@@ -258,7 +258,7 @@ export function AdminApp() {
   const menuView = (MENU_NAV.some((item) => item.key === route.get('view')) ? route.get('view') : 'goods') as MenuView;
   const financeView = financeNav.find(({ key }) => key === route.get('view'))?.key ?? financeNav[0]?.key;
   const staffView = personnelNav.find(({ key }) => key === route.get('view'))?.key ?? 'employees';
-  const staffTab = route.get('view') === 'waiter-report' ? 'waiter-orders' : 'current';
+  const staffTab = route.get('view') === 'waiter-report' ? 'waiter-orders' : 'directory';
   const settingsTab = SETTINGS_NAV.find(({ key }) => key === route.get('view')) ?? SETTINGS_NAV[0];
   const settingsView = settingsTab.key;
   const posterWorkspace = ['menu', 'warehouse', 'finance', 'staff'].includes(section) || (section === 'settings' && settingsView === 'taxes');
@@ -492,7 +492,9 @@ export function AdminApp() {
                     warehouseViewInUse(item.key, warehouseLocations.data?.locations.length ?? 0, warehousePolicy.data),
                 )
               : s.key === 'menu'
-                ? MENU_NAV.filter((item) => !['preparations', 'ingredients', 'ingredientCategories'].includes(item.key) || canSection('warehouse'))
+                ? MENU_NAV.filter((item) => item.key === 'foodCost'
+                  ? canSection('warehouse') && can('actions.warehouseCosts')
+                  : !['preparations', 'ingredients', 'ingredientCategories'].includes(item.key) || canSection('warehouse'))
                 : s.key === 'stats' ? STATISTICS_NAV
                   : s.key === 'finance' ? financeNav : s.key === 'staff' ? personnelNav
                     : s.key === 'requests' ? requestsNav : s.key === 'settings' ? SETTINGS_NAV : [];

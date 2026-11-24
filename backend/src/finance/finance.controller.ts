@@ -112,6 +112,11 @@ export class FinanceController {
     return this.finance.payroll(actor, query);
   }
 
+  @Get('payroll/employees/:userId')
+  payrollEmployee(@CurrentUser() actor: AuthUser, @Param('userId') userId: string, @Query() query: PayrollReportDto) {
+    return this.finance.payroll(actor, query, userId);
+  }
+
   @Post('payroll/calculated')
   accrueCalculated(@CurrentUser() actor: AuthUser, @Body() input: SalaryAccrualDto) {
     return this.finance.accrueCalculated(actor, input);

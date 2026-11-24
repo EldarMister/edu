@@ -49,6 +49,11 @@ export class AuthService {
     await assertCafeActive(this.prisma, user.cafeId);
 
     const tokens = await this.issueTokens(user.id, user.role);
+    const now = new Date();
+    await this.prisma.user.updateMany({
+      where: { id: user.id, OR: [{ lastLoginAt: null }, { lastLoginAt: { lt: now } }] },
+      data: { lastLoginAt: now },
+    });
     return {
       ...tokens,
       user: {

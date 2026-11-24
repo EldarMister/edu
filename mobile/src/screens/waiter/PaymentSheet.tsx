@@ -1,191 +1,99 @@
-import React, { useMemo, useState } from 'react';
-import { Alert, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Button } from '@/components/ui';
+import React, { useRef, useState } from 'react';
+import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BottomSheet } from '@/components/BottomSheet';
-import { colors, fontSize, radius, spacing } from '@/theme';
+import { CashShiftEditor } from '@/components/CashShiftPanel';
+import { Button, Field, Loading, PillTabs } from '@/components/ui';
+import { apiError } from '@/lib/api';
+import { useCashAccess, useCashShiftState } from '@/services/api/cash-shifts';
 import { usePay } from '@/services/api/waiter';
 import { usePublicSettings, resolveQrSrc } from '@/services/api/settings';
-import { apiError } from '@/lib/api';
+import { colors, fontSize, radius, spacing } from '@/theme';
 import { displayOrderNumber, hallSuffix, money } from '@/utils/format';
+import { mixedTender, moneyCents, tenderLabels, type Tender } from '@/utils/payment';
 import type { Order, PaymentMethod } from '@/types';
 
-type Tab = 'qr' | 'cash' | 'mixed';
+const paymentOrder: Tender[] = ['qr', 'cash', 'card'];
 
-export function PaymentSheet({
-  order,
-  visible,
-  onClose,
-  onPaid,
-}: {
-  order: Order | null;
-  visible: boolean;
-  onClose: () => void;
-  onPaid: () => void;
-}) {
+export function PaymentSheet({ order, onClose, onPaid }: { order: Order; onClose: () => void; onPaid: () => void }) {
   const settings = usePublicSettings();
   const pay = usePay();
-  const [tab, setTab] = useState<Tab>('qr');
-  const [cashInput, setCashInput] = useState('');
-  const [qrInput, setQrInput] = useState('');
-
-  const enabled = settings.data?.paymentMethods ?? (['qr', 'cash'] as PaymentMethod[]);
-  const mixedAvailable = enabled.includes('qr') && enabled.includes('cash');
-  const tabs = useMemo(() => {
-    const list: { key: Tab; label: string }[] = [];
-    if (enabled.includes('qr')) list.push({ key: 'qr', label: 'QR-код' });
-    if (enabled.includes('cash')) list.push({ key: 'cash', label: 'Наличные' });
-    if (mixedAvailable) list.push({ key: 'mixed', label: 'Смешанная' });
-    return list;
-  }, [enabled, mixedAvailable]);
-
-  if (!order) return null;
+  const { canManage } = useCashAccess();
+  const totalInCents = moneyCents(order.finalAmount);
   const total = Number(order.finalAmount);
+  const cashShift = useCashShiftState(canManage && total > 0);
+  const [openingCashShift, setOpeningCashShift] = useState(false);
+  const [selected, setSelected] = useState<PaymentMethod>();
+  const [drafts, setDrafts] = useState({ cash: '', card: '', qr: '' });
+  const submitting = useRef(false);
   const qrSrc = resolveQrSrc(settings.data?.qrImageUrl);
-  const onError = (e: unknown) => Alert.alert('Ошибка', apiError(e));
+  const available = paymentOrder.filter((method) => settings.data?.paymentMethods.includes(method) && (method !== 'qr' || qrSrc));
+  const options: { key: PaymentMethod; label: string }[] = available.map((method) => ({ key: method, label: tenderLabels[method] }));
+  if (available.length >= 2 && total > 0) options.push({ key: 'mixed', label: 'Смешанная' });
+  const method = options.some(({ key }) => key === selected) ? selected : options[0]?.key;
+  const mixed = method === 'mixed' && totalInCents != null ? mixedTender(totalInCents, drafts, available) : null;
+  const cashShiftRequired = cashShift.data?.enabled && !cashShift.data.current;
 
-  const submit = () => {
-    if (tab === 'mixed') {
-      const cash = Number(cashInput) || 0;
-      const qr = Number(qrInput) || 0;
-      if (Math.round(cash + qr) !== Math.round(total)) {
-        Alert.alert('Проверьте суммы', `Сумма наличных и QR должна быть равна ${money(total)}`);
-        return;
-      }
-      pay.mutate(
-        { orderId: order.id, method: 'mixed', cashAmount: cash, qrAmount: qr },
-        { onSuccess: onPaid, onError },
-      );
-    } else {
-      pay.mutate({ orderId: order.id, method: tab }, { onSuccess: onPaid, onError });
+  async function submit() {
+    if (submitting.current || !method || (method === 'mixed' && !mixed) || totalInCents == null) return;
+    submitting.current = true;
+    try {
+      await pay.mutateAsync({ orderId: order.id, method, expectedAmount: total,
+        cashAmount: mixed?.cashAmount, qrAmount: mixed?.qrAmount, cardAmount: mixed?.cardAmount });
+      onPaid();
+    } catch {
+      // The sheet shows the server error and keeps the entered payment amounts.
+    } finally {
+      submitting.current = false;
     }
-  };
+  }
 
-  return (
-    <BottomSheet visible={visible} onClose={onClose} title="Оплата заказа">
-      <Text style={styles.subtitle}>
-        Стол {order.table.number}
-        {hallSuffix(order.table)} · {displayOrderNumber(order.orderNumber)}
-      </Text>
-
+  if (openingCashShift) return <CashShiftEditor mode="open" current={null}
+    onClose={() => setOpeningCashShift(false)} />;
+  return <BottomSheet visible onClose={() => { if (!submitting.current) onClose(); }} title="Оплата заказа"
+    maxHeight="92%" bodyStyle={styles.body} footer={
+      cashShiftRequired ? <Button title="Открыть кассовую смену" onPress={() => setOpeningCashShift(true)} />
+        : <Button title={`Принять оплату · ${money(total)}`} onPress={() => void submit()} loading={pay.isPending}
+          disabled={!method || (canManage && total > 0 && cashShift.isPending) || (method === 'mixed' && !mixed)} />
+    }>
+    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+      <Text style={styles.subtitle}>Стол {order.table.number}{hallSuffix(order.table)} · {displayOrderNumber(order.orderNumber)}</Text>
       <View style={styles.totalRow}>
         <Text style={styles.totalLabel}>К оплате</Text>
         <Text style={styles.totalValue}>{money(total)}</Text>
       </View>
-
-      <Text style={styles.sectionLabel}>Способ оплаты</Text>
-      <View style={styles.tabs}>
-        {tabs.map((t) => {
-          const active = tab === t.key;
-          return (
-            <Pressable
-              key={t.key}
-              onPress={() => setTab(t.key)}
-              style={[styles.tab, active && styles.tabActive]}
-            >
-              <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      <View style={styles.content}>
-        {tab === 'qr' ? (
-          <View style={styles.qrBox}>
-            <Text style={styles.qrHint}>Покажите QR-код клиенту для оплаты</Text>
-            {qrSrc ? (
-              <Image source={{ uri: qrSrc }} style={styles.qrImage} resizeMode="contain" />
-            ) : (
-              <Text style={styles.qrMissing}>QR-код не настроен</Text>
-            )}
-          </View>
-        ) : tab === 'cash' ? (
-          <View style={styles.qrBox}>
-            <Text style={styles.qrHint}>Примите оплату наличными — {money(total)}</Text>
-          </View>
-        ) : (
-          <View style={{ gap: spacing.md }}>
-            <View style={styles.mixedRow}>
-              <Text style={styles.mixedLabel}>Наличные</Text>
-              <TextInput
-                value={cashInput}
-                onChangeText={setCashInput}
-                keyboardType="numeric"
-                placeholder="0"
-                placeholderTextColor={colors.textLight}
-                style={styles.mixedInput}
-              />
-            </View>
-            <View style={styles.mixedRow}>
-              <Text style={styles.mixedLabel}>QR</Text>
-              <TextInput
-                value={qrInput}
-                onChangeText={setQrInput}
-                keyboardType="numeric"
-                placeholder="0"
-                placeholderTextColor={colors.textLight}
-                style={styles.mixedInput}
-              />
-            </View>
-          </View>
-        )}
-      </View>
-
-      <View style={{ paddingTop: spacing.md, paddingBottom: spacing.sm }}>
-        <Button
-          title={`Оплачено · ${money(total)}`}
-          onPress={submit}
-          loading={pay.isPending}
-        />
-      </View>
-    </BottomSheet>
-  );
+      {Number(order.discountAmount) > 0 && <Text style={styles.subtitle}>Скидка · {money(order.discountAmount)}</Text>}
+      {settings.isPending ? <Loading text="Загрузка способов оплаты…" /> : null}
+      {settings.error ? <Text accessibilityRole="alert" style={styles.error}>{apiError(settings.error)}</Text> : null}
+      {!settings.isPending && !settings.error && !options.length ? <Text style={styles.subtitle}>Нет настроенных способов оплаты</Text> : null}
+      {cashShiftRequired ? <Text style={styles.subtitle}>Откройте кассовую смену перед оплатой.</Text> : null}
+      {options.length > 0 && !cashShiftRequired ? <PillTabs items={options} value={method ?? ''}
+        onChange={(value) => { if (!submitting.current) setSelected(value as PaymentMethod); }} /> : null}
+      {!cashShiftRequired && method === 'mixed' ? <View style={styles.content}>
+        {available.map((value) => <Field key={value} label={tenderLabels[value]} value={drafts[value]} keyboardType="decimal-pad"
+          placeholder="0,00" maxLength={13} editable={!pay.isPending}
+          onChangeText={(input) => setDrafts((current) => ({ ...current, [value]: input }))} />)}
+        {mixed?.change ? <Text>Сдача · {money(mixed.change)}</Text> : null}
+        {!mixed ? <Text style={styles.subtitle}>Укажите суммы по двум или более способам. Итог оплаты должен совпадать с чеком.</Text> : null}
+      </View> : null}
+      {!cashShiftRequired && qrSrc && (method === 'qr' || (mixed?.qrAmount ?? 0) > 0) ? <View style={styles.qrBox}>
+        <Text style={styles.subtitle}>Покажите QR-код гостю</Text>
+        <Image source={{ uri: qrSrc }} accessibilityLabel="QR-код для оплаты" style={styles.qrImage} resizeMode="contain" />
+      </View> : null}
+      {!cashShiftRequired && method === 'card' ? <Text style={styles.subtitle}>Подтвердите оплату на банковском терминале.</Text> : null}
+      {pay.error ? <Text accessibilityRole="alert" style={styles.error}>{apiError(pay.error)}</Text> : null}
+    </ScrollView>
+  </BottomSheet>;
 }
 
 const styles = StyleSheet.create({
-  subtitle: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: 4 },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: spacing.md },
+  body: { flexShrink: 1 },
+  content: { gap: spacing.md },
+  subtitle: { fontSize: fontSize.sm, color: colors.textMuted },
+  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   totalLabel: { fontSize: fontSize.md, color: colors.textSecondary },
   totalValue: { fontSize: fontSize.xxl, fontWeight: '700', color: colors.textPrimary },
-  sectionLabel: { fontSize: fontSize.base, color: colors.textSecondary, marginTop: spacing.lg, marginBottom: spacing.sm },
-  tabs: { flexDirection: 'row', gap: spacing.sm },
-  tab: {
-    flex: 1,
-    height: 48,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tabActive: { borderColor: colors.primary, backgroundColor: colors.primaryFaint },
-  tabText: { fontSize: fontSize.base, fontWeight: '600', color: colors.textSecondary },
-  tabTextActive: { color: colors.primary },
-  content: { marginTop: spacing.md },
-  qrBox: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.lg,
-    alignItems: 'center',
-    gap: spacing.md,
-    minHeight: 160,
-    justifyContent: 'center',
-  },
-  qrHint: { fontSize: fontSize.base, color: colors.textSecondary, textAlign: 'center' },
-  qrImage: { width: 200, height: 200 },
-  qrMissing: { fontSize: fontSize.sm, color: colors.textLight },
-  mixedRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
-  mixedLabel: { fontSize: fontSize.base, color: colors.textSecondary },
-  mixedInput: {
-    width: 140,
-    height: 44,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    paddingHorizontal: 14,
-    fontSize: fontSize.base,
-    color: colors.textPrimary,
-    textAlign: 'right',
-  },
+  qrBox: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
+    padding: spacing.md, alignItems: 'center', gap: spacing.sm },
+  qrImage: { width: 180, height: 180 },
+  error: { color: colors.danger },
 });

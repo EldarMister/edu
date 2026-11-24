@@ -159,6 +159,26 @@ export class MenuEntryService {
           throw new BadRequestException('Остаток изменяется через поставки и инвентаризацию');
         if (dto.catalogKind === 'goods' && dto.recipe?.items.length)
           throw new BadRequestException('У товара нет состава техкарты');
+        const producedStockId = dto.recipe?.producedStockIngredientId;
+        let producedStockBinding: { stockIngredientId: string | null; stockAmount: number } | undefined;
+        if (producedStockId !== undefined) {
+          if (dto.catalogKind !== 'recipe') throw new BadRequestException('Складской выпуск относится к техкарте блюда');
+          if (producedStockId === null) {
+            if (previous?.stockIngredientId && !await tx.ingredient.findFirst({ where: { id: previous.stockIngredientId, isPrepared: true } }))
+              throw new BadRequestException('Существующую складскую привязку можно изменить только в её настройках');
+            producedStockBinding = { stockIngredientId: null, stockAmount: 1 };
+          } else {
+            const output = await tx.ingredient.findFirst({ where: { id: producedStockId, isActive: true, isPrepared: true, preparationMode: 'stocked',
+              preparationRecipe: { is: { items: { some: {} } } } } });
+            if (!output) throw new BadRequestException('Выберите позицию с рецептурой и учётом производства партиями');
+            const weighted = dto.dish.isWeighted ?? previous?.isWeighted ?? false;
+            const measure = dto.dish.weightedMeasure ?? previous?.weightedMeasure ?? 'weight';
+            if (weighted && output.unitType !== (measure === 'volume' ? 'volume' : 'mass'))
+              throw new BadRequestException('Единица измерения складского выпуска не соответствует весовой продаже');
+            producedStockBinding = { stockIngredientId: output.id, stockAmount: weighted
+              ? dto.dish.weightedPriceBase ?? previous?.weightedPriceBase ?? 100 : toBase(1, normalizeUnit(output.displayUnit)) };
+          }
+        }
         const price = variants?.length
           ? Math.min(...variants.map((variant) => variant.price))
           : (dto.dish.price ?? Number(previous?.price ?? 0));
@@ -181,6 +201,7 @@ export class MenuEntryService {
           discountType: dto.dish.discountType,
           discountValue: dto.dish.discountValue,
           cookingTime: dto.dish.cookingTime,
+          ...producedStockBinding,
         };
         if (previous) await this.recipes.archiveRevision(tx, previous.id);
         let dish = previous

@@ -4,6 +4,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button, Card, EmptyState, Loading } from '@/components/ui';
 import { OrderBadge } from '@/components/StatusBadge';
 import { AppHeader } from '@/components/AppHeader';
+import { CashShiftPanel } from '@/components/CashShiftPanel';
+import { EndWorkShiftControl, useWorkShiftRequired } from '@/components/WorkShiftControls';
 import { BrandLogo } from '@/components/BrandLogo';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { colors, fontSize, spacing } from '@/theme';
@@ -19,6 +21,7 @@ export function StaffScreen() {
   const orders = useActiveOrders();
   const logout = useAuth((s) => s.logout);
   const user = useAuth((s) => s.user);
+  const workShiftRequired = useWorkShiftRequired();
 
   const onLogout = () => {
     void unregisterPushDevice();
@@ -47,6 +50,8 @@ export function StaffScreen() {
           <Button title="Выйти" variant="secondary" danger onPress={onLogout} />
         </Card>
 
+        {workShiftRequired ? <Card><EndWorkShiftControl /></Card> : null}
+        <CashShiftPanel />
         <Text style={styles.sectionTitle}>Активные заказы</Text>
 
         {orders.isLoading ? (

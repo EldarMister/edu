@@ -15,6 +15,11 @@ const { WarehouseLocationsService } = require('../src/warehouse/locations.servic
 const { WarehouseReportsService } = require('../src/warehouse/reports.service.ts');
 const { OrdersService } = require('../src/orders/orders.service.ts');
 const { SettingsService } = require('../src/settings/settings.service.ts');
+const { MenuEntryService } = require('../src/admin/menu-entry.service.ts');
+const { MenuModifiersService } = require('../src/warehouse/menu-modifiers.ts');
+const { warehouseDay } = require('../src/warehouse/report-range.ts');
+const { redactWarehouseCosts } = require('../src/warehouse/warehouse-cost.interceptor.ts');
+const XLSX = require('xlsx');
 
 const url = process.env.ORDER_FEATURE_TEST_DATABASE_URL;
 if (url && (!['localhost', '127.0.0.1'].includes(new URL(url).hostname) || !new URL(url).pathname.includes('test'))) {
@@ -61,7 +66,7 @@ async function inventoryScenario(verify) {
       const movements = (sourceId) => db.stockMovement.findMany({ where: { sourceId }, orderBy: { id: 'asc' } });
 
       await verify({
-        db, owner, main, bar, events, ingredient, line, receive, count, repost, balance, recipe, preparation,
+        db, owner, main, bar, events, ingredients, ingredient, line, receive, count, repost, balance, recipe, preparation,
         produce, movements, documents, production, processing, purchases, reports,
       });
     });
@@ -90,6 +95,75 @@ async function inventoryScenario(verify) {
 function verifyInventory(label, verify) {
   test('PostgreSQL: ' + label, { skip: !url }, () => inventoryScenario(verify));
 }
+
+verifyInventory('links a menu recipe to a stocked batch, sells its output once, and reconciles the reports and count', async ({
+  db, owner, main, bar, events, ingredients, ingredient, count, balance, movements, documents, production, purchases, reports,
+}) => {
+  const raw = await ingredient('Flour for stocked recipe', { unit: 'kg' });
+  const receiveKg = (purchasePrice) => purchases.create({ supplier: 'Mill', warehouseId: main.id, complete: true,
+    items: [{ ingredientId: raw.id, quantity: 1, unit: 'kg', purchasePrice }] });
+  await receiveKg(100);
+  await receiveKg(200);
+  assert.deepEqual(await balance(raw), [2, 150, true]);
+  const output = await production.saveCard({ name: 'Stocked bread', kind: 'prepared_dish', unit: 'pcs', mode: 'stocked',
+    outputQuantity: 10, outputUnit: 'pcs', items: [{ ingredientId: raw.id, quantity: 2, unit: 'kg' }] });
+  const make = { warehouseId: main.id, quantity: 10, unit: 'pcs', requestKey: randomUUID(), comment: 'Day batch' };
+  const batch = await production.produce(output.id, make, owner);
+  assert.equal((await production.produce(output.id, make, owner)).id, batch.id);
+  await assert.rejects(production.produce(output.id, { ...make, comment: 'Another batch' }, owner), /Ключ повторной операции/);
+  const journalDay = warehouseDay(batch.producedAt);
+  const journal = await production.journalPage({ warehouseId: main.id, search: 'day batch', from: journalDay, to: journalDay, status: 'posted', pageSize: 1 });
+  assert.deepEqual(journal.rows.map(({ ingredientName, warehouseName, comment, actorName, actualQuantity, totalCost }) =>
+    [ingredientName, warehouseName, comment, actorName, actualQuantity, totalCost]), [[output.name, main.name, 'Day batch', owner.name, 10, 300]]);
+  assert.equal((await production.journalPage({ warehouseId: bar.id })).totalRows, 0);
+  assert.ok((await movements(batch.id)).every((movement) => +movement.createdAt === +batch.producedAt));
+
+  const category = await db.category.create({ data: { name: 'Bakery output', prepStation: 'none' } });
+  const audit = { log: async () => {} };
+  const menu = new MenuEntryService(db, new RecipesService(db), new MenuModifiersService(db), events, audit);
+  const entry = await menu.save(null, { catalogKind: 'recipe', requestKey: randomUUID(),
+    dish: { name: 'Bread portion', categoryId: category.id, price: 90, prepStation: 'none' },
+    recipe: { producedStockIngredientId: output.id, items: [{ ingredientId: raw.id, amount: 0.2, amountUnit: 'kg' }] } }, owner);
+  assert.equal(entry.dish.stockIngredientId, output.id);
+  const settings = new SettingsService(db, audit, events);
+  await settings.ensure();
+  const shift = await db.waiterShift.create({ data: { waiterId: owner.id } });
+  const hall = await db.hall.create({ data: { name: 'Sale room' } });
+  const table = await db.table.create({ data: { hallId: hall.id, number: 1 } });
+  const orders = new OrdersService(db, events, { shiftForTerminalOrder: async () => shift }, {
+    notifyRole: async () => {}, notifyUser: async () => {}, notifyWaiter: async () => {},
+  }, settings, { recalculateDishes: async () => {} }, audit, new IngredientStockService());
+  const check = await orders.create(owner, { tableId: table.id, items: [{ dishId: entry.dish.id, quantity: 3 }] });
+  if (check.status === 'ready') await orders.served(check.id, owner.id);
+  await orders.markPaid(check.id, owner, 'cash');
+  assert.deepEqual((await movements(check.id)).map(({ ingredientId, change }) => [ingredientId, Number(change)]), [[output.id, -3]]);
+  assert.equal((await balance(raw))[0], 0);
+  assert.deepEqual(await balance(output), [7, 30, true]);
+
+  const columns = 'name,stock,cost,lastPurchasePrice,retailValue,total';
+  const balancePage = await ingredients.balances({ warehouseId: main.id, columns, pageSize: 1 });
+  assert.equal(balancePage.totalRows, 2);
+  assert.equal(balancePage.stockValue, 210);
+  assert.equal(balancePage.rows[0].lastPurchasePrice, 200);
+  assert.equal(balancePage.rows[0].retailValue, null);
+  const stockQuery = { warehouseId: main.id, kinds: ['prepared_dish'], columns };
+  const preparedPage = await ingredients.balances(stockQuery);
+  assert.deepEqual(preparedPage.rows.map(({ stock, avgCost, lastPurchasePrice, retailValue, stockValue }) =>
+    [stock, avgCost, lastPurchasePrice, retailValue, stockValue]), [[7, 30, null, 630, 210]]);
+  assert.deepEqual(redactWarehouseCosts(preparedPage).rows.map(({ stock, lastPurchasePrice, retailValue, stockValue }) =>
+    [stock, lastPurchasePrice, retailValue, stockValue]), [[7, null, null, null]]);
+  const xlsx = XLSX.read(await ingredients.exportXlsx(stockQuery));
+  assert.deepEqual(XLSX.utils.sheet_to_json(xlsx.Sheets['Остатки'], { header: 1, defval: null })[1],
+    [output.name, 7, 30, null, 630, 210]);
+  const report = (await reports.report({ view: 'movement_summary', ingredientId: output.id, warehouseId: main.id })).rows[0];
+  assert.deepEqual([report.incomingQuantity, report.outgoingQuantity, report.closingQuantity, report.closingValue], [10, 3, 7, 210]);
+
+  const posted = await count(output, 6);
+  assert.deepEqual(posted.items.map(({ expected, quantity, difference, value }) => [expected, quantity, difference, value]), [[7, 6, -1, -30]]);
+  const context = (await documents.get(posted.id, true, output.id)).inventoryContext;
+  assert.deepEqual(context.rows[0].movements.map(({ sourceId, change }) => [sourceId, change]), [[check.id, -3], [batch.id, 10]]);
+  assert.equal((await balance(output))[0], 6);
+});
 
 verifyInventory('reprices a batch and two processing outputs through a warehouse transfer and a paid sale', async ({
   db, owner, main, bar, events, ingredient, line, receive, count, repost, balance, recipe, preparation,

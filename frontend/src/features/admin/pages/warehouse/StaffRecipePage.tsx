@@ -1,14 +1,19 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiError } from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
 import { Spinner } from '@/components/Spinner';
-import { EditorPage } from './EditorPage';
-import { RecipeDraftFields, recipeDraftPayload, recipeDraftRows } from './RecipeDraftFields';
+import { Select } from '@/components/Select';
+import { EditorPage, useEditorDirty } from './EditorPage';
+import { RecipeDraftFields } from './RecipeDraftFields';
+import { recipeDraftPayload, recipeDraftRows, recipePreviewItems, validRecipeRows } from './recipe-draft-values';
+import { RecipeCostSummary } from './RecipeCostSummary';
+import { useRecipePreview, type RecipePreview } from './recipe-preview-api';
 import type { ModifierDraft } from './ModifierDraftFields';
 import { PROCESSING_METHODS, type Recipe, type RecipeMetadata, qty } from './api';
 import { costLabel } from './cost-format';
+import { unitLabel } from './units';
 
 interface StaffRecipeData {
   recipe: Recipe & {
@@ -78,17 +83,32 @@ function StaffRecipeForm({
   const push = useNotifications((state) => state.push);
   const [rows, setRows] = useState(() => recipeDraftRows(recipe.items));
   const [metadata, setMetadata] = useState<RecipeMetadata>(() => recipe.metadata ?? {});
+  const [variantId, setVariantId] = useState('');
+  const variants = recipe.variants ?? [];
   const modifiers = baseline.modifiers;
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
+  const submitting = useRef(false);
+  const snapshot = JSON.stringify([rows, metadata]);
+  const [original] = useState(snapshot);
+  const { markSaved } = useEditorDirty(editable && original !== snapshot);
+  const validRows = validRecipeRows(rows);
+  const preview = useRecipePreview(!editable || validRows ? {
+    dishId: recipe.dishId,
+    variantId: variantId || undefined,
+    metadata: { outputQuantity: metadata.outputQuantity, outputUnit: metadata.outputUnit },
+    items: !recipe.stockIngredientId && !recipe.isSet && recipe.catalogKind === 'recipe'
+      ? recipePreviewItems(rows, variants.map(({ id }) => id)) : [],
+  } : null);
   async function save(event: FormEvent) {
     event.preventDefault();
-    if (!editable || pending) return;
-    if (rows.some((row) => row.amount <= 0 || (row.netAmount ?? row.amount) > row.amount)) {
-      setError('Укажите брутто больше нуля. Нетто не должно превышать брутто.');
+    if (!editable || submitting.current) return;
+    if (!validRows) {
+      setError('Проверьте нормы техкарты. Брутто должно быть больше нуля, нетто не больше брутто, а потери от 0 до 100%.');
       return;
     }
     setError('');
+    submitting.current = true;
     setPending(true);
     try {
       await api.put(`/admin/warehouse/dishes/${recipe.dishId}/recipe-draft`, {
@@ -98,17 +118,19 @@ function StaffRecipeForm({
       });
       await queryClient.invalidateQueries({ queryKey: ['admin'] });
       push({ message: 'Техкарта сохранена', at: new Date().toISOString() });
+      markSaved();
       onClose();
     } catch (failure) {
       setError(apiError(failure));
     } finally {
+      submitting.current = false;
       setPending(false);
     }
   }
   return (
     <EditorPage
       title={recipe.dishName}
-      onClose={onClose}
+      onClose={() => { if (!submitting.current) onClose(); }}
       footer={
         editable ? (
           <div className="flex flex-wrap items-center gap-3">
@@ -133,12 +155,13 @@ function StaffRecipeForm({
       }
     >
       <form id="staff-recipe" className="min-w-0 w-full space-y-6" onSubmit={save}>
-        {recipe.stockItem && (
-          <p className="border-b border-border pb-4 text-sm">
-            При продаже списывается: <strong>{recipe.stockItem.name}</strong> ·{' '}
-            {qty(recipe.stockItem.amount, recipe.stockItem.unit)}
-          </p>
-        )}
+        {(costs || preview.data?.stockItem || variants.length > 0) && <section className="space-y-3 rounded-xl border border-border p-4">
+          {variants.length > 0 && <Select ariaLabel="Вариант техкарты" className="h-10 w-full sm:max-w-sm" value={variantId}
+            options={[{ value: '', label: 'Базовая норма' }, ...variants.map(({ id, name }) => ({ value: id, label: name }))]}
+            onChange={setVariantId} />}
+          <RecipeCostSummary preview={preview} showCosts={costs} showError={!editable} showMissing={!editable}
+            showPriceMetrics={!variants.length || !!variantId} />
+        </section>}
         {!!recipe.components?.length && (
           <section className="space-y-3">
             <h3 className="text-lg font-semibold">Состав сета</h3>
@@ -171,6 +194,8 @@ function StaffRecipeForm({
               showCosts={costs}
               disabled={pending}
               allowCreate={false}
+              preview={preview}
+              previewVariant={variantId || undefined}
             />
             <div className="grid min-w-0 gap-5 md:max-w-3xl">
               <label className="grid gap-2 md:grid-cols-[190px_minmax(0,1fr)]">
@@ -216,7 +241,7 @@ function StaffRecipeForm({
           </fieldset>
         ) : (
           <>
-            {!!recipe.items.length && <RecipeReadOnly recipe={recipe} costs={costs} />}
+            {!!recipe.items.length && !preview.data?.stockItem && <RecipeReadOnly recipe={recipe} costs={costs} preview={preview.data} />}
             {recipe.metadata?.outputQuantity != null && (
               <p className="text-sm">
                 Выход:{' '}
@@ -231,7 +256,7 @@ function StaffRecipeForm({
                 <p className="whitespace-pre-wrap text-sm">{recipe.metadata.instructions}</p>
               </section>
             )}
-            {!recipe.items.length && !recipe.components?.length && !recipe.stockItem && (
+            {!recipe.items.length && !recipe.components?.length && !recipe.stockItem && !preview.data?.stockItem && (
               <p className="text-sm text-text-muted">Состав этой техкарты ещё не заполнен.</p>
             )}
           </>
@@ -256,7 +281,8 @@ function StaffRecipeForm({
     </EditorPage>
   );
 }
-function RecipeReadOnly({ recipe, costs }: { recipe: Recipe; costs: boolean }) {
+function RecipeReadOnly({ recipe, costs, preview }: { recipe: Recipe; costs: boolean; preview?: RecipePreview }) {
+  const calculated = new Map(preview?.items.map((row) => [row.ingredientId, row]));
   return (
     <section className="min-w-0 w-full space-y-3">
       <h3 className="text-lg font-semibold">Состав техкарты</h3>
@@ -265,6 +291,7 @@ function RecipeReadOnly({ recipe, costs }: { recipe: Recipe; costs: boolean }) {
           <thead>
             <tr className="border-b border-border text-left text-xs text-text-muted">
               <th className="py-3 pr-3">Ингредиент</th>
+              <th className="px-3">Склад</th>
               <th className="px-3">Обработка</th>
               <th className="px-3">Брутто</th>
               <th className="px-3">Нетто</th>
@@ -272,8 +299,12 @@ function RecipeReadOnly({ recipe, costs }: { recipe: Recipe; costs: boolean }) {
             </tr>
           </thead>
           <tbody>
-            {recipe.items.map((row) => (
-              <tr className="border-b border-border" key={row.id}>
+            {recipe.items.map((row) => {
+              const source = calculated.get(row.ingredientId);
+              const unit = source ? unitLabel(source.amountUnit) : row.unit;
+              const gross = source?.amount ?? row.amount;
+              const net = source ? source.netAmount : row.netAmount;
+              return <tr className="border-b border-border" key={row.id}>
                 <td className="py-4 pr-3">
                   <span className="font-medium">{row.name}</span>
                   {recipe.variants?.map(
@@ -285,23 +316,19 @@ function RecipeReadOnly({ recipe, costs }: { recipe: Recipe; costs: boolean }) {
                       ),
                   )}
                 </td>
+                <td className="px-3">{source?.warehouseName ?? '—'}</td>
                 <td className="px-3">
                   {PROCESSING_METHODS.find((method) => method.value === row.processingMethod)
                     ?.label ?? 'Без обработки'}
                 </td>
-                <td className="px-3">{qty(row.amount, row.unit)}</td>
-                <td className="px-3">{qty(row.netAmount ?? row.amount, row.unit)}</td>
-                {costs && <td className="pl-3 text-right">{costLabel(row.lineCost)}</td>}
-              </tr>
-            ))}
+                <td className="px-3">{qty(gross, unit)}</td>
+                <td className="px-3">{net == null ? '—' : qty(net, unit)}</td>
+                {costs && <td className="pl-3 text-right">{costLabel(source?.lineCost)}</td>}
+              </tr>;
+            })}
           </tbody>
         </table>
       </div>
-      {costs && (
-        <p className="text-right text-sm">
-          Себестоимость: <strong>{costLabel(recipe.foodCost)}</strong>
-        </p>
-      )}
     </section>
   );
 }

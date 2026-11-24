@@ -12,6 +12,12 @@ export interface AuthUser {
   name: string;
   phone: string;
   role: Role;
+  permissions?: {
+    workShiftRequired?: boolean;
+    sections?: { finance?: boolean };
+    readOnlySections?: string[];
+    actions?: { financeCashShifts?: boolean; closeShift?: boolean; acceptOrderPayments?: boolean };
+  };
 }
 
 export interface LoginResponse {

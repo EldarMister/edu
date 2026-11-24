@@ -12,7 +12,7 @@ import { PurchasesService } from './purchases.service';
 import { lockIngredients, lockWarehouseCatalog } from './stock-lock';
 import { getWarehouseBalance, resolveWarehouse, setWarehouseBalance, warehouseBalances, warehouseDocumentFilter } from './warehouse-location';
 import { getCafeId } from '../tenant/tenant-context';
-import { balanceExportColumns, writeBalanceWorkbook, type BalanceExportQuery } from './balance-xlsx';
+import { balanceExportColumns, filteredBalances, writeBalanceWorkbook, type BalanceExportQuery, type BalanceListQuery } from './balance-xlsx';
 import {
   assertUnitMatchesType,
   baseUnitForType,
@@ -73,6 +73,7 @@ export class IngredientsService {
       // Значения в display-единице — то, что видит и вводит админ.
       stock: round3(fromBase(stockBase, display)),
       avgCost: i.valuationKnown ? round2(costFromBase(avgCostBase, display)) : null,
+      stockValue: i.stock.isZero() ? 0 : i.valuationKnown ? Number(i.stock.mul(i.avgCost).toDecimalPlaces(2)) : null,
       valuationKnown: i.valuationKnown,
       lowStockThreshold: round3(fromBase(thresholdBase, display)),
       costUnitLabel: costUnitLabel(display),
@@ -85,7 +86,8 @@ export class IngredientsService {
     };
   }
 
-  async findAll(params: { search?: string; includeInactive?: boolean; warehouseId?: string }) {
+  async findAll(params: { search?: string; includeInactive?: boolean; warehouseId?: string;
+    lastPurchasePrice?: boolean; retailValue?: boolean }) {
     return this.prisma.$transaction(async (db) => {
       const where: Prisma.IngredientWhereInput = {
         ...(params.includeInactive ? {} : { isActive: true }),
@@ -116,7 +118,12 @@ export class IngredientsService {
           expanded.set(item.id, null);
         }
       }
-      const balances = await warehouseBalances(db, warehouse, [...costingItems.values()]);
+      const ids = items.map(({ id }) => id);
+      const [balances, receiptPrices, retailPrices] = await Promise.all([
+        warehouseBalances(db, warehouse, [...costingItems.values()]),
+        params.lastPurchasePrice ? this.lastPurchasePrices(db, ids, warehouse) : undefined,
+        params.retailValue ? this.retailPrices(db, ids) : undefined,
+      ]);
       return items.map((item) => {
         const parts = expanded.get(item.id);
         const recipe = recipesById.get(item.id);
@@ -127,17 +134,85 @@ export class IngredientsService {
           recipeUnitCost = Number(cost.toDecimalPlaces(8));
           if (recipe) recipeTotalCost = Number(cost.mul(recipe.outputAmount).div(toBase(1, normalizeUnit(item.displayUnit))).toDecimalPlaces(2));
         }
-        return { ...this.serialize({ ...item, ...balances.get(item.id)! }), recipeUnitCost, recipeTotalCost,
+        const balance = balances.get(item.id)!;
+        const receiptPrice = receiptPrices?.get(item.id);
+        const retailPrice = retailPrices?.get(item.id);
+        return { ...this.serialize({ ...item, ...balance }), recipeUnitCost, recipeTotalCost,
+          lastPurchasePrice: receiptPrice == null ? null : Number(receiptPrice.mul(toBase(1, normalizeUnit(item.displayUnit))).toDecimalPlaces(8)),
+          retailValue: retailPrice == null || (item.isPrepared && item.preparationMode === 'virtual')
+            ? null : Number(retailPrice.mul(balance.stock).toDecimalPlaces(2)),
           recipeOutputQuantity: recipe ? fromBase(Number(recipe.outputAmount), normalizeUnit(recipe.outputUnit)) : null, recipeOutputUnit: recipe?.outputUnit ?? null };
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
+  async balances(query: BalanceListQuery) {
+    const items = await this.balanceItems(query);
+    const rows = filteredBalances(items, query);
+    const valued = rows.filter((item) => !item.isPrepared || item.preparationMode !== 'virtual');
+    const pageSize = query.pageSize ?? 50;
+    const page = Math.min(query.page ?? 1, Math.max(1, Math.ceil(rows.length / pageSize)));
+    return { rows: rows.slice((page - 1) * pageSize, page * pageSize), page, pageSize, totalRows: rows.length,
+      categories: [...new Set(items.flatMap(({ category }) => category ? [category] : []))].sort((a, b) => a.localeCompare(b, 'ru')),
+      stockValue: valued.reduce((sum, item) => sum.add(item.stockValue ?? 0), new Prisma.Decimal(0)).toNumber(),
+      incompleteStockValue: valued.some((item) => item.stockValue == null) };
+  }
+
   async exportXlsx(query: BalanceExportQuery) {
     const columns = balanceExportColumns(query.columns);
-    const items = await this.findAll({ warehouseId: query.warehouseId });
+    const items = await this.balanceItems(query);
     const warehouse = query.warehouseId ? await resolveWarehouse(this.prisma, query.warehouseId) : null;
-    return writeBalanceWorkbook(items, warehouse?.name ?? 'Все склады', query, columns);
+    return writeBalanceWorkbook(filteredBalances(items, query), warehouse?.name ?? 'Все склады', columns);
+  }
+
+  private balanceItems(query: BalanceExportQuery) {
+    const columns = balanceExportColumns(query.columns);
+    return this.findAll({ warehouseId: query.warehouseId,
+      lastPurchasePrice: columns.includes('lastPurchasePrice'), retailValue: columns.includes('retailValue') });
+  }
+
+  private async lastPurchasePrices(db: Prisma.TransactionClient, ids: string[], warehouse: Awaited<ReturnType<typeof resolveWarehouse>>) {
+    if (!ids.length) return new Map<string, Prisma.Decimal | null>();
+    const cafeId = getCafeId();
+    const warehouseSql = !warehouse ? Prisma.empty : warehouse.isDefault
+      ? Prisma.sql`AND (p.warehouse_id = ${warehouse.id} OR p.warehouse_id IS NULL)`
+      : Prisma.sql`AND p.warehouse_id = ${warehouse.id}`;
+    const prices = await db.$queryRaw<{ ingredientId: string; unitPriceBase: Prisma.Decimal | null }[]>`
+      SELECT DISTINCT ON (pi.ingredient_id) pi.ingredient_id AS "ingredientId",
+        SUM(pi.total) / NULLIF(SUM(pi.quantity_base), 0) AS "unitPriceBase"
+      FROM purchase_items pi JOIN purchases p ON p.id = pi.purchase_id
+      WHERE pi.ingredient_id IN (${Prisma.join(ids)}) AND pi.cafe_id IS NOT DISTINCT FROM ${cafeId}
+        AND p.cafe_id IS NOT DISTINCT FROM ${cafeId} AND p.status = 'completed' ${warehouseSql}
+      GROUP BY pi.ingredient_id, p.id
+      ORDER BY pi.ingredient_id, COALESCE(p.effective_at, p.date) DESC, p.created_at DESC, p.id DESC
+    `;
+    return new Map(prices.map(({ ingredientId, unitPriceBase }) => [ingredientId, unitPriceBase]));
+  }
+
+  private async retailPrices(db: Prisma.TransactionClient, ids: string[]) {
+    const wanted = new Set(ids);
+    const prices = new Map<string, Prisma.Decimal | null>();
+    if (!ids.length) return prices;
+    const dishes = await db.dish.findMany({
+      where: { isActive: true, isSet: false, OR: [{ stockIngredientId: { in: ids } }, { variants: { some: { stockIngredientId: { in: ids } } } }] },
+      select: { stockIngredientId: true, stockAmount: true, price: true,
+        variants: { select: { stockIngredientId: true, stockAmount: true, price: true } } },
+    });
+    for (const dish of dishes) {
+      const offers = dish.variants.length ? dish.variants : [dish];
+      for (const offer of offers) {
+        const binding = offer.stockIngredientId ? offer : dish;
+        const id = binding.stockIngredientId;
+        if (!id || !wanted.has(id)) continue;
+        const amount = binding.stockAmount;
+        if (amount.lte(0)) continue;
+        const price = offer.price.div(amount);
+        // A single retail value is only meaningful if every active offer has the same per-unit price.
+        const previous = prices.get(id);
+        prices.set(id, previous === undefined || previous?.eq(price) ? price : null);
+      }
+    }
+    return prices;
   }
 
   async findOne(id: string) {
@@ -150,9 +225,18 @@ export class IngredientsService {
         return { warehouseId: warehouse.id, warehouseName: warehouse.name,
           stock: fromBase(Number(balance.stock), unit), avgCost: balance.valuationKnown ? costFromBase(Number(balance.avgCost), unit) : null, valuationKnown: balance.valuationKnown };
       }));
-      const [recipes, direct, latest] = await Promise.all([
-        db.recipeItem.findMany({ where: { ingredientId: id }, select: { dish: { select: { id: true, name: true } } } }),
-        db.dish.findMany({ where: { stockIngredientId: id }, select: { id: true, name: true } }),
+      const cafeId = ingredient.cafeId;
+      const dishFields = { id: true, name: true, catalogKind: true, isActive: true, isSet: true } as const;
+      const [recipes, direct, variants, preparations, modifiers, latest, aggregateBalances] = await Promise.all([
+        db.recipeItem.findMany({ where: { ingredientId: id, cafeId, dish: { cafeId } }, select: { id: true,
+          amount: true, amountUnit: true, dish: { select: dishFields } } }),
+        db.dish.findMany({ where: { stockIngredientId: id, cafeId }, select: { ...dishFields, stockAmount: true } }),
+        db.dishVariant.findMany({ where: { stockIngredientId: id, cafeId, dish: { cafeId } }, select: { id: true, name: true,
+          stockAmount: true, dish: { select: dishFields } } }),
+        cafeId ? db.preparationRecipeItem.findMany({ where: { ingredientId: id, cafeId, recipe: { cafeId, ingredient: { cafeId } } },
+          select: { amount: true, unit: true, recipe: { select: { ingredient: { select: { id: true, name: true, isActive: true } } } } } }) : Promise.resolve([]),
+        db.menuModifierOption.findMany({ where: { ingredientId: id, cafeId, group: { cafeId, dish: { cafeId } } }, select: { id: true,
+          name: true, isActive: true, amount: true, amountUnit: true, group: { select: { name: true, dish: { select: dishFields } } } } }),
         db.$queryRaw<Array<{ unitPriceBase: Prisma.Decimal | null }>>`
           SELECT SUM(pi.total) / NULLIF(SUM(pi.quantity_base), 0) AS "unitPriceBase"
           FROM purchase_items pi JOIN purchases p ON p.id = pi.purchase_id
@@ -162,10 +246,32 @@ export class IngredientsService {
           ORDER BY COALESCE(p.effective_at, p.date) DESC, p.created_at DESC, p.id DESC
           LIMIT 1
         `,
+        warehouseBalances(db, null, [ingredient]),
       ]);
-      const aggregate = (await warehouseBalances(db, null, [ingredient])).get(id)!;
-      return { ...this.serialize({ ...ingredient, ...aggregate }), balances,
-        usedInDishes: [...new Map([...recipes.map(({ dish }) => dish), ...direct].map((dish) => [dish.id, dish])).values()],
+      const displayQuantity = (amount: Prisma.Decimal, storedUnit: string) => {
+        const displayUnit = normalizeUnit(storedUnit);
+        return { quantity: fromBase(Number(amount), displayUnit), unit: unitLabel(displayUnit) };
+      };
+      const menuUsage = (sourceId: string, dish: Pick<typeof direct[number], keyof typeof dishFields>,
+        kind: 'recipe' | 'stock' | 'variant' | 'modifier', amount: Prisma.Decimal, unit: string,
+        label: string | null = null, active = dish.isActive) => ({
+        sourceId, targetId: dish.id, name: dish.name, kind, label, active, catalogKind: dish.catalogKind, isSet: dish.isSet,
+        ...displayQuantity(amount, unit),
+      });
+      const usage = [
+        ...recipes.map((row) => menuUsage(row.id, row.dish, 'recipe', row.amount, row.amountUnit)),
+        ...direct.map((dish) => menuUsage(dish.id, dish, 'stock', dish.stockAmount, unit)),
+        ...variants.map((variant) => menuUsage(variant.id, variant.dish, 'variant', variant.stockAmount, unit, variant.name)),
+        ...preparations.map(({ recipe: { ingredient: product }, amount, unit }) => ({
+          sourceId: product.id, targetId: product.id, name: product.name, kind: 'preparation' as const, label: null, active: product.isActive,
+          catalogKind: null, isSet: false, ...displayQuantity(amount, unit),
+        })),
+        ...modifiers.map((option) => menuUsage(option.id, option.group.dish, 'modifier', option.amount, option.amountUnit,
+          `${option.group.name} · ${option.name}`, option.group.dish.isActive && option.isActive)),
+      ].sort((a, b) => a.name.localeCompare(b.name, 'ru') || a.kind.localeCompare(b.kind) || a.sourceId.localeCompare(b.sourceId));
+      return { ...this.serialize({ ...ingredient, ...aggregateBalances.get(id)! }), balances, usage,
+        usedInDishes: [...new Map(usage.filter(({ kind }) => kind !== 'preparation')
+          .map(({ targetId: id, name }) => [id, { id, name }])).values()],
         lastPurchasePrice: latest[0]?.unitPriceBase == null ? null : Number(latest[0].unitPriceBase.mul(toBase(1, unit)).toDecimalPlaces(8)) };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }

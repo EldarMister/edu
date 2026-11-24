@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'react-router-dom';
 import { Modal } from '@/components/Modal';
 import { Toggle } from '@/components/Toggle';
+import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { usePermissions } from '@/hooks/usePermissions';
 import { api, apiError } from '@/lib/api';
 import { money } from '@/lib/format';
@@ -11,7 +12,7 @@ import { cashShiftKey, financeKey, type CashShift } from '@/features/admin/pages
 import { CashOperationDialog } from '@/features/admin/pages/finance/CashOperationDialog';
 
 type CurrentShift = Pick<CashShift, 'id' | 'expectedAmount'>;
-type CashShiftState = { enabled: boolean; current: CurrentShift | null };
+type CashShiftState = { enabled: boolean; requireClosedOrders: boolean; current: CurrentShift | null };
 const key = cashShiftKey;
 export function useCashShiftAccess() {
   const { canSection, canEditSection, canAction } = usePermissions();
@@ -32,7 +33,8 @@ export function CashShiftSettings() {
   const query = useCashShiftState();
   const qc = useQueryClient();
   const change = useMutation({
-    mutationFn: async (enabled: boolean) => (await api.patch('/cash-shifts/setting', { enabled })).data,
+    mutationFn: async (setting: Partial<Pick<CashShiftState, 'enabled' | 'requireClosedOrders'>>) =>
+      (await api.patch('/cash-shifts/setting', setting)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: key }),
   });
   useEffect(() => {
@@ -42,9 +44,14 @@ export function CashShiftSettings() {
     <div className="flex items-center justify-between gap-4">
       <h3 className="font-semibold text-text-primary">Использовать кассовые смены</h3>
       <Toggle ariaLabel="Использовать кассовые смены" checked={query.data?.enabled ?? false}
-        disabled={!query.data || change.isPending} onChange={(enabled) => change.mutate(enabled)} />
+        disabled={!query.data || change.isPending} onChange={(enabled) => change.mutate({ enabled })} />
     </div>
     <p className="text-sm text-text-secondary">При включении для оплаты нужна открытая кассовая смена. Кассир считает наличные в начале и в конце смены.</p>
+    {query.data?.enabled && <div className="flex items-center justify-between gap-4 border-t border-border pt-3">
+      <span className="text-sm">Требовать закрытия всех заказов перед закрытием кассовой смены</span>
+      <Toggle ariaLabel="Требовать закрытия всех заказов" checked={query.data.requireClosedOrders}
+        disabled={change.isPending} onChange={(requireClosedOrders) => change.mutate({ requireClosedOrders })} />
+    </div>}
     {(change.error || query.error) && <p role="alert" className="text-sm text-danger">{apiError(change.error ?? query.error)}</p>}
   </section>;
 }
@@ -87,6 +94,9 @@ export function CashShiftForm({ current, onClose, endpoint = '/cash-shifts', onC
   const [amount, setAmount] = useState('');
   const [closingComment, setClosingComment] = useState('');
   const [closeEmployeeShifts, setCloseEmployeeShifts] = useState(false);
+  const submitted = useRef(false);
+  const dirty = !!(amount || closingComment || closeEmployeeShifts);
+  const { markSaved } = useEditorDirty(dirty);
   const { canAction } = usePermissions();
   const { canManage } = useCashShiftAccess();
   const mayCloseEmployeeShifts = canAction('closeShift');
@@ -110,20 +120,27 @@ export function CashShiftForm({ current, onClose, endpoint = '/cash-shifts', onC
         closeEmployeeShifts && mayCloseEmployeeShifts ? qc.invalidateQueries({ queryKey: ['staff', 'work-shift'] }) : undefined,
         closeEmployeeShifts && mayCloseEmployeeShifts ? qc.invalidateQueries({ queryKey: ['admin', 'staff'] }) : undefined,
       ]);
+      markSaved();
       notify({ type: 'success', message: close ? 'Кассовая смена закрыта' : 'Кассовая смена открыта', at: new Date().toISOString() });
       (onComplete ?? onClose)();
     },
     onError: () => { void qc.invalidateQueries({ queryKey: key }); },
+    onSettled: () => { submitted.current = false; },
   });
   const valid = /^\d+(?:[,.]\d{1,2})?$/.test(amount.trim()) && Number(amount.replace(',', '.')) <= 9999999999.99;
+  const dismiss = () => {
+    if (!submitted.current && (!dirty || window.confirm('Закрыть форму без сохранения?'))) onClose();
+  };
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (canManage && valid && !mutate.isPending) mutate.mutate(Number(amount.replace(',', '.')));
+    if (!canManage || !valid || submitted.current) return;
+    submitted.current = true;
+    mutate.mutate(Number(amount.replace(',', '.')));
   }
   if (!canManage) return null;
-  return <Modal open title={title} panelClassName="max-w-xl"
-    onClose={() => { if (!mutate.isPending) onClose(); }}
+  return <Modal open title={title} onClose={dismiss}
     footer={<div className="flex flex-wrap items-center justify-between gap-3">
+      <button type="button" className="btn-secondary btn-md" disabled={mutate.isPending} onClick={dismiss}>Отмена</button>
       <button type="submit" form={form} className="btn-primary btn-md min-w-28" disabled={!valid || mutate.isPending}>
         {close ? 'Закончить' : 'Открыть'}
       </button>

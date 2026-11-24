@@ -3,12 +3,22 @@ import { SERVER_EVENTS } from '../realtime/events';
 import { BadRequestException, ConflictException, Injectable, Optional, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { getCafeId } from '../tenant/tenant-context';
-import { getWarehouseBalance } from './warehouse-location';
+import { assertAssignableStation } from '../kitchen/preparation-stations';
 import { PrismaService } from '../prisma/prisma.service';
-import { RecipeDraftDto, RecipeItemInputDto, RecipeItemUpdateDto, RecipeSettingsDto } from './recipes.dto';
+import { RecipeCostsQuery, RecipeDraftDto, RecipeItemInputDto, RecipeItemUpdateDto, RecipePreviewDto, RecipeSettingsDto } from './recipes.dto';
 import { MenuModifiersService } from './menu-modifiers';
-import { RecipeResolver, recipeAmount, lockRecipeGraph } from './recipe-resolution';
-import { assertUnitMatchesType, costFromBase, costUnitLabel, fromBase, normalizeUnit, toBase, unitLabel, type UnitCode } from './units';
+import { lockRecipeGraph } from './recipe-resolution';
+import { addRecipeValue, RecipeCalculator, recipeMetrics, recipeOutput, type RecipeCostRow } from './recipe-calculation';
+import { assertUnitMatchesType, normalizeUnit, toBase, type UnitCode } from './units';
+
+const recipeDishInclude = {
+  variants: { orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] },
+  category: { include: { tax: true } }, tax: true,
+  setComponents: true,
+  recipeItems: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], include: { ingredient: true } },
+} satisfies Prisma.DishInclude;
+
+type RecipeDish = Prisma.DishGetPayload<{ include: typeof recipeDishInclude }>;
 
 @Injectable()
 export class RecipesService {
@@ -62,101 +72,162 @@ export class RecipesService {
     return dishes.map(({ _count, variants, ...dish }) => ({ ...dish, hasRecipe: _count.recipeItems > 0, hasDirectStock: !!dish.stockIngredientId || variants.some((variant) => !!variant.stockIngredientId) }));
   }
 
-  async getByDish(dishId: string, variantId?: string, path: string[] = [], exact?: { foodCost: Prisma.Decimal; packagingCost: Prisma.Decimal }) {
-    if (path.includes(dishId) || path.length >= 32) throw new BadRequestException('Циклический состав сетов');
-    const dish = await this.prisma.dish.findUnique({ where: { id: dishId }, include: { variants: true, category: true, setComponents: true } });
-    if (!dish) throw new NotFoundException('Блюдо не найдено');
-    if (variantId && !dish.variants.some((variant) => variant.id === variantId)) throw new BadRequestException('Вариант не относится к блюду');
-    const recipeItems = await this.prisma.recipeItem.findMany({ where: { dishId }, orderBy: { createdAt: 'asc' }, include: { ingredient: true } });
-    const cafeId = getCafeId();
-    const stationId = dish.prepStation ?? dish.category.prepStation;
-    const route = cafeId ? await this.prisma.stationWarehouse.findUnique({ where: { cafeId_stationId: { cafeId, stationId } }, include: { warehouse: true } }) : null;
-    const warehouses = cafeId ? await this.prisma.warehouse.findMany({ where: { cafeId } }) : [];
-    const byWarehouse = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]));
-    const resolver = new RecipeResolver(this.prisma, { allowInactive: true });
-    let foodCost = new Prisma.Decimal(0), packagingCost = new Prisma.Decimal(0);
-    const missingCosts = new Set<string>(), inactiveIngredients = new Set<string>();
-    const items = [];
-    for (const ri of recipeItems) {
-      const warehouse = ri.warehouseId ? byWarehouse.get(ri.warehouseId) : ri.fromCommonWarehouse ? null : route?.warehouse ?? null;
-      if (ri.warehouseId && !warehouse) throw new BadRequestException('Склад рецептуры недоступен');
-      const balance = await getWarehouseBalance(this.prisma, warehouse ?? null, ri.ingredient);
-      const amountUnit = ri.amountUnit as UnitCode;
-      const amount = recipeAmount(ri, variantId);
-      let lineCost = new Prisma.Decimal(0);
-      let lineCostKnown = true;
-      const parts = await resolver.expand(ri.ingredientId, amount, warehouse ?? null);
-      for (const part of parts) {
-        const partBalance = await getWarehouseBalance(this.prisma, part.warehouse, part.ingredient);
-        const cost = part.amount.mul(partBalance.avgCost);
-        lineCost = lineCost.add(cost);
-        if (!partBalance.valuationKnown) { missingCosts.add(part.ingredient.name); lineCostKnown = false; }
-        if (!part.ingredient.isActive) inactiveIngredients.add(part.ingredient.name);
-        if (part.ingredient.kind === 'consumable') packagingCost = packagingCost.add(cost);
-      }
-      foodCost = foodCost.add(lineCost);
-      const amountBase = Number(amount);
-      const unitCost = amount.gt(0) ? lineCost.div(amount) : balance.avgCost;
-      items.push({
-        id: ri.id, ingredientId: ri.ingredientId, fromCommonWarehouse: ri.fromCommonWarehouse, warehouseId: ri.warehouseId,
-        warehouseName: warehouse?.name ?? 'Основной склад', isPrepared: ri.ingredient.isPrepared, preparationMode: ri.ingredient.preparationMode,
-        name: ri.ingredient.name, unit: unitLabel(amountUnit), amountUnit, unitType: ri.ingredient.unitType, ingredientDisplayUnit: ri.ingredient.displayUnit,
-        amount: fromBase(amountBase, amountUnit), baseAmount: fromBase(Number(ri.amount), amountUnit),
-        netAmount: ri.netAmount == null ? null : fromBase(Number(ri.netAmount), amountUnit), lossPercent: Number(ri.lossPercent), processingMethod: ri.processingMethod,
-        variantAmounts: Object.fromEntries(Object.entries((ri.variantAmounts ?? {}) as Record<string, number>).map(([id, value]) => [id, fromBase(Number(value), amountUnit)])),
-        costKnown: lineCostKnown, avgCost: lineCostKnown ? costFromBase(Number(unitCost), amountUnit) : null,
-        costUnitLabel: costUnitLabel(amountUnit), lineCost: lineCostKnown ? round2(Number(lineCost)) : null, stock: round3(fromBase(Number(balance.stock), amountUnit)),
-        isLow: balance.stock.lte(ri.ingredient.lowStockThreshold), isActive: ri.ingredient.isActive,
-      });
+  async getByDish(dishId: string, variantId?: string): Promise<Awaited<ReturnType<RecipesService['calculateSaved']>>['response']> {
+    if (typeof this.prisma.$transaction === 'function') {
+      return this.prisma.$transaction((tx) => new RecipesService(tx as PrismaService).getByDish(dishId, variantId),
+        { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     }
-    const variant = dish.variants.find((value) => value.id === variantId);
-    const directId = variant?.stockIngredientId ?? dish.stockIngredientId;
-    const directAmount = variant?.stockIngredientId ? variant.stockAmount : dish.stockAmount;
-    let stockItem: { id: string; name: string; unit: string; amount: number } | null = null;
-    const components: { dishId: string; dishName: string; variantId: string | null; quantity: number; foodCost: number | null; accountingConfigured: boolean }[] = [];
-    if (directId) {
-      foodCost = new Prisma.Decimal(0); packagingCost = new Prisma.Decimal(0); missingCosts.clear();
-      const parts = await resolver.expand(directId, directAmount, route?.warehouse ?? null);
-      for (const part of parts) {
-        const balance = await getWarehouseBalance(this.prisma, part.warehouse, part.ingredient);
-        foodCost = foodCost.add(part.amount.mul(balance.avgCost));
-        if (!balance.valuationKnown) missingCosts.add(part.ingredient.name);
-        if (!part.ingredient.isActive) inactiveIngredients.add(part.ingredient.name);
-      }
-      const ingredient = await this.prisma.ingredient.findUniqueOrThrow({ where: { id: directId } });
-      stockItem = { id: directId, name: ingredient.name, unit: ingredient.displayUnit, amount: fromBase(Number(directAmount), ingredient.displayUnit as UnitCode) };
-    }
-    if (!directId && !recipeItems.length && dish.isSet) {
-      for (const component of dish.setComponents) {
-        const recipe = await this.componentRecipe(component.dishId, component.dishVariantId ?? undefined, [...path, dishId]);
-        foodCost = foodCost.add(recipe.foodCost.mul(component.quantity));
-        packagingCost = packagingCost.add(recipe.packagingCost.mul(component.quantity));
-        for (const name of recipe.missingCosts) missingCosts.add(name);
-        if (!recipe.accountingConfigured) missingCosts.add('Не настроено: ' + recipe.dishName);
-        components.push({ dishId: component.dishId, dishName: recipe.dishName, variantId: component.dishVariantId, quantity: component.quantity,
-          foodCost: recipe.missingCosts.length || !recipe.accountingConfigured ? null : Number(recipe.foodCost.mul(component.quantity).toDecimalPlaces(2)), accountingConfigured: recipe.accountingConfigured });
-      }
-    }
-    const price = Number(variant?.price ?? dish.price), cost = Number(foodCost);
-    const accountingConfigured = !!directId || recipeItems.length > 0 || (components.length > 0 && components.every((component) => component.accountingConfigured));
-    const costKnown = !missingCosts.size && accountingConfigured;
-    if (exact) { exact.foodCost = foodCost; exact.packagingCost = packagingCost; }
-    return {
-      dishId: dish.id, dishName: dish.name, price, foodCost: costKnown ? round2(cost) : null, ingredientCost: costKnown ? round2(cost - Number(packagingCost)) : null,
-      packagingCost: costKnown ? round2(Number(packagingCost)) : null, marginAmount: costKnown ? round2(price - cost) : null, marginPercent: costKnown ? (price > 0 ? (price - cost) / price * 100 : 0) : null,
-      foodCostPercent: costKnown ? (price > 0 ? cost / price * 100 : 0) : null, items, version: dish.recipeVersion, metadata: dish.recipeMetadata ?? {},
-      stockIngredientId: directId, stockAmount: Number(directAmount), stockItem,
-      variants: dish.variants.map((variant) => ({ id: variant.id, name: variant.name, stockIngredientId: variant.stockIngredientId, stockAmount: Number(variant.stockAmount) })),
-      costKnown, missingCosts: [...missingCosts], inactiveIngredients: [...inactiveIngredients], components, accountingConfigured,
-    };
+    const calculator = await RecipeCalculator.create(this.prisma);
+    const dish = await this.readRecipeDish(dishId);
+    return (await this.calculateSaved(dish, calculator, variantId)).response;
   }
 
-  private async componentRecipe(dishId: string, variantId: string | undefined, path: string[]): Promise<{
-    dishName: string; foodCost: Prisma.Decimal; packagingCost: Prisma.Decimal; missingCosts: string[]; accountingConfigured: boolean;
-  }> {
-    const exact = { foodCost: new Prisma.Decimal(0), packagingCost: new Prisma.Decimal(0) };
-    const recipe = await this.getByDish(dishId, variantId, path, exact);
-    return { dishName: recipe.dishName, ...exact, missingCosts: recipe.missingCosts, accountingConfigured: recipe.accountingConfigured };
+  async preview(dto: RecipePreviewDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const cafeId = getCafeId() ?? null;
+      const dish = dto.dishId ? await tx.dish.findUnique({ where: { id: dto.dishId, cafeId }, include: {
+        variants: true, tax: true, recipeItems: true,
+      } }) : null;
+      if (dto.dishId && !dish) throw new NotFoundException('Блюдо не найдено');
+      const categoryId = dto.categoryId ?? dish?.categoryId;
+      if (!categoryId) throw new BadRequestException('Выберите категорию блюда');
+      const category = await tx.category.findUnique({ where: { id: categoryId, cafeId }, include: { tax: true } });
+      if (!category) throw new NotFoundException('Категория не найдена');
+      if (dto.prepStation != null) await assertAssignableStation(tx, dto.prepStation);
+      const station = (dto.prepStation === undefined ? dish?.prepStation : dto.prepStation) ?? category.prepStation;
+      const variant = dish?.variants.find(({ id }) => id === dto.variantId);
+      if (dto.variantId && !variant) throw new BadRequestException('Вариант не относится к блюду');
+      const ids = dto.items.map(({ ingredientId }) => ingredientId);
+      if (new Set(ids).size !== ids.length) throw new BadRequestException('Ингредиент указан дважды');
+      const ingredientRows = ids.length ? await tx.ingredient.findMany({ where: { cafeId, id: { in: ids } } }) : [];
+      const ingredients = new Map(ingredientRows.map((ingredient) => [ingredient.id, ingredient]));
+      const savedRows = new Map(dish?.recipeItems.map((row) => [row.ingredientId, row]));
+      const variantIds = new Set(dish?.variants.map(({ id }) => id));
+      const composition: RecipeCostRow[] = [];
+      for (const item of dto.items) {
+        const ingredient = ingredients.get(item.ingredientId);
+        const previous = savedRows.get(item.ingredientId);
+        if (!ingredient || (!ingredient.isActive && !previous)) throw new BadRequestException('Ингредиент недоступен');
+        const data = await this.rowData(tx, dish?.id, ingredient.unitType, ingredient.displayUnit, item, previous, ingredient.processingLosses, variantIds);
+        composition.push({ ...data, id: previous?.id, ingredient, ingredientId: ingredient.id,
+          fromCommonWarehouse: data.fromCommonWarehouse ?? previous?.fromCommonWarehouse ?? false, warehouseId: data.warehouseId ?? null,
+          variantAmounts: data.variantAmounts === undefined ? previous?.variantAmounts ?? null : data.variantAmounts as Prisma.JsonValue });
+      }
+      const calculator = await RecipeCalculator.create(tx);
+      const recipe = await calculator.composition(composition, station, dto.variantId);
+      const savedBinding = variant?.stockIngredientId ?? dish?.stockIngredientId ?? null;
+      const directId = dto.producedStockIngredientId === undefined ? savedBinding : dto.producedStockIngredientId;
+      let stockAmount = variant?.stockIngredientId ? variant.stockAmount : dish?.stockAmount ?? new Prisma.Decimal(1);
+      if (directId && (dto.producedStockIngredientId !== undefined || dto.weightedPriceBase !== undefined)) {
+        const ingredient = await tx.ingredient.findUnique({ where: { id: directId, cafeId } });
+        if (!ingredient) throw new BadRequestException('Складская позиция не найдена');
+        if (dto.producedStockIngredientId !== undefined && (!ingredient.isPrepared || !ingredient.isActive || ingredient.preparationMode === 'virtual'))
+          throw new BadRequestException('Выберите складской полуфабрикат или выпущенное блюдо');
+        stockAmount = new Prisma.Decimal(dto.weightedPriceBase ?? toBase(1, normalizeUnit(ingredient.displayUnit)));
+      }
+      const direct = directId ? await calculator.direct(directId, stockAmount, station) : null;
+      const set = dish?.isSet && !direct && !composition.length ? new RecipesService(tx as PrismaService) : null;
+      const setCalculation = set ? await set.calculateSaved(await set.readRecipeDish(dish!.id), calculator, dto.variantId) : null;
+      if (dto.taxExempt && dto.taxId) throw new BadRequestException('Выберите налог или режим «Без налога»');
+      const overriddenTax = dto.taxId ? await tx.menuTax.findUnique({ where: { id: dto.taxId, cafeId } }) : null;
+      if (dto.taxId && !overriddenTax) throw new BadRequestException('Налог не найден');
+      const exempt = dto.taxExempt ?? (dto.taxId === undefined && dish?.taxExempt === true);
+      const specificTax = dto.taxId === undefined ? dish?.tax : overriddenTax;
+      const tax = calculator.taxesEnabled && !exempt ? specificTax ?? category.tax : null;
+      const price = dto.price === undefined ? variant?.price ?? dish?.price ?? null : new Prisma.Decimal(dto.price);
+      const metrics = recipeMetrics(price, direct?.value ?? setCalculation?.value ?? recipe.value,
+        !!directId || recipe.items.length > 0 || setCalculation?.response.accountingConfigured === true, tax);
+      return { ...metrics, items: recipe.items, stockItem: direct?.stockItem ?? null,
+        output: recipeOutput(dto.metadata ?? dish?.recipeMetadata, recipe.output, composition, dto.variantId),
+        compositionFoodCost: recipeMetrics(null, recipe.value, recipe.items.length > 0).foodCost, compositionMissingCosts: [...recipe.value.missing],
+        productionCost: direct ? metrics.foodCost : null, productionMissingCosts: direct ? [...direct.value.missing] : [] };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
+  async costSummary(query: RecipeCostsQuery) {
+    const ids = query.dishIds === undefined ? undefined : [...new Set(query.dishIds.split(',').map((id) => id.trim()).filter(Boolean))];
+    if (ids && (!ids.length || ids.length > 30 || ids.some((id) => id.length > 160))) throw new BadRequestException('Укажите до 30 позиций меню');
+    const search = query.search?.trim();
+    const offset = query.offset ?? 0;
+    const limit = query.limit ?? 30;
+    return this.prisma.$transaction(async (tx) => {
+      const where: Prisma.DishWhereInput = {
+        cafeId: getCafeId() ?? null,
+        ...(ids ? { id: { in: ids } } : { isActive: true, catalogKind: 'recipe' }),
+        categoryId: query.categoryId, ...(search ? { name: { contains: search, mode: 'insensitive' } } : {}),
+      };
+      const [dishes, total, calculator] = await Promise.all([
+        tx.dish.findMany({ where, skip: offset, take: limit, orderBy: [{ name: 'asc' }, { id: 'asc' }], include: recipeDishInclude }),
+        tx.dish.count({ where }),
+        RecipeCalculator.create(tx),
+      ]);
+      const service = new RecipesService(tx as PrismaService);
+      const rows = [];
+      for (const dish of dishes) {
+        for (const variant of dish.variants.length ? dish.variants : [null]) {
+          const { response } = await service.calculateSaved(dish, calculator, variant?.id);
+          const { price, foodCost, ingredientCost, packagingCost, foodCostPercent, markupPercent, marginAmount, marginPercent,
+            taxAmount, profit, missingCosts, costKnown, output, warehouseName, stockItem, compositionFoodCost, productionCost } = response;
+          rows.push({ dishId: dish.id, dishName: dish.name, categoryId: dish.categoryId, categoryName: dish.category.name,
+            isSet: dish.isSet, catalogKind: dish.catalogKind, isActive: dish.isActive, variantId: variant?.id ?? null, variantName: variant?.name ?? null,
+            price, foodCost, ingredientCost, packagingCost, foodCostPercent, markupPercent, marginAmount, marginPercent, taxAmount,
+            profit, missingCosts, costKnown, output, warehouseName, stockItem, compositionFoodCost, productionCost });
+        }
+      }
+      return { rows, total, offset, limit };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30_000 });
+  }
+
+  private async readRecipeDish(dishId: string) {
+    const dish = await this.prisma.dish.findUnique({ where: { id: dishId }, include: recipeDishInclude });
+    if (!dish) throw new NotFoundException('Блюдо не найдено');
+    return dish;
+  }
+
+  private async calculateSaved(dish: RecipeDish, calculator: RecipeCalculator, variantId?: string, path: string[] = []) {
+    if (path.includes(dish.id) || path.length >= 32) throw new BadRequestException('Циклический состав сетов');
+    const variant = dish.variants.find((value) => value.id === variantId);
+    if (variantId && !variant) throw new BadRequestException('Вариант не относится к блюду');
+    const station = dish.prepStation ?? dish.category.prepStation;
+    const composition = await calculator.composition(dish.recipeItems, station, variantId);
+    const directId = variant?.stockIngredientId ?? dish.stockIngredientId;
+    const directAmount = variant?.stockIngredientId ? variant.stockAmount : dish.stockAmount;
+    const direct = directId ? await calculator.direct(directId, directAmount, station) : null;
+    const value = direct?.value ?? composition.value;
+    const components: { dishId: string; dishName: string; variantId: string | null; variantName: string | null; quantity: number; foodCost: number | null; accountingConfigured: boolean }[] = [];
+    if (!direct && !dish.recipeItems.length && dish.isSet) {
+      for (const component of dish.setComponents) {
+        const child = await this.readRecipeDish(component.dishId);
+        let accountingConfigured = false;
+        let foodCost: number | null = null;
+        try {
+          const result = await this.calculateSaved(child, calculator, component.dishVariantId ?? undefined, [...path, dish.id]);
+          accountingConfigured = result.response.accountingConfigured;
+          addRecipeValue(value, result.value, component.quantity);
+          foodCost = result.response.costKnown ? Number(result.value.cost.mul(component.quantity).toDecimalPlaces(2)) : null;
+        } catch (error) {
+          if (!(error instanceof BadRequestException)) throw error;
+        }
+        if (!accountingConfigured) value.missing.add('Не настроено: ' + child.name);
+        components.push({ dishId: component.dishId, dishName: child.name, variantId: component.dishVariantId,
+          variantName: child.variants.find(({ id }) => id === component.dishVariantId)?.name ?? null,
+          quantity: component.quantity, foodCost, accountingConfigured });
+      }
+    }
+    const configured = !!directId || dish.recipeItems.length > 0 || (components.length > 0 && components.every((item) => item.accountingConfigured));
+    const tax = calculator.taxesEnabled && !dish.taxExempt ? dish.tax ?? dish.category.tax : null;
+    const price = variant?.price ?? dish.price;
+    const metrics = recipeMetrics(price, value, configured, tax);
+    return { value, response: {
+      ...metrics, price: Number(price), dishId: dish.id, dishName: dish.name, items: composition.items, version: dish.recipeVersion,
+      metadata: dish.recipeMetadata ?? {}, output: recipeOutput(dish.recipeMetadata, composition.output, dish.recipeItems, variantId),
+      stockIngredientId: directId, stockAmount: Number(directAmount), stockItem: direct?.stockItem ?? null,
+      variants: dish.variants.map(({ id, name, stockIngredientId, stockAmount }) => ({ id, name, stockIngredientId, stockAmount: Number(stockAmount) })),
+      components, warehouseName: direct?.stockItem?.warehouseName ?? calculator.stationWarehouseName(station),
+      productionCost: direct ? metrics.foodCost : null, productionMissingCosts: direct ? [...value.missing] : [],
+      compositionFoodCost: recipeMetrics(null, composition.value, composition.items.length > 0).foodCost,
+      compositionMissingCosts: [...composition.value.missing],
+    } };
   }
 
   async addItem(dishId: string, dto: RecipeItemInputDto) {
@@ -259,16 +330,17 @@ export class RecipesService {
     return amount;
   }
 
-  async rowData(tx: Prisma.TransactionClient, dishId: string, unitType: 'mass' | 'volume' | 'count', defaultUnit: string, dto: RecipeItemUpdateDto, previous?: Prisma.RecipeItemGetPayload<{}>, processingLosses?: Prisma.JsonValue | null) {
+  async rowData(tx: Prisma.TransactionClient, dishId: string | undefined, unitType: 'mass' | 'volume' | 'count', defaultUnit: string,
+    dto: RecipeItemUpdateDto, previous?: Prisma.RecipeItemGetPayload<{}>, processingLosses?: Prisma.JsonValue | null, variantIds?: Set<string>) {
     const unit = normalizeUnit(dto.unit ?? defaultUnit);
     assertUnitMatchesType(unit, unitType);
     const amount = this.quantity(dto.amount, unit);
     const warehouseId = dto.warehouseId === undefined ? previous?.warehouseId : dto.warehouseId;
     if (warehouseId && !await tx.warehouse.findFirst({ where: { id: warehouseId, cafeId: getCafeId() } })) throw new BadRequestException('Склад не найден');
-    const variants = await tx.dishVariant.findMany({ where: { dishId }, select: { id: true } });
-    const ids = new Set(variants.map((variant) => variant.id));
     let variantAmounts: Prisma.InputJsonValue | undefined;
     if (dto.variantAmounts !== undefined) {
+      const variants = !variantIds && dishId ? await tx.dishVariant.findMany({ where: { dishId }, select: { id: true } }) : [];
+      const ids = variantIds ?? new Set(variants.map(({ id }) => id));
       const entries = Object.entries(dto.variantAmounts);
       if (entries.some(([id, value]) => !ids.has(id) || typeof value !== 'number' || !Number.isFinite(value) || value < 0)) throw new BadRequestException('Укажите допустимые нормы существующих вариантов блюда');
       variantAmounts = Object.fromEntries(entries.map(([id, value]) => [id, this.quantity(value, unit).toString()]));
@@ -282,6 +354,3 @@ export class RecipesService {
     return { processingMethod, amount, amountUnit: unit, fromCommonWarehouse: dto.fromCommonWarehouse, warehouseId, netAmount, lossPercent: dto.netAmount != null && amount.gt(0) ? new Prisma.Decimal(100).sub(netAmount!.mul(100).div(amount)).toDecimalPlaces(2) : new Prisma.Decimal(lossPercent), variantAmounts };
   }
 }
-
-function round2(n: number) { return Math.round(n * 100) / 100; }
-function round3(n: number) { return Math.round(n * 1000) / 1000; }

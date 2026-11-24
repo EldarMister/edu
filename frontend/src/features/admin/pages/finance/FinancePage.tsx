@@ -44,11 +44,11 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts' | 'ca
   start.setUTCMonth(start.getUTCMonth() - 2);
   const [{
     financeFrom: from, financeTo: to, financeSearch: search, financeScope: scope,
-    financeKind: kind, financeCategory: categoryId, payrollPosition, payrollMonth,
+    financeKind: kind, financeCategory: categoryId, payrollPosition, payrollMonth, payrollFrom, payrollTo,
   }, setFilters] = usePageFilters({
     financeFrom: view === 'cashFlow' ? start.toISOString().slice(0, 10) : today.slice(0, 7) + '-01', financeTo: today, financeSearch: '',
     financeScope: '', financeKind: '', financeCategory: '', payrollPosition: '',
-    payrollMonth: today.slice(0, 7),
+    payrollMonth: today.slice(0, 7), payrollFrom: '', payrollTo: '',
   });
   const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(payrollMonth) && payrollMonth <= today.slice(0, 7) ? payrollMonth : today.slice(0, 7);
   const transactionPeriod = useListPeriod('financeTransaction', 'all');
@@ -64,7 +64,8 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts' | 'ca
     month: view === 'payroll' ? month : undefined,
     accountIds: view === 'cashFlow' ? scope || undefined : undefined,
   }, rangeValid);
-  const salary = usePayroll(month, view === 'payroll');
+  const payrollRange = payrollFrom && payrollTo && payrollFrom <= payrollTo ? { from: payrollFrom, to: payrollTo } : undefined;
+  const salary = usePayroll(payrollRange ?? month, view === 'payroll');
   const [salaryHistoryId, setSalaryHistory] = useState<string | null>(null);
   const [reversingEntryId, setReversingEntryId] = useState<string | null>(null);
   const [archivingAccount, setArchivingAccount] = useState<FinanceAccount | null>(null);
@@ -182,12 +183,15 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts' | 'ca
       edit={data.canManage ? (id) => openEditor({ type: 'financeCategory', id }) : undefined} />;
   }
 
-  if (view === 'payroll') return <PayrollRegister report={salary} month={month}
-    changeMonth={(value) => { setFilters({ payrollMonth: value }); setSalaryHistory(null); }}
+  if (view === 'payroll') return <PayrollRegister report={salary} month={month} range={payrollRange}
+    periodPicker={<FinancePeriod from={payrollFrom || month + '-01'} to={payrollTo || today}
+      onApply={({ from, to }) => { setFilters({ payrollFrom: from, payrollTo: to }); setSalaryHistory(null); }} />}
+    changeMonth={(value) => { setFilters({ payrollMonth: value, payrollFrom: '', payrollTo: '' }); setSalaryHistory(null); }}
     search={search} changeSearch={setSearch} position={payrollPosition}
     changePosition={(value) => setFilters({ payrollPosition: value })}
     historyId={salaryHistoryId} changeHistory={setSalaryHistory}
-    canAccrue={data.canManage && (data.employees.length > 0 || (salary.data?.staff.length ?? 0) > 0)} canPay={data.canManage && data.accounts.length > 0}
+    canAccrue={!payrollRange && data.canManage && (data.employees.length > 0 || (salary.data?.staff.length ?? 0) > 0)}
+    canPay={!payrollRange && data.canManage && data.accounts.length > 0}
     accounts={data.accounts} openEditor={openEditor} />;
 
   if (view === 'cashFlow') {

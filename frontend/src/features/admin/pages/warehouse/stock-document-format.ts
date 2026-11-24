@@ -21,7 +21,7 @@ const STATUS_LABEL: Record<StockDocumentDisplayStatus, string> = {
   reversed: 'Сторнирован',
 };
 
-const DOCUMENT_DATE = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
+const DOCUMENT_DATE = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Bishkek' });
 
 export function documentDisplayStatus(document: StockDocument): StockDocumentDisplayStatus {
   return document.status === 'draft' && document.reopenedAt ? 'reopened' : document.status;

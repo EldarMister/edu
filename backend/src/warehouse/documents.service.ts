@@ -131,8 +131,8 @@ export class WarehouseDocumentsService {
     }, { ...transactionOptions, isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
-  async get(id: string, includeInventoryContext = false) {
-    return this.prisma.$transaction(async (tx) => this.preview(tx, await this.load(tx, id), includeInventoryContext),
+  async get(id: string, includeInventoryContext = false, inventoryIngredientId?: string) {
+    return this.prisma.$transaction(async (tx) => this.preview(tx, await this.load(tx, id), includeInventoryContext, inventoryIngredientId),
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
@@ -636,7 +636,7 @@ export class WarehouseDocumentsService {
 
   /** Draft counts are preserved while the preview follows the current book stock.
    * Posted/reversed documents keep the immutable values captured at approval. */
-  private async preview(tx: Prisma.TransactionClient, document: Document, includeInventoryContext = false) {
+  private async preview(tx: Prisma.TransactionClient, document: Document, includeInventoryContext = false, inventoryIngredientId?: string) {
     const reversalBlockedReason = await this.reversalBlockedReason(tx, document);
     const serialize = (value: Document) => ({ ...this.serialize(value), ...(reversalBlockedReason ? { reversalBlockedReason } : {}) });
     const snapshot = readWriteoffSnapshot(document.sourceLines);
@@ -653,7 +653,7 @@ export class WarehouseDocumentsService {
         return { ...item, quantity, difference: quantity && item.expected ? quantity.sub(item.expected) : null };
       }) };
       return { ...serialize(document), ...(includeInventoryContext
-        ? { inventoryContext: await inventoryPeriodContext(tx, warehouse, document.id, document.items, cutoffAt) } : {}) };
+        ? { inventoryContext: await inventoryPeriodContext(tx, warehouse, document.id, document.items, cutoffAt, inventoryIngredientId) } : {}) };
     }
     const draft = document.status === 'draft' || document.status === 'submitted';
     const cutoffAt = document.countedAt ?? (draft ? new Date() : document.postedAt);
@@ -673,7 +673,7 @@ export class WarehouseDocumentsService {
     }
     const serialized = serialize(document);
     if (!includeInventoryContext || !cutoffAt) return serialized;
-    return { ...serialized, inventoryContext: await inventoryPeriodContext(tx, warehouse, document.id, document.items, cutoffAt) };
+    return { ...serialized, inventoryContext: await inventoryPeriodContext(tx, warehouse, document.id, document.items, cutoffAt, inventoryIngredientId) };
   }
 
   private async reversalBlockedReason(tx: Prisma.TransactionClient, document: Document) {

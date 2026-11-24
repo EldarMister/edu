@@ -10,6 +10,10 @@ type PeriodRow = {
   consumptionQuantity: Prisma.Decimal;
   writeoffQuantity: Prisma.Decimal;
   otherQuantity: Prisma.Decimal;
+  lastCountId: string | null;
+  movementCount?: number;
+  movements?: { id: string; sourceType: string; sourceId: string | null; createdAt: string;
+    actorName: string | null; comment: string | null; change: string; bucket: string }[];
 };
 
 export async function inventoryPeriodContext(
@@ -18,9 +22,10 @@ export async function inventoryPeriodContext(
   documentId: string,
   items: WarehouseDocumentItem[],
   cutoffAt: Date,
+  ingredientId?: string,
 ) {
   const { cafeId, id: warehouseId, isDefault } = warehouse;
-  const countedItems = items.filter(({ expected }) => expected !== null);
+  const countedItems = items.filter((item) => item.expected !== null && (!ingredientId || item.ingredientId === ingredientId));
   if (!countedItems.length) return { cutoffAt, rows: [] };
   const ingredientIds = Prisma.join(countedItems.map(({ ingredientId }) => ingredientId));
   // Prisma binds a Date as timestamptz. Warehouse timestamps store UTC with
@@ -38,7 +43,7 @@ export async function inventoryPeriodContext(
         AND (d.status = 'posted' OR d.reopened_at IS NOT NULL OR (d.status = 'reversed' AND d.reversed_at > ${cutoffUtc}))
       ORDER BY i.ingredient_id, d.posted_at DESC, d.id DESC
     ), flows AS (
-      SELECT m.ingredient_id, m.change,
+      SELECT m.ingredient_id, m.change, m.id, m.source_type, m.source_id, m.created_at, m.actor_name, m.comment,
         CASE
           WHEN m.source_type = 'purchase' THEN 'incoming'
           WHEN m.source_type = 'order' THEN 'consumption'
@@ -60,7 +65,7 @@ export async function inventoryPeriodContext(
           AND (p.id IS NULL OR m.source_id IS DISTINCT FROM p.id)
         ))
     ), totals AS (
-      SELECT ingredient_id,
+      SELECT ingredient_id, COUNT(*)::int AS movement_count,
         SUM(change) FILTER (WHERE bucket = 'incoming') AS incoming,
         SUM(change) FILTER (WHERE bucket = 'consumption') AS consumption,
         SUM(change) FILTER (WHERE bucket = 'writeoff') AS writeoff,
@@ -68,11 +73,19 @@ export async function inventoryPeriodContext(
       FROM flows GROUP BY ingredient_id
     )
     SELECT COALESCE(p.ingredient_id, t.ingredient_id) AS "ingredientId",
-      p.count_at AS "lastCountAt", p.quantity AS "priorQuantity",
+      p.count_at AS "lastCountAt", p.id AS "lastCountId", p.quantity AS "priorQuantity",
       COALESCE(t.incoming, 0) AS "incomingQuantity",
       COALESCE(t.consumption, 0) AS "consumptionQuantity",
       COALESCE(t.writeoff, 0) AS "writeoffQuantity",
       COALESCE(t.other, 0) AS "otherQuantity"
+      ${ingredientId ? Prisma.sql`, COALESCE(t.movement_count, 0) AS "movementCount", (
+        SELECT COALESCE(jsonb_agg(jsonb_build_object(
+          'id', f.id, 'sourceType', f.source_type, 'sourceId', f.source_id,
+          'createdAt', to_char(f.created_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+          'actorName', f.actor_name, 'comment', f.comment, 'change', f.change::text, 'bucket', f.bucket
+        ) ORDER BY f.created_at DESC, f.id DESC), '[]'::jsonb)
+        FROM (SELECT * FROM flows ORDER BY created_at DESC, id DESC LIMIT 50) f
+      ) AS movements` : Prisma.empty}
     FROM previous p FULL OUTER JOIN totals t USING (ingredient_id)
   `;
   const byIngredient = new Map(periods.map((period) => [period.ingredientId, period]));
@@ -95,6 +108,8 @@ export async function inventoryPeriodContext(
       openingQuantity: display(opening), incomingQuantity: display(incoming),
       consumptionQuantity: display(consumption), writeoffQuantity: display(writeoff),
       otherQuantity: display(balancedOther),
+      ...(ingredientId ? { lastCountId: period?.lastCountId ?? null, movementCount: period?.movementCount ?? 0, movements: (period?.movements ?? []).map(({ change, ...movement }) =>
+        ({ ...movement, change: display(new Prisma.Decimal(change)) })) } : {}),
     };
   });
   return { cutoffAt, rows };

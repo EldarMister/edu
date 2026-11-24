@@ -363,6 +363,7 @@ model FinanceEntry {
   categoryId            String?          @map("category_id")
   counterpartyAccountId String?          @map("counterparty_account_id")
   salaryAccrualId       String?          @map("salary_accrual_id")
+  purchaseId            String?          @map("purchase_id")
   cashShiftId           String?          @map("cash_shift_id")
   cashCustodianId       String?          @map("cash_custodian_id")
   cashCustodyDay        DateTime?        @map("cash_custody_day") @db.Date
@@ -377,11 +378,13 @@ model FinanceEntry {
   counterparty          FinanceAccount?  @relation("FinanceCounterAccount", fields: [cafeId, counterpartyAccountId], references: [cafeId, id], onDelete: NoAction)
   category              FinanceCategory? @relation(fields: [cafeId, categoryId], references: [cafeId, id], onDelete: NoAction)
   salaryAccrual         SalaryAccrual?   @relation(fields: [cafeId, salaryAccrualId], references: [cafeId, id], onDelete: NoAction)
+  purchase              Purchase?        @relation(fields: [cafeId, purchaseId], references: [cafeId, id], onDelete: NoAction)
 
   @@unique([cafeId, sourceKey])
   @@index([cafeId, occurredAt])
   @@index([cafeId, accountId, occurredAt])
   @@index([cafeId, salaryAccrualId])
+  @@index([cafeId, purchaseId])
   @@index([cafeId, cashShiftId])
   @@index([cafeId, cashCustodyDay, cashCustodianId], map: "finance_entries_cash_custody_idx")
   @@map("finance_entries")
@@ -399,6 +402,7 @@ model User {
   prepStation  String?  @map("prep_station")
   isActive     Boolean  @default(true) @map("is_active")
   deletedAt    DateTime? @map("deleted_at")
+  lastLoginAt  DateTime? @map("last_login_at")
   // Совместимость со старыми записями; права сотрудников задаются в StaffPosition.
   permissions  Json?    @map("permissions")
   positionId   String?  @map("position_id")
@@ -407,6 +411,7 @@ model User {
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   orders               Order[]               @relation("WaiterOrders")
+  openedPayrollOrders  Order[]               @relation("PayrollOrderOpener")
   waiterShifts         WaiterShift[]         @relation("WaiterShifts")
   payments             Payment[]
   kitchenEvents        KitchenEvent[]
@@ -447,15 +452,16 @@ model StaffPosition {
 model StaffPositionSalaryRate {
   cafeId          String   @map("cafe_id")
   positionId      String   @map("position_id")
-  effectiveMonth  String   @map("effective_month")
+  effectiveDay    String   @map("effective_day")
   hourly          Decimal  @default(0) @db.Decimal(14, 2)
   perShift        Decimal  @default(0) @map("per_shift") @db.Decimal(14, 2)
   monthly         Decimal  @default(0) @db.Decimal(14, 2)
   personalPercent Decimal  @default(0) @map("personal_percent") @db.Decimal(5, 2)
   shiftPercent    Decimal  @default(0) @map("shift_percent") @db.Decimal(5, 2)
+  categoryRates   Json     @default("[]") @map("category_rates")
   position StaffPosition @relation(fields: [cafeId, positionId], references: [cafeId, id], onDelete: Cascade, map: "staff_position_salary_rates_position_fkey")
 
-  @@id([cafeId, positionId, effectiveMonth])
+  @@id([cafeId, positionId, effectiveDay])
   @@map("staff_position_salary_rates")
 }
 
@@ -463,7 +469,7 @@ model StaffPositionSalaryRate {
 model EmployeeSalaryRate {
   cafeId          String   @map("cafe_id")
   userId          String   @map("user_id")
-  effectiveMonth  String   @map("effective_month")
+  effectiveDay    String   @map("effective_day")
   positionId      String?  @map("position_id")
   positionName    String   @map("position_name")
   hourly          Decimal  @default(0) @db.Decimal(14, 2)
@@ -471,9 +477,10 @@ model EmployeeSalaryRate {
   monthly         Decimal  @default(0) @db.Decimal(14, 2)
   personalPercent Decimal  @default(0) @map("personal_percent") @db.Decimal(5, 2)
   shiftPercent    Decimal  @default(0) @map("shift_percent") @db.Decimal(5, 2)
+  categoryRates   Json     @default("[]") @map("category_rates")
   cafe            Cafe     @relation(fields: [cafeId], references: [id], onDelete: Cascade)
 
-  @@id([cafeId, userId, effectiveMonth])
+  @@id([cafeId, userId, effectiveDay])
   @@map("employee_salary_rates")
 }
 
@@ -691,6 +698,7 @@ model Order {
   splitFromOrderId       String?        @map("split_from_order_id")
   // nullable: заказ из QR-меню создаётся без официанта (source=qr).
   waiterId               String?        @map("waiter_id")
+  payrollOpenedById      String?        @map("payroll_opened_by_id")
   // Источник заказа: pos — в зале, qr — QR-меню, delivery — доставка с кассы или из интеграции.
   source                 String         @default("pos")
   // Внешний идентификатор есть только у заказов из интеграции.
@@ -729,6 +737,7 @@ model Order {
   splitFromOrder       Order?                @relation("SplitOrderFamily", fields: [splitFromOrderId], references: [id], onDelete: NoAction)
   splitOrders          Order[]               @relation("SplitOrderFamily")
   waiter               User?                 @relation("WaiterOrders", fields: [waiterId], references: [id])
+  payrollOpenedBy      User?                 @relation("PayrollOrderOpener", fields: [payrollOpenedById], references: [id], onDelete: Restrict)
   waiterShift          WaiterShift?          @relation(fields: [waiterShiftId], references: [id])
   items                OrderItem[]
   payments             Payment[]
@@ -749,6 +758,7 @@ model Order {
   @@index([tableId])
   @@index([splitFromOrderId])
   @@index([waiterId])
+  @@index([payrollOpenedById])
   @@index([waiterShiftId])
   @@map("orders")
 }
@@ -883,6 +893,7 @@ model OrderItem {
   dishId                  String?            @map("dish_id")
   dishVariantId           String?            @map("dish_variant_id")
   dishNameSnapshot        String             @map("dish_name_snapshot")
+  payrollCategoryId       String?            @map("payroll_category_id")
   dishVariantNameSnapshot String?            @map("dish_variant_name_snapshot")
   // Выбранный вес позиции. Цена остаётся фиксированной ценой блюда.
   weightGrams             Int?               @map("weight_grams")
@@ -1127,6 +1138,7 @@ model Settings {
   taxesEnabled Boolean @default(false) @map("taxes_enabled")
   useFloorPlan Boolean @default(false) @map("use_floor_plan")
   cashShiftsEnabled            Boolean @default(false) @map("cash_shifts_enabled")
+  cashShiftRequireClosedOrders Boolean @default(false) @map("cash_shift_require_closed_orders")
   cashHandoverEnabled          Boolean @default(false) @map("cash_handover_enabled")
   waiterOrderPermissions Json? @map("waiter_order_permissions")
   cafeId                       String? @unique @map("cafe_id")
@@ -1547,6 +1559,8 @@ model Purchase {
   date        DateTime       @default(now())
   effectiveAt DateTime?      @map("effective_at")
   stockPostedAt DateTime?    @map("stock_posted_at")
+  settlementKnownAt DateTime? @map("settlement_known_at")
+  settlementOpeningPaid Decimal? @map("settlement_opening_paid") @db.Decimal(12, 2)
   supplier    String
   supplierId String? @map("supplier_id")
   supplierRecord WarehouseSupplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
@@ -1560,10 +1574,12 @@ model Purchase {
   updatedAt   DateTime       @updatedAt @map("updated_at")
 
   items PurchaseItem[]
+  settlementEntries FinanceEntry[]
   warehouseId String? @map("warehouse_id")
   warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
 
   @@unique([cafeId, requestKey])
+  @@unique([cafeId, id])
   @@index([cafeId, warehouseId])
   @@index([status])
   @@index([createdAt])
@@ -1663,9 +1679,11 @@ model PreparationBatch {
   producedAt DateTime @default(now()) @map("produced_at")
   expiresAt DateTime? @map("expires_at")
   batchNumber String? @map("batch_number")
+  comment String?
   requestKey String @default(uuid()) @map("request_key")
   @@unique([cafeId, requestKey])
   @@index([cafeId, ingredientId, producedAt])
+  @@index([cafeId, producedAt])
   @@map("preparation_batches")
   costKnown Boolean @default(false) @map("cost_known")
 }

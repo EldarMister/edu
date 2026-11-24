@@ -52,6 +52,9 @@ export interface Ingredient {
   costUnitLabel: string; // «с/кг»
   stockBase: number;
   avgCostBase: number | null;
+  stockValue?: number | null;
+  lastPurchasePrice?: number | null;
+  retailValue?: number | null;
   isActive: boolean;
   isLow: boolean;
 }
@@ -66,6 +69,8 @@ export interface RecipeItem {
   costKnown?: boolean;
   processingMethod?: ProcessingMethod | null;
   warehouseId?: string | null;
+  warehouseName?: string;
+  baseAmount?: number;
   netAmount?: number;
   lossPercent?: number;
   variantAmounts?: Record<string, number>;
@@ -99,11 +104,13 @@ export interface Recipe {
   metadata?: RecipeMetadata | null;
   stockIngredientId?: string | null;
   stockAmount?: number;
+  stockItem?: { id: string; name: string; amount: number; unit: UnitCode | string; warehouseName?: string; kind?: ItemKind } | null;
   variants?: { id: string; name: string }[];
   components?: {
     dishId: string;
     dishName: string;
     variantId?: string;
+    variantName?: string | null;
     quantity: number;
     foodCost: number | null;
     accountingConfigured: boolean;
@@ -121,6 +128,19 @@ export interface Recipe {
 }
 
 export type PurchaseStatus = 'draft' | 'completed' | 'cancelled';
+export type PurchasePaymentStatus = 'untracked' | 'unpaid' | 'partly_paid' | 'paid' | 'overpaid';
+
+export interface PurchasePayment {
+  id: string;
+  occurredAt: string;
+  accountName: string;
+  actorName: string | null;
+  amount: number;
+  note: string | null;
+  reversedAt: string | null;
+  reversalReason: string | null;
+  reversible: boolean;
+}
 
 export interface PurchaseItem {
   grossTotal?: number;
@@ -149,6 +169,7 @@ export interface Purchase {
   returnableItems?: { ingredientId: string; name: string; unit: string; unitCode: UnitCode; receivedQuantity: number; returnedQuantity: number; remainingQuantity: number; receivedQuantityBase: number; returnedQuantityBase: number; remainingQuantityBase: number; remainingBase: number }[];
   corrections?: { id: string; createdAt: string; actorName: string | null; reason: string; before: { totalAmount: number }; after: { totalAmount: number } }[];
   productNames?: string[];
+  fundingAccounts?: string[];
   supplierId?: string | null;
   note?: string | null;
   attachments?: string[];
@@ -159,6 +180,12 @@ export interface Purchase {
   date: string;
   supplier: string;
   totalAmount: number;
+  paymentStatus: PurchasePaymentStatus | null;
+  paidAmount: number | null;
+  debtAmount: number | null;
+  creditAmount: number | null;
+  payments?: PurchasePayment[];
+  reconciliation?: { paidAmount: number; userName: string | null; description: string; createdAt: string } | null;
   status: PurchaseStatus;
   itemsCount: number;
   items?: PurchaseItem[];
@@ -340,6 +367,25 @@ export function useIngredients(search: string, warehouseId?: string, enabled = t
   });
 }
 
+export interface BalanceRows {
+  rows: Ingredient[];
+  totalRows: number;
+  page: number;
+  pageSize: number;
+  categories: string[];
+  stockValue: number | null;
+  incompleteStockValue: boolean;
+}
+
+export function useBalances(params: URLSearchParams, enabled: boolean) {
+  const query = params.toString();
+  return useQuery({
+    queryKey: [...KEY, 'balances', query],
+    queryFn: () => get<BalanceRows>(`/admin/warehouse/ingredients/balances?${query}`),
+    enabled,
+  });
+}
+
 export function useIngredientsOverview(warehouseId?: string) {
   return useQuery({
     queryKey: [...KEY, 'ingredients', 'overview', warehouseId],
@@ -351,8 +397,21 @@ export function useIngredientsOverview(warehouseId?: string) {
 export interface IngredientDetails extends Ingredient {
   balances: { warehouseId: string; warehouseName: string; stock: number; avgCost: number | null }[];
   usedInDishes: { id: string; name: string }[];
+  usage?: IngredientUsage[];
   lastPurchasePrice: number | null;
 }
+export type IngredientUsage = {
+  sourceId: string;
+  targetId: string;
+  name: string;
+  kind: 'recipe' | 'stock' | 'variant' | 'preparation' | 'modifier';
+  label: string | null;
+  active: boolean;
+  catalogKind: string | null;
+  isSet: boolean;
+  quantity?: number;
+  unit?: string;
+};
 export function useIngredient(id: string | null) {
   return useQuery({
     queryKey: [...KEY, 'ingredient', id],
@@ -484,6 +543,7 @@ interface PreparationRecipeInput {
 }
 
 export interface PreparationRecipe extends Omit<PreparationRecipeInput, 'items'> {
+  kind?: 'preparation' | 'prepared_dish';
   totalCost?: number | null;
   missingCosts?: string[];
   id: string;
@@ -517,7 +577,11 @@ export interface ProductionBatch {
   id: string;
   batchId: string;
   ingredientName: string;
+  kind?: ItemKind;
   warehouseId: string;
+  warehouseName?: string | null;
+  actorName?: string | null;
+  comment?: string | null;
   plannedQuantity: number;
   actualQuantity: number;
   yieldDifference: number;
@@ -529,10 +593,11 @@ export interface ProductionBatch {
   batchNumber: string | null;
   items: { actual: { ingredientId: string; name: string; quantity: number; unit: UnitCode; cost: string | null; costKnown?: boolean }[] };
 }
-export function useProductionJournal(warehouseId?: string) {
+export function useProductionJournal(params: { warehouseId?: string; search?: string; from?: string; to?: string;
+  status?: string; sort: 'asc' | 'desc'; page: number; pageSize: number }) {
   return useQuery({
-    queryKey: [...KEY, 'production', 'journal', warehouseId],
-    queryFn: () => get<ProductionBatch[]>(`${PREPARATION_URL}/batches?${warehouseQuery(warehouseId)}`),
+    queryKey: [...KEY, 'production', 'journal', params],
+    queryFn: () => api.get<{ rows: ProductionBatch[]; totalRows: number; page: number }>(`${PREPARATION_URL}/journal`, { params }).then((r) => r.data),
   });
 }
 export function useProductionBatches(id: string) {
@@ -572,6 +637,7 @@ export function usePreparationMutations() {
       plannedQuantity?: number;
       requestKey?: string;
       batchNumber?: string;
+      comment?: string;
       expiresAt?: string;
       items?: { ingredientId: string; quantity: number; unit: UnitCode }[];
     }) =>
@@ -598,6 +664,7 @@ export function usePreparationMutations() {
 
 type PurchaseListParams = {
   status: string;
+  paymentStatus?: string;
   search: string;
   warehouseId?: string;
   suppliers?: string[];
@@ -611,6 +678,7 @@ type PurchaseListParams = {
 export function purchaseListQuery(params: PurchaseListParams) {
   const q = warehouseQuery(params.warehouseId);
   if (params.status) q.set('status', params.status);
+  if (params.paymentStatus) q.set('paymentStatus', params.paymentStatus);
   if (params.search) q.set('search', params.search);
   if (params.from) q.set('from', params.from);
   if (params.to) q.set('to', params.to);

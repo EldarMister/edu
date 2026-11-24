@@ -52,7 +52,11 @@ export class RecipeResolver {
 export function recipeAmount(row: { amount: Prisma.Decimal; variantAmounts: Prisma.JsonValue | null }, variantId?: string | null): Prisma.Decimal {
   const amounts = row.variantAmounts;
   if (variantId && amounts && typeof amounts === 'object' && !Array.isArray(amounts) && amounts[variantId] !== undefined) {
-    const amount = new Prisma.Decimal(String(amounts[variantId]));
+    const saved = amounts[variantId];
+    if (!(typeof saved === 'number' || typeof saved === 'string' && saved.trim()) || !Number.isFinite(Number(saved))) {
+      throw new BadRequestException('Некорректная норма варианта блюда');
+    }
+    const amount = new Prisma.Decimal(saved);
     if (!amount.isFinite() || amount.lt(0)) throw new BadRequestException('Некорректная норма варианта блюда');
     return amount;
   }

@@ -3,7 +3,7 @@ import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
 import { api, apiError } from '@/lib/api';
 import { useAuth } from '@/store/auth';
-import { PROCESSING_METHODS, useIngredients, type Ingredient } from './api';
+import { PROCESSING_METHODS, useBalances, useIngredients, type Ingredient } from './api';
 import { QueryState } from './WarehouseUi';
 import { usePageFilter, usePageFilters } from './workspace-route';
 import { useWarehousePolicy } from './settings-api';
@@ -24,6 +24,8 @@ const balanceColumns = {
   stock: { label: 'Остатки', width: 125, numeric: true },
   unit: { label: 'Ед. измерения', width: 130, optional: true },
   cost: { label: 'Себестоимость', width: 150, numeric: true, costs: true },
+  lastPurchasePrice: { label: 'Себестоимость последней поставки', width: 180, numeric: true, costs: true, optional: true },
+  retailValue: { label: 'Сумма по ценам реализации', width: 175, numeric: true, costs: true, optional: true },
   total: { label: 'Сумма', width: 120, numeric: true, costs: true },
   limit: { label: 'Лимит', width: 125, numeric: true },
 } satisfies Record<string, { label: string; width: number; numeric?: boolean; costs?: boolean; optional?: boolean }>;
@@ -76,7 +78,13 @@ export function IngredientsTab({
   const dataColumns = columns.slice(1);
   const suppliesVisible = can('actions.warehouseReports') && costs;
   const preparedCatalogue = catalogue === 'preparations';
-  const [expanded, setExpanded] = usePageFilter('balanceExpanded');
+  const [balanceFilters, updateBalanceFilters] = usePageFilters({ search: '', kind: '', category: '', unit: '', stockFilter: '',
+    warehouse: '', balancePage: '1', balanceExpanded: '', balanceSort: 'asc' });
+  const { search, kind, category, unit, balanceExpanded: expanded, balanceSort: sort } = balanceFilters;
+  function setBalanceFilter(patch: Partial<typeof balanceFilters>) {
+    updateBalanceFilters({ ...patch, balancePage: '1', balanceExpanded: '' });
+  }
+  const setExpanded = (value: string) => updateBalanceFilters({ balanceExpanded: value });
   const [catalogueExpanded, setCatalogueExpanded] = usePageFilter('catalogueExpanded');
   const catalogueDetail = catalogueExpanded.startsWith('composition:')
     ? { id: catalogueExpanded.slice('composition:'.length), kind: 'composition' as const }
@@ -84,42 +92,47 @@ export function IngredientsTab({
       ? { id: catalogueExpanded.slice('usage:'.length), kind: 'usage' as const }
       : null;
   const detailId = useId();
-  const [search, setSearch] = usePageFilter('search');
-  const [kind, setKind] = usePageFilter('kind');
-  const [category, setCategory] = usePageFilter('category');
-  const [unit, setUnit] = usePageFilter('unit');
-  const [sort, setSort] = usePageFilter('balanceSort', 'asc');
   const [catalogueSort, setCatalogueSort] = usePageFilter('nameSort', 'asc');
-  const [, updateBalanceFilters] = usePageFilters({ search: '', kind: '', category: '', unit: '', stockFilter: '', warehouse: '' });
   const balanceKinds = warehouseMultiFilterValues(kind);
   const balanceCategories = warehouseMultiFilterValues(category);
   const policy = useWarehousePolicy();
   const production = policy.data?.warehouseProductionEnabled || policy.data?.productionInUse;
-  const query = useIngredients('', warehouseId);
-  const catalogueRows = (query.data ?? []).filter((item) =>
+  const searchText = search.trim().toLocaleLowerCase();
+  const params = new URLSearchParams({ columns: columns.join(','), sort: sort === 'desc' ? 'desc' : 'asc' });
+  if (warehouseId) params.set('warehouseId', warehouseId);
+  if (searchText) params.set('search', search.trim().slice(0, 160));
+  if (unit) params.set('unit', unit);
+  if (filter === 'low' || filter === 'empty') params.set('stockFilter', filter);
+  balanceKinds.forEach((value) => params.append('kinds', value));
+  balanceCategories.forEach((value) => params.append('categories', value));
+  const pageSize = 50;
+  const requestedPage = Number(balanceFilters.balancePage);
+  const balances = useBalances(new URLSearchParams([...params, ['page', String(
+    Number.isSafeInteger(requestedPage) && requestedPage > 0 ? Math.min(requestedPage, 1000000) : 1)], ['pageSize', String(pageSize)]]), !catalogue);
+  const catalogueQuery = useIngredients('', warehouseId, !!catalogue);
+  const query = catalogue ? catalogueQuery : balances;
+  const catalogueRows = (catalogueQuery.data ?? []).filter((item) =>
     preparedCatalogue
       ? item.isPrepared
       : catalogue === 'ingredients'
         ? !item.isPrepared && item.kind !== 'goods' && item.kind !== 'beverage'
         : true,
   );
-  const searchText = search.trim().toLocaleLowerCase();
-  const rows = catalogueRows.filter(
+  const rows = catalogue ? catalogueRows.filter(
     (item) =>
       (!searchText ||
         [item.name, item.category].some((value) =>
           value?.toLocaleLowerCase().includes(searchText),
         )) &&
-      (catalogue || !balanceKinds.length || balanceKinds.includes(balanceKind(item)) || balanceKinds.includes(item.kind ?? '')) &&
-      (catalogue ? !category || item.category === category : !balanceCategories.length || balanceCategories.includes(item.category ?? '')) &&
+      (!category || item.category === category) &&
       (!unit || item.displayUnit === unit) &&
       (preparedCatalogue || !filter || (filter === 'empty' ? item.stock <= 0 : item.isLow && item.stock > 0)),
-  );
-  if (!catalogue) rows.sort((a, b) => a.name.localeCompare(b.name, 'ru') * (sort === 'desc' ? -1 : 1));
-  else rows.sort((a, b) => a.name.localeCompare(b.name, 'ru') * (catalogueSort === 'desc' ? -1 : 1));
-  const categories = [
-    ...new Set(catalogueRows.flatMap((item) => (item.category ? [item.category] : []))),
-  ].sort();
+  ).sort((a, b) => a.name.localeCompare(b.name, 'ru') * (catalogueSort === 'desc' ? -1 : 1)) : balances.data?.rows ?? [];
+  const categories = catalogue ? [...new Set(catalogueRows.flatMap((item) => item.category ? [item.category] : []))].sort()
+    : balances.data?.categories ?? [];
+  const totalRows = balances.data?.totalRows ?? 0;
+  const page = balances.data?.page ?? 1;
+  const lastPage = Math.ceil(totalRows / pageSize);
   const virtual = (item: Ingredient) => !!item.isPrepared && item.preparationMode === 'virtual';
   const unitCost = (item: Ingredient) => (virtual(item) ? (item.recipeUnitCost ?? null) : item.avgCost);
   const listCost = (item: Ingredient) =>
@@ -129,7 +142,7 @@ export function IngredientsTab({
   const amount = balanceMoney;
   const stock = (item: Ingredient) => (virtual(item) ? 'По рецепту' : quantity(item.stock, item));
   const kindLabel = (item: Ingredient) =>
-    item.isPrepared ? 'Полуфабрикат' : ['goods', 'beverage'].includes(item.kind ?? '') ? 'Товар' : 'Ингредиент';
+    item.kind === 'prepared_dish' ? 'Готовое блюдо' : item.isPrepared ? 'Полуфабрикат' : ['goods', 'beverage'].includes(item.kind ?? '') ? 'Товар' : 'Ингредиент';
   const includeUnit = !columns.includes('unit');
   const threshold = (item: Ingredient) => virtual(item) ? '—'
     : item.lowStockThreshold.toLocaleString('ru-RU', { minimumFractionDigits: 3, maximumFractionDigits: 3 })
@@ -139,8 +152,8 @@ export function IngredientsTab({
       ? balanceQuantity(item.recipeOutputQuantity, unitLabel(item.recipeOutputUnit))
       : 'Не задан';
   const valuedRows = rows.filter((item) => !virtual(item));
-  const total = valuedRows.reduce((sum, item) => sum + (balanceValue(item) ?? 0), 0);
-  const unknown = valuedRows.some((item) => item.avgCost == null && item.stock !== 0);
+  const total = catalogue ? valuedRows.reduce((sum, item) => sum + (balanceValue(item) ?? 0), 0) : balances.data?.stockValue ?? 0;
+  const unknown = catalogue ? valuedRows.some((item) => item.avgCost == null && item.stockBase !== 0) : !!balances.data?.incompleteStockValue;
   const toggleCatalogue = (id: string, kind: 'usage' | 'composition') =>
     setCatalogueExpanded(catalogueDetail?.id === id && catalogueDetail.kind === kind ? '' : `${kind}:${id}`);
   const catalogueDetails = (item: Ingredient) => (
@@ -233,8 +246,10 @@ export function IngredientsTab({
       case 'category': return item.category || '—';
       case 'stock': return virtual(item) ? 'По рецепту' : balanceQuantity(item.stock, item.unit, item.unitType, includeUnit);
       case 'unit': return item.unit;
-      case 'cost': return unitCost(item) == null ? '—' : amount(unitCost(item)!);
-      case 'total': return virtual(item) || balanceValue(item) == null ? '—' : amount(balanceValue(item)!);
+      case 'cost': return unitCost(item) == null ? 'Не рассчитана' : amount(unitCost(item)!);
+      case 'lastPurchasePrice': return item.lastPurchasePrice == null ? '—' : amount(item.lastPurchasePrice);
+      case 'retailValue': return item.retailValue == null ? '—' : amount(item.retailValue);
+      case 'total': return virtual(item) ? '—' : item.stockValue == null ? 'Не рассчитана' : amount(item.stockValue);
       case 'limit': return threshold(item);
       default: return item.name;
     }
@@ -245,13 +260,6 @@ export function IngredientsTab({
     setExporting(true);
     setExportError('');
     try {
-      const params = new URLSearchParams({ columns: columns.join(','), sort: sort === 'desc' ? 'desc' : 'asc' });
-      if (warehouseId) params.set('warehouseId', warehouseId);
-      if (searchText) params.set('search', search.trim());
-      if (unit) params.set('unit', unit);
-      if (filter) params.set('stockFilter', filter);
-      balanceKinds.forEach((value) => params.append('kinds', value));
-      balanceCategories.forEach((value) => params.append('categories', value));
       const response = await api.get<Blob>(`/admin/warehouse/ingredients/export.xlsx?${params}`, { responseType: 'blob' });
       const downloadUrl = URL.createObjectURL(response.data);
       const link = document.createElement('a');
@@ -313,18 +321,19 @@ export function IngredientsTab({
         {exportError && <p role="alert" className="py-2 text-sm text-danger">{exportError}</p>}
       </>}
       <div className="poster-toolbar">
-        <WorkspaceSearch label="Поиск позиции" placeholder={catalogue ? 'Быстрый поиск' : 'Поиск...'} value={search} onChange={setSearch} />
+        <WorkspaceSearch label="Поиск позиции" placeholder={catalogue ? 'Быстрый поиск' : 'Поиск...'} value={search} onChange={(value) => setBalanceFilter({ search: value })} />
         {filters}
         {catalogue && canCreate && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
         {!catalogue && (
           <WarehouseMultiFilter
             label="Тип"
             value={kind}
-            onChange={setKind}
+            onChange={(value) => setBalanceFilter({ kind: value })}
             options={[
               { value: 'ingredient', label: 'Ингредиент' },
               { value: 'goods', label: 'Товар' },
               { value: 'preparation', label: 'Полуфабрикат' },
+              { value: 'prepared_dish', label: 'Готовое блюдо' },
             ]}
           />
         )}
@@ -334,12 +343,12 @@ export function IngredientsTab({
               ariaLabel="Категория"
               className="poster-filter w-40"
               value={category}
-              onChange={setCategory}
+              onChange={(value) => setBalanceFilter({ category: value })}
               options={[
                 { value: '', label: 'Категория' },
                 ...categories.map((value) => ({ value, label: value })),
               ]}
-            /> : <WarehouseMultiFilter label="Категория" value={category} onChange={setCategory} options={[
+            /> : <WarehouseMultiFilter label="Категория" value={category} onChange={(value) => setBalanceFilter({ category: value })} options={[
               { value: '', label: 'Без категории' },
               ...categories.map((value) => ({ value, label: value })),
             ]} />}
@@ -347,7 +356,7 @@ export function IngredientsTab({
               ariaLabel="Единица измерения"
               className="poster-filter w-40"
               value={unit}
-              onChange={setUnit}
+              onChange={(value) => setBalanceFilter({ unit: value })}
               options={[{ value: '', label: 'Ед. измерения' }, ...UNIT_OPTIONS]}
             />}
           </>
@@ -362,7 +371,7 @@ export function IngredientsTab({
                 ariaLabel="Категория"
                 className="w-full"
                 value={category}
-                onChange={setCategory}
+                onChange={(value) => setBalanceFilter({ category: value })}
                 options={[
                   { value: '', label: 'Все категории' },
                   ...categories.map((value) => ({ value, label: value })),
@@ -374,7 +383,7 @@ export function IngredientsTab({
                 ariaLabel="Единица измерения"
                 className="w-full"
                 value={unit}
-                onChange={setUnit}
+                onChange={(value) => setBalanceFilter({ unit: value })}
                 options={[{ value: '', label: 'Ед. измерения' }, ...UNIT_OPTIONS]}
               />
             )}
@@ -383,7 +392,7 @@ export function IngredientsTab({
                 ariaLabel="Остатки"
                 className="w-full"
                 value={filter}
-                onChange={(value) => onFilter(value as StockFilter)}
+                onChange={(value) => catalogue ? onFilter(value as StockFilter) : setBalanceFilter({ stockFilter: value })}
                 options={[
                   { value: '', label: 'Все остатки' },
                   { value: 'low', label: 'Ниже лимита' },
@@ -394,7 +403,7 @@ export function IngredientsTab({
           </div>
         </details>
         {!catalogue && (filtered || warehouseId) && <button type="button" className="poster-balance-reset"
-          onClick={() => updateBalanceFilters({ search: '', kind: '', category: '', unit: '', stockFilter: '', warehouse: '' })}>
+          onClick={() => setBalanceFilter({ search: '', kind: '', category: '', unit: '', stockFilter: '', warehouse: '' })}>
           Сбросить всё
         </button>}
         {!catalogue && <button type="button" className="supply-header-action ml-auto shrink-0 print:hidden"
@@ -421,7 +430,7 @@ export function IngredientsTab({
                     <button
                       type="button"
                       className="flex items-center gap-2"
-                      onClick={() => setSort(sort === 'desc' ? 'asc' : 'desc')}
+                      onClick={() => setBalanceFilter({ balanceSort: sort === 'desc' ? 'asc' : 'desc' })}
                     >
                       Название <span aria-hidden>{sort === 'desc' ? '↓' : '↑'}</span>
                     </button>
@@ -447,7 +456,7 @@ export function IngredientsTab({
                   </>
                 )}
                 <th><span className="sr-only">Действия</span></th>
-                </> : dataColumns.map((key) => <th key={key} scope="col" className={columnSpec(key).numeric ? 'text-right' : undefined}>
+                </> : dataColumns.map((key) => <th key={key} scope="col" data-column={key} className={columnSpec(key).numeric ? 'text-right' : undefined}>
                   {columnSpec(key).label}
                 </th>)}
               </tr>
@@ -604,13 +613,12 @@ export function IngredientsTab({
         {unknown && showTotal && (
           <p className="mt-2 text-xs text-text-muted">Стоимость части остатков неизвестна. Итог неполный.</p>
         )}
+        {!catalogue && lastPage > 1 && <nav aria-label="Страницы остатков" className="poster-balance-pagination">
+          <button type="button" disabled={page <= 1} onClick={() => updateBalanceFilters({ balancePage: String(page - 1), balanceExpanded: '' })}>Назад</button>
+          <span>{(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalRows)} из {totalRows}</span>
+          <button type="button" disabled={page >= lastPage} onClick={() => updateBalanceFilters({ balancePage: String(page + 1), balanceExpanded: '' })}>Вперёд</button>
+        </nav>}
       </QueryState>
     </div>
   );
-}
-
-function balanceKind(item: Ingredient) {
-  if (item.isPrepared) return 'preparation';
-  if (item.kind === 'goods' || item.kind === 'beverage') return 'goods';
-  return 'ingredient';
 }

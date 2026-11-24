@@ -7,6 +7,7 @@ const { Reflector } = require('@nestjs/core');
 const { ValidationPipe } = require('@nestjs/common');
 const { runWithTenant, tenantPrismaMiddleware } = require('../src/tenant/tenant-context.ts');
 const { RecipesService } = require('../src/warehouse/recipes.service.ts');
+const { IngredientsService } = require('../src/warehouse/ingredients.service.ts');
 const { RecipesController } = require('../src/warehouse/recipes.controller.ts');
 const { RecipeDraftDto } = require('../src/warehouse/recipes.dto.ts');
 const { PermissionsGuard } = require('../src/common/guards/permissions.guard.ts');
@@ -265,6 +266,40 @@ test(
             (await service.getDraft(dish.id)).recipe.metadata.instructions,
             'Параллельная правка',
           );
+        });
+        await t.test('ingredient usage reports direct and variant sales, preparation recipes and archived modifiers', async () => {
+          const ingredient = await db.ingredient.create({ data: { name: 'Сливки для связей', unitType: 'volume', displayUnit: 'l' } });
+          const preparation = await db.ingredient.create({ data: { name: 'Крем', isPrepared: true, kind: 'preparation', unitType: 'mass', displayUnit: 'kg' } });
+          await db.preparationRecipe.create({ data: { ingredientId: preparation.id, outputAmount: 1000, outputUnit: 'kg',
+            items: { create: [{ ingredientId: ingredient.id, amount: 250, unit: 'l' }] } } });
+          const drinks = await db.dish.create({ data: { name: 'Сливочный кофе', categoryId: category.id, price: 150,
+            stockIngredientId: ingredient.id, stockAmount: 100,
+            recipeItems: { create: [{ ingredientId: ingredient.id, amount: 75, amountUnit: 'ml' }] },
+            variants: { create: [{ name: 'Большой', price: 200, stockIngredientId: ingredient.id, stockAmount: 175 }] },
+            modifierGroups: { create: [{ name: 'Добавки', options: { create: [{ name: 'Сливки', isActive: false,
+              ingredientId: ingredient.id, amount: 30, amountUnit: 'ml' }] } }] },
+          } });
+          const foreign = await db.cafe.create({ data: { name: 'Foreign usage ' + randomUUID() } });
+          try {
+            await runWithTenant({ cafeId: foreign.id }, async () => {
+              const foreignCategory = await db.category.create({ data: { name: 'Чужая категория' } });
+              // Even an imported cross-tenant reference must not disclose the other tenant's dish.
+              await db.dish.create({ data: { name: 'Чужое блюдо', categoryId: foreignCategory.id, price: 100, stockIngredientId: ingredient.id } });
+              await assert.rejects(new IngredientsService(db).findOne(ingredient.id), /не найден/i);
+            });
+            const { usage, usedInDishes } = await new IngredientsService(db).findOne(ingredient.id);
+            assert.deepEqual(usedInDishes, [{ id: drinks.id, name: drinks.name }]);
+            const values = Object.fromEntries(usage.map(({ kind, quantity, unit, active, label }) => [kind, [quantity, unit, active, label]]));
+            assert.deepEqual(values, { preparation: [0.25, 'л', true, null], recipe: [75, 'мл', true, null], stock: [0.1, 'л', true, null],
+              variant: [0.175, 'л', true, 'Большой'], modifier: [30, 'мл', false, 'Добавки · Сливки'] });
+          } finally {
+            await runWithTenant({ cafeId: foreign.id }, async () => {
+              await db.dish.deleteMany();
+              await db.category.deleteMany();
+            });
+            await db.cafe.delete({ where: { id: foreign.id } });
+            await db.preparationRecipe.delete({ where: { ingredientId: preparation.id } });
+          }
         });
       });
     } finally {

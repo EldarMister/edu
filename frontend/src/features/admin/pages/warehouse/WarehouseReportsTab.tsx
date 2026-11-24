@@ -304,14 +304,22 @@ function WarehouseReportContents({ report, view, canOpen, onOpen }: {
     <>
       {report.salesPerformance && (
         <div className="space-y-2 border-b border-border p-4">
-          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3 lg:grid-cols-5">
             <div>
               Выручка после скидок
               <p className="font-semibold">{money(report.salesPerformance.netRevenue)}</p>
             </div>
             <div>
               Фактическая себестоимость
-              <p className="font-semibold">{money(report.salesPerformance.actualCost)}</p>
+              <p className="font-semibold">{costLabel(report.salesPerformance.actualCost)}</p>
+            </div>
+            <div>
+              Фудкост, %
+              <p className="font-semibold">
+                {report.salesPerformance.foodCostPercent == null
+                  ? '—'
+                  : `${report.salesPerformance.foodCostPercent.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%`}
+              </p>
             </div>
             <div>
               Маржа до прочих расходов

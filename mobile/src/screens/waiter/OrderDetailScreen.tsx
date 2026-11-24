@@ -7,6 +7,7 @@ import { Pressable } from 'react-native';
 import { Button, EmptyState, Loading } from '@/components/ui';
 import { OrderBadge } from '@/components/StatusBadge';
 import { colors, fontSize, radius, spacing } from '@/theme';
+import { useAuth } from '@/store/auth';
 import {
   useActiveOrders,
   usePickedUp,
@@ -26,6 +27,7 @@ export function OrderDetailScreen() {
   const route = useRoute<R>();
   const navigation = useNavigation<any>();
   const { orderId } = route.params;
+  const canPay = useAuth((state) => state.user?.permissions?.actions?.acceptOrderPayments !== false);
   const orders = useActiveOrders();
   const order = orders.data?.find((o) => o.id === orderId) ?? null;
 
@@ -83,7 +85,7 @@ export function OrderDetailScreen() {
           />
         );
       case 'waiting_payment':
-        return <Button title="Оплатить" style={{ flex: 1 }} onPress={() => setPayOpen(true)} />;
+        return canPay ? <Button title="Оплатить" style={{ flex: 1 }} onPress={() => setPayOpen(true)} /> : null;
       default:
         return <View style={{ flex: 1 }} />;
     }
@@ -132,15 +134,14 @@ export function OrderDetailScreen() {
         </View>
       </View>
 
-      <PaymentSheet
+      {payOpen && canPay && <PaymentSheet
         order={order}
-        visible={payOpen}
         onClose={() => setPayOpen(false)}
         onPaid={() => {
           setPayOpen(false);
           navigation.goBack();
         }}
-      />
+      />}
     </SafeAreaView>
   );
 }
