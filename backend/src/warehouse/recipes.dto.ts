@@ -49,6 +49,7 @@ export class RecipePreviewDto {
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160) categoryId?: string;
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160) prepStation?: string | null;
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160) variantId?: string;
+  @IsOptional() @IsBoolean() ownRecipe?: boolean;
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160) producedStockIngredientId?: string | null;
   @IsOptional() @IsIn([1, 100, 1000]) weightedPriceBase?: number;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(99999999.99) price?: number;

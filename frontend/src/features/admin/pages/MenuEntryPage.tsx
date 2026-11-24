@@ -20,11 +20,11 @@ import { useIngredients, type Ingredient, type Recipe, type RecipeMetadata } fro
 import { EditorPage } from './warehouse/EditorPage';
 import { RecipeDraftFields } from './warehouse/RecipeDraftFields';
 import {
-  recipeDraftPayload, recipeDraftRows, recipePreviewItems, recipeQuantity, scaleRecipeDraftRows, validRecipeRows,
+  recipeDraftPayload, recipeDraftRows, recipePreviewItems, recipeQuantity, scaleRecipeDraftRows, validRecipeRows, type RecipeDraftRow,
 } from './warehouse/recipe-draft-values';
 import { RecipeCostSummary } from './warehouse/RecipeCostSummary';
 import { RecipeBatchPanel } from './warehouse/RecipeBatchPreview';
-import { useRecipePreview, type RecipePreview } from './warehouse/recipe-preview-api';
+import { useRecipePreview, type RecipePreview, type RecipePreviewInput } from './warehouse/recipe-preview-api';
 import { ModifierDraftFields, type ModifierDraft } from './warehouse/ModifierDraftFields';
 import { normalizeUnitLabel, unitLabel, unitLabelOptions } from './warehouse/units';
 import { useWarehousePolicy } from './warehouse/settings-api';
@@ -46,7 +46,10 @@ type VariantDraft = {
   name: string;
   price: string;
   unit: string;
+  ownRecipe?: VariantRecipeDraft | null;
 };
+
+type VariantRecipeDraft = { rows: RecipeDraftRow[]; metadata: RecipeMetadata };
 
 const emptyModifiers: ModifierDraft = { allowIngredientExclusions: false, groups: [] };
 const maxRecipePortions = 10_000;
@@ -143,16 +146,18 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
     weightedPriceBase: source?.weightedPriceBase ?? 100,
     unit: normalizeUnitLabel(source?.unit),
   }));
-  const [variants, setVariants] = useState<VariantDraft[]>(() => (source?.variants ?? []).map((variant) => ({
-    key: variant.id,
-    id: copy ? undefined : variant.id,
-    name: variant.name,
-    price: String(Number(variant.price)),
-    unit: normalizeUnitLabel(variant.unit),
-  })));
+  const [variants, setVariants] = useState<VariantDraft[]>(() => (source?.variants ?? []).map((variant) => {
+    const ownRecipe = initial?.recipe.variantRecipes?.[variant.id];
+    return {
+      key: variant.id, id: copy ? undefined : variant.id, name: variant.name,
+      price: String(Number(variant.price)), unit: normalizeUnitLabel(variant.unit),
+      ownRecipe: ownRecipe && { rows: recipeDraftRows(ownRecipe.items, copy), metadata: ownRecipe.metadata },
+    };
+  }));
   const [withVariants, setWithVariants] = useState(variants.length > 0);
   const activeVariants = !isGoods || withVariants ? variants : [];
-  const [costVariantKey, setCostVariantKey] = useState(initialVariantId ?? '');
+  const [costVariantKey, setCostVariantKey] = useState(initialVariantId ??
+    (initial?.recipe.items.length === 0 ? (variants.find(({ ownRecipe }) => ownRecipe)?.key ?? '') : ''));
   const costVariant = activeVariants.find((variant) => variant.key === costVariantKey) ?? (isGoods ? activeVariants[0] : undefined);
   const [metadata, setMetadata] = useState<RecipeMetadata>(() => initial?.recipe.metadata ?? {});
   const savedPortions = initial?.recipe.metadata?.recipePortions ?? 1;
@@ -198,23 +203,34 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
   const priceBasis = weightedPriceUnits.find((unit) => unit.value === String(form.weightedPriceBase))?.label;
   const hasStockBinding = !isGoods && !!producedStockId;
   const validRows = validRecipeRows(rows);
-  const hasVariantNorms = !!costVariant && rows.some((row) => row.variantAmounts?.[costVariant.id ?? costVariant.key] != null);
+  const ownRecipe = costVariant?.ownRecipe ?? null;
+  const previewRows = ownRecipe?.rows ?? rows;
+  const previewMetadata = ownRecipe?.metadata ?? metadata;
+  const previewPortions = ownRecipe ? 1 : inputPortions;
+  const hasVariantNorms = !ownRecipe && !!costVariant && rows.some((row) => row.variantAmounts?.[costVariant.id ?? costVariant.key] != null);
+  const recipeIngredientIds = new Set([...rows, ...activeVariants.flatMap((variant) => variant.ownRecipe?.rows ?? [])]
+    .map(({ ingredientId }) => ingredientId));
   const previewPrice = salePrice(costVariant?.price ?? form.price);
   const goodsBindingPending = isGoods && (!!costVariant && !costVariant.id || !withVariants && !dish?.stockIngredientId);
-  const preview = useRecipePreview(canWarehouse && !goodsBindingPending && !!form.categoryId && (dish || rows.length || hasStockBinding)
-    && (validRows || hasStockBinding || isGoods) ? {
+  const previewContext = canWarehouse && form.categoryId ? {
       dishId: dish?.id,
       categoryId: form.categoryId,
       prepStation: form.prepStation === (dish?.prepStation ?? '') ? undefined : form.prepStation || null,
+      ...dishTaxInput(tax),
+  } : null;
+  const validPreviewRows = ownRecipe ? validRecipeRows(previewRows) : validRows;
+  const preview = useRecipePreview(previewContext && !goodsBindingPending && (dish || previewRows.length || hasStockBinding)
+    && (validPreviewRows || hasStockBinding || isGoods) ? {
+      ...previewContext,
       variantId: costVariant?.id,
       price: previewPrice ?? 0,
-      ...dishTaxInput(tax),
       ...(!isGoods && producedStockId !== savedStockId ? { producedStockIngredientId: producedStockId || null } : {}),
       weightedPriceBase: form.isWeighted ? form.weightedPriceBase : undefined,
-      inputPortions: !isGoods && !dish?.isSet ? inputPortions : undefined,
-      metadata: !isGoods ? { outputQuantity: hasVariantNorms ? undefined : metadata.outputQuantity, outputUnit: metadata.outputUnit } : undefined,
-      items: !isGoods && !dish?.isSet && validRows
-        ? recipePreviewItems(rows, activeVariants.flatMap(({ id }) => id ? [id] : []), costVariant?.id ? undefined : costVariant?.key)
+      ...(!isGoods && { inputPortions: previewPortions, ownRecipe: !!ownRecipe,
+        metadata: { outputQuantity: hasVariantNorms ? undefined : previewMetadata.outputQuantity, outputUnit: previewMetadata.outputUnit } }),
+      items: !isGoods && !dish?.isSet && validPreviewRows
+        ? recipePreviewItems(previewRows, ownRecipe ? [] : activeVariants.flatMap(({ id }) => id ? [id] : []),
+          !ownRecipe && !costVariant?.id ? costVariant?.key : undefined)
         : [],
     } : null);
 
@@ -274,11 +290,21 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
       setError('Укажите цену продажи с точностью до двух знаков после запятой.');
       return;
     }
-    const pricedVariants = activeVariants.map(({ key, id, name, price, unit }) => ({
+    const pricedVariants = activeVariants.map(({ key, id, name, price, unit, ownRecipe }) => ({
       id, clientKey: key, name: name.trim(), price: salePrice(price) ?? 0, unit,
+      ...(canRecipe && !isGoods && ownRecipe !== undefined && { ownRecipe: ownRecipe && {
+        items: recipeDraftPayload(ownRecipe.rows), metadata: ownRecipe.metadata,
+      } }),
     }));
     if (pricedVariants.some((variant) => !variant.name || variant.name.length > 80 || variant.price <= 0)) {
       setError('Укажите название и цену больше нуля для каждого варианта. В цене допускаются два знака после запятой.');
+      return;
+    }
+    const invalidVariant = activeVariants.find(({ ownRecipe }) => ownRecipe &&
+      (!ownRecipe.rows.length || !validRecipeRows(ownRecipe.rows)));
+    if (canRecipe && invalidVariant) {
+      setVariantEditor(invalidVariant);
+      setError('Проверьте состав варианта «' + invalidVariant.name + '».');
       return;
     }
     if (canRecipe && !isGoods && !validRows) {
@@ -289,7 +315,6 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
     submission.current = true;
     setPending(true);
     try {
-      const recipeIngredientIds = new Set(rows.map(({ ingredientId }) => ingredientId));
       const modifiersToSave = { ...modifiers, excludableIngredientIds: modifiers.excludableIngredientIds
         ?.filter((ingredientId) => recipeIngredientIds.has(ingredientId)) ?? modifiers.excludableIngredientIds };
       const body = {
@@ -360,6 +385,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
     setVariants((current) => current.some(({ key }) => key === variant.key)
       ? current.map((value) => value.key === variant.key ? variant : value)
       : [...current, variant]);
+    if (variant.ownRecipe) setCostVariantKey(variant.key);
     setVariantEditor(undefined);
   }
 
@@ -373,7 +399,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
       details.items.map((item) => [item.name, recipeQuantity(item.amount, unitLabel(item.amountUnit)),
         item.netWeightGrams != null ? recipeQuantity(item.netWeightGrams, 'г')
           : item.netAmount == null ? 'Не рассчитано' : recipeQuantity(item.netAmount, unitLabel(item.amountUnit)),
-        item.warehouseName ?? 'По цеху']), { title: 'Технология приготовления', text: metadata.instructions ?? '' });
+        item.warehouseName ?? 'По цеху']), { title: 'Технология приготовления', text: previewMetadata.instructions ?? '' });
     setError(printed ? '' : 'Разрешите открытие окна печати в браузере.');
   }
 
@@ -395,18 +421,19 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
   const priceLabel = priceBasis && form.isWeighted ? 'Цена за ' + priceBasis : 'Цена продажи';
   const priceInput = <PriceInput label={priceLabel} value={form.price} disabled={!canEdit || busy}
     onChange={(price) => patch({ price })} />;
-  const priceMetrics = canWarehouse && (canCosts || preview.data?.stockItem) && <div className="min-w-0 space-y-3">
+  const priceMetrics = ((!isGoods && activeVariants.length > 0) || canWarehouse && (canCosts || preview.data?.stockItem)) && <div className="min-w-0 space-y-3">
     {activeVariants.length > 0 && <div className="max-w-sm">
-      <Select ariaLabel="Вариант для расчёта себестоимости" className="h-10 w-full" value={costVariant?.key ?? ''} onChange={setCostVariantKey}
+      <Select ariaLabel={canCosts ? 'Вариант для расчёта себестоимости' : 'Вариант техкарты'}
+        className="h-10 w-full" value={costVariant?.key ?? ''} onChange={setCostVariantKey}
         options={[...(!isGoods ? [{ value: '', label: 'Базовая норма' }] : []),
           ...activeVariants.map(({ key, name }, index) => ({ value: key, label: name || `Вариант ${index + 1}` }))]} />
     </div>}
     {goodsBindingPending ? <p className="text-sm text-text-secondary">Складская привязка появится после сохранения.</p>
-      : <RecipeCostSummary preview={preview} showCosts={canCosts} showPriceMetrics={previewPrice != null && (!activeVariants.length || !!costVariant)}
+      : <RecipeCostSummary preview={preview} showCosts={canWarehouse && canCosts} showPriceMetrics={previewPrice != null && (!activeVariants.length || !!costVariant)}
         showMissing={isGoods || hasStockBinding || !!dish?.isSet || !canRecipe}
         showError={isGoods || hasStockBinding || !!dish?.isSet || !canRecipe} />}
   </div>;
-  const outputDetails = <RecipeOutput preview={preview.data} pending={preview.pending} metadata={metadata}
+  const outputDetails = <RecipeOutput preview={preview.data} pending={preview.pending} metadata={previewMetadata}
     manualApplies={!hasVariantNorms} editable={canEdit && !busy && !costVariant}
     onChange={(outputQuantity, outputUnit) => setMetadata((current) => ({ ...current, outputQuantity, outputUnit }))} />;
 
@@ -559,14 +586,18 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
               </li>)}
             </ul>
           </section>}
-          {!hasStockBinding && !dish?.isSet && <RecipeDraftFields rows={rows} onChange={setRows} showCosts={canCosts} disabled={!canEdit || busy}
+          {!hasStockBinding && !dish?.isSet && <RecipeDraftFields rows={previewRows} onChange={(next) => { if (!ownRecipe) setRows(next); }}
+            heading={ownRecipe ? 'Состав · ' + costVariant?.name : undefined} showCosts={canCosts} disabled={!canEdit || busy || !!ownRecipe}
             allowCreate={canEditSection('warehouse') && can('actions.warehouseReceive')}
-            variants={activeVariants.map((variant) => ({ id: variant.id ?? variant.key, name: variant.name }))}
-            preview={preview} previewVariant={costVariant?.key} inputPortions={inputPortions}
-            outputDetails={rows.length ? outputDetails : undefined} showBatchPreview={false} batchAction={<>
-              {!!rows.length && <button type="button" className="btn-ghost btn-md text-primary"
+            variants={activeVariants.filter((variant) => !variant.ownRecipe)
+              .map((variant) => ({ id: variant.id ?? variant.key, name: variant.name }))}
+            preview={preview} previewVariant={ownRecipe ? undefined : costVariant?.key} inputPortions={previewPortions}
+            outputDetails={previewRows.length ? outputDetails : undefined} showBatchPreview={false} batchAction={<>
+              {ownRecipe && canEdit && costVariant && <button type="button" className="btn-ghost btn-md text-primary"
+                onClick={() => setVariantEditor(costVariant)}>Изменить состав варианта</button>}
+              {!!previewRows.length && <button type="button" className="btn-ghost btn-md text-primary"
                 disabled={busy || !preview.data?.items.length || preview.pending} onClick={() => setBatchOpen(true)}>Рассчитать партию</button>}
-              {inputPortions > 1 && <button type="button" className="btn-ghost btn-md text-primary"
+              {!ownRecipe && inputPortions > 1 && <button type="button" className="btn-ghost btn-md text-primary"
                 onClick={() => changeInputPortions(1)}>Показать на одну порцию</button>}
             </>} />}
           {canBindProducedStock && hasStockBinding && <fieldset disabled={!canEdit}>
@@ -589,6 +620,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
                 draggedVariant.current = null;
               }}>
               <span className="grow break-words text-sm font-medium">{variant.name || `Вариант ${index + 1}`}</span>
+              <span className="text-xs text-text-muted">{variant.ownRecipe ? 'Своя техкарта' : 'Общий состав'}</span>
               <span className="text-sm tabular-nums">{salePrice(variant.price) == null ? 'Цена не указана' : money(variant.price)}</span>
               <div className="flex flex-wrap items-center gap-1">
                 <button type="button" className="btn-ghost h-8 px-2" aria-label={`Поднять ${variant.name}`}
@@ -603,7 +635,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
           </ul>}
         </fieldset>}
         {!isGoods && canRecipe && <fieldset disabled={!canEdit || busy} className="min-w-0 border-t border-border pt-4">
-          <ModifierDraftFields value={modifiers} onChange={setModifiers} recipeIngredientIds={rows.map(({ ingredientId }) => ingredientId)} />
+          <ModifierDraftFields value={modifiers} onChange={setModifiers} recipeIngredientIds={[...recipeIngredientIds]} />
         </fieldset>}
         <fieldset disabled={!canEdit || busy} className="min-w-0 space-y-3 border-t border-border pt-4">
           <details className="max-w-3xl">
@@ -622,12 +654,13 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
                   <textarea id={formId + '-instructions'} className="input min-h-24 py-2" value={metadata.instructions ?? ''} maxLength={12_000}
                     onChange={(event) => setMetadata((current) => ({ ...current, instructions: event.target.value }))} />
                 </FormRow>
-                {!hasStockBinding && rows.length === 0 && outputDetails}
+                {!hasStockBinding && !ownRecipe && rows.length === 0 && outputDetails}
                 {!hasStockBinding && <FormRow label="Нормы рецепта">
                   <button type="button" className="btn-secondary btn-md" onClick={() => setBasisOpen(true)}>Ввести нормы на партию</button>
                 </FormRow>}
               </>}
-              {canBindProducedStock && !hasStockBinding && <ProducedStockField items={stock ?? []} value={producedStockId}
+              {canBindProducedStock && !hasStockBinding && !activeVariants.some((variant) => variant.ownRecipe) &&
+                <ProducedStockField items={stock ?? []} value={producedStockId}
                 onChange={setProducedStockId} savedStockId={savedStockId} canProduce={can('actions.warehouseProduce')} />}
             </div>
           </details>
@@ -644,6 +677,13 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
           recipeRef.current?.scrollIntoView({ block: 'start' });
         }} />}
       {variantEditor && <RecipeVariantDialog initial={variantEditor} editing={variants.some(({ key }) => key === variantEditor.key)}
+        allowOwnRecipe={canRecipe && !hasStockBinding && !initial?.dish.variants.find(({ id }) => id === variantEditor.id)?.stockIngredientId}
+        allowCreateIngredient={canEditSection('warehouse') && can('actions.warehouseReceive')}
+        showCosts={canCosts} previewContext={previewContext}
+        copyBaseRecipe={rows.length ? () => ({
+          rows: scaleRecipeDraftRows(rows, inputPortions, 1).map((row) => ({ ...row, variantAmounts: undefined })),
+          metadata: { ...metadata, recipePortions: undefined },
+        }) : undefined}
         onSave={saveRecipeVariant} onClose={() => setVariantEditor(undefined)} />}
     </EditorPage>
   );
@@ -678,25 +718,80 @@ function RecipeBasisDialog({ initial, onApply, onClose }: {
   </Modal>, document.body);
 }
 
-function RecipeVariantDialog({ initial, editing, onSave, onClose }: {
-  initial: VariantDraft; editing: boolean; onSave: (variant: VariantDraft) => void; onClose: () => void;
+function RecipeVariantDialog({ initial, editing, allowOwnRecipe, allowCreateIngredient, showCosts, previewContext, copyBaseRecipe,
+  onSave, onClose }: {
+  initial: VariantDraft;
+  editing: boolean;
+  allowOwnRecipe: boolean;
+  allowCreateIngredient: boolean;
+  showCosts: boolean;
+  previewContext: Pick<RecipePreviewInput, 'dishId' | 'categoryId' | 'prepStation' | 'taxId' | 'taxExempt'> | null;
+  copyBaseRecipe?: () => VariantRecipeDraft;
+  onSave: (variant: VariantDraft) => void;
+  onClose: () => void;
 }) {
+  const modeId = useId();
   const [value, setValue] = useState(initial);
-  const canSave = !!value.name.trim() && (salePrice(value.price) ?? 0) > 0;
+  const [useOwnRecipe, setUseOwnRecipe] = useState(!!initial.ownRecipe);
+  const [recipe, setRecipe] = useState<VariantRecipeDraft>(initial.ownRecipe ?? { rows: [], metadata: {} });
+  const separate = allowOwnRecipe && useOwnRecipe;
+  const price = salePrice(value.price) ?? 0;
+  const validRecipe = recipe.rows.length > 0 && validRecipeRows(recipe.rows);
+  const canSave = !!value.name.trim() && price > 0 && (!separate || validRecipe);
+  const preview = useRecipePreview(separate && validRecipe && previewContext ? {
+    ...previewContext, variantId: initial.id, price, ownRecipe: true,
+    metadata: { outputQuantity: recipe.metadata.outputQuantity, outputUnit: recipe.metadata.outputUnit },
+    items: recipeDraftPayload(recipe.rows),
+  } : null);
+  function save() {
+    onSave({
+      ...value,
+      ...(allowOwnRecipe && { ownRecipe: separate ? recipe : initial.ownRecipe === undefined ? undefined : null }),
+    });
+  }
   return createPortal(<Modal open manageFocus title={editing ? 'Вариант порции' : 'Добавление варианта порции'} onClose={onClose}
+    panelClassName={separate ? 'max-w-6xl' : 'max-w-lg'}
     footer={<div className="flex justify-end gap-2">
       <button type="button" className="btn-secondary btn-md" onClick={onClose}>Отмена</button>
-      <button type="button" className="btn-primary btn-md" disabled={!canSave} onClick={() => onSave(value)}>Применить</button>
+      <button type="button" className="btn-primary btn-md" disabled={!canSave} onClick={save}>Применить</button>
     </div>}>
-    <div className="grid gap-3">
-      <label className="grid gap-1 text-sm">Название варианта
-        <input className="input" data-dialog-initial-focus maxLength={80} value={value.name}
-          onChange={(event) => setValue({ ...value, name: event.target.value })} />
-      </label>
-      <Field label="Цена продажи"><PriceInput label="Цена варианта" value={value.price}
-        onChange={(price) => setValue({ ...value, price })} /></Field>
-      <Field label="Единица учёта"><Select ariaLabel="Единица учёта варианта" className="w-full" value={value.unit}
-        onChange={(unit) => setValue({ ...value, unit })} options={unitLabelOptions(value.unit)} /></Field>
+    <div className="space-y-4">
+      <div className={'grid gap-3' + (separate ? ' sm:grid-cols-3' : '')}>
+        <label className="grid gap-1.5 text-sm font-medium text-text-secondary">Название варианта
+          <input className="input" data-dialog-initial-focus maxLength={80} value={value.name}
+            onChange={(event) => setValue({ ...value, name: event.target.value })} />
+        </label>
+        <Field label="Цена продажи"><PriceInput label="Цена варианта" value={value.price}
+          onChange={(price) => setValue({ ...value, price })} /></Field>
+        <Field label="Единица учёта"><Select ariaLabel="Единица учёта варианта" className="h-11 w-full" value={value.unit}
+          onChange={(unit) => setValue({ ...value, unit })} options={unitLabelOptions(value.unit)} /></Field>
+      </div>
+      {allowOwnRecipe && <fieldset aria-label="Техкарта варианта"
+        className={'grid rounded-xl border border-border' + (separate ? ' sm:grid-cols-2' : ' divide-y divide-border')}>
+        <ModeOption name={modeId} checked={!useOwnRecipe} label="Общая техкарта" description="Использует состав блюда."
+          onSelect={() => setUseOwnRecipe(false)} />
+        <ModeOption name={modeId} checked={useOwnRecipe} label="Своя техкарта" description="У этой порции свои продукты, нормы и выход."
+          onSelect={() => setUseOwnRecipe(true)} />
+      </fieldset>}
+      {separate && <>
+        {showCosts && validRecipe && <RecipeCostSummary preview={preview} showCosts showMissing={false} showError={false} />}
+        {!recipe.rows.length && copyBaseRecipe && <button type="button" className="btn-secondary btn-md"
+          onClick={() => setRecipe(copyBaseRecipe())}>Скопировать общий состав</button>}
+        <RecipeDraftFields rows={recipe.rows} onChange={(rows) => setRecipe((current) => ({ ...current, rows }))}
+          preview={preview} showCosts={showCosts} allowCreate={allowCreateIngredient}
+          outputDetails={recipe.rows.length ? <RecipeOutput preview={preview.data} pending={preview.pending} metadata={recipe.metadata}
+            manualApplies editable onChange={(outputQuantity, outputUnit) => setRecipe((current) => ({
+              ...current, metadata: { ...current.metadata, outputQuantity, outputUnit },
+            }))} /> : undefined} />
+        <label className="grid gap-1.5 text-sm font-medium text-text-secondary">
+          Технология приготовления варианта
+          <textarea className="input min-h-20 py-2" maxLength={12000} value={recipe.metadata.instructions ?? ''}
+            onChange={(event) => {
+              const instructions = event.target.value;
+              setRecipe((current) => ({ ...current, metadata: { ...current.metadata, instructions } }));
+            }} />
+        </label>
+      </>}
     </div>
   </Modal>, document.body);
 }

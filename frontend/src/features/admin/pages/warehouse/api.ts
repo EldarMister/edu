@@ -118,6 +118,7 @@ export interface Recipe {
   stockAmount?: number;
   stockItem?: { id: string; name: string; amount: number; unit: UnitCode | string; warehouseName?: string; kind?: ItemKind } | null;
   variants?: { id: string; name: string }[];
+  variantRecipes?: Record<string, { items: RecipeItem[]; metadata: RecipeMetadata }>;
   components?: {
     dishId: string;
     dishName: string;

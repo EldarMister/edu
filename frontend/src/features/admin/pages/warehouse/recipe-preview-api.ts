@@ -9,6 +9,7 @@ export interface RecipePreviewInput {
   categoryId?: string;
   prepStation?: string | null;
   variantId?: string;
+  ownRecipe?: boolean;
   price?: number;
   taxId?: string | null;
   taxExempt?: boolean;

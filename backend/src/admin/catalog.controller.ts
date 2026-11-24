@@ -41,7 +41,10 @@ export class CatalogController {
   updateMenuEntry(@Param('id') id: string, @Body() dto: MenuEntryDto, @CurrentUser() user: AuthUser) { this.assertRecipePermission(dto, user); return this.entries.save(id, dto, user); }
 
   private assertRecipePermission(dto: MenuEntryDto, user: AuthUser) {
-    if ((dto.recipe || dto.modifiers) && user.role !== Role.OWNER && !hasPermission(user.permissions ?? resolvePermissions(user.role as Role, null), 'actions.warehouseRecipes')) throw new ForbiddenException('Нет права изменять состав техкарты');
+    if ((dto.recipe || dto.modifiers || dto.dish.variants?.some(({ ownRecipe }) => ownRecipe !== undefined))
+      && user.role !== Role.OWNER && !hasPermission(user.permissions ?? resolvePermissions(user.role as Role, null), 'actions.warehouseRecipes')) {
+      throw new ForbiddenException('Нет права изменять состав техкарты');
+    }
   }
 
   // ---- Залы и столы (раздел «Столы») ----

@@ -230,7 +230,7 @@ export class IngredientsService {
       const dishFields = { id: true, name: true, catalogKind: true, isActive: true, isSet: true } as const;
       const [recipes, direct, variants, preparations, modifiers, latest, aggregateBalances] = await Promise.all([
         db.recipeItem.findMany({ where: { ingredientId: id, cafeId, dish: { cafeId } }, select: { id: true,
-          amount: true, amountUnit: true, dish: { select: dishFields } } }),
+          amount: true, amountUnit: true, dish: { select: dishFields }, variant: { select: { name: true } } } }),
         db.dish.findMany({ where: { stockIngredientId: id, cafeId }, select: { ...dishFields, stockAmount: true } }),
         db.dishVariant.findMany({ where: { stockIngredientId: id, cafeId, dish: { cafeId } }, select: { id: true, name: true,
           stockAmount: true, dish: { select: dishFields } } }),
@@ -260,7 +260,7 @@ export class IngredientsService {
         ...displayQuantity(amount, unit),
       });
       const usage = [
-        ...recipes.map((row) => menuUsage(row.id, row.dish, 'recipe', row.amount, row.amountUnit)),
+        ...recipes.map((row) => menuUsage(row.id, row.dish, 'recipe', row.amount, row.amountUnit, row.variant?.name)),
         ...direct.map((dish) => menuUsage(dish.id, dish, 'stock', dish.stockAmount, unit)),
         ...variants.map((variant) => menuUsage(variant.id, variant.dish, 'variant', variant.stockAmount, unit, variant.name)),
         ...preparations.map(({ recipe: { ingredient: product }, amount, unit }) => ({

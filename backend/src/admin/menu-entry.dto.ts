@@ -16,11 +16,8 @@ import { CreateDishDto, DishVariantDto } from './dto';
 import { MAX_RECIPE_PORTIONS, RecipeItemInputDto, RecipeMetadataDto } from '../warehouse/recipes.dto';
 import { MenuModifiersDto } from '../warehouse/menu-modifiers';
 
-export class MenuRecipeDto {
+export class MenuRecipeContentsDto {
   @IsOptional() @IsInt() @Min(1) @Max(MAX_RECIPE_PORTIONS) inputPortions?: number;
-
-  @IsOptional() @IsString() @MaxLength(160)
-  producedStockIngredientId?: string | null;
 
   @IsOptional()
   @ValidateNested()
@@ -32,8 +29,14 @@ export class MenuRecipeDto {
   @Type(() => RecipeItemInputDto)
   items: RecipeItemInputDto[];
 }
+export class MenuRecipeDto extends MenuRecipeContentsDto {
+  @IsOptional() @IsString() @MaxLength(160)
+  producedStockIngredientId?: string | null;
+}
 class MenuEntryVariantDto extends DishVariantDto {
   @IsOptional() @IsString() @MaxLength(80) clientKey?: string;
+  @IsOptional() @ValidateNested() @Type(() => MenuRecipeContentsDto)
+  ownRecipe?: MenuRecipeContentsDto | null;
 }
 class MenuEntryDishDto extends CreateDishDto {
   @IsOptional()

@@ -676,15 +676,18 @@ model DishVariant {
   stock        Int?
   initialStock Int?     @map("initial_stock")
   unit         String   @default("шт")
+  recipeMetadata Json? @map("recipe_metadata")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   dish               Dish                    @relation(fields: [dishId], references: [id], onDelete: Cascade)
   orderItems         OrderItem[]
   setComponents      SetComponent[]
+  recipeItems        RecipeItem[]
   finalOrderSetItems OrderItemSetComponent[] @relation("FinalVariant")
 
   @@index([dishId])
+  @@unique([dishId, id])
   @@map("dish_variants")
 }
 
@@ -1395,6 +1398,7 @@ model RecipeItem {
   cafeId       String?  @map("cafe_id")
   id           String   @id @default(uuid())
   dishId       String   @map("dish_id")
+  variantId    String?  @map("variant_id")
   ingredientId String   @map("ingredient_id")
   amount       Decimal  @db.Decimal(14, 3) // количество на 1 порцию в БАЗОВЫХ единицах
   amountUnit   String   @default("pcs") @map("amount_unit") // display-единица, выбранная при вводе
@@ -1412,9 +1416,10 @@ model RecipeItem {
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   dish       Dish       @relation(fields: [dishId], references: [id], onDelete: Cascade)
+  variant    DishVariant? @relation(fields: [dishId, variantId], references: [dishId, id], onDelete: Cascade)
   ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
 
-  @@unique([dishId, ingredientId])
+  @@unique([dishId, variantId, ingredientId])
   @@index([dishId])
   @@index([ingredientId])
   @@map("recipe_items")

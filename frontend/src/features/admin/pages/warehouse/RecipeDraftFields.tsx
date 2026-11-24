@@ -78,7 +78,8 @@ function scaleAmount(amount: number | null | undefined, factor: number) {
 }
 
 export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = true, allowCreate = true,
-  disabled = false, preview, previewVariant, outputDetails, showBatchPreview = true, batchAction, inputPortions = 1 }: {
+  disabled = false, preview, previewVariant, outputDetails, showBatchPreview = true, batchAction, inputPortions = 1,
+  heading = 'Состав' }: {
   rows: RecipeDraftRow[];
   onChange: (rows: RecipeDraftRow[]) => void;
   variants?: { id?: string; name: string }[];
@@ -91,6 +92,7 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
   showBatchPreview?: boolean;
   batchAction?: ReactNode;
   inputPortions?: number;
+  heading?: string;
 }) {
   const ingredients = useIngredients('');
   const warehouses = useWarehouseLocations(rows.length > 0);
@@ -137,7 +139,7 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
   </button>;
   return <section className="w-full min-w-0 space-y-3 border-t border-border pt-4" aria-label="Состав техкарты">
     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-      <h3 className="text-lg font-semibold">Состав</h3>
+      <h3 className="text-lg font-semibold">{heading}</h3>
       {inputPortions > 1 && <span className="text-sm text-text-muted">Нормы на {inputPortions.toLocaleString('ru-RU')} порций</span>}
     </div>
     {rows.length > 0 || addingProduct ? <div className="min-w-0 xl:overflow-x-auto xl:rounded-xl xl:border xl:border-border">

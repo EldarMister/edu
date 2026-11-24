@@ -10,6 +10,8 @@ const { PurchasesService } = require('../src/warehouse/purchases.service.ts');
 const { postStockMovement } = require('../src/warehouse/stock-posting.ts');
 const { lockIngredients } = require('../src/warehouse/stock-lock.ts');
 const { MenuModifiersService } = require('../src/warehouse/menu-modifiers.ts');
+const { MenuEntryService } = require('../src/admin/menu-entry.service.ts');
+const { WarehouseDocumentsService } = require('../src/warehouse/documents.service.ts');
 const { WarehouseReportsService } = require('../src/warehouse/reports.service.ts');
 const { RecipesService } = require('../src/warehouse/recipes.service.ts');
 const { PreparationProductionService } = require('../src/warehouse/preparation-production.ts');
@@ -181,7 +183,7 @@ test('PostgreSQL: unified stock covers direct sales, recipes, production, stages
           metadata: { recipePortions: 10, outputQuantity: 250, outputUnit: 'g' } });
         assert.deepEqual([saved.recipe.metadata.recipePortions, saved.recipe.output, saved.recipe.compositionOutput],
           [10, { amount: 250, unit: 'g' }, { amount: 240, unit: 'g' }]);
-        const canonical = await db.recipeItem.findUniqueOrThrow({ where: { dishId_ingredientId: { dishId: menu.id, ingredientId: cheese.id } } });
+        const canonical = await db.recipeItem.findFirstOrThrow({ where: { dishId: menu.id, variantId: null, ingredientId: cheese.id } });
         assert.deepEqual([Number(canonical.amount), Number(canonical.measuredNetWeightGrams), Number(canonical.variantAmounts[large.id])], [0.2, 40, 0.4]);
         const variant = await recipes.getByDish(menu.id, large.id);
         assert.deepEqual([variant.foodCost, variant.output, variant.items.find(({ ingredientId }) => ingredientId === cheese.id).netWeightGrams],
@@ -194,6 +196,63 @@ test('PostgreSQL: unified stock covers direct sales, recipes, production, stages
         assert.equal(await db.stockMovement.count({ where: { type: 'writeoff', sourceId: sold.id } }), 0);
         await orders.cancelOrder(sold.id, owner, 'Проверка возврата партии');
         assert.deepEqual(await Promise.all([sausage.id, cheese.id, bread.id].map((id) => balance(id))), [10, 10, 10]);
+      });
+
+      await t.test('an independent portion drives costing, exclusions, writeoff and sale without touching the shared recipe', async () => {
+        const dough = await ingredients.create({ name: 'Тесто двух порций', unit: 'g', stock: 1000, avgCost: 0.1 });
+        const ham = await ingredients.create({ name: 'Ветчина общей порции', unit: 'g', stock: 1000, avgCost: 0.2 });
+        const filling = await ingredients.create({ name: 'Начинка отдельной порции', unit: 'pcs', stock: 10, avgCost: 20, pieceWeightGrams: 50 });
+        const modifiers = new MenuModifiersService(db);
+        const entry = new MenuEntryService(db, recipes, modifiers, events, audit);
+        const body = {
+          catalogKind: 'recipe', requestKey: randomUUID(),
+          dish: { name: 'Пирог в двух вариантах', categoryId: category.id, prepStation: 'kitchen', variants: [
+            { clientKey: 'shared', name: 'Обычный', price: 100 },
+            { clientKey: 'own', name: 'Особый', price: 150, ownRecipe: {
+              metadata: { instructions: 'Собрать с начинкой', outputQuantity: 230, outputUnit: 'g' },
+              items: [{ ingredientId: dough.id, amount: 140, unit: 'g' }, { ingredientId: filling.id, amount: 2, unit: 'pcs' }],
+            } },
+          ] },
+          recipe: { items: [
+            { ingredientId: dough.id, amount: 100, unit: 'g', variantAmounts: { shared: 120 } },
+            { ingredientId: ham.id, amount: 50, unit: 'g' },
+          ] },
+          modifiers: { allowIngredientExclusions: true, groups: [] },
+        };
+        const saved = await entry.save(null, body, owner);
+        const [common, own] = saved.dish.variants;
+        assert.deepEqual(new Set(saved.recipe.items.map(({ ingredientId }) => ingredientId)), new Set([dough.id, ham.id]));
+        assert.deepEqual(Object.fromEntries(saved.recipe.variantRecipes[own.id].items.map(({ ingredientId, amount }) => [ingredientId, amount])),
+          { [dough.id]: 140, [filling.id]: 2 });
+        const commonCost = await recipes.getByDish(saved.dish.id, common.id);
+        const ownCost = await recipes.getByDish(saved.dish.id, own.id);
+        assert.equal(commonCost.foodCost, 22);
+        assert.deepEqual([ownCost.foodCost, ownCost.output, ownCost.metadata.instructions],
+          [54, { amount: 230, unit: 'g' }, 'Собрать с начинкой']);
+        assert.deepEqual(new Set((await modifiers.get(saved.dish.id, true, own.id)).excludableIngredients.map(({ id }) => id)),
+          new Set([dough.id, filling.id]));
+        const docs = new WarehouseDocumentsService(db);
+        const writeoff = await docs.writeoffPreview({ warehouseId: main.id, sourceLines: [{
+          sourceLineId: randomUUID(), kind: 'dish', sourceId: saved.dish.id, variantId: own.id, quantity: 1, unit: 'pcs',
+        }] });
+        assert.equal(writeoff.total, 54);
+        assert.deepEqual(new Set(writeoff.sourceLines[0].parts.map(({ ingredientId }) => ingredientId)), new Set([dough.id, filling.id]));
+        const sold = await order([{ dishId: saved.dish.id, variantId: own.id, quantity: 1 }]);
+        const moves = await db.stockMovement.findMany({ where: { type: 'sale', sourceId: sold.id } });
+        assert.deepEqual(Object.fromEntries(moves.map(({ ingredientId, change }) => [ingredientId, Number(change)])),
+          { [dough.id]: -140, [filling.id]: -2 });
+        const shared = await entry.save(saved.dish.id, {
+          catalogKind: 'recipe', expectedVersion: saved.recipe.version,
+          dish: { ...body.dish, variants: [
+            { id: common.id, name: common.name, price: 100 },
+            { id: own.id, name: own.name, price: 150, ownRecipe: null },
+          ] },
+        }, owner);
+        assert.equal(shared.recipe.variantRecipes[own.id], undefined);
+        assert.deepEqual(new Set((await recipes.getByDish(saved.dish.id, own.id)).items.map(({ ingredientId }) => ingredientId)),
+          new Set([dough.id, ham.id]));
+        await orders.cancelOrder(sold.id, owner, 'Возврат порции после смены рецепта');
+        assert.deepEqual(await Promise.all([balance(dough.id), balance(ham.id), balance(filling.id)]), [1000, 1000, 10]);
       });
 
       await t.test('three 200 ml drinks consume 600 ml at the bar and three cups from main', async () => {

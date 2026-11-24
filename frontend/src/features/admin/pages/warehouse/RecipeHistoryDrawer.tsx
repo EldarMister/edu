@@ -17,6 +17,8 @@ interface HistoricalIngredient {
 }
 
 interface HistoricalItem extends HistoricalIngredient {
+  variantId?: string;
+  variantName?: string | null;
   netAmount: number | null;
   measuredNetWeightGrams: number | null;
   lossPercent: number | null;
@@ -100,7 +102,7 @@ function RevisionComposition({ revision, isSet }: { revision: RecipeRevision; is
       </ul>
     </section>}
     {revision.items.length > 0 && <ul aria-label="Ингредиенты прежнего состава" className="divide-y divide-border rounded-lg border border-border">
-      {revision.items.map((item) => <IngredientRow key={item.ingredientId} item={item} />)}
+      {revision.items.map((item) => <IngredientRow key={(item.variantId ?? '') + ':' + item.ingredientId} item={item} />)}
     </ul>}
     {!!revision.components?.length && <ul aria-label="Прежний состав сета" className="divide-y divide-border rounded-lg border border-border">
       {revision.components.map((component) => <li key={component.id} className="flex justify-between gap-3 p-3">
@@ -138,6 +140,7 @@ function IngredientRow({ item }: { item: HistoricalItem }) {
     ? [{ method: item.processingMethod, lossPercent: item.lossPercent }] : [];
   return <li className="space-y-2 p-3">
     <p className="break-words font-medium">{itemName(item)}</p>
+    {item.variantId && <p className="text-xs text-text-muted">Вариант · {item.variantName ?? item.variantId}</p>}
     <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
       <HistoryField label="Брутто">{amountLabel(item.amount, item.unit)}</HistoryField>
       <HistoryField label="Нетто">{amountLabel(item.netAmount, item.unit)}</HistoryField>

@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { getCafeId } from '../tenant/tenant-context';
 import type { WriteoffSourceLineDto } from './documents.dto';
-import { RecipeResolver, recipeAmount } from './recipe-resolution';
+import { RecipeResolver, recipeAmount, recipeRowsForVariant } from './recipe-resolution';
 import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, unitLabel, type UnitCode } from './units';
 import { warehouseBalances, type WarehouseLocation } from './warehouse-location';
 
@@ -75,7 +75,9 @@ export async function resolveWriteoffSources(tx: Prisma.TransactionClient, wareh
       name = variant ? `${dish.name} · ${variant.name}` : dish.name;
       const directId = variant?.stockIngredientId ?? dish.stockIngredientId;
       if (directId) roots.push({ ingredientId: directId, amount: (variant?.stockIngredientId ? variant.stockAmount : dish.stockAmount).mul(multiplier) });
-      else for (const row of dish.recipeItems) roots.push({ ingredientId: row.ingredientId, amount: recipeAmount(row, variant?.id).mul(multiplier) });
+      else for (const row of recipeRowsForVariant(dish.recipeItems, variant)) roots.push({
+        ingredientId: row.ingredientId, amount: recipeAmount(row, variant?.recipeMetadata == null ? variant?.id : undefined).mul(multiplier),
+      });
       recipe = { kind: directId ? 'direct' : 'recipe', dishId: dish.id, recipeVersion: dish.recipeVersion,
         variantId: variant?.id ?? null, weightedPriceBase: Number(dish.weightedPriceBase) };
     } else throw new BadRequestException('Неизвестный тип продукта списания');

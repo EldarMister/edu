@@ -8,7 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CurrentUser, type AuthUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
-import { lockRecipeGraph, recipeAmount } from './recipe-resolution';
+import { lockRecipeGraph, recipeAmount, recipeRowsForVariant } from './recipe-resolution';
 import { archiveDishRecipe, type RecipeRevisionEditor } from './recipe-revisions';
 import { assertUnitMatchesType, fromBase, normalizeUnit, toBase, UnitCode } from './units';
 
@@ -43,8 +43,8 @@ type ExclusionDish = {
   allowIngredientExclusions: boolean;
   excludableIngredientIds: Prisma.JsonValue | null;
   stockIngredientId: string | null;
-  variants: { id: string; stockIngredientId: string | null }[];
-  recipeItems: { ingredientId: string; amount: Prisma.Decimal; variantAmounts: Prisma.JsonValue | null;
+  variants: { id: string; stockIngredientId: string | null; recipeMetadata?: Prisma.JsonValue }[];
+  recipeItems: { ingredientId: string; variantId?: string | null; amount: Prisma.Decimal; variantAmounts: Prisma.JsonValue | null;
     ingredient: { id: string; name: string } }[];
 };
 
@@ -58,9 +58,11 @@ function servingIngredients(dish: ExclusionDish, variantId?: string | null) {
   const variant = variantId ? dish.variants.find(({ id }) => id === variantId) : null;
   if (variantId && !variant) throw new BadRequestException('Вариант не относится к выбранному блюду');
   if (dish.stockIngredientId || variant?.stockIngredientId) return [];
-  return dish.recipeItems.filter((row) => variantId ? recipeAmount(row, variantId).gt(0)
-    : row.amount.gt(0) || dish.variants.some((entry) => !entry.stockIngredientId && recipeAmount(row, entry.id).gt(0)))
-    .map(({ ingredient }) => ingredient);
+  const servingRows = (value?: ExclusionDish['variants'][number] | null) => recipeRowsForVariant(dish.recipeItems, value)
+    .filter((row) => recipeAmount(row, value?.recipeMetadata == null ? value?.id : undefined).gt(0));
+  const rows = variantId ? servingRows(variant)
+    : [...servingRows(), ...dish.variants.filter((entry) => !entry.stockIngredientId).flatMap(servingRows)];
+  return [...new Map(rows.map(({ ingredient }) => [ingredient.id, ingredient])).values()];
 }
 
 function excludableIngredients(dish: ExclusionDish, ingredients: { id: string; name: string }[]) {
@@ -99,7 +101,7 @@ export async function resolveMenuSelections(tx: Prisma.TransactionClient, dishId
     return { options, exclusions, exclusionNames: (existing.excludedIngredientNames ?? []) as string[], price: options.reduce((sum, option) => sum.add(new Prisma.Decimal(option.price).mul(option.quantity)), new Prisma.Decimal(0)) };
   }
   const dish = await tx.dish.findUnique({ where: { id: dishId }, include: { modifierGroups: { include: { options: true } },
-    variants: { select: { id: true, stockIngredientId: true } }, recipeItems: { include: { ingredient: { select: { id: true, name: true } } } } } });
+    variants: { select: { id: true, stockIngredientId: true, recipeMetadata: true } }, recipeItems: { include: { ingredient: { select: { id: true, name: true } } } } } });
   if (!dish) throw new NotFoundException('Блюдо не найдено');
   const byId = new Map(dish.modifierGroups.flatMap((group) => group.options.map((option) => [option.id, option] as const)));
   const ingredients = servingIngredients(dish, variantId);
@@ -134,7 +136,7 @@ export class MenuModifiersService {
   constructor(private prisma: PrismaService, @Optional() private events?: EventsGateway) {}
   async get(dishId: string, publicView = false, variantId?: string) {
     const dish = await this.prisma.dish.findUnique({ where: { id: dishId }, include: { modifierGroups: { orderBy: { sortOrder: 'asc' }, include: { options: { orderBy: { sortOrder: 'asc' } } } },
-      variants: { select: { id: true, stockIngredientId: true } }, recipeItems: { include: { ingredient: { select: { id: true, name: true } } } } } });
+      variants: { select: { id: true, stockIngredientId: true, recipeMetadata: true } }, recipeItems: { include: { ingredient: { select: { id: true, name: true } } } } } });
     if (!dish) throw new NotFoundException('Блюдо не найдено');
     const ingredients = servingIngredients(dish, variantId);
     const targetNames = new Map(ingredients.map(({ id, name }) => [id, name]));

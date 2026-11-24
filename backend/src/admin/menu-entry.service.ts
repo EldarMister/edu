@@ -44,7 +44,7 @@ export class MenuEntryService {
         if (!dish) throw new NotFoundException('Позиция меню не найдена');
         return {
           dish: JSON.parse(JSON.stringify(withDishImageRef(dish))),
-          recipe: await new RecipesService(tx as PrismaService).getByDish(id),
+          recipe: await new RecipesService(tx as PrismaService).getMenuRecipe(id),
           modifiers: await new MenuModifiersService(tx as PrismaService).get(id),
         };
       },
@@ -159,6 +159,8 @@ export class MenuEntryService {
           throw new BadRequestException('Остаток изменяется через поставки и инвентаризацию');
         if (dto.catalogKind === 'goods' && dto.recipe?.items.length)
           throw new BadRequestException('У товара нет состава техкарты');
+        if (dto.catalogKind === 'goods' && variants?.some(({ ownRecipe }) => ownRecipe !== undefined))
+          throw new BadRequestException('Отдельная техкарта доступна только для вариантов блюда');
         const producedStockId = dto.recipe?.producedStockIngredientId;
         let producedStockBinding: { stockIngredientId: string | null; stockAmount: number } | undefined;
         if (producedStockId !== undefined) {
@@ -273,6 +275,9 @@ export class MenuEntryService {
               price: new Prisma.Decimal(variant.price),
               sortOrder,
               unit: unitLabel(unit),
+              ...(variant.ownRecipe !== undefined && {
+                recipeMetadata: variant.ownRecipe ? (variant.ownRecipe.metadata ?? {}) as Prisma.InputJsonValue : Prisma.DbNull,
+              }),
             };
             const saved = variant.id
               ? await tx.dishVariant.update({
@@ -283,8 +288,20 @@ export class MenuEntryService {
                   data: { dishId: dish.id, ...variantData },
                 });
             if (variant.clientKey) variantIdsByClientKey.set(variant.clientKey, saved.id);
+            if (variant.ownRecipe !== undefined) {
+              if (variant.ownRecipe && (dish.stockIngredientId || saved.stockIngredientId))
+                throw new BadRequestException('Отдельная техкарта варианта недоступна при продаже готовой позиции со склада');
+              if (variant.ownRecipe && !variant.ownRecipe.items.length)
+                throw new BadRequestException(`Добавьте продукты в состав варианта «${saved.name}»`);
+              await this.recipes.saveRecipeItems(tx, dish.id, variant.ownRecipe?.items ?? [], {
+                variantId: saved.id, inputPortions: variant.ownRecipe?.inputPortions,
+              });
+            }
           }
         }
+        if (dish.stockIngredientId && dto.catalogKind === 'recipe' && await tx.dishVariant.findFirst({
+          where: { dishId: dish.id, recipeMetadata: { not: Prisma.DbNull } }, select: { id: true },
+        })) throw new BadRequestException('Сначала переведите варианты блюда на общий состав');
         if (dto.catalogKind === 'goods') {
           if (previous?.isWeighted && dish.weightedPriceBase !== previous.weightedPriceBase) {
             dish = await tx.dish.update({
@@ -367,58 +384,12 @@ export class MenuEntryService {
           }
         }
         if (dto.recipe) {
-          const itemIds = dto.recipe.items.map((row) => row.ingredientId);
-          if (new Set(itemIds).size !== itemIds.length)
-            throw new BadRequestException('Ингредиент указан дважды');
-          const existingRows = await tx.recipeItem.findMany({
-            where: { dishId: dish.id },
-          });
-          for (const row of dto.recipe.items) {
-            const ingredient = await tx.ingredient.findUnique({
-              where: { id: row.ingredientId },
-            });
-            const existing = existingRows.find((item) => item.ingredientId === row.ingredientId);
-            if (!ingredient || (!ingredient.isActive && !existing))
-              throw new BadRequestException('Ингредиент недоступен');
-            const mappedRow = row.variantAmounts
-              ? {
-                  ...row,
-                  variantAmounts: Object.fromEntries(
-                    Object.entries(row.variantAmounts).map(([key, amount]) => [
-                      variantIdsByClientKey.get(key) ?? key,
-                      amount,
-                    ]),
-                  ),
-                }
-              : row;
-            const rowData = await this.recipes.rowData(
-              tx,
-              dish.id,
-              ingredient.unitType,
-              ingredient.displayUnit,
-              mappedRow,
-              existing,
-              ingredient.processingLosses,
-              { inputPortions: dto.recipe.inputPortions },
-            );
-            await tx.recipeItem.upsert({
-              where: {
-                dishId_ingredientId: {
-                  dishId: dish.id,
-                  ingredientId: row.ingredientId,
-                },
-              },
-              create: {
-                dishId: dish.id,
-                ingredientId: row.ingredientId,
-                ...rowData,
-              },
-              update: rowData,
-            });
-          }
-          await tx.recipeItem.deleteMany({
-            where: { dishId: dish.id, ingredientId: { notIn: itemIds } },
-          });
+          const rows = dto.recipe.items.map((row) => row.variantAmounts ? {
+            ...row,
+            variantAmounts: Object.fromEntries(Object.entries(row.variantAmounts)
+              .map(([key, amount]) => [variantIdsByClientKey.get(key) ?? key, amount])),
+          } : row);
+          await this.recipes.saveRecipeItems(tx, dish.id, rows, { inputPortions: dto.recipe.inputPortions });
           if (dto.recipe.metadata !== undefined)
             await tx.dish.update({
               where: { id: dish.id },

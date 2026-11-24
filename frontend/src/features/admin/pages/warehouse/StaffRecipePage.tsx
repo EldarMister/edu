@@ -86,6 +86,10 @@ function StaffRecipeForm({
   const [metadata, setMetadata] = useState<RecipeMetadata>(() => recipe.metadata ?? {});
   const [variantId, setVariantId] = useState('');
   const variants = recipe.variants ?? [];
+  const ownRecipe = recipe.variantRecipes?.[variantId];
+  const displayedRecipe = ownRecipe ? { ...recipe, ...ownRecipe, variants: [] } : recipe;
+  const displayedMetadata = ownRecipe?.metadata ?? metadata;
+  const editingBase = editable && !ownRecipe;
   const modifiers = baseline.modifiers;
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
@@ -94,16 +98,18 @@ function StaffRecipeForm({
   const [original] = useState(snapshot);
   const { markSaved } = useEditorDirty(editable && original !== snapshot);
   const validRows = validRecipeRows(rows);
-  const preview = useRecipePreview(!editable || validRows ? {
+  const preview = useRecipePreview(!editingBase || validRows ? {
     dishId: recipe.dishId,
     variantId: variantId || undefined,
-    metadata: { outputQuantity: metadata.outputQuantity, outputUnit: metadata.outputUnit },
+    ownRecipe: !!ownRecipe,
+    metadata: { outputQuantity: displayedMetadata.outputQuantity, outputUnit: displayedMetadata.outputUnit },
     items: !recipe.stockIngredientId && !recipe.isSet && recipe.catalogKind === 'recipe'
-      ? recipePreviewItems(rows, variants.map(({ id }) => id)) : [],
+      ? ownRecipe ? recipeDraftPayload(recipeDraftRows(ownRecipe.items)) : recipePreviewItems(rows, variants.map(({ id }) => id))
+      : [],
   } : null);
   async function save(event: FormEvent) {
     event.preventDefault();
-    if (!editable || submitting.current) return;
+    if (!editingBase || submitting.current) return;
     if (!validRows) {
       setError('Проверьте количество и этапы обработки. Для расчёта от нетто нужен положительный выход.');
       return;
@@ -133,7 +139,7 @@ function StaffRecipeForm({
       title={recipe.dishName}
       onClose={() => { if (!submitting.current) onClose(); }}
       footer={
-        editable ? (
+        editingBase ? (
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="submit"
@@ -160,7 +166,7 @@ function StaffRecipeForm({
           {variants.length > 0 && <Select ariaLabel="Вариант техкарты" className="h-10 w-full sm:max-w-sm" value={variantId}
             options={[{ value: '', label: 'Базовая норма' }, ...variants.map(({ id, name }) => ({ value: id, label: name }))]}
             onChange={setVariantId} />}
-          <RecipeCostSummary preview={preview} showCosts={costs} showError={!editable} showMissing={!editable}
+          <RecipeCostSummary preview={preview} showCosts={costs} showError={!editingBase} showMissing={!editingBase}
             showPriceMetrics={!variants.length || !!variantId} />
         </section>}
         {!!recipe.components?.length && (
@@ -186,12 +192,12 @@ function StaffRecipeForm({
             </div>
           </section>
         )}
-        {editable ? (
+        {editingBase ? (
           <fieldset disabled={pending} className="min-w-0 w-full space-y-6">
             <RecipeDraftFields
               rows={rows}
               onChange={setRows}
-              variants={recipe.variants}
+              variants={variants.filter(({ id }) => !recipe.variantRecipes?.[id])}
               showCosts={costs}
               disabled={pending}
               allowCreate={false}
@@ -242,22 +248,22 @@ function StaffRecipeForm({
           </fieldset>
         ) : (
           <>
-            {!!recipe.items.length && !preview.data?.stockItem && <RecipeReadOnly recipe={recipe} costs={costs} preview={preview.data} />}
-            {recipe.metadata?.outputQuantity != null && (
+            {!!displayedRecipe.items.length && !preview.data?.stockItem && <RecipeReadOnly recipe={displayedRecipe} costs={costs} preview={preview.data} />}
+            {displayedRecipe.metadata?.outputQuantity != null && (
               <p className="text-sm">
                 Выход:{' '}
                 <strong>
-                  {qty(recipe.metadata.outputQuantity, recipe.metadata.outputUnit ?? '')}
+                  {qty(displayedRecipe.metadata.outputQuantity, displayedRecipe.metadata.outputUnit ?? '')}
                 </strong>
               </p>
             )}
-            {!!recipe.metadata?.instructions && (
+            {!!displayedRecipe.metadata?.instructions && (
               <section>
                 <h3 className="mb-2 text-base font-semibold">Способ приготовления</h3>
-                <p className="whitespace-pre-wrap text-sm">{recipe.metadata.instructions}</p>
+                <p className="whitespace-pre-wrap text-sm">{displayedRecipe.metadata.instructions}</p>
               </section>
             )}
-            {!recipe.items.length && !recipe.components?.length && !recipe.stockItem && !preview.data?.stockItem && (
+            {!displayedRecipe.items.length && !recipe.components?.length && !recipe.stockItem && !preview.data?.stockItem && (
               <p className="text-sm text-text-muted">Состав этой техкарты ещё не заполнен.</p>
             )}
           </>

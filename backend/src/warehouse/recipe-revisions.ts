@@ -20,8 +20,8 @@ export async function archiveDishRecipe(tx: Prisma.TransactionClient, dishId: st
   const ids = [dish.stockIngredientId, ...dish.variants.map((variant) => variant.stockIngredientId),
     ...dish.recipeItems.map((item) => item.ingredientId), ...dish.modifierGroups.flatMap((group) => group.options.map((option) => option.ingredientId))];
   const labels = await ingredientLabels(tx, ids);
-  const variants = variantSnapshot === 'full' ? dish.variants : dish.variants.map(({ id, name, stockIngredientId, stockAmount }) => ({
-    id, name, stockIngredientId, stockAmount,
+  const variants = variantSnapshot === 'full' ? dish.variants : dish.variants.map(({ id, name, stockIngredientId, stockAmount, recipeMetadata }) => ({
+    id, name, stockIngredientId, stockAmount, ...(recipeMetadata != null && { recipeMetadata }),
   }));
   await tx.recipeRevision.upsert({
     where: { dishId_version: { dishId, version: dish.recipeVersion } },
@@ -92,11 +92,13 @@ function composition(snapshot: Prisma.JsonObject, labels: Map<string, ItemLabel>
     if (!id) return [];
     const label = ingredient(id);
     const unit = unitCode(item.amountUnit) ?? label.unit;
+    const variantId = string(item.variantId);
     const variantAmounts = Object.entries(object(item.variantAmounts)).flatMap(([variantId, value]) => {
       const amount = quantity(value, unit);
       return amount == null ? [] : [{ variantId, name: variantNames.get(variantId) ?? null, amount }];
     });
     return [{ ...label, unit, amount: quantity(item.amount, unit), netAmount: quantity(item.netAmount, unit),
+      ...(variantId && { variantId, variantName: variantNames.get(variantId) ?? null }),
       measuredNetWeightGrams: number(item.measuredNetWeightGrams), lossPercent: number(item.lossPercent),
       processingMethod: enumValue(item.processingMethod, processingMethods), processingBasis: enumValue(item.processingBasis, processingBases),
       processingStages: readProcessingStages(item.processingStages), variantAmounts }];

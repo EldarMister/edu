@@ -4,7 +4,7 @@ import { getCafeId } from '../tenant/tenant-context';
 import { lockIngredients } from './stock-lock';
 import { fromBase, unitLabel, type UnitCode } from './units';
 import { getWarehouseBalance } from './warehouse-location';
-import { RecipeResolver, recipeAmount, warehouseKey, lockRecipeGraph } from './recipe-resolution';
+import { RecipeResolver, recipeAmount, recipeRowsForVariant, warehouseKey, lockRecipeGraph } from './recipe-resolution';
 import { processingSnapshot } from './recipe-processing';
 import { postStockMovement } from './stock-posting';
 import type { ModifierSelectionSnapshot } from './menu-modifiers';
@@ -150,12 +150,13 @@ export class IngredientStockService {
       const route = routeByStation.get(serving.componentId ? dish.prepStation ?? dish.category.prepStation : line.prepStation ?? dish.prepStation ?? dish.category.prepStation) ?? null;
       const multiplier = new Prisma.Decimal(serving.quantity).mul(dish.isWeighted && line.weightGrams ? new Prisma.Decimal(line.weightGrams).div(dish.weightedPriceBase) : 1);
       const roots = serving.modifiersOnly ? [] : directId ? [{ ingredientId: directId, amount: directAmount, warehouseId: null, fromCommonWarehouse: false, variantAmounts: null }]
-        : dish.recipeItems;
+        : recipeRowsForVariant(dish.recipeItems, variant);
       if (!roots.length && !serving.modifiersOnly) warnings.push({ kind: 'unconfigured', dishId: dish.id, ingredientId: '', ingredient: dish.name, warehouseId: route?.id ?? null,
         unit: '', needed: 0, available: 0, missing: 0, message: 'Складской учёт для блюда «' + dish.name + '» не настроен' });
       const selectedModifiers = dish.id === parentDish.id ? modifiers : [];
       const selectedRoots = roots.filter((row) => dish.id !== parentDish.id || directId || !exclusions.has(row.ingredientId))
-        .map((row) => ({ ...row, consumed: recipeAmount(row, serving.variantId).mul(multiplier), modifier: null as ModifierSelectionSnapshot | null }));
+        .map((row) => ({ ...row, consumed: recipeAmount(row, variant?.recipeMetadata == null ? serving.variantId : undefined)
+          .mul(multiplier), modifier: null as ModifierSelectionSnapshot | null }));
       for (const modifier of selectedModifiers) if (modifier.ingredientId) selectedRoots.push({ ingredientId: modifier.ingredientId,
         amount: new Prisma.Decimal(modifier.amount), warehouseId: modifier.warehouseId, fromCommonWarehouse: modifier.fromCommonWarehouse,
         variantAmounts: null, consumed: new Prisma.Decimal(modifier.amount).mul(modifier.quantity)

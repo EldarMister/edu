@@ -67,6 +67,13 @@ export function recipeAmount(row: { amount: Prisma.Decimal; variantAmounts: Pris
   return row.amount;
 }
 
+export function recipeRowsForVariant<T extends { variantId?: string | null }>(
+  rows: readonly T[], variant?: { id: string; recipeMetadata?: Prisma.JsonValue } | null,
+): T[] {
+  const recipeVariantId = variant?.recipeMetadata != null ? variant.id : null;
+  return rows.filter((row) => (row.variantId ?? null) === recipeVariantId);
+}
+
 export function warehouseKey(warehouse: { id: string; isDefault: boolean } | null | undefined) {
   return warehouse && !warehouse.isDefault ? warehouse.id : 'default';
 }
