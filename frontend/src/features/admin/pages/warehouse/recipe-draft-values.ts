@@ -122,10 +122,10 @@ export function scaleRecipeDraftRows(rows: RecipeDraftRow[], fromPortions: numbe
     const [mantissa, exponent = '0'] = String(amount).split('e');
     const [whole, fraction = ''] = mantissa.split('.');
     const places = decimals + Number(exponent) - fraction.length;
-    const units = BigInt(whole + fraction) * BigInt(toPortions) * 10n ** BigInt(Math.max(0, places));
+    const units = BigInt(whole + fraction) * 10n ** BigInt(Math.max(0, places));
     const divisor = BigInt(fromPortions) * 10n ** BigInt(Math.max(0, -places));
-    const roundedUnits = (2n * units + divisor) / (2n * divisor);
-    return Number(`${roundedUnits}e-${decimals}`);
+    const portionUnits = (2n * units + divisor) / (2n * divisor);
+    return Number(`${portionUnits * BigInt(toPortions)}e-${decimals}`);
   }
 
   return rows.map((row) => {

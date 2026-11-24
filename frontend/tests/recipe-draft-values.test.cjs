@@ -43,6 +43,13 @@ test('changing the portion basis rounds decimal midpoints like saving a batch', 
   assert.deepEqual(row.variantAmounts, { small: 0.002 });
 });
 
+test('switching between two batch sizes preserves the precise stored portion', () => {
+  const draft = { ...potato, unit: 'g', amount: 0.014, netAmount: null };
+  const [batch] = scaleRecipeDraftRows([draft], 10, 2);
+  assert.equal(batch.amount, 0.002);
+  assert.deepEqual(scaleRecipeDraftRows([batch], 2, 1), scaleRecipeDraftRows([draft], 10, 1));
+});
+
 test('gross and net can be the basis of the same 20% processing loss', () => {
   assert.equal(grossFromLoss(160, 20, 0), 200);
   assert.equal(netFromLoss(200, 20), 160);
