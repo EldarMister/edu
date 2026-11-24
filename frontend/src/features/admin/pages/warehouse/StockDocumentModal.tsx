@@ -23,7 +23,7 @@ import { DocumentField, DocumentFooter } from './WarehouseUi';
 import { qty, purchaseNumber, usePurchase, useIngredients, useWarehouseLocations, type Ingredient, type WarehouseLocation } from './api';
 import { documentQuantityError, documentQuantityFromBase, documentQuantityValue, documentStockShortages, documentUnitCost, returnableQuantityInUnit } from './stock-document-form';
 import { DocumentStockWarnings } from './DocumentStockWarnings';
-import { TransferActButton } from './TransferActButton';
+import { StockDocumentExportButton } from './StockDocumentExportButton';
 import { WriteoffLines, useWriteoffLines } from './WriteoffLines';
 import {
   useStockDocument,
@@ -89,7 +89,7 @@ export function StockDocumentModal({
       )}
       {document?.kind === 'transfer' && (document.status === 'posted' || document.status === 'reversed') && (
           <WorkspaceHeaderActions>
-            {can('actions.exportReports') && <TransferActButton key={document.id} id={document.id} />}
+            {can('actions.exportReports') && <StockDocumentExportButton key={document.id} id={document.id} kind="transfer" />}
             {can('actions.warehouseTransfer') && onCopyTransfer && <button type="button" className="btn-ghost btn-md text-primary"
               onClick={() => onCopyTransfer(document.id)}>Копировать</button>}
           </WorkspaceHeaderActions>
@@ -170,7 +170,8 @@ function StockDocumentDraft({
   const timingReady = reopened || (document.kind !== 'inventory' && !supportsStockDate) ||
     (timingValid && !inventoryTimingError(timing) && (supportsStockDate ? effectiveAt !== undefined : countedAt !== undefined));
   const [savedValues, setSavedValues] = useState(() => draftValues(draftItems(document), document.reason ?? '', document.note ?? '', document.countedAt));
-  const { markSaved } = useEditorDirty(draftValues(items, reason, note, countedAt) !== savedValues ||
+  const hasUnsavedValues = draftValues(items, reason, note, countedAt) !== savedValues;
+  const { markSaved } = useEditorDirty(hasUnsavedValues ||
     (supportsStockDate && effectiveAt !== savedEffectiveAt) || !timingReady || (document.kind === 'writeoff' && writeoffLines.dirty));
   const [error, setError] = useState('');
   const [reloadError, setReloadError] = useState('');
@@ -377,7 +378,11 @@ function StockDocumentDraft({
     >
       {!writeoff && <>
         <InventoryCountSheet document={document} warehouseName={warehouse.name} rows={rows} />
-        <WorkspaceHeaderActions><button type="button" className="btn-ghost btn-md text-primary" disabled={previewNeedsSave || !timingReady} onClick={() => window.print()}>Печать списка</button></WorkspaceHeaderActions>
+        <WorkspaceHeaderActions>
+          {can('actions.exportReports') && <StockDocumentExportButton id={document.id} kind="inventory"
+            disabled={hasUnsavedValues || !timingReady || pending || stale} />}
+          <button type="button" className="btn-ghost btn-md text-primary" disabled={previewNeedsSave || !timingReady} onClick={() => window.print()}>Печать списка</button>
+        </WorkspaceHeaderActions>
       </>}
       <div className="poster-document-panel poster-document-fields space-y-3">
         <DocumentHeader document={document} warehouse={warehouse} editingStockDate={supportsStockDate} />
@@ -641,6 +646,8 @@ function StockDocumentReview({
         </p>
       )}
       <WorkspaceHeaderActions>
+        {document.kind === 'inventory' && can('actions.exportReports') &&
+          <StockDocumentExportButton id={document.id} kind="inventory" disabled={pending} />}
         <button
           type="button"
           className="btn-ghost btn-md print:hidden text-primary"

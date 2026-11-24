@@ -1,5 +1,7 @@
+import { useRef } from 'react';
 import { Select, type SelectOption } from '@/components/Select';
 import { useT } from '@/lib/i18n';
+import { IconX } from './icons';
 
 export type OrderSort = 'default' | 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc';
 
@@ -49,9 +51,9 @@ export function OrdersFilters(props: Props) {
   const ctrl = 'orders-filter-control';
   return (
     <div className="orders-filters">
-      <Select className={`${ctrl} orders-status-select`} value={props.tab} onChange={props.onTabChange} options={STATUS_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />
+      <Select className={`${ctrl} orders-status-select`} ariaLabel={tr('Статус заказа')} value={props.tab} onChange={props.onTabChange} options={STATUS_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />
       <Select className={`${ctrl} orders-payment-select`} ariaLabel={tr('Способ оплаты')} value={props.paymentMethod} onChange={props.onPaymentMethodChange} options={PAYMENT_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />
-      <Select className={`${ctrl} orders-waiter-select`} value={props.waiterId} onChange={props.onWaiterChange} options={props.waiterOptions} />
+      <Select className={`${ctrl} orders-waiter-select`} ariaLabel={tr('Официант')} value={props.waiterId} onChange={props.onWaiterChange} options={props.waiterOptions} />
       <Select className={`${ctrl} orders-sort-select`} value={props.sort} onChange={(value) => props.onSortChange(value as OrderSort)} options={SORT_OPTIONS.map((option) => ({ ...option, label: tr(option.label) }))} />
       <OrdersSearchField value={props.search} onChange={props.onSearchChange} />
     </div>
@@ -60,13 +62,19 @@ export function OrdersFilters(props: Props) {
 
 function OrdersSearchField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const tr = useT();
+  const input = useRef<HTMLInputElement>(null);
   return (
-    <div className="orders-search-wrap">
+    <div className={`orders-search-wrap${value ? ' has-value' : ''}`}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <circle cx="10.8" cy="10.8" r="6.8" />
         <path d="m16 16 4.5 4.5" />
       </svg>
-      <input className="orders-filter-control orders-search-input" placeholder={tr('Номер чека, блюдо или сотрудник')} aria-label={tr('Поиск по заказам')} value={value} onChange={(event) => onChange(event.target.value)} />
+      <input ref={input} type="search" className="orders-filter-control orders-search-input" placeholder={tr('Номер чека, блюдо или сотрудник')}
+        aria-label={tr('Поиск по заказам')} value={value} onChange={(event) => onChange(event.target.value)} />
+      {value && <button type="button" className="orders-search-clear" aria-label={tr('Очистить поиск')} onClick={() => {
+        onChange('');
+        input.current?.focus();
+      }}><IconX className="h-4 w-4" aria-hidden="true" /></button>}
     </div>
   );
 }

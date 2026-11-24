@@ -90,6 +90,12 @@ class CreateCashOperationDto extends CashOperationDto {
   requestKey!: string;
 }
 
+class UpdateCashOperationDto extends CashOperationDto {
+  @IsOptional()
+  @IsUUID()
+  authorId?: string;
+}
+
 class CashCountDto {
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -214,32 +220,32 @@ function cashOperationDate(shift: CashShift, input: CashOperation, previous?: Da
 }
 
 async function storeOperation(db: Db, shift: CashShift, actorId: string, input: CashOperation,
-  categoryId: string | null, sourceKey: string, occurredAt: Date, previous?: { id: string; counterpartyAccountId: string | null }) {
+  categoryId: string | null, sourceKey: string, occurredAt: Date,
+  previous?: { id: string; counterpartyAccountId: string | null; amount: Prisma.Decimal }, authorId: string | null = actorId) {
   const { cafeId, id: cashShiftId, accountId } = shift;
   const transfer = input.kind === 'collection';
   const destination = transfer
     ? previous?.counterpartyAccountId ?? (await ensureCollectionAccount(db, cafeId)).id : null;
   const amount = new Prisma.Decimal(input.amount).mul(input.kind === 'income' ? 1 : -1);
   const data = { kind: transfer ? 'transfer' as const : input.kind as 'income' | 'expense',
-    amount, categoryId, counterpartyAccountId: destination, occurredAt, note: input.note?.trim() || null };
+    actorId: authorId, amount, categoryId, counterpartyAccountId: destination, occurredAt, note: input.note?.trim() || null };
   const pendingCashShift = !shift.closedAt;
   if (pendingCashShift) {
-    const before = previous ? await db.financeEntry.findUnique({ where: { id: previous.id }, select: { amount: true } }) : null;
-    await assertDrawerBalance(db, shift, amount.sub(before?.amount ?? 0));
+    await assertDrawerBalance(db, shift, amount.sub(previous?.amount ?? 0));
   }
   const entry = previous
     ? await db.financeEntry.update({ where: { id: previous.id }, data })
-    : await db.financeEntry.create({ data: { ...data, cafeId, cashShiftId, accountId, actorId, sourceKey, pendingCashShift } });
+    : await db.financeEntry.create({ data: { ...data, cafeId, cashShiftId, accountId, sourceKey, pendingCashShift } });
   if (destination) {
     const incoming = { ...data, accountId: destination, amount: amount.negated(), counterpartyAccountId: accountId };
     await db.financeEntry.upsert({
       where: { cafeId_sourceKey: { cafeId, sourceKey: sourceKey + ':in' } }, update: incoming,
-      create: { ...incoming, cafeId, cashShiftId, actorId, sourceKey: sourceKey + ':in', pendingCashShift },
+      create: { ...incoming, cafeId, cashShiftId, sourceKey: sourceKey + ':in', pendingCashShift },
     });
   } else if (previous?.counterpartyAccountId) {
     await db.financeEntry.deleteMany({ where: { cafeId, sourceKey: sourceKey + ':in' } });
   }
-  await recalculateClosedShift(db, shift, actorId);
+  if (!previous || !amount.eq(previous.amount)) await recalculateClosedShift(db, shift, actorId);
   return entry;
 }
 
@@ -331,7 +337,7 @@ export class CashShiftsService {
         && (accountId === shift.accountId || kind === 'sale' || kind === 'refund'))
         .map(({ category, counterparty, accountId, actorId, sourceKey, ...row }) => ({
           ...row, category: category?.name ?? null, categoryId: category?.id ?? null,
-          actorName: actorId ? names.get(actorId) ?? null : null,
+          actorId, actorName: actorId ? names.get(actorId) ?? null : null,
           cash: accountId === shift.accountId, editable: !!sourceKey?.startsWith(posKey),
           collection: row.kind === 'transfer' && row.amount.lt(0) && counterparty?.isCollection === true,
           reconciliation: sourceKey?.startsWith(openKey) ? 'open' : sourceKey?.startsWith(closeKey) ? 'close' : null,
@@ -374,6 +380,12 @@ export class CashShiftsService {
     return categories;
   }
 
+  operationAuthors(cafeId: string) {
+    return this.db.user.findMany({
+      where: { cafeId, isActive: true }, orderBy: [{ name: 'asc' }, { id: 'asc' }], select: { id: true, name: true },
+    });
+  }
+
   async createOperation(cafeId: string, actor: AuthUser, id: string, input: CreateCashOperationDto) {
     return this.db.$transaction(async (db) => {
       await lockFinance(db, cafeId);
@@ -401,7 +413,7 @@ export class CashShiftsService {
     });
   }
 
-  async updateOperation(cafeId: string, actor: AuthUser, id: string, entryId: string, input?: CashOperationDto) {
+  async updateOperation(cafeId: string, actor: AuthUser, id: string, entryId: string, input?: UpdateCashOperationDto) {
     const result = await this.db.$transaction(async (db) => {
       await lockFinance(db, cafeId);
       const shift = await findShift(db, cafeId, id);
@@ -418,9 +430,18 @@ export class CashShiftsService {
       if (input) {
         const categoryId = input.categoryId === original.categoryId && input.kind === original.kind
           ? original.categoryId : await cashCategory(db, cafeId, input, actor.role !== Role.OWNER && !canManageFinance(actor));
+        let authorChange: string | null = null;
+        if (input.authorId && input.authorId !== original.actorId) {
+          const [replacement, previous] = await Promise.all([
+            db.user.findFirst({ where: { id: input.authorId, cafeId, isActive: true }, select: { name: true } }),
+            original.actorId ? db.user.findFirst({ where: { id: original.actorId, cafeId }, select: { name: true } }) : null,
+          ]);
+          if (!replacement) throw new BadRequestException('Выберите действующего сотрудника заведения');
+          authorChange = `Автор операции кассовой смены изменён с «${previous?.name ?? 'Не указан'}» на «${replacement.name}»`;
+        }
         const updated = await storeOperation(db, shift, actor.id, input, categoryId, original.sourceKey,
-          cashOperationDate(shift, input, original.occurredAt), original);
-        return { original, updated };
+          cashOperationDate(shift, input, original.occurredAt), original, input.authorId ?? original.actorId);
+        return { original, updated, authorChange };
       }
       if (!shift.closedAt) await assertDrawerBalance(db, shift, original.amount.negated());
       const author = original.actorId ? await db.user.findFirst({ where: { id: original.actorId, cafeId }, select: { name: true } }) : null;
@@ -431,13 +452,13 @@ export class CashShiftsService {
       } });
       await db.financeEntry.deleteMany({ where: { cafeId, sourceKey: { in: [original.sourceKey, original.sourceKey + ':in'] } } });
       await recalculateClosedShift(db, shift, actor.id);
-      return { original, updated: null };
+      return { original, updated: null, authorChange: null };
     });
     if (!result) return { id: entryId };
-    const snapshot = ({ kind, amount, categoryId, occurredAt, note }: Pick<typeof result.original, 'kind' | 'amount' | 'categoryId' | 'occurredAt' | 'note'>) =>
-      ({ kind, amount: amount.toNumber(), categoryId, occurredAt: occurredAt.toISOString(), note });
+    const snapshot = ({ kind, amount, categoryId, occurredAt, note, actorId }: Pick<typeof result.original, 'kind' | 'amount' | 'categoryId' | 'occurredAt' | 'note' | 'actorId'>) =>
+      ({ kind, amount: amount.toNumber(), categoryId, occurredAt: occurredAt.toISOString(), note, actorId });
     await this.audit.log({ actor, actionType: AuditAction.FINANCE_TRANSACTION_UPDATED, entityType: AuditEntity.FINANCE_TRANSACTION,
-      entityId: entryId, description: result.updated ? 'Изменена операция кассовой смены' : 'Удалена операция кассовой смены',
+      entityId: entryId, description: result.updated ? result.authorChange ?? 'Изменена операция кассовой смены' : 'Удалена операция кассовой смены',
       oldValue: snapshot(result.original), newValue: result.updated ? snapshot(result.updated) : null });
     return { id: entryId };
   }
@@ -603,6 +624,12 @@ class CashShiftsController {
     return this.shifts.operationCategories(this.access(user), !canViewFinance(user));
   }
 
+  @Get('operation-authors')
+  @Roles(Role.OWNER, Role.ADMIN)
+  operationAuthors(@CurrentUser() user: AuthUser) {
+    return this.shifts.operationAuthors(this.access(user, true));
+  }
+
   @Post(':id/operations')
   createOperation(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() input: CreateCashOperationDto) {
     return this.shifts.createOperation(this.access(user, true), user, id, input);
@@ -611,7 +638,7 @@ class CashShiftsController {
   @Patch(':id/operations/:entryId')
   @Roles(Role.OWNER, Role.ADMIN)
   updateOperation(@CurrentUser() user: AuthUser, @Param('id') id: string,
-    @Param('entryId') entryId: string, @Body() input: CashOperationDto) {
+    @Param('entryId') entryId: string, @Body() input: UpdateCashOperationDto) {
     return this.shifts.updateOperation(this.access(user, true), user, id, entryId, input);
   }
 

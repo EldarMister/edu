@@ -58,6 +58,16 @@ export class WarehouseDocumentsController {
     response.send(workbook);
   }
 
+  @Get(':id/inventory.xlsx')
+  @RequirePermission('actions.exportReports')
+  async getInventoryWorkbook(@Param('id') id: string, @CurrentUser() user: AuthUser, @Res() response: Response) {
+    const showCosts = hasPermission(resolvePermissions(user.role as Role, user.permissions), 'actions.warehouseCosts');
+    const workbook = await this.documents.inventoryWorkbook(id, showCosts);
+    response.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    response.setHeader('Content-Disposition', 'attachment; filename="inventory.xlsx"');
+    response.send(workbook);
+  }
+
   @Post()
   async create(@CurrentUser() user: AuthUser, @Body() dto: CreateWarehouseDocumentDto) {
     this.assertDocumentPermission(user, dto.kind);

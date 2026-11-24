@@ -46,6 +46,7 @@ const { getDefaultPermissionsByRole } = require('../src/common/permissions.ts');
 const { tenantPrismaMiddleware, runWithTenant } = require('../src/tenant/tenant-context.ts');
 const { AdminOrdersController } = require('../src/admin/admin-orders.controller.ts');
 const { AdminOrdersService } = require('../src/admin/admin-orders.service.ts');
+const XLSX = require('xlsx');
 
 const databaseUrl = process.env.ORDER_FEATURE_TEST_DATABASE_URL;
 if (databaseUrl && (!['localhost', '127.0.0.1'].includes(new URL(databaseUrl).hostname)
@@ -295,6 +296,67 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
       assert.equal((await request('/auth/me', { token, workspace: 'terminal' })).role, 'OWNER');
       assert.equal((await db.user.findUnique({ where: { id: fixture.owner.id } })).role, 'OWNER');
       assert.equal(auditEntries.find((entry) => entry.actor?.id === fixture.owner.id && entry.actor?.workspace === 'terminal').actor.identityRole, 'OWNER');
+    });
+    await t.test('receipt workbook uses the complete filtered register and distinguishes opening and closing dates', async () => {
+      const table = await newTable();
+      const opened = new Date('2026-07-02T17:58:00Z');
+      const closed = new Date('2026-07-02T18:02:00Z');
+      const viewer = await runWithTenant({ cafeId: cafe.id }, async () => {
+        const permissions = getDefaultPermissionsByRole('ADMIN');
+        permissions.actions.exportReports = false;
+        permissions.sections.staff = false;
+        const position = await db.staffPosition.create({ data: { name: 'Orders viewer', role: 'ADMIN', permissions } });
+        const user = await db.user.create({ data: { name: 'Orders viewer', role: 'ADMIN', positionId: position.id,
+          phone: `+996${randomInt(100_000_000, 1_000_000_000)}`, passwordHash: await bcrypt.hash('workspace-test-password', 4) } });
+        const defaults = { tableId: table.id, waiterId: fixture.mixed.id, createdAt: opened, closedAt: closed };
+        await db.order.create({ data: { ...defaults, orderNumber: 'TENDER-XLSX-1', status: 'paid', paymentStatus: 'paid', paymentMethod: 'mixed',
+          finalAmount: 100, refundedAmount: 5, payments: { create: [
+            { method: 'cash', amount: 60, cashierId: fixture.owner.id },
+            { method: 'card', amount: 40, refundedAmount: 5, cashierId: fixture.owner.id },
+          ] }, items: { create: [
+            { dishNameSnapshot: 'Чай', dishVariantNameSnapshot: 'Большой', quantity: 2, refundedQuantity: 1, priceSnapshot: 50, finalPrice: 100, status: 'served' },
+            { dishNameSnapshot: 'Удалённая строка', priceSnapshot: 20, finalPrice: 20, status: 'cancelled' },
+          ] },
+        } });
+        await db.order.create({ data: { ...defaults, orderNumber: 'TENDER-XLSX-2', status: 'paid', paymentStatus: 'paid', paymentMethod: 'card',
+          finalAmount: 24, refundedAmount: 4,
+        } });
+        await db.order.create({ data: { ...defaults, orderNumber: 'TENDER-XLSX-3', status: 'cancelled', paymentMethod: 'card', finalAmount: 10 } });
+        return user;
+      });
+      const { accessToken } = await request('/auth/login', { method: 'POST', body: { phone: viewer.phone, password: 'workspace-test-password' } });
+      const readOnly = { token: accessToken, workspace: 'admin' };
+      const query = new URLSearchParams({ tab: 'paid', dateField: 'closed', dateFrom: '2026-07-03', dateTo: '2026-07-03',
+        paymentMethod: 'card', waiterId: fixture.mixed.id, search: 'TENDER-XLSX-', sort: 'amount', sortDirection: 'asc', pageSize: '1' });
+      await request('/admin/staff', { ...readOnly, status: 403 });
+      assert.ok((await request('/admin/orders/waiters', readOnly)).some(({ id }) => id === fixture.mixed.id));
+      const list = await request(`/admin/orders?${query}`, readOnly);
+      assert.equal(list.total, 2);
+      assert.equal(list.items[0].orderNumber, 'TENDER-XLSX-2');
+      const summary = await request(`/admin/orders/summary?${query}`, readOnly);
+      assert.deepEqual(summary, { total: 2, paid: 2, unpaid: 0, cancelled: 0, revenue: 115, tenderRevenue: 55 });
+      await request(`/admin/orders/export.xlsx?${query}`, { ...readOnly, status: 403 });
+
+      async function workbook(details) {
+        const response = await fetch(`${base}/admin/orders/export.xlsx?${query}&includeDetails=${details}`, {
+          headers: { Authorization: `Bearer ${sessions.owner}`, 'X-EDU-Workspace': 'admin' },
+        });
+        assert.equal(response.status, 200);
+        assert.match(response.headers.get('content-type'), /spreadsheetml/);
+        return XLSX.read(Buffer.from(await response.arrayBuffer()), { type: 'buffer', cellNF: true });
+      }
+      assert.deepEqual((await workbook(false)).SheetNames, ['Чеки']);
+      const book = await workbook(true);
+      assert.deepEqual(book.SheetNames, ['Чеки', 'Позиции']);
+      const receipts = XLSX.utils.sheet_to_json(book.Sheets['Чеки']);
+      assert.deepEqual(receipts.map((row) => [row['№ чека'], row['Выручка после возвратов'], row['Карта после возвратов']]),
+        [['TENDER-XLSX-2', 20, 20], ['TENDER-XLSX-1', 95, 35]]);
+      assert.equal(receipts[1]['Наличные после возвратов'], 60);
+      assert.match(book.Sheets['Чеки'].B2.w, /^02\.07\.2026 23:58$/);
+      assert.match(book.Sheets['Чеки'].C2.w, /^03\.07\.2026 00:02$/);
+      const items = XLSX.utils.sheet_to_json(book.Sheets['Позиции']);
+      assert.deepEqual(items.map((row) => [row['Позиция'], row['Вариант'], row['Возвращённое количество']]), [['Чай', 'Большой', 1]]);
+      assert.equal(items[0]['ID чека'], receipts[1]['ID чека']);
     });
     await t.test('mixed cashier works independently of disabled admin orders and read-only staff', async () => {
       const token = sessions.mixed;

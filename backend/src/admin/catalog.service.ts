@@ -9,6 +9,8 @@ import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { normalizeDishImage, withDishImageRef } from '../dishes/dish-image';
 import { normalizeUnit, unitLabel } from '../warehouse/units';
 import { projectDishStock } from '../warehouse/dish-stock-projection';
+import { lockRecipeGraph } from '../warehouse/recipe-resolution';
+import { archiveDishRecipe } from '../warehouse/recipe-revisions';
 import { assertAssignableStation, BUILTIN_STATIONS, defaultCategoryStation, lockStationRouting, stationCatalog } from '../kitchen/preparation-stations';
 import { goodsExportColumns, writeGoodsWorkbook, type GoodsExportQuery } from './goods-xlsx';
 import { assertMenuTax, dishTaxFields } from '../settings/order-taxes';
@@ -763,16 +765,30 @@ export class CatalogService {
   async updateSet(id: string, dto: UpdateSetDto, actor: AuditActor) {
     const set = await this.prisma.dish.findUnique({ where: { id } });
     if (!set || !set.isSet) throw new NotFoundException('Сет не найден');
-    if (dto.components) await this.validateSetComponents(dto.components);
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      if (dto.components) await lockRecipeGraph(tx);
       await lockStationRouting(tx);
       await assertAssignableStation(tx, dto.prepStation);
+      let compositionChanged = false;
       if (dto.components) {
-        await tx.setComponent.deleteMany({ where: { setId: id } });
-        await tx.setComponent.createMany({
-          data: this.mapSetComponents(dto.components).map((c) => ({ ...c, setId: id })),
+        await this.validateSetComponents(dto.components, tx);
+        const components = this.mapSetComponents(dto.components);
+        const saved = await tx.setComponent.findMany({
+          where: { setId: id },
+          orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
         });
+        compositionChanged = saved.length !== components.length || components.some((component, index) => {
+          const previous = saved[index];
+          return previous.dishId !== component.dishId || previous.dishVariantId !== component.dishVariantId
+            || previous.quantity !== component.quantity || previous.removable !== component.removable
+            || previous.replaceable !== component.replaceable;
+        });
+        if (compositionChanged) {
+          await archiveDishRecipe(tx, id, actor);
+          await tx.setComponent.deleteMany({ where: { setId: id } });
+          await tx.setComponent.createMany({ data: components.map((component) => ({ ...component, setId: id })) });
+        }
       }
       return tx.dish.update({
         where: { id },
@@ -780,6 +796,7 @@ export class CatalogService {
           ...(dto.name !== undefined ? { name: dto.name } : {}),
           ...(dto.price !== undefined ? { price: new Prisma.Decimal(dto.price) } : {}),
           ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+          ...(compositionChanged ? { recipeVersion: { increment: 1 } } : {}),
           prepStation: dto.prepStation,
           ...await dishTaxFields(tx, dto),
         },
@@ -815,10 +832,10 @@ export class CatalogService {
    * Компоненты сета должны быть существующими активными обычными блюдами (не сетами).
    * Вариант (если указан) должен принадлежать своему блюду.
    */
-  private async validateSetComponents(components: SetComponentDto[]) {
+  private async validateSetComponents(components: SetComponentDto[], db: Prisma.TransactionClient = this.prisma) {
     const ids = [...new Set(components.map((c) => c.dishId))];
     if (ids.length === 0) throw new BadRequestException('Добавьте блюда в состав сета');
-    const dishes = await this.prisma.dish.findMany({
+    const dishes = await db.dish.findMany({
       where: { id: { in: ids } },
       select: { id: true, isSet: true, isActive: true, variants: { select: { id: true } } },
     });

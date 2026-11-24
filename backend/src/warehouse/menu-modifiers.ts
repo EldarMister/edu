@@ -5,10 +5,11 @@ import { Prisma, Role } from '@prisma/client';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
+import { CurrentUser, type AuthUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { lockRecipeGraph } from './recipe-resolution';
-import { archiveDishRecipe } from './recipe-revisions';
+import { archiveDishRecipe, type RecipeRevisionEditor } from './recipe-revisions';
 import { assertUnitMatchesType, fromBase, normalizeUnit, toBase, UnitCode } from './units';
 
 class ModifierOptionDto {
@@ -84,18 +85,18 @@ export class MenuModifiersService {
         options: group.options.filter((option) => !publicView || option.isActive).map((option) => ({ id: option.id, name: option.name, price: Number(option.price), maxQuantity: option.maxQuantity, isActive: option.isActive, sortOrder: option.sortOrder,
           ...(!publicView ? { ingredientId: option.ingredientId, amount: fromBase(Number(option.amount), option.amountUnit as UnitCode), unit: option.amountUnit, fromCommonWarehouse: option.fromCommonWarehouse, warehouseId: option.warehouseId } : {}) })) })) };
   }
-  async save(dishId: string, dto: MenuModifiersDto) {
+  async save(dishId: string, dto: MenuModifiersDto, editor?: RecipeRevisionEditor) {
     await this.prisma.$transaction(async (tx) => {
       await lockRecipeGraph(tx);
-      await this.saveInTransaction(tx, dishId, dto);
+      await this.saveInTransaction(tx, dishId, dto, true, editor);
     });
     this.events?.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { dishId });
     return this.get(dishId);
   }
-  async saveInTransaction(tx: Prisma.TransactionClient, dishId: string, dto: MenuModifiersDto, archive = true) {
+  async saveInTransaction(tx: Prisma.TransactionClient, dishId: string, dto: MenuModifiersDto, archive = true, editor?: RecipeRevisionEditor) {
       const dish = await tx.dish.findUnique({ where: { id: dishId }, include: { recipeItems: true, variants: true, modifierGroups: { include: { options: true } } } });
       if (!dish) throw new NotFoundException('Блюдо не найдено');
-      if (archive) await archiveDishRecipe(tx, dishId, 'full');
+      if (archive) await archiveDishRecipe(tx, dishId, editor, 'full');
       const groupIds = new Set(dish.modifierGroups.map((group) => group.id));
       const existingOptions = new Map(dish.modifierGroups.flatMap((group) => group.options.map((option) => [option.id, option] as const)));
       const keptGroups: string[] = [], seenOptions = new Set<string>();
@@ -145,5 +146,7 @@ export class MenuModifiersController {
   constructor(private modifiers: MenuModifiersService) {}
   @Get(':id/modifiers') get(@Param('id') id: string) { return this.modifiers.get(id); }
   @Put(':id/modifiers') @RequirePermission('actions.warehouseRecipes')
-  save(@Param('id') id: string, @Body() dto: MenuModifiersDto) { return this.modifiers.save(id, dto); }
+  save(@Param('id') id: string, @Body() dto: MenuModifiersDto, @CurrentUser() user: AuthUser) {
+    return this.modifiers.save(id, dto, user);
+  }
 }

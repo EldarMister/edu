@@ -177,5 +177,5 @@ test('yesterday uses Bishkek business days and receipt drill-down uses the same 
   const day = warehouseDay(yesterday);
   await orders.list({ tab: 'paid', dateField: 'closed', dateFrom: day, dateTo: day });
   assert.deepEqual(receiptQuery.where, { status: 'paid', closedAt: { gte: yesterday, lte: new Date(+today - 1) } });
-  assert.deepEqual(receiptQuery.orderBy, { closedAt: 'desc' });
+  assert.deepEqual(receiptQuery.orderBy, [{ closedAt: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }]);
 });

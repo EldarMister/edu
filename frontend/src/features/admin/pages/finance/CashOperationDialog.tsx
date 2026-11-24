@@ -16,11 +16,14 @@ export type CashOperation = {
   amount: number;
   note: string | null;
   occurredAt: string;
+  actorId?: string | null;
+  actorName: string | null;
 };
 
 const kinds = [{ kind: 'expense', label: 'Расход' }, { kind: 'income', label: 'Внесение' },
   { kind: 'collection', label: 'Инкассация' }] as const;
 type Category = Pick<FinanceCategory, 'name' | 'id' | 'kind' | 'parentId'>;
+type OperationAuthor = { id: string; name: string };
 
 function localTime(value: string) {
   const date = new Date(value);
@@ -43,15 +46,24 @@ export function CashOperationDialog({ shiftId, operation, cashier = false, onClo
   const [note, setNote] = useState(operation?.note ?? '');
   const initialTime = operation ? localTime(operation.occurredAt) : '';
   const [dateTime, setDateTime] = useState(initialTime);
+  const initialAuthor = operation?.actorId ?? '';
+  const [authorId, setAuthorId] = useState(initialAuthor);
+  const editAuthor = !!operation && !cashier;
+  const authorChanged = editAuthor && authorId !== initialAuthor;
   const submitted = useRef(false);
   const dirty = kind !== (operation?.kind ?? 'expense') || amount !== (operation ? String(Math.abs(operation.amount)) : '')
-    || categoryId !== (operation?.categoryId ?? '') || note !== (operation?.note ?? '') || dateTime !== initialTime;
+    || categoryId !== (operation?.categoryId ?? '') || note !== (operation?.note ?? '') || dateTime !== initialTime || authorChanged;
   const { markSaved } = useEditorDirty(dirty);
   const base = cashier ? '/cash-shifts' : '/admin/cash-shifts';
   const categories = useQuery({
     queryKey: [...cashShiftKey, 'operation-categories', base],
     queryFn: async () => (await api.get<Category[]>(base + '/operation-categories')).data,
     enabled: kind !== 'collection',
+  });
+  const authors = useQuery({
+    queryKey: [...cashShiftKey, 'operation-authors'],
+    queryFn: async () => (await api.get<OperationAuthor[]>('/admin/cash-shifts/operation-authors')).data,
+    enabled: editAuthor,
   });
   const options = categoryOptions((categories.data ?? []).map((category) => ({ ...category, userIds: [], positionIds: [] })),
     (category) => category.kind === kind || category.kind === 'both');
@@ -61,7 +73,8 @@ export function CashOperationDialog({ shiftId, operation, cashier = false, onClo
       const url = base + '/' + shiftId + '/operations';
       const values = { kind, amount: parsed, categoryId: kind === 'collection' || !categoryId ? undefined : categoryId,
         note, occurredAt: !cashier && dateTime && dateTime !== initialTime ? new Date(dateTime + '+06:00').toISOString() : undefined };
-      return operation ? api.patch(url + '/' + operation.id, values) : api.post(url, { ...values, requestKey });
+      return operation ? api.patch(url + '/' + operation.id, { ...values, authorId: authorChanged ? authorId : undefined })
+        : api.post(url, { ...values, requestKey });
     },
     onSuccess: async () => {
       await Promise.all([cache.invalidateQueries({ queryKey: cashShiftKey }), cache.invalidateQueries({ queryKey: financeKey })]);
@@ -111,6 +124,13 @@ export function CashOperationDialog({ shiftId, operation, cashier = false, onClo
         {!cashier && <label className="grid gap-1.5 text-sm">Дата и время
           <input type="datetime-local" className="input w-full" aria-label="Дата и время" step={1} value={dateTime} onChange={(event) => setDateTime(event.target.value)} />
           {!operation && <span className="text-xs text-text-muted">Если поле пустое, используется время проведения или закрытия смены.</span>}
+        </label>}
+        {editAuthor && <label className="grid gap-1.5 text-sm">Автор операции
+          <select className="input w-full" value={authorId} disabled={!authors.data} onChange={(event) => setAuthorId(event.target.value)}>
+            {!authors.data?.some(({ id }) => id === initialAuthor) && <option value={initialAuthor}>{operation.actorName ?? 'Не указан'}</option>}
+            {authors.data?.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
+          </select>
+          {authors.error && <span role="alert" className="text-xs text-danger">Не удалось загрузить сотрудников</span>}
         </label>}
         <label className="grid gap-1.5 text-sm">Комментарий
           <input className="input w-full" maxLength={500} value={note} onChange={(event) => setNote(event.target.value)} />

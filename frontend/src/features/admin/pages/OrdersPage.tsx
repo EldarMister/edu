@@ -10,11 +10,12 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { normalizeOrderPaymentMethod, OrdersFilters, type OrderSort } from '../components/OrdersFilters';
 import { defaultOrderColumns, orderColumnLabel, orderTableWidth, OrdersTable } from '../components/OrdersTable';
+import { OrdersExportButton } from '../components/OrdersExportButton';
 import { IconTables } from '../components/icons';
 import { CancelOrderModal } from '../components/CancelOrderModal';
 import { OrderDetailsModal } from '../components/OrderDetailsModal';
 import { useCanManageOrderRefunds } from '@/features/refunds/api';
-import { useAdminOrderDetails, useAdminOrdersInfinite, useOrdersSummary, useCancelOrder, useStaff, useUpdateOrderStatus } from '../api';
+import { useAdminOrderDetails, useAdminOrdersInfinite, useOrdersSummary, useCancelOrder, useOrderWaiters, useUpdateOrderStatus } from '../api';
 import { WorkspaceHeaderActions } from './WorkspaceHeader';
 import { useListPeriod } from './warehouse/ListPeriodFilter';
 import { visibleWarehouseColumns, WarehouseColumnSettings } from './warehouse/WarehouseColumnSettings';
@@ -40,10 +41,10 @@ function sortRequest(sort: OrderSort): { sort: 'default' | 'date' | 'amount'; so
 
 export function OrdersPage() {
   const tr = useT();
-  const [{ ordersTab: tab, ordersDateField, ordersPaymentMethod }, updateView] = usePageFilters({
-    ordersTab: 'all', ordersDateField: '', ordersPaymentMethod: '',
+  const [{ ordersTab: tab, ordersPaymentMethod }, updateView] = usePageFilters({
+    ordersTab: 'all', ordersPaymentMethod: '',
   });
-  const byClose = tab === 'paid' && ordersDateField === 'closed';
+  const byClose = tab === 'paid';
   const paymentMethod = normalizeOrderPaymentMethod(ordersPaymentMethod);
   const showTenderRevenue = paymentMethod !== '' && paymentMethod !== 'mixed';
   const [waiterId, setWaiterId] = useState('');
@@ -58,7 +59,7 @@ export function OrdersPage() {
   const [detailsOrder, setDetailsOrder] = useState<Order | null>(null);
   const detail = useAdminOrderDetails(detailsOrder?.id ?? null);
   const canManageRefunds = useCanManageOrderRefunds();
-  const { canEditSection, canOwnerOperation } = usePermissions();
+  const { canAction, canEditSection, canOwnerOperation } = usePermissions();
   const [statusTarget, setStatusTarget] = useState<Order | null>(null);
   const [manualStatus, setManualStatus] = useState<OrderStatus>('served');
   const [manualReason, setManualReason] = useState('');
@@ -68,27 +69,17 @@ export function OrdersPage() {
   const cancelOrder = useCancelOrder();
   const updateStatus = useUpdateOrderStatus();
 
-  const waiters = useStaff('WAITER', '');
+  const waiters = useOrderWaiters();
   const waiterOptions = [
     { value: '', label: tr('Все официанты') },
     ...(waiters.data ?? []).map((w) => ({ value: w.id, label: w.name })),
   ];
 
-  const filters = { search, paymentMethod, waiterId, ...period.range, ...(byClose && { dateField: 'closed' as const }) };
-  const requestSort = sortRequest(sort);
-
-  const ordersQ = useAdminOrdersInfinite({ tab, ...requestSort, ...filters });
+  const filters = { tab, search, paymentMethod, waiterId, ...period.range, ...(byClose && { dateField: 'closed' as const }) };
+  const listFilters = { ...filters, ...sortRequest(sort) };
+  const ordersQ = useAdminOrdersInfinite(listFilters);
   const summaryQ = useOrdersSummary(filters);
-  const loadedItems = ordersQ.data?.pages.flatMap((p) => p.items) ?? [];
-  const items =
-    sort === 'default'
-      ? loadedItems
-      : [...loadedItems].sort((a, b) => {
-          const comparison = sort.startsWith('date')
-            ? new Date((byClose ? a.closedAt : a.createdAt) ?? a.createdAt).getTime() - new Date((byClose ? b.closedAt : b.createdAt) ?? b.createdAt).getTime()
-            : Number(a.finalAmount) - Number(b.finalAmount);
-          return sort.endsWith('_asc') ? comparison : -comparison;
-        });
+  const items = ordersQ.data?.pages.flatMap((p) => p.items) ?? [];
   const ordersError = ordersQ.isError ? apiError(ordersQ.error) : null;
   const s = summaryQ.data;
   const summaryPlaceholder = summaryQ.isPending
@@ -150,6 +141,7 @@ export function OrdersPage() {
         <button type="button" className="btn-secondary btn-md" onClick={() => setColumnsOpen(true)}>
           <IconTables className="h-4 w-4" /> {tr('Столбцы')}
         </button>
+        {canAction('exportReports') && <OrdersExportButton filters={listFilters} disabled={!items.length || !!ordersError} />}
         {period.filter}
       </WorkspaceHeaderActions>
       <div className="orders-controls">
@@ -176,7 +168,7 @@ export function OrdersPage() {
           waiterOptions={waiterOptions}
           sort={sort}
           search={search}
-          onTabChange={(ordersTab) => updateView({ ordersTab, ordersDateField: ordersTab === 'paid' ? ordersDateField : '' })}
+          onTabChange={(ordersTab) => updateView({ ordersTab })}
           onPaymentMethodChange={(ordersPaymentMethod) => updateView({ ordersPaymentMethod })}
           onWaiterChange={setWaiterId}
           onSortChange={setSort}

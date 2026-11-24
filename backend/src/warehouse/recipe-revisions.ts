@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import type { AuditActor } from '../audit/audit.service';
 import { getCafeId } from '../tenant/tenant-context';
 import { readProcessingStages } from './recipe-processing';
 import { processingBases, processingMethods } from './recipe-processing.dto';
@@ -6,8 +7,10 @@ import { fromBase, normalizeUnit, type UnitCode } from './units';
 
 const itemLabelSelect = { id: true, name: true, displayUnit: true } as const;
 type ItemLabel = Prisma.IngredientGetPayload<{ select: typeof itemLabelSelect }>;
+export type RecipeRevisionEditor = Pick<AuditActor, 'id' | 'name'>;
 
-export async function archiveDishRecipe(tx: Prisma.TransactionClient, dishId: string, variantSnapshot: 'summary' | 'full' = 'summary') {
+export async function archiveDishRecipe(tx: Prisma.TransactionClient, dishId: string, editor?: RecipeRevisionEditor,
+  variantSnapshot: 'summary' | 'full' = 'summary') {
   const dish = await tx.dish.findUniqueOrThrow({ where: { id: dishId }, include: {
     recipeItems: true,
     variants: { orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] },
@@ -23,6 +26,7 @@ export async function archiveDishRecipe(tx: Prisma.TransactionClient, dishId: st
   await tx.recipeRevision.upsert({
     where: { dishId_version: { dishId, version: dish.recipeVersion } },
     create: { dishId, version: dish.recipeVersion, snapshot: JSON.parse(JSON.stringify({
+      replacedBy: editor ? { id: editor.id, name: editor.name ?? null } : null,
       modifierGroups: dish.modifierGroups, allowIngredientExclusions: dish.allowIngredientExclusions, metadata: dish.recipeMetadata,
       stockIngredientId: dish.stockIngredientId, stockAmount: dish.stockAmount, items: dish.recipeItems, variants,
       ingredientLabels: Object.fromEntries(labels),
@@ -138,8 +142,11 @@ export async function readCompositionRevisions(tx: Prisma.TransactionClient, dis
   const labels = await ingredientLabels(tx, ids);
   return rows.map((row, index) => {
     const previous = revisions[index + 1];
+    const adjacent = previous?.version === row.version - 1 ? previous : null;
     return { id: row.id, version: row.version, replacedAt: row.createdAt,
-      savedAt: previous?.version === row.version - 1 ? previous.createdAt : null,
+      replacedBy: string(object(snapshots[index].replacedBy).name),
+      savedAt: adjacent?.createdAt ?? null,
+      savedBy: adjacent ? string(object(object(adjacent.snapshot).replacedBy).name) : null,
       ...composition(snapshots[index], labels) };
   });
 }

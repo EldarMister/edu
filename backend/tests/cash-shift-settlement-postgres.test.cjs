@@ -196,3 +196,58 @@ test('PostgreSQL: shift settlement posts sales and both collection legs once and
     await db.$disconnect();
   }
 });
+
+test('PostgreSQL: cash operation author is independent of the editor and follows both collection legs', { skip: !url }, async () => {
+  const db = new PrismaClient({ datasourceUrl: url });
+  const cafe = await db.cafe.create({ data: { name: 'Cash operation authors ' + randomUUID() } });
+  const foreignCafe = await db.cafe.create({ data: { name: 'Other cafe ' + randomUUID() } });
+  const cafeId = cafe.id;
+  const trail = [];
+  const service = new CashShiftsService(db, { log: async (event) => trail.push(event) }, {});
+  const makeUser = (name, role = 'WAITER', tenant = cafeId, isActive = true) => db.user.create({ data: {
+    cafeId: tenant, name, role, isActive, phone: randomUUID(), passwordHash: 'fixture',
+    permissions: { actions: { financeCashShifts: true } },
+  } });
+  try {
+    const [owner, waiter, replacement, inactive, foreign] = await Promise.all([
+      makeUser('Owner', 'OWNER'), makeUser('Cashier'), makeUser('Other cashier'),
+      makeUser('Inactive cashier', 'WAITER', cafeId, false), makeUser('Foreign cashier', 'WAITER', foreignCafe.id),
+    ]);
+    const authors = await service.operationAuthors(cafeId);
+    assert.deepEqual(authors.map(({ id }) => id).sort(), [owner.id, waiter.id, replacement.id].sort());
+    assert.ok(authors.every((row) => Object.keys(row).sort().join() === 'id,name'));
+    await service.setting(cafeId, true);
+    const shift = await service.open(cafeId, waiter.id, 500);
+    const expense = await service.createOperation(cafeId, waiter, shift.id, { kind: 'expense', amount: 30, requestKey: randomUUID() });
+    await service.close(cafeId, waiter.id, { shiftId: shift.id, amount: 468, expectedAmount: 470 });
+    const collection = { kind: 'collection', amount: 30 };
+    const legs = () => db.financeEntry.findMany({ where: { cafeId, sourceKey: { in: [expense.sourceKey, expense.sourceKey + ':in'] } }, orderBy: { amount: 'asc' } });
+
+    await service.updateOperation(cafeId, owner, shift.id, expense.id, collection);
+    assert.deepEqual((await legs()).map(({ actorId, amount }) => [actorId, amount.toNumber()]), [[waiter.id, -30], [waiter.id, 30]]);
+    for (const unavailable of [inactive, foreign]) {
+      await assert.rejects(service.updateOperation(cafeId, owner, shift.id, expense.id, { ...collection, authorId: unavailable.id }), { status: 400 });
+    }
+    await service.updateOperation(cafeId, owner, shift.id, expense.id, { ...collection, authorId: replacement.id });
+    assert.deepEqual((await legs()).map(({ actorId }) => actorId), [replacement.id, replacement.id]);
+    const details = await service.details(cafeId, shift.id);
+    assert.equal(details.movements.find(({ id }) => id === expense.id).actorName, replacement.name);
+    assert.deepEqual([details.summary.expectedAmount, details.summary.actualAmount, details.summary.difference], [470, 468, -2]);
+    assert.equal((await db.financeEntry.findFirstOrThrow({ where: { cafeId, sourceKey: 'cash-close:' + shift.id } })).actorId, waiter.id);
+    assert.equal(trail.length, 2);
+    assert.deepEqual(trail.map(({ actor, oldValue, newValue }) => [actor.id, oldValue.actorId, newValue.actorId]), [
+      [owner.id, waiter.id, waiter.id], [owner.id, waiter.id, replacement.id],
+    ]);
+    assert.match(trail[1].description, /с «Cashier» на «Other cashier»/);
+    await service.updateOperation(cafeId, owner, shift.id, expense.id);
+    const deleted = (await service.movements(cafeId, shift.id)).find(({ id }) => id === expense.id);
+    assert.deepEqual([deleted.actorName, deleted.deletedByName], [replacement.name, owner.name]);
+  } finally {
+    await db.financeEntry.deleteMany({ where: { cafeId } });
+    await db.cashShift.deleteMany({ where: { cafeId } });
+    await db.user.deleteMany({ where: { cafeId: { in: [cafeId, foreignCafe.id] } } });
+    await db.settings.deleteMany({ where: { cafeId } });
+    await db.cafe.deleteMany({ where: { id: { in: [cafeId, foreignCafe.id] } } });
+    await db.$disconnect();
+  }
+});

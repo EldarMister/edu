@@ -108,6 +108,21 @@
   padding: 0 12px 0 42px;
   font-weight: 400;
 }
+.orders-search-input::-webkit-search-cancel-button { display: none; }
+.orders-search-wrap.has-value .orders-search-input { padding-right: 36px; }
+.orders-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  color: rgb(var(--edu-text-muted));
+}
+.orders-search-clear:hover { background-color: rgb(var(--edu-border) / .55); }
 
 .orders-table-card {
   border: 1px solid light-dark(#e4ebf5, rgb(var(--edu-border)));

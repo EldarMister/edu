@@ -9,6 +9,8 @@ const { runWithTenant, tenantPrismaMiddleware } = require('../src/tenant/tenant-
 const { RecipesService } = require('../src/warehouse/recipes.service.ts');
 const { IngredientsService } = require('../src/warehouse/ingredients.service.ts');
 const { RecipesController } = require('../src/warehouse/recipes.controller.ts');
+const { MenuModifiersController, MenuModifiersService } = require('../src/warehouse/menu-modifiers.ts');
+const { CatalogService } = require('../src/admin/catalog.service.ts');
 const { RecipeDraftDto } = require('../src/warehouse/recipes.dto.ts');
 const { PermissionsGuard } = require('../src/common/guards/permissions.guard.ts');
 const { redactWarehouseCosts } = require('../src/warehouse/warehouse-cost.interceptor.ts');
@@ -270,29 +272,34 @@ test(
             'Параллельная правка',
           );
         });
-        await t.test('composition history keeps prior measured amounts, archived names and dates without exposing price fields', async () => {
+        await t.test('composition history keeps prior measured amounts, archived names, editors and dates without exposing price fields', async () => {
           const volume = await db.ingredient.create({ data: { name: 'Молоко в старой версии', unitType: 'volume', displayUnit: 'l', avgCost: 5 } });
           const mass = await db.ingredient.create({ data: { name: 'Весовая норма', unitType: 'mass', displayUnit: 'kg' } });
           const target = await db.dish.create({ data: { name: 'История состава', categoryId: category.id, price: 175,
             variants: { create: { name: 'Большая', price: 225 } } }, include: { variants: true } });
           const variantId = target.variants[0].id;
+          const author = { id: randomUUID(), name: 'Автор состава' };
+          const replacement = { id: randomUUID(), name: 'Редактор состава' };
+          const controller = new RecipesController(service);
           assert.deepEqual(await service.compositionRevisions(target.id), []);
-          await service.saveDraft(target.id, { expectedVersion: 1, metadata: { outputQuantity: 320, outputUnit: 'г', instructions: 'Смешать' },
+          await controller.saveDraft(target.id, { expectedVersion: 1, metadata: { outputQuantity: 320, outputUnit: 'г', instructions: 'Смешать' },
             items: [{ ingredientId: volume.id, unit: 'l', amount: 0.2, netAmount: 0.19, measuredNetWeightGrams: 195,
               variantAmounts: { [variantId]: 0.28 } }, { ingredientId: mass.id, amount: 0.25, netAmount: 0.2, unit: 'kg', processingBasis: 'net',
               processingStages: [{ method: 'cleaning', lossPercent: 20 }] }],
             modifiers: { allowIngredientExclusions: false, groups: [{ name: 'Молоко', options: [{
               name: 'Дополнительное молоко', ingredientId: volume.id, price: 20, amount: 30, unit: 'ml',
             }] }] },
-          });
-          await service.saveDraft(target.id, { expectedVersion: 2, items: [{ ingredientId: volume.id, amount: 0.3, unit: 'l' }] });
+          }, author);
+          await controller.saveDraft(target.id, { expectedVersion: 2, items: [{ ingredientId: volume.id, amount: 0.3, unit: 'l' }] }, replacement);
+          author.name = 'Изменённое имя';
           await db.ingredient.update({ where: { id: volume.id }, data: { name: 'Новое название' } });
-          const controller = new RecipesController(service);
           const [old, first] = await controller.revisions(target.id, 'composition');
           assert.deepEqual([old.version, first.version], [2, 1]);
           assert.deepEqual(old.savedAt, first.replacedAt);
           assert.ok(old.replacedAt >= old.savedAt);
           assert.equal(first.savedAt, null);
+          assert.deepEqual([old.savedBy, old.replacedBy, first.savedBy, first.replacedBy],
+            ['Автор состава', 'Редактор состава', null, 'Автор состава']);
           const oldVolume = old.items.find(({ ingredientId }) => ingredientId === volume.id);
           assert.deepEqual(oldVolume, { ingredientId: volume.id, name: 'Молоко в старой версии', unit: 'l', amount: 0.2, netAmount: 0.19,
             measuredNetWeightGrams: 195, lossPercent: 5, processingMethod: null, processingBasis: null, processingStages: [],
@@ -306,6 +313,14 @@ test(
           assert.doesNotMatch(JSON.stringify(old), /price|cost|actor|snapshot/i);
           const [raw] = await controller.revisions(target.id);
           assert.ok(raw.snapshot.items.length && raw.snapshot.modifierGroups[0].options[0].price);
+          assert.deepEqual(raw.snapshot.replacedBy, replacement);
+          assert.doesNotMatch(JSON.stringify(old), new RegExp(replacement.id));
+
+          await new MenuModifiersController(new MenuModifiersService(db))
+            .save(target.id, { allowIngredientExclusions: false, groups: [] }, { id: randomUUID(), name: 'Редактор модификаторов' });
+          const [modifierVersion] = await controller.revisions(target.id, 'composition');
+          assert.equal(modifierVersion.replacedBy, 'Редактор модификаторов');
+          assert.equal(modifierVersion.savedBy, 'Редактор состава');
 
           const set = await db.dish.create({ data: { name: 'История сета', categoryId: category.id, price: 300, isSet: true,
             setComponents: { create: { dishId: target.id, dishVariantId: variantId, quantity: 2 } } } });
@@ -316,6 +331,7 @@ test(
           ] } } });
           const [legacy] = await service.compositionRevisions(set.id);
           assert.equal(legacy.components, null);
+          assert.equal(legacy.replacedBy, null);
           assert.deepEqual(legacy.items.map(({ ingredientId, name, amount, netAmount }) => [ingredientId, name, amount, netAmount]),
             [[volume.id, 'Новое название', 0.2, null], [missingId, null, 0, null]]);
           await db.dish.update({ where: { id: set.id }, data: { recipeVersion: 3 } });
@@ -324,6 +340,26 @@ test(
           assert.equal(setVersion.savedAt, null, 'gaps should not be filled with a guessed date');
           assert.deepEqual(setVersion.components.map(({ name, variantName, quantity }) => [name, variantName, quantity]),
             [[target.name, 'Большая', 2]]);
+        });
+        await t.test('set composition changes archive only the replaced components with the editor', async () => {
+          const set = await db.dish.create({ data: { name: 'Сет для сверки', categoryId: category.id, price: 300, isSet: true,
+            setComponents: { create: { dishId: dish.id, dishVariantId: dish.variants[0].id, quantity: 2 } } } });
+          const catalog = new CatalogService(db, { emitBroadcast() {} }, { async log() {} });
+          const editor = { id: randomUUID(), name: 'Редактор сета' };
+          const components = [{ dishId: dish.id, dishVariantId: dish.variants[0].id, quantity: 2 }];
+          const originalLine = await db.setComponent.findFirstOrThrow({ where: { setId: set.id } });
+          assert.equal((await catalog.updateSet(set.id, { price: 330, components }, editor)).recipeVersion, set.recipeVersion);
+          assert.deepEqual(await service.compositionRevisions(set.id), []);
+          assert.equal((await db.setComponent.findFirstOrThrow({ where: { setId: set.id } })).id, originalLine.id);
+          assert.equal((await catalog.updateSet(set.id, { components: [{ ...components[0], quantity: 3 }] }, editor)).recipeVersion,
+            set.recipeVersion + 1);
+          const [previous] = await service.compositionRevisions(set.id);
+          assert.equal(previous.replacedBy, editor.name);
+          assert.equal(previous.components[0].quantity, 2);
+          assert.equal((await service.getByDish(set.id)).components[0].quantity, 3);
+          await assert.rejects(catalog.updateSet(set.id, { components: [{ ...components[0], dishVariantId: randomUUID() }] }, editor), /Вариант блюда/);
+          assert.equal((await service.compositionRevisions(set.id)).length, 1);
+          assert.equal((await service.getByDish(set.id)).components[0].quantity, 3);
         });
         await t.test('ingredient usage reports direct and variant sales, preparation recipes and archived modifiers', async () => {
           const ingredient = await db.ingredient.create({ data: { name: 'Сливки для связей', unitType: 'volume', displayUnit: 'l' } });

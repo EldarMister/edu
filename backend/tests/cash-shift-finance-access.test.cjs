@@ -19,6 +19,7 @@ test('cash shift admin finance view overrides cashier actions, while the termina
     (user) => controller.operationCategories(user),
   ];
   const writes = [
+    (user) => controller.operationAuthors(user),
     (user) => controller.open(user, { amount: 10 }),
     (user) => controller.close(user, { shiftId: 'shift', amount: 10, expectedAmount: 10 }),
     (user) => controller.createOperation(user, 'shift', {}),

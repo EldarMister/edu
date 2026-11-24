@@ -279,6 +279,8 @@ export interface OrdersFilter {
   waiterId?: string;
 }
 
+export type OrderListFilters = Omit<OrdersFilter, 'page'>;
+
 function ordersQueryString(params: Partial<OrdersFilter>) {
   const q = new URLSearchParams();
   if (params.tab && params.tab !== 'all') q.set('tab', params.tab);
@@ -293,6 +295,25 @@ function ordersQueryString(params: Partial<OrdersFilter>) {
   return q;
 }
 
+export async function downloadOrdersWorkbook(filters: OrderListFilters, includeDetails: boolean) {
+  const params = ordersQueryString(filters);
+  if (includeDetails) params.set('includeDetails', 'true');
+  const { data } = await api.get<Blob>(`/admin/orders/export.xlsx?${params}`, { responseType: 'blob' });
+  const url = URL.createObjectURL(data);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'Чеки.xlsx';
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export function useOrderWaiters() {
+  return useQuery({
+    queryKey: ['admin', 'orders', 'waiters'],
+    queryFn: () => get<{ id: string; name: string }[]>('/admin/orders/waiters'),
+  });
+}
+
 export function useAdminOrders(params: OrdersFilter) {
   const q = ordersQueryString(params);
   q.set('page', String(params.page));
@@ -304,7 +325,7 @@ export function useAdminOrders(params: OrdersFilter) {
 }
 
 /** Бесконечная подгрузка заказов (длинный список вместо страниц). */
-export function useAdminOrdersInfinite(filters: Omit<OrdersFilter, 'page'> & { tab: string }) {
+export function useAdminOrdersInfinite(filters: OrderListFilters) {
   const PAGE_SIZE = 30;
   return useInfiniteQuery({
     queryKey: ['admin', 'orders', 'infinite', filters],
@@ -371,8 +392,8 @@ export interface OrdersSummary {
   tenderRevenue?: number | null;
 }
 
-/** Сводка по периоду/фильтрам — для строки итогов (статус-фильтр игнорируется). */
-export function useOrdersSummary(params: Omit<OrdersFilter, 'page' | 'tab'>) {
+/** Сводка по фильтрам журнала без сортировки и пагинации. */
+export function useOrdersSummary(params: Omit<OrderListFilters, 'sort' | 'sortDirection'>) {
   const q = ordersQueryString(params);
   return useQuery({
     queryKey: ['admin', 'orders', 'summary', params],

@@ -476,6 +476,11 @@ export class OrderQueryDto {
   pageSize?: number;
 }
 
+export class OrderExportQueryDto extends OrderQueryDto {
+  @IsOptional() @IsIn(['true', 'false'])
+  includeDetails?: 'true' | 'false';
+}
+
 export class UpdateOrderStatusDto {
   @IsEnum(OrderStatus)
   status: OrderStatus;

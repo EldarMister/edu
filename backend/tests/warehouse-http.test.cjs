@@ -23,7 +23,9 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
     const keeper = await createUser('ADMIN', { sections: { warehouse: true }, actions: {
       warehouseCosts: false, warehouseReceive: false, warehouseApprove: false, warehouseSettings: false,
     } });
-    const counter = await createUser('ADMIN', { sections: { warehouse: true }, actions: { warehouseCount: true, warehouseWriteoff: true, warehouseApprove: false, warehouseCosts: false } });
+    const counter = await createUser('ADMIN', { sections: { warehouse: true }, actions: {
+      warehouseCount: true, warehouseWriteoff: true, warehouseApprove: false, warehouseCosts: false, exportReports: true,
+    } });
     const chefPermissions = { sections: { warehouse: true }, actions: {
       warehouseProduce: true, warehouseRecipes: false, warehouseReports: false, warehouseCosts: false,
     } };
@@ -161,6 +163,20 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
       incomingQuantity: 0, consumptionQuantity: 0, writeoffQuantity: -1, otherQuantity: 0,
     }]);
     assert.equal((await (await request(counterToken, inventoryPath)).json()).inventoryContext, undefined);
+    const workbookPath = `${inventoryPath}/inventory.xlsx`;
+    assert.equal((await request(reportReaderToken, workbookPath)).status, 403);
+    const inventoryExport = async (token, showCosts) => {
+      const response = await request(token, workbookPath);
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('content-type'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      const workbook = XLSX.read(Buffer.from(await response.arrayBuffer()));
+      const rows = XLSX.utils.sheet_to_json(workbook.Sheets['Инвентаризация'], { header: 1, defval: null });
+      const header = rows.find(([title]) => title === 'Наименование');
+      assert.equal(header.includes('Разница в деньгах'), showCosts);
+      assert.equal(header.includes('Себестоимость за ед.'), showCosts);
+    };
+    await inventoryExport(ownerToken, true);
+    await inventoryExport(counterToken, false);
     assert.equal((await request(counterToken, `${inventoryPath}?includeInventoryContext=invalid`)).status, 400);
     assert.equal((await request(counterToken, `/admin/warehouse/documents/${uncounted.id}/submit`, 'POST', {
       revision: uncounted.revision,

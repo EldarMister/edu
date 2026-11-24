@@ -16,6 +16,7 @@ import { getWarehouseBalance, resolveWarehouse, warehouseBalances, warehouseDocu
 import { lockRecipeGraph } from './recipe-resolution';
 import { previewWriteoffSources, readWriteoffSnapshot, resolveWriteoffSources, serializeWriteoffSources, sourceInputs, writeoffStockLines } from './writeoff-resolution';
 import { writeTransferAct } from './transfer-act-xlsx';
+import { writeInventoryWorkbook } from './inventory-xlsx';
 
 type Actor = Pick<AuthUser, 'id' | 'role' | 'name' | 'cafeId'> & Partial<Pick<AuthUser, 'permissions'>>;
 type Document = WarehouseDocument & { items: WarehouseDocumentItem[] };
@@ -148,6 +149,18 @@ export class WarehouseDocumentsService {
       return { document, sender, recipient };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     return writeTransferAct(document, sender.name, recipient.name, showCosts);
+  }
+
+  async inventoryWorkbook(id: string, showCosts: boolean) {
+    const { inventory, warehouse } = await this.prisma.$transaction(async (tx) => {
+      const document = await this.load(tx, id);
+      if (document.kind !== 'inventory') throw new NotFoundException('Инвентаризация не найдена');
+      const [inventory, warehouse] = await Promise.all([
+        this.preview(tx, document, true), this.warehouse(tx, document.warehouseId),
+      ]);
+      return { inventory, warehouse };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    return writeInventoryWorkbook(inventory, warehouse.name, inventory.inventoryContext, showCosts);
   }
 
   async create(actor: Actor, dto: CreateWarehouseDocumentDto) {
@@ -650,7 +663,11 @@ export class WarehouseDocumentsService {
 
   /** Draft counts are preserved while the preview follows the current book stock.
    * Posted/reversed documents keep the immutable values captured at approval. */
-  private async preview(tx: Prisma.TransactionClient, document: Document, includeInventoryContext = false, inventoryIngredientId?: string) {
+  private async preview(tx: Prisma.TransactionClient, document: Document, includeInventoryContext = false,
+    inventoryIngredientId?: string): Promise<ReturnType<WarehouseDocumentsService['serialize']> & {
+      reversalBlockedReason?: string;
+      inventoryContext?: Awaited<ReturnType<typeof inventoryPeriodContext>>;
+    }> {
     const reversalBlockedReason = await this.reversalBlockedReason(tx, document);
     const serialize = (value: Document) => ({ ...this.serialize(value), ...(reversalBlockedReason ? { reversalBlockedReason } : {}) });
     const snapshot = readWriteoffSnapshot(document.sourceLines);

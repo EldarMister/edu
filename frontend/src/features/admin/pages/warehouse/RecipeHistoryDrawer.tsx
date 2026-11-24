@@ -30,7 +30,9 @@ interface RecipeRevision {
   id: string;
   version: number;
   savedAt: string | null;
+  savedBy: string | null;
   replacedAt: string;
+  replacedBy: string | null;
   items: HistoricalItem[];
   stockItem: HistoricalIngredient | null;
   variants: { id: string; name: string | null; stockItem: HistoricalIngredient | null }[];
@@ -65,8 +67,14 @@ export function RecipeHistoryDrawer({ dishId, name, isSet, onClose }: { dishId: 
           <Select ariaLabel="Версия состава" value={selected.id} onChange={setSelectedId} className="w-full sm:max-w-sm"
             options={(query.data ?? []).map((row) => ({ value: row.id, label: `Версия ${row.version} · ${financeDateTime(row.replacedAt)}` }))} />
           <dl className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-            {selected.savedAt && <HistoryField label="Сохранена"><time dateTime={selected.savedAt}>{financeDateTime(selected.savedAt)}</time></HistoryField>}
-            <HistoryField label="Заменена"><time dateTime={selected.replacedAt}>{financeDateTime(selected.replacedAt)}</time></HistoryField>
+            {selected.savedAt && <HistoryField label="Сохранена">
+              <time dateTime={selected.savedAt}>{financeDateTime(selected.savedAt)}</time>
+              {selected.savedBy && <span className="block break-words">{selected.savedBy}</span>}
+            </HistoryField>}
+            <HistoryField label="Заменена">
+              <time dateTime={selected.replacedAt}>{financeDateTime(selected.replacedAt)}</time>
+              <span className="block break-words">{selected.replacedBy ?? 'Автор не записан'}</span>
+            </HistoryField>
             {selected.output && <HistoryField label="Выход">{recipeQuantity(selected.output.amount, selected.output.unit ? normalizeUnitLabel(selected.output.unit) : '')}</HistoryField>}
           </dl>
           <RevisionComposition revision={selected} isSet={isSet} />

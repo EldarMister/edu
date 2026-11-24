@@ -21,6 +21,11 @@ if (url && (!['localhost', '127.0.0.1'].includes(new URL(url).hostname) || !new 
   throw new Error('Only a dedicated local test database is allowed');
 }
 
+function inventoryWorkbookRows(buffer) {
+  const workbook = XLSX.read(buffer);
+  return XLSX.utils.sheet_to_json(workbook.Sheets['Инвентаризация'], { header: 1, defval: null });
+}
+
 test('PostgreSQL: inventory confirms current physical stock and owner approval is atomic', { skip: !url }, async () => {
   const db = new PrismaClient({ datasourceUrl: url });
   db.$use(tenantPrismaMiddleware);
@@ -55,6 +60,9 @@ test('PostgreSQL: inventory confirms current physical stock and owner approval i
       assert.equal(full.itemsCount, 2);
       const counted = await docs.update(admin, full.id, { revision: full.revision, items: [{ ingredientId: cola.id, quantity: 21 }] });
       assert.equal(counted.items.find(({ ingredientId }) => ingredientId === cola.id).expected, 24);
+      const draftExport = inventoryWorkbookRows(await docs.inventoryWorkbook(full.id, true));
+      assert.deepEqual(draftExport.find(([name]) => name === 'Кола').slice(8), [24, 21, -3, 12, -36]);
+      assert.deepEqual(draftExport.find(([name]) => name === 'Сироп').slice(8), [2, null, null, 40, null]);
       await assert.rejects(docs.submit(admin, full.id, counted.revision));
       const filled = await docs.update(admin, full.id, { revision: counted.revision, items: [
         { ingredientId: cola.id, quantity: 21 }, { ingredientId: syrup.id, quantity: 0 },
@@ -85,6 +93,14 @@ test('PostgreSQL: inventory confirms current physical stock and owner approval i
       assert.equal(posted.items.find(({ ingredientId }) => ingredientId === cola.id).expected, 22, 'approval compares the count against stock after the intervening sale');
       const inventoryMoves = await movements.findAll({ warehouseId: bar.id, sourceType: 'inventory', type: 'inventory' });
       assert.deepEqual(inventoryMoves.filter(({ sourceId }) => sourceId === full.id).map(({ change }) => change).sort(), [-1, -2]);
+      const postedExport = inventoryWorkbookRows(await docs.inventoryWorkbook(full.id, true));
+      assert.deepEqual(postedExport.find(([name]) => name === 'Кола').slice(8), [22, 21, -1, 12, -12]);
+      assert.deepEqual(postedExport.find(([name]) => name === 'Сироп').slice(8), [2, 0, -2, 40, -80]);
+      assert.equal(postedExport.find(([name]) => name === 'Итоговая разница в деньгах').at(-1), -92);
+      const withoutCosts = inventoryWorkbookRows(await docs.inventoryWorkbook(full.id, false));
+      assert.equal(withoutCosts.find(([name]) => name === 'Наименование').at(-1), 'Разница');
+      assert.deepEqual(withoutCosts.find(([name]) => name === 'Кола').slice(8), [22, 21, -1]);
+      assert.equal(withoutCosts.some(([name]) => name === 'Итоговая разница в деньгах'), false);
 
       const startPartial = async (quantity) => {
         const draft = await docs.create(admin, { warehouseId: bar.id, kind: 'inventory', mode: 'partial',
@@ -171,6 +187,7 @@ test('PostgreSQL: inventory confirms current physical stock and owner approval i
       const returned = await docs.create(owner, { warehouseId: bar.id, kind: 'supplier_return',
         sourcePurchaseId: receipt.id, finalize: 'post', items: [{ ingredientId: cola.id, quantity: 1 }] });
       assert.equal(returned.status, 'posted'); assert.equal(await stock(cola, bar.id), 13);
+      await assert.rejects(docs.inventoryWorkbook(returned.id, true), { status: 404 });
       await assert.rejects(docs.create(owner, { warehouseId: bar.id, kind: 'supplier_return',
         sourcePurchaseId: receipt.id, finalize: 'post', items: [{ ingredientId: cola.id, quantity: 3 }] }));
       assert.equal(await stock(cola, bar.id), 13);
@@ -191,6 +208,7 @@ test('PostgreSQL: inventory confirms current physical stock and owner approval i
     await runWithTenant({ cafeId: foreign.id }, async () => {
       await assert.rejects(docs.list(identifiers.warehouseId, 'inventory'));
       await assert.rejects(docs.get(identifiers.documentId));
+      await assert.rejects(docs.inventoryWorkbook(identifiers.documentId, true), { status: 404 });
       assert.deepEqual(await docs.list(undefined, 'writeoff', 'fourth product'), [], 'search respects tenant isolation');
     });
   } finally {
@@ -357,6 +375,9 @@ test('PostgreSQL: inventory context reconciles the counted warehouse and posting
       assert.equal(postedWithContext.inventoryContext.cutoffAt.getTime(), posted.postedAt.getTime());
       assert.deepEqual(postedWithContext.inventoryContext.rows, draftWithContext.inventoryContext.rows,
         'later stock and attempted reversal cannot change the closed period; own correction is never counted');
+      const exported = inventoryWorkbookRows(await docs.inventoryWorkbook(posted.id, true));
+      assert.deepEqual(exported.find(([name]) => name === 'Молоко').slice(3),
+        [10, 22, -17, -2, -3, 10, 7, -3, null, null]);
     });
   } finally {
     await db.warehouseDocument.deleteMany({ where: { cafeId: cafe.id } });

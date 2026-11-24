@@ -25,7 +25,9 @@ export class RecipesController {
 
   @Put('dishes/:dishId/recipe-draft')
   @RequirePermission('actions.warehouseRecipes')
-  saveDraft(@Param('dishId') dishId: string, @Body() dto: RecipeDraftDto) { return this.recipes.saveDraft(dishId, dto); }
+  saveDraft(@Param('dishId') dishId: string, @Body() dto: RecipeDraftDto, @CurrentUser() user: AuthUser) {
+    return this.recipes.saveDraft(dishId, dto, user);
+  }
 
   @Get('dishes/:dishId/recipe')
   getByDish(@Param('dishId') dishId: string, @Query('variantId') variantId?: string) {
@@ -34,26 +36,26 @@ export class RecipesController {
 
   @Post('dishes/:dishId/recipe')
   @RequirePermission('actions.warehouseRecipes')
-  addItem(@Param('dishId') dishId: string, @Body() dto: RecipeItemInputDto) {
-    return this.recipes.addItem(dishId, dto);
+  addItem(@Param('dishId') dishId: string, @Body() dto: RecipeItemInputDto, @CurrentUser() user: AuthUser) {
+    return this.recipes.addItem(dishId, dto, user);
   }
 
   @Patch('recipe/:id')
   @RequirePermission('actions.warehouseRecipes')
-  updateItem(@Param('id') id: string, @Body() dto: RecipeItemUpdateDto) {
-    return this.recipes.updateItem(id, dto);
+  updateItem(@Param('id') id: string, @Body() dto: RecipeItemUpdateDto, @CurrentUser() user: AuthUser) {
+    return this.recipes.updateItem(id, dto, user);
   }
 
   @Delete('recipe/:id')
   @RequirePermission('actions.warehouseRecipes')
-  removeItem(@Param('id') id: string) {
-    return this.recipes.removeItem(id);
+  removeItem(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.recipes.removeItem(id, user);
   }
 
   @Patch('dishes/:dishId/recipe-settings')
   @RequirePermission('actions.warehouseRecipes')
-  updateSettings(@Param('dishId') dishId: string, @Body() dto: RecipeSettingsDto) {
-    return this.recipes.updateSettings(dishId, dto);
+  updateSettings(@Param('dishId') dishId: string, @Body() dto: RecipeSettingsDto, @CurrentUser() user: AuthUser) {
+    return this.recipes.updateSettings(dishId, dto, user);
   }
 
   @Get('dishes/:dishId/recipe-revisions')

@@ -8,7 +8,8 @@ import { netOrderAmount, netPaymentAmount } from '../orders/order-net';
 import { preparedLossQuantity } from '../warehouse/movement-cost';
 import { warehouseDateRange } from '../warehouse/report-range';
 import { baseUnitForType, fromBase, unitLabel, unitType, type UnitCode } from '../warehouse/units';
-import { OrderQueryDto } from './dto';
+import { OrderExportQueryDto, OrderQueryDto } from './dto';
+import { receiptExportSelect, receiptExportItems, writeReceiptWorkbook } from './receipt-export-xlsx';
 
 const ACTIVE_STATUSES: OrderStatus[] = [
   OrderStatus.sent_to_kitchen,
@@ -49,6 +50,19 @@ function dayBounds(date = new Date()) {
   return { start, end };
 }
 
+function receiptOrderBy(query: OrderQueryDto): Prisma.OrderOrderByWithRelationInput[] {
+  const sort = query.sort;
+  if (sort === 'amount_asc' || sort === 'amount_desc' || sort === 'amount') {
+    const ascending = sort === 'amount_asc' || (sort === 'amount' && query.sortDirection === 'asc');
+    return [{ finalAmount: ascending ? 'asc' : 'desc' }, { id: 'asc' }];
+  }
+  const direction = sort === 'date_asc' || (sort === 'date' && query.sortDirection === 'asc') ? 'asc' : 'desc';
+  const byDate: Prisma.OrderOrderByWithRelationInput = query.dateField === 'closed'
+    ? { closedAt: { sort: direction, nulls: 'last' } }
+    : { createdAt: direction };
+  return [byDate, { id: 'asc' }];
+}
+
 @Injectable()
 export class AdminOrdersService {
   constructor(private prisma: PrismaService) {}
@@ -71,18 +85,12 @@ export class AdminOrdersService {
     return { ordersToday, activeCount: active, paidCount: paid, cancelledCount: cancelled };
   }
 
-  /**
-   * Собирает условие выборки заказов из фильтров.
-   * @param withStatus учитывать ли фильтр по статусу (tab) — для сводки он не нужен.
-   */
-  private buildWhere(query: OrderQueryDto, withStatus = true): Prisma.OrderWhereInput {
+  private buildWhere(query: OrderQueryDto): Prisma.OrderWhereInput {
     const where: Prisma.OrderWhereInput = {};
 
-    if (withStatus) {
-      if (query.tab === 'active') where.status = { in: ACTIVE_STATUSES };
-      else if (query.tab === 'paid') where.status = OrderStatus.paid;
-      else if (query.tab === 'cancelled') where.status = { in: CANCELLED_STATUSES };
-    }
+    if (query.tab === 'active') where.status = { in: ACTIVE_STATUSES };
+    else if (query.tab === 'paid') where.status = OrderStatus.paid;
+    else if (query.tab === 'cancelled') where.status = { in: CANCELLED_STATUSES };
 
     const tender = getTender(query.paymentMethod);
     if (tender) {
@@ -112,7 +120,8 @@ export class AdminOrdersService {
     }
 
     if (query.dateField === 'closed') {
-      where.closedAt = warehouseDateRange(query.dateFrom, query.dateTo) ?? { not: null };
+      const range = warehouseDateRange(query.dateFrom, query.dateTo);
+      if (range) where.closedAt = range;
     } else if (query.dateFrom || query.dateTo) {
       const calendarDate = /^\d{4}-\d{2}-\d{2}$/;
       if ((!query.dateFrom || calendarDate.test(query.dateFrom)) && (!query.dateTo || calendarDate.test(query.dateTo))) {
@@ -135,20 +144,10 @@ export class AdminOrdersService {
     const page = query.page ?? 1;
     const pageSize = Math.min(query.pageSize ?? 10, 50);
     const where = this.buildWhere(query);
-    const dateField = query.dateField === 'closed' ? 'closedAt' : 'createdAt';
-    const orderBy: Prisma.OrderOrderByWithRelationInput =
-      query.sort === 'amount_desc' || (query.sort === 'amount' && query.sortDirection !== 'asc')
-        ? { finalAmount: 'desc' }
-        : query.sort === 'amount_asc' || (query.sort === 'amount' && query.sortDirection === 'asc')
-          ? { finalAmount: 'asc' }
-          : query.sort === 'date_asc' || (query.sort === 'date' && query.sortDirection === 'asc')
-            ? { [dateField]: 'asc' }
-            : { [dateField]: 'desc' };
-
     const [items, total] = await Promise.all([
       this.prisma.order.findMany({
         where,
-        orderBy,
+        orderBy: receiptOrderBy(query),
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: receiptInclude,
@@ -159,19 +158,34 @@ export class AdminOrdersService {
     return { items, total, page, pageSize, pages: Math.ceil(total / pageSize) };
   }
 
-  /**
-   * Сводка по выбранному периоду/фильтрам (для строки итогов под заголовком и внизу таблицы).
-   * Статус-фильтр (tab) здесь не применяется — нужна полная разбивка по статусам.
-   */
+  async waiters() {
+    return this.prisma.user.findMany({
+      where: { orders: { some: {} } },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+      select: { id: true, name: true },
+    });
+  }
+
+  async exportOrders(query: OrderExportQueryDto) {
+    const includeDetails = query.includeDetails === 'true';
+    const orders = await this.prisma.order.findMany({
+      where: this.buildWhere(query),
+      orderBy: receiptOrderBy(query),
+      select: { ...receiptExportSelect, items: includeDetails ? receiptExportItems : false },
+    });
+    return writeReceiptWorkbook(orders, includeDetails);
+  }
+
   async summary(query: OrderQueryDto) {
-    const base = this.buildWhere(query, false);
-    const closed = { ...base, status: OrderStatus.paid };
+    const base = this.buildWhere(query);
+    const withStatus = (status: Prisma.OrderWhereInput['status']): Prisma.OrderWhereInput => ({ AND: [base, { status }] });
+    const closed = withStatus(OrderStatus.paid);
     const tender = getTender(query.paymentMethod);
     const [total, paid, cancelled, unpaid, revenueAgg, tenderRevenue] = await Promise.all([
       this.prisma.order.count({ where: base }),
       this.prisma.order.count({ where: closed }),
-      this.prisma.order.count({ where: { ...base, status: { in: CANCELLED_STATUSES } } }),
-      this.prisma.order.count({ where: { ...base, status: { in: ACTIVE_STATUSES } } }),
+      this.prisma.order.count({ where: withStatus({ in: CANCELLED_STATUSES }) }),
+      this.prisma.order.count({ where: withStatus({ in: ACTIVE_STATUSES }) }),
       this.prisma.order.aggregate({
         where: closed,
         _sum: { finalAmount: true, refundedAmount: true },

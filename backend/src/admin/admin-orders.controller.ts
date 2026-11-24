@@ -1,11 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Query, Res } from '@nestjs/common';
 import { Role } from '@prisma/client';
+import type { Response } from 'express';
 import { AdminOrdersService } from './admin-orders.service';
 import { OrdersService } from '../orders/orders.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
-import { OrderQueryDto, UpdateOrderStatusDto } from './dto';
+import { OrderExportQueryDto, OrderQueryDto, UpdateOrderStatusDto } from './dto';
 
 @Controller('admin/orders')
 @Roles(Role.ADMIN, Role.OWNER)
@@ -26,9 +27,24 @@ export class AdminOrdersController {
     return this.orders.summary(query);
   }
 
+  @Get('waiters')
+  waiters() {
+    return this.orders.waiters();
+  }
+
   @Get()
   list(@Query() query: OrderQueryDto) {
     return this.orders.list(query);
+  }
+
+  @Get('export.xlsx')
+  @RequirePermission('actions.exportReports')
+  async exportOrders(@Query() query: OrderExportQueryDto, @Res() response: Response) {
+    const workbook = await this.orders.exportOrders(query);
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    response.setHeader('Content-Disposition', 'attachment; filename="receipts.xlsx"');
+    response.send(workbook);
   }
 
   @Get(':id')

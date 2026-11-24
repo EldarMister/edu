@@ -259,6 +259,8 @@ test(
               modifiers.groups[0].options[0].id,
             );
             assert.equal(result.recipe.items[0].amount, 0.25);
+            const [previous] = await new RecipesService(db).compositionRevisions(recipe.dish.id);
+            assert.equal(previous.replacedBy, actor.name);
             assert.equal(
               await db.recipeRevision.count({
                 where: { dishId: recipe.dish.id },

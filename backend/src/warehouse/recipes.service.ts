@@ -11,7 +11,7 @@ import { lockRecipeGraph } from './recipe-resolution';
 import { massProcessing, measuredVolumeNetWeight, nonMassProcessing, readProcessingStages } from './recipe-processing';
 import { addRecipeValue, RecipeCalculator, recipeMetrics, recipeOutput, type RecipeCostRow } from './recipe-calculation';
 import { assertUnitMatchesType, normalizeUnit, toBase, unitLabel, type UnitCode } from './units';
-import { archiveDishRecipe, readCompositionRevisions } from './recipe-revisions';
+import { archiveDishRecipe, readCompositionRevisions, type RecipeRevisionEditor } from './recipe-revisions';
 import { recipeExportProcessing, type RecipeExportCard, type RecipeExportLine } from './recipe-export-workbook';
 
 const recipeDishInclude = {
@@ -38,7 +38,7 @@ export class RecipesService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
-  async saveDraft(dishId: string, dto: RecipeDraftDto) {
+  async saveDraft(dishId: string, dto: RecipeDraftDto, editor?: RecipeRevisionEditor) {
     await this.prisma.$transaction(async (tx) => {
       await lockRecipeGraph(tx);
       const dish = await tx.dish.findUnique({ where: { id: dishId }, include: { recipeItems: true } });
@@ -47,7 +47,7 @@ export class RecipesService {
       if (dto.expectedVersion !== dish.recipeVersion) throw new ConflictException('Техкарта уже изменена. Обновите страницу перед сохранением.');
       const ids = dto.items.map((row) => row.ingredientId);
       if (new Set(ids).size !== ids.length) throw new BadRequestException('Ингредиент указан дважды');
-      await this.archiveRevision(tx, dishId);
+      await this.archiveRevision(tx, dishId, editor);
       for (const row of dto.items) {
         const ingredient = await tx.ingredient.findUnique({ where: { id: row.ingredientId } });
         const previous = dish.recipeItems.find((item) => item.ingredientId === row.ingredientId);
@@ -272,7 +272,7 @@ export class RecipesService {
     } };
   }
 
-  async addItem(dishId: string, dto: RecipeItemInputDto) {
+  async addItem(dishId: string, dto: RecipeItemInputDto, editor?: RecipeRevisionEditor) {
     await this.prisma.$transaction(async (tx) => {
       await lockRecipeGraph(tx);
       await this.assertDish(tx, dishId);
@@ -280,7 +280,7 @@ export class RecipesService {
       if (!ingredient) throw new NotFoundException('Позиция склада не найдена');
       if (await tx.recipeItem.findUnique({ where: { dishId_ingredientId: { dishId, ingredientId: dto.ingredientId } } })) throw new BadRequestException('Этот ингредиент уже есть в техкарте');
       const data = await this.rowData(tx, dishId, ingredient.unitType, ingredient.displayUnit, dto, undefined, ingredient.processingLosses);
-      await this.archiveRevision(tx, dishId);
+      await this.archiveRevision(tx, dishId, editor);
       await tx.recipeItem.create({ data: { dishId, ingredientId: dto.ingredientId, ...data } });
       await tx.dish.update({ where: { id: dishId }, data: { recipeVersion: { increment: 1 } } });
     });
@@ -288,13 +288,13 @@ export class RecipesService {
     return this.getByDish(dishId);
   }
 
-  async updateItem(id: string, dto: RecipeItemUpdateDto) {
+  async updateItem(id: string, dto: RecipeItemUpdateDto, editor?: RecipeRevisionEditor) {
     const dishId = await this.prisma.$transaction(async (tx) => {
       await lockRecipeGraph(tx);
       const item = await tx.recipeItem.findUnique({ where: { id }, include: { ingredient: true } });
       if (!item) throw new NotFoundException('Строка техкарты не найдена');
       const data = await this.rowData(tx, item.dishId, item.ingredient.unitType, item.amountUnit, dto, item, item.ingredient.processingLosses);
-      await this.archiveRevision(tx, item.dishId);
+      await this.archiveRevision(tx, item.dishId, editor);
       await tx.recipeItem.update({ where: { id }, data });
       await tx.dish.update({ where: { id: item.dishId }, data: { recipeVersion: { increment: 1 } } });
       return item.dishId;
@@ -303,12 +303,12 @@ export class RecipesService {
     return this.getByDish(dishId);
   }
 
-  async removeItem(id: string) {
+  async removeItem(id: string, editor?: RecipeRevisionEditor) {
     const dishId = await this.prisma.$transaction(async (tx) => {
       await lockRecipeGraph(tx);
       const item = await tx.recipeItem.findUnique({ where: { id } });
       if (!item) throw new NotFoundException('Строка техкарты не найдена');
-      await this.archiveRevision(tx, item.dishId);
+      await this.archiveRevision(tx, item.dishId, editor);
       await tx.recipeItem.delete({ where: { id } });
       await tx.dish.update({ where: { id: item.dishId }, data: { recipeVersion: { increment: 1 } } });
       return item.dishId;
@@ -317,7 +317,7 @@ export class RecipesService {
     return this.getByDish(dishId);
   }
 
-  async updateSettings(dishId: string, dto: RecipeSettingsDto) {
+  async updateSettings(dishId: string, dto: RecipeSettingsDto, editor?: RecipeRevisionEditor) {
     await this.prisma.$transaction(async (tx) => {
       await lockRecipeGraph(tx);
       await this.assertDish(tx, dishId);
@@ -335,7 +335,7 @@ export class RecipesService {
         else if (dto.stockIngredientId !== undefined && dto.stockIngredientId !== current.stockIngredientId) stockAmount = this.quantity(1, unit);
       } else if (dto.stockAmount !== undefined || dto.stockUnit !== undefined) throw new BadRequestException('Сначала выберите товар для прямой продажи');
       if (dto.metadata?.photoUrl && !/^(https?:\/\/|\/)/.test(dto.metadata.photoUrl)) throw new BadRequestException('Укажите ссылку на фото');
-      await this.archiveRevision(tx, dishId);
+      await this.archiveRevision(tx, dishId, editor);
       const data = { stockIngredientId: binding, stockAmount };
       if (dto.variantId) await tx.dishVariant.update({ where: { id: dto.variantId }, data });
       await tx.dish.update({ where: { id: dishId }, data: {
@@ -359,8 +359,8 @@ export class RecipesService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
-  async archiveRevision(tx: Prisma.TransactionClient, dishId: string) {
-    await archiveDishRecipe(tx, dishId);
+  async archiveRevision(tx: Prisma.TransactionClient, dishId: string, editor?: RecipeRevisionEditor) {
+    await archiveDishRecipe(tx, dishId, editor);
   }
 
   private async assertDish(tx: Prisma.TransactionClient, dishId: string) {

@@ -7,6 +7,7 @@ export type InventoryMode = 'full' | 'partial';
 export type WriteoffReason =
   'spoilage' | 'expired' | 'damage' | 'staff_meal' | 'tasting' | 'household' | 'other';
 export type StockDocumentStatus = 'draft' | 'submitted' | 'posted' | 'reversed';
+export type ExportableStockDocument = 'inventory' | 'transfer';
 
 export interface StockDocumentItem {
   costKnown?:boolean;
@@ -101,12 +102,14 @@ export function useStockDocument(id: string) {
   });
 }
 
-export async function downloadTransferAct(id: string) {
-  const response = await api.get<Blob>(`${BASE_URL}/${encodeURIComponent(id)}/transfer-act.xlsx`, { responseType: 'blob' });
+export async function downloadStockDocument(id: string, kind: ExportableStockDocument) {
+  const transfer = kind === 'transfer';
+  const filename = transfer ? 'transfer-act.xlsx' : 'inventory.xlsx';
+  const response = await api.get<Blob>(`${BASE_URL}/${encodeURIComponent(id)}/${filename}`, { responseType: 'blob' });
   const url = URL.createObjectURL(response.data);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `Акт перемещения ${id.slice(0, 8)}.xlsx`;
+  link.download = `${transfer ? 'Акт перемещения' : 'Инвентаризация'} ${id.slice(0, 8)}.xlsx`;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

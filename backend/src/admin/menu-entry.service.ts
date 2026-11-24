@@ -203,7 +203,7 @@ export class MenuEntryService {
           cookingTime: dto.dish.cookingTime,
           ...producedStockBinding,
         };
-        if (previous) await this.recipes.archiveRevision(tx, previous.id);
+        if (previous) await this.recipes.archiveRevision(tx, previous.id, actor);
         let dish = previous
           ? await tx.dish.update({ where: { id: previous.id }, data })
           : await tx.dish.create({
