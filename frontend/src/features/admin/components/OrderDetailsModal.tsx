@@ -5,8 +5,8 @@ import { useT } from '@/lib/i18n';
 import { EditorPage } from '../pages/warehouse/EditorPage';
 import { OrderStatusBadges } from '@/components/StatusBadge';
 import type { Order, OrderItemStatus } from '@/types';
-import { displayOrderNumber, hallSuffix, money, orderItemDisplayName, paymentDisplayLabel, timeHM, isSplitPayment, paymentMethodLabel, tableLabel,
-  taxRateLabel } from '@/lib/format';
+import { displayOrderNumber, hallSuffix, isSplitPayment, mixedPaymentBreakdown, money, orderItemDisplayName,
+  paymentDisplayLabel, paymentMethodLabel, tableLabel, taxRateLabel, timeHM } from '@/lib/format';
 import { useNotifications } from '@/store/notifications';
 import { usePermissions } from '@/hooks/usePermissions';
 import { apiError } from '@/lib/api';
@@ -53,8 +53,6 @@ export function OrderDetailsModal({
   if (!order) return null;
 
   const date = new Date(order.createdAt);
-  const showMixedBreakdown =
-    order.paymentMethod === 'mixed' && !isSplitPayment(order) && !!order.payments?.length;
   const itemCancellationAllowed = order.paymentStatus !== 'paid' && order.paymentStatus !== 'refunded'
     && !['paid', 'cancelled', 'rejected'].includes(order.status);
   const isDelivery = order.source === 'delivery';
@@ -99,11 +97,11 @@ export function OrderDetailsModal({
     infoRows[1] = [dateCell, tableCell];
     infoRows[2] = [amountCell, paymentCell];
   }
-  if (showMixedBreakdown) {
-    infoRows.push([
-      { label: 'Наличными', value: money(mixedSumBy(order, 'cash')) },
-      { label: 'QR', value: money(mixedSumBy(order, 'qr')) },
-    ]);
+  if (order.paymentMethod === 'mixed' && !isSplitPayment(order)) {
+    const breakdown = mixedPaymentBreakdown(order.payments)
+      .map(({ method, amount }) => ({ label: t(paymentMethodLabel(method)), value: money(amount) }));
+    if (breakdown.length) infoRows.push(breakdown.slice(0, 2));
+    if (breakdown.length > 2) infoRows.push(breakdown.slice(2));
   }
   if (isDelivery) {
     infoRows.push(
@@ -339,16 +337,6 @@ function FiscalBlock({ order }: { order: Order }) {
       <p className="mt-1.5 text-xs text-danger">{order.fiscalError}</p>
     </div>
   );
-}
-
-/** Сумма платежей заказа по способу (наличные / QR) для смешанной оплаты. */
-function mixedSumBy(
-  order: { payments?: { method: string; amount: string }[] },
-  method: string,
-): number {
-  return (order.payments ?? [])
-    .filter((p) => p.method === method)
-    .reduce((acc, p) => acc + Number(p.amount), 0);
 }
 
 function Total({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {

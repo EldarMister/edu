@@ -49,6 +49,20 @@ function ShiftJournalTime({ time }: { time: string }) {
   return <time dateTime={time} title={financeDateTime(time)}>{journalTime.format(new Date(time))}</time>;
 }
 
+function signedCashAmount(amount: number | null) {
+  return (amount != null && amount > 0 ? '+' : '') + financeMoney(amount);
+}
+
+function OpeningCount({ shift }: { shift: CashShift }) {
+  return <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+    <span>{financeMoney(shift.openingAmount)}</span>
+    {shift.openingDifference !== 0 && <span className="rounded-md bg-danger/10 px-1.5 font-medium text-danger"
+      title={`Книжный остаток при открытии ${financeMoney(shift.openingExpectedAmount)}`}>
+      <span className="sr-only">Разница при открытии </span>{signedCashAmount(shift.openingDifference)}
+    </span>}
+  </div>;
+}
+
 export function CashShiftsPage() {
   const isOwner = useAuth((state) => state.user?.role === 'OWNER');
   const { canManage } = useCashShiftAccess();
@@ -83,9 +97,10 @@ export function CashShiftsPage() {
             onClick={() => setEditing('open')}>Открыть смену</button>}
           <div className="finance-register-tools">
             <button type="button" className="btn-secondary btn-md inline-flex items-center gap-2" disabled={!rows.length}
-              onClick={() => setPrintBlocked(!printRegister('Кассовые смены', [columns, ...rows.map((shift) => [
-                shift.number, financeDateTime(shift.openedAt), shift.closedAt ? financeDateTime(shift.closedAt) : 'Не закрыта',
-                shift.openingAmount, shift.collectionAmount, shift.actualAmount, shift.difference,
+              onClick={() => setPrintBlocked(!printRegister('Кассовые смены', [
+                [...columns.slice(0, 4), 'Книжный остаток при открытии', 'Разница при открытии', ...columns.slice(4)], ...rows.map((shift) => [
+                String(shift.number), financeDateTime(shift.openedAt), shift.closedAt ? financeDateTime(shift.closedAt) : 'Не закрыта',
+                shift.openingAmount, shift.openingExpectedAmount, shift.openingDifference, shift.collectionAmount, shift.actualAmount, shift.difference,
               ])]))}><IconPrinter className="h-4 w-4" aria-hidden="true" />Распечатать</button>
             {period}
           </div>
@@ -113,11 +128,11 @@ export function CashShiftsPage() {
                   <ShiftJournalTime time={shift.openedAt} />
                 </button>,
                 shift.closedAt ? <ShiftJournalTime time={shift.closedAt} /> : <span className="font-medium">Не закрыта</span>,
-                financeMoney(shift.openingAmount),
+                <OpeningCount shift={shift} />,
                 financeMoney(shift.collectionAmount),
                 financeMoney(shift.actualAmount),
                 <span className={difference < 0 ? 'font-semibold text-danger' : difference > 0 ? 'font-semibold' : undefined}>
-                  {difference > 0 ? '+' : ''}{financeMoney(shift.difference)}
+                  {signedCashAmount(shift.difference)}
                 </span>,
               ] };
           })} empty="За этот период кассовых смен нет" />
@@ -146,6 +161,8 @@ type CashShiftDetail = {
   movements: ShiftEntry[];
   summary: {
     openingAmount: number;
+    openingExpectedAmount: number;
+    openingDifference: number;
     cashSales: number;
     cashRefunds: number;
     noncashSales: number;
@@ -179,7 +196,9 @@ function CashShiftDetails({ shift, canManage }: { shift: CashShift; canManage: b
   const revenue = (entry: ShiftEntry) => entry.kind === 'sale' || entry.kind === 'refund';
   const summary = entries.data?.summary;
   const metrics = summary ? [
+    { label: 'Книжный остаток при открытии', amount: summary.openingExpectedAmount },
     { label: 'Открытие смены', amount: summary.openingAmount, key: 'openingAmount' as const },
+    { label: 'Разница при открытии', amount: summary.openingDifference, difference: true },
     { label: 'Продажи наличными', amount: summary.cashSales },
     { label: 'Возвраты наличными', amount: summary.cashRefunds },
     { label: 'Безналичные продажи', amount: summary.noncashSales },
@@ -191,7 +210,7 @@ function CashShiftDetails({ shift, canManage }: { shift: CashShift; canManage: b
     ...(summary.adjustments ? [{ label: 'Корректировки', amount: summary.adjustments }] : []),
     { label: 'Книжный баланс', amount: summary.expectedAmount },
     { label: 'Фактический баланс', amount: summary.actualAmount, key: 'actualAmount' as const },
-    { label: 'Разница', amount: summary.difference },
+    { label: 'Разница при закрытии', amount: summary.difference, difference: true },
   ] : [];
   return <div className="finance-register space-y-5">
     <div className="flex flex-wrap gap-x-8 gap-y-2 border-b border-border px-4 py-3 text-sm text-text-muted">
@@ -202,10 +221,12 @@ function CashShiftDetails({ shift, canManage }: { shift: CashShift; canManage: b
     <QueryState pending={entries.isPending} error={entries.error}>
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(210px,285px)_minmax(0,1fr)]">
         <dl className="divide-y divide-border px-4 text-sm">
-          {metrics.map(({ label, amount, key }) => <div key={label} className="flex items-baseline justify-between gap-3 py-2.5">
+          {metrics.map(({ label, amount, key, difference }) => <div key={label} className="flex items-baseline justify-between gap-3 py-2.5">
             <dt className="text-text-secondary">{label}</dt>
             <dd className="flex flex-wrap justify-end gap-2 text-right tabular-nums">
-              <span className={label === 'Разница' && amount ? 'text-danger' : undefined}>{financeMoney(amount)}</span>
+              <span className={'whitespace-nowrap' + (difference && amount ? ' text-danger' : '')}>
+                {difference ? signedCashAmount(amount) : financeMoney(amount)}
+              </span>
               {canManage && key && amount != null && <button type="button" className="text-primary hover:underline"
                 aria-label={'Изменить ' + label.toLowerCase()} onClick={() => setEditCount(key)}>Ред.</button>}
             </dd>

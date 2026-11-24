@@ -23,6 +23,7 @@ import { DocumentField, DocumentFooter } from './WarehouseUi';
 import { qty, purchaseNumber, usePurchase, useIngredients, useWarehouseLocations, type Ingredient, type WarehouseLocation } from './api';
 import { documentQuantityError, documentQuantityFromBase, documentQuantityValue, documentStockShortages, documentUnitCost, returnableQuantityInUnit } from './stock-document-form';
 import { DocumentStockWarnings } from './DocumentStockWarnings';
+import { TransferActButton } from './TransferActButton';
 import { WriteoffLines, useWriteoffLines } from './WriteoffLines';
 import {
   useStockDocument,
@@ -86,10 +87,12 @@ export function StockDocumentModal({
           {apiError(query.error)}
         </p>
       )}
-      {document?.kind === 'transfer' && (document.status === 'posted' || document.status === 'reversed') &&
-        can('actions.warehouseTransfer') && onCopyTransfer && (
-          <WorkspaceHeaderActions><button type="button" className="btn-ghost btn-md text-primary"
-            onClick={() => onCopyTransfer(document.id)}>Копировать</button></WorkspaceHeaderActions>
+      {document?.kind === 'transfer' && (document.status === 'posted' || document.status === 'reversed') && (
+          <WorkspaceHeaderActions>
+            {can('actions.exportReports') && <TransferActButton key={document.id} id={document.id} />}
+            {can('actions.warehouseTransfer') && onCopyTransfer && <button type="button" className="btn-ghost btn-md text-primary"
+              onClick={() => onCopyTransfer(document.id)}>Копировать</button>}
+          </WorkspaceHeaderActions>
         )}
       {document?.status === 'draft' && canEditDraft && (
         <StockDocumentDraft

@@ -61,25 +61,23 @@ export function paymentDisplayLabel(order: {
   return paymentMethodLabel(order.paymentMethod);
 }
 
-/**
- * Ячейка способа оплаты для заказа. Для смешанной показывает разбивку:
- * «Смешанная (1 000 с / 1 300 с)» — сначала наличные, затем QR.
- */
+export function mixedPaymentBreakdown(payments: readonly { method: string; amount: string }[] = []) {
+  return ['cash', 'card', 'qr'].flatMap((method) => {
+    const parts = payments.filter((payment) => payment.method === method);
+    return parts.length ? [{ method, amount: parts.reduce((sum, part) => sum + Number(part.amount), 0) }] : [];
+  });
+}
+
 export function paymentCell(order: {
   paymentMethod: string | null;
   payments?: { method: string; amount: string; source?: string | null }[];
-}): string {
+}, translate: (label: string) => string = (label) => label): string {
   if (!order.paymentMethod) return '—';
   if (isSplitPayment(order)) return splitPaymentSummary(order);
-  if (order.paymentMethod !== 'mixed') return paymentMethodShort(order.paymentMethod);
-  const sumBy = (m: string) =>
-    (order.payments ?? [])
-      .filter((p) => p.method === m)
-      .reduce((acc, p) => acc + Number(p.amount), 0);
-  const cash = sumBy('cash');
-  const qr = sumBy('qr');
-  if (!order.payments?.length) return 'Смешанная';
-  return `Смешанная (${money(cash)} / ${money(qr)})`;
+  const label = translate(paymentMethodShort(order.paymentMethod));
+  if (order.paymentMethod !== 'mixed') return label;
+  const parts = mixedPaymentBreakdown(order.payments).map(({ method, amount }) => `${translate(paymentMethodShort(method))} ${money(amount)}`);
+  return parts.length ? `${label} (${parts.join(' · ')})` : label;
 }
 
 /** Форматирование суммы: 1063 → «1 063 с» (сом). */

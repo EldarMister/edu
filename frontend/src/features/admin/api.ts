@@ -368,6 +368,7 @@ export interface OrdersSummary {
   unpaid: number;
   cancelled: number;
   revenue: number;
+  tenderRevenue?: number | null;
 }
 
 /** Сводка по периоду/фильтрам — для строки итогов (статус-фильтр игнорируется). */

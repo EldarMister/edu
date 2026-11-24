@@ -101,6 +101,16 @@ export function useStockDocument(id: string) {
   });
 }
 
+export async function downloadTransferAct(id: string) {
+  const response = await api.get<Blob>(`${BASE_URL}/${encodeURIComponent(id)}/transfer-act.xlsx`, { responseType: 'blob' });
+  const url = URL.createObjectURL(response.data);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `Акт перемещения ${id.slice(0, 8)}.xlsx`;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export function useInventoryContext(id: string, ingredientId?: string) {
   return useQuery({
     queryKey: [...DOCUMENTS_KEY, 'detail', id, 'inventory-context', ingredientId],

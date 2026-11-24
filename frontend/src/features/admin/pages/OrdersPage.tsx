@@ -8,7 +8,7 @@ import { displayOrderNumber, money, orderPlaceLabel } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
-import { OrdersFilters, type OrderSort } from '../components/OrdersFilters';
+import { normalizeOrderPaymentMethod, OrdersFilters, type OrderSort } from '../components/OrdersFilters';
 import { defaultOrderColumns, orderColumnLabel, orderTableWidth, OrdersTable } from '../components/OrdersTable';
 import { IconTables } from '../components/icons';
 import { CancelOrderModal } from '../components/CancelOrderModal';
@@ -40,9 +40,12 @@ function sortRequest(sort: OrderSort): { sort: 'default' | 'date' | 'amount'; so
 
 export function OrdersPage() {
   const tr = useT();
-  const [{ ordersTab: tab, ordersDateField }, updateView] = usePageFilters({ ordersTab: 'all', ordersDateField: '' });
+  const [{ ordersTab: tab, ordersDateField, ordersPaymentMethod }, updateView] = usePageFilters({
+    ordersTab: 'all', ordersDateField: '', ordersPaymentMethod: '',
+  });
   const byClose = tab === 'paid' && ordersDateField === 'closed';
-  const [paymentMethod, setPaymentMethod] = useState('');
+  const paymentMethod = normalizeOrderPaymentMethod(ordersPaymentMethod);
+  const showTenderRevenue = paymentMethod !== '' && paymentMethod !== 'mixed';
   const [waiterId, setWaiterId] = useState('');
   const period = useListPeriod('orders', 'all', tr(byClose ? 'Дата закрытия' : 'Период'));
   const [search, setSearch] = useState('');
@@ -159,7 +162,11 @@ export function OrdersPage() {
           <Sep />
           <Sum label={tr('Отменено')} value={s?.cancelled ?? summaryPlaceholder} />
           <Sep />
-          <Sum label={tr('Выручка')} value={s ? money(s.revenue) : summaryPlaceholder} />
+          <Sum label={tr(showTenderRevenue ? 'Выручка по чекам' : 'Выручка')} value={s ? money(s.revenue) : summaryPlaceholder} />
+          {showTenderRevenue && <>
+            <Sep />
+            <Sum label={tr('По выбранному способу оплаты')} value={s?.tenderRevenue != null ? money(s.tenderRevenue) : summaryPlaceholder} />
+          </>}
         </div>
 
         <OrdersFilters
@@ -170,7 +177,7 @@ export function OrdersPage() {
           sort={sort}
           search={search}
           onTabChange={(ordersTab) => updateView({ ordersTab, ordersDateField: ordersTab === 'paid' ? ordersDateField : '' })}
-          onPaymentMethodChange={setPaymentMethod}
+          onPaymentMethodChange={(ordersPaymentMethod) => updateView({ ordersPaymentMethod })}
           onWaiterChange={setWaiterId}
           onSortChange={setSort}
           onSearchChange={setSearch}

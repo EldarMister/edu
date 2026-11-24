@@ -96,6 +96,7 @@ export interface CashShift {
   closedAt?: string | null;
   closingComment?: string | null;
   openingAmount: number;
+  openingExpectedAmount: number;
   expectedAmount: number;
   actualAmount: number | null;
   difference: number | null;

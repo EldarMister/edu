@@ -4,7 +4,7 @@ import { WorkspaceHeaderCount } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { QueryState } from '../warehouse/WarehouseUi';
 import { usePageFilter, type EditorRoute } from '../warehouse/workspace-route';
-import type { FinanceAccount, usePayroll } from './api';
+import type { FinanceAccount, PayrollStaffRow, usePayroll } from './api';
 import { financeDay, financeMoney } from './finance-format';
 import { FinanceRegister, type RegisterColumn } from './FinanceRegister';
 import { PayrollEmployeeCard, payrollMonthLabel } from './PayrollEmployeeCard';
@@ -14,15 +14,37 @@ const columns = [
   { key: 'position', label: 'Должность', width: 160 },
   { key: 'hours', label: 'Часы', width: 76, numeric: true },
   { key: 'shifts', label: 'Смены', width: 76, numeric: true },
+  { key: 'days', label: 'Рабочие дни', width: 112, numeric: true },
+  { key: 'hourlyPay', label: 'Оплата за часы', width: 130, numeric: true },
+  { key: 'shiftPay', label: 'Оплата за смены', width: 136, numeric: true },
+  { key: 'monthlyPay', label: 'По месячной ставке', width: 140, numeric: true },
+  { key: 'personalSales', label: 'Личные продажи', width: 135, numeric: true },
+  { key: 'shiftSales', label: 'Продажи за рабочие смены', width: 200, numeric: true },
+  { key: 'personalCommission', label: 'Комиссия с личных продаж', width: 202, numeric: true },
+  { key: 'shiftCommission', label: 'Комиссия с продаж за смены', width: 210, numeric: true },
   { key: 'estimate', label: 'Рассчитано', width: 112, numeric: true },
+  { key: 'available', label: 'К начислению', width: 116, numeric: true },
   { key: 'accrued', label: 'Начислено', width: 112, numeric: true },
   { key: 'paid', label: 'Выплачено', width: 112, numeric: true },
   { key: 'due', label: 'Остаток', width: 112, numeric: true },
 ] as const satisfies readonly RegisterColumn[];
-const workingTime = ['hours', 'shifts'] as const;
-const amounts = ['estimate', 'accrued', 'paid', 'due'] as const;
+type PayrollColumn = typeof columns[number]['key'];
+type PayrollValueColumn = Exclude<PayrollColumn, 'employee' | 'position'>;
+const initialColumns: PayrollColumn[] = ['employee', 'position', 'hours', 'shifts', 'estimate', 'accrued', 'paid', 'due'];
+const monthColumns = new Set<PayrollColumn>(['available', 'accrued', 'paid', 'due']);
+const workingTime = new Set<PayrollValueColumn>(['hours', 'shifts', 'days']);
+const calculationBreakdown = new Set<PayrollValueColumn>([
+  'hourlyPay', 'shiftPay', 'monthlyPay', 'personalSales', 'shiftSales', 'personalCommission', 'shiftCommission',
+]);
 const workNumber = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
-const workCell = (value: number | null) => ({ value, display: value == null ? '—' : workNumber.format(value) });
+
+function payrollValue(row: PayrollStaffRow, key: PayrollValueColumn) {
+  return calculationBreakdown.has(key) && !row.timeTrackingAvailable ? null : row[key];
+}
+
+function payrollCell(key: PayrollValueColumn, value: number | null) {
+  return { value, display: workingTime.has(key) && value != null ? workNumber.format(value) : financeMoney(value) };
+}
 
 function adjacentMonth(month: string, offset: number) {
   const date = new Date(month + '-01T00:00:00Z');
@@ -41,22 +63,21 @@ export function PayrollRegister({ report, month, changeMonth, search, changeSear
   const [payrollFilter, setPayrollFilter] = usePageFilter('payrollFilter');
   const [sort, setSort] = usePageFilter('payrollSort', 'name-asc');
   const [requestedKey] = sort.split('-');
-  const sortKey = requestedKey === 'hours' || requestedKey === 'shifts' || requestedKey === 'name' ? requestedKey : 'position';
-  const ascending = !sort.endsWith('desc');
-  const sortedColumns = columns.filter((column) => !range || !['accrued', 'paid', 'due'].includes(column.key)).map((column): RegisterColumn => {
-    const key = column.key === 'employee' ? 'name' : column.key;
-    if (key !== 'name' && key !== 'position' && key !== 'hours' && key !== 'shifts') return column;
-    return {
-      ...column,
-      sort: {
-        ascending: sortKey === key ? ascending : undefined,
-        toggle: () => {
-          const direction = sortKey === key && ascending ? 'desc' : 'asc';
-          setSort(key === 'position' ? direction : key + '-' + direction);
-        },
+  const requestedColumn = requestedKey === 'name' ? 'employee' :
+    requestedKey === 'asc' || requestedKey === 'desc' ? 'position' : requestedKey;
+  const availableColumns = columns.filter(({ key }) => !range || !monthColumns.has(key));
+  const sortKey = availableColumns.find(({ key }) => key === requestedColumn)?.key ?? 'employee';
+  const ascending = sortKey !== requestedColumn || !sort.endsWith('desc');
+  const sortedColumns = availableColumns.map(({ key, ...column }): RegisterColumn => ({ ...column, key,
+    sort: {
+      ascending: sortKey === key ? ascending : undefined,
+      toggle: () => {
+        const direction = sortKey === key && ascending ? 'desc' : 'asc';
+        setSort(key === 'position' ? direction : `${key === 'employee' ? 'name' : key}-${direction}`);
       },
-    };
-  });
+    },
+  }));
+  const valueColumns = availableColumns.map(({ key }) => key).filter((key): key is PayrollValueColumn => key !== 'employee' && key !== 'position');
   const staff = report.data?.staff ?? [];
   const selected = staff.find(({ userId }) => userId === historyId);
   const term = search.trim().toLocaleLowerCase('ru');
@@ -64,15 +85,18 @@ export function PayrollRegister({ report, month, changeMonth, search, changeSear
   const rows = staff.filter((row) => row.name.toLocaleLowerCase('ru').includes(term)
     && (!position || row.position === position) && (range || payrollFilter !== 'due' || row.due > 0)
     && (range || payrollFilter !== 'calculated' || row.available > 0)).sort((a, b) => {
-    const left = a[sortKey], right = b[sortKey];
+    const left = sortKey === 'employee' ? a.name : sortKey === 'position' ? a.position : payrollValue(a, sortKey);
+    const right = sortKey === 'employee' ? b.name : sortKey === 'position' ? b.position : payrollValue(b, sortKey);
     if ((left == null) !== (right == null)) return left == null ? 1 : -1;
     const result = typeof left === 'number' && typeof right === 'number'
       ? left - right : String(left ?? '').localeCompare(String(right ?? ''), 'ru');
     return (ascending ? result : -result) || a.name.localeCompare(b.name, 'ru');
   });
-  const timeTotals = Object.fromEntries(workingTime.map((key) => {
-    const known = rows.flatMap((row) => row[key] == null ? [] : [row[key]]);
-    return [key, workCell(known.length ? known.reduce((total, value) => total + value, 0) : null)];
+  const totals = Object.fromEntries(valueColumns.map((key) => {
+    if (key === 'shiftSales') return [key, { value: null,
+      display: <span title="Один чек может учитываться в сменах нескольких сотрудников">—</span> }];
+    const known = rows.map((row) => payrollValue(row, key)).filter((value) => value != null);
+    return [key, payrollCell(key, known.length ? known.reduce((sum, value) => sum + value, 0) : null)];
   }));
   if (selected) return <PayrollEmployeeCard key={selected.userId + month} employee={selected} month={month} range={range}
     entries={report.data?.records.filter(({ userId }) => userId === selected.userId) ?? []}
@@ -95,7 +119,8 @@ export function PayrollRegister({ report, month, changeMonth, search, changeSear
     </div>
     <QueryState pending={report.isPending} error={report.error}>
       <FinanceRegister title={`Зарплата · ${range ? [range.from, range.to].map((day) => day.split('-').reverse().join('.')).join(' — ') : payrollMonthLabel(month)}`}
-        columns={sortedColumns} columnPreference={range ? 'payroll-period' : 'payroll-month'}
+        columns={sortedColumns} defaultColumns={initialColumns.filter((key) => !range || !monthColumns.has(key))}
+        columnPreference={range ? 'payroll-period' : 'payroll-month'}
         filters={<><WorkspaceSearch label="Поиск сотрудника" value={search} onChange={changeSearch} />
           <Select ariaLabel="Должность" value={position} onChange={changePosition}
             options={[{ value: '', label: 'Все должности' }, ...positions.map((name) => ({ label: name, value: name }))]} />
@@ -106,14 +131,9 @@ export function PayrollRegister({ report, month, changeMonth, search, changeSear
           employee: { value: row.name, display: <button type="button" className="text-left text-primary hover:underline"
             onClick={() => changeHistory(row.userId)}>{row.name}</button> },
           position: { value: row.position || '—' },
-          hours: workCell(row.hours),
-          shifts: workCell(row.shifts),
-          ...Object.fromEntries(amounts.map((key) => [key, { value: row[key], display: financeMoney(row[key]) }])),
+          ...Object.fromEntries(valueColumns.map((key) => [key, payrollCell(key, payrollValue(row, key))])),
         }, action: <button type="button" className="text-primary" onClick={() => changeHistory(row.userId)}>Расчёт</button> }))}
-        totals={{ employee: { value: 'Итого' }, ...timeTotals, ...Object.fromEntries(amounts.map((key) => {
-          const value = rows.reduce((sum, row) => sum + row[key], 0);
-          return [key, { value, display: financeMoney(value) }];
-        })) }} empty="За выбранный период сотрудники не найдены" />
+        totals={{ employee: { value: 'Итого' }, ...totals }} empty="За выбранный период сотрудники не найдены" />
     </QueryState>
     {report.isError && <button type="button" className="btn-secondary btn-md" onClick={() => void report.refetch()}>Повторить</button>}
   </>;

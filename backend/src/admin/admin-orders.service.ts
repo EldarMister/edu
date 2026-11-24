@@ -1,9 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { OrderStatus, PaymentMethod, Prisma, Role } from '@prisma/client';
+import { OrderItemStatus, OrderStatus, PaymentMethod, PaymentStatus, Prisma, Role } from '@prisma/client';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { hasPermission, resolvePermissions } from '../common/permissions';
 import { PrismaService } from '../prisma/prisma.service';
 import { orderInclude } from '../orders/order.helpers';
+import { netOrderAmount, netPaymentAmount } from '../orders/order-net';
 import { preparedLossQuantity } from '../warehouse/movement-cost';
 import { warehouseDateRange } from '../warehouse/report-range';
 import { baseUnitForType, fromBase, unitLabel, unitType, type UnitCode } from '../warehouse/units';
@@ -22,11 +23,22 @@ const ACTIVE_STATUSES: OrderStatus[] = [
 
 const CANCELLED_STATUSES: OrderStatus[] = [OrderStatus.cancelled, OrderStatus.rejected];
 const STOCK_UNITS: readonly UnitCode[] = ['g', 'kg', 'ml', 'l', 'pcs'];
+const TENDERS = [PaymentMethod.cash, PaymentMethod.card, PaymentMethod.qr];
 
-// Список заказов отдаёт ещё и разбивку оплат — чтобы показать «Смешанная (нал / QR)».
-const listInclude = {
+function getTender(method?: string): PaymentMethod | undefined {
+  return TENDERS.find((tender) => tender === method);
+}
+
+function legacyTender(method: PaymentMethod): Prisma.OrderWhereInput {
+  return { paymentMethod: method, payments: { none: {} } };
+}
+
+const receiptInclude = {
   ...orderInclude,
-  payments: { select: { method: true, amount: true, source: true } },
+  payments: {
+    ...orderInclude.payments,
+    where: { status: { in: [PaymentStatus.paid, PaymentStatus.refunded] } },
+  },
 } satisfies Prisma.OrderInclude;
 
 function dayBounds(date = new Date()) {
@@ -72,18 +84,30 @@ export class AdminOrdersService {
       else if (query.tab === 'cancelled') where.status = { in: CANCELLED_STATUSES };
     }
 
-    if (query.paymentMethod && query.paymentMethod in PaymentMethod) {
-      where.paymentMethod = query.paymentMethod as PaymentMethod;
+    const tender = getTender(query.paymentMethod);
+    if (tender) {
+      where.AND = [{ OR: [
+        { payments: { some: { method: tender, status: { in: [PaymentStatus.paid, PaymentStatus.refunded] } } } },
+        legacyTender(tender),
+      ] }];
+    } else if (query.paymentMethod === PaymentMethod.mixed) {
+      where.paymentMethod = PaymentMethod.mixed;
     }
     if (query.waiterId) where.waiterId = query.waiterId;
 
-    if (query.search) {
+    const search = query.search?.trim();
+    if (search) {
+      const contains = { contains: search, mode: Prisma.QueryMode.insensitive };
       where.OR = [
-        { orderNumber: { contains: query.search, mode: 'insensitive' } },
-        { waiter: { name: { contains: query.search, mode: 'insensitive' } } },
-        { externalOrderId: { contains: query.search, mode: 'insensitive' } },
-        { deliveryCustomerName: { contains: query.search, mode: 'insensitive' } },
-        { deliveryCustomerPhone: { contains: query.search, mode: 'insensitive' } },
+        { orderNumber: contains },
+        { waiter: { name: contains } },
+        { externalOrderId: contains },
+        { deliveryCustomerName: contains },
+        { deliveryCustomerPhone: contains },
+        { items: { some: {
+          status: { notIn: [OrderItemStatus.cancelled, OrderItemStatus.rejected] },
+          OR: [{ dishNameSnapshot: contains }, { dishVariantNameSnapshot: contains }],
+        } } },
       ];
     }
 
@@ -127,7 +151,7 @@ export class AdminOrdersService {
         orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: listInclude,
+        include: receiptInclude,
       }),
       this.prisma.order.count({ where }),
     ]);
@@ -141,27 +165,46 @@ export class AdminOrdersService {
    */
   async summary(query: OrderQueryDto) {
     const base = this.buildWhere(query, false);
-    const [total, paid, cancelled, unpaid, revenueAgg] = await Promise.all([
+    const closed = { ...base, status: OrderStatus.paid };
+    const tender = getTender(query.paymentMethod);
+    const [total, paid, cancelled, unpaid, revenueAgg, tenderRevenue] = await Promise.all([
       this.prisma.order.count({ where: base }),
-      this.prisma.order.count({ where: { ...base, status: OrderStatus.paid } }),
+      this.prisma.order.count({ where: closed }),
       this.prisma.order.count({ where: { ...base, status: { in: CANCELLED_STATUSES } } }),
       this.prisma.order.count({ where: { ...base, status: { in: ACTIVE_STATUSES } } }),
       this.prisma.order.aggregate({
-        where: { ...base, status: OrderStatus.paid },
+        where: closed,
         _sum: { finalAmount: true, refundedAmount: true },
       }),
+      tender ? this.tenderRevenue(closed, tender) : null,
     ]);
     return {
       total,
       paid,
       unpaid,
       cancelled,
-      revenue: Number(revenueAgg._sum.finalAmount ?? 0) - Number(revenueAgg._sum.refundedAmount ?? 0),
+      revenue: netOrderAmount({ finalAmount: revenueAgg._sum.finalAmount ?? 0, refundedAmount: revenueAgg._sum.refundedAmount }).toNumber(),
+      tenderRevenue,
     };
   }
 
+  private async tenderRevenue(closed: Prisma.OrderWhereInput, method: PaymentMethod) {
+    const [payments, legacy] = await Promise.all([
+      this.prisma.payment.aggregate({
+        where: { order: closed, method, status: PaymentStatus.paid },
+        _sum: { amount: true, refundedAmount: true },
+      }),
+      this.prisma.order.aggregate({
+        where: { ...closed, ...legacyTender(method) },
+        _sum: { finalAmount: true, refundedAmount: true },
+      }),
+    ]);
+    return netPaymentAmount({ amount: payments._sum.amount ?? 0, refundedAmount: payments._sum.refundedAmount })
+      .add(netOrderAmount({ finalAmount: legacy._sum.finalAmount ?? 0, refundedAmount: legacy._sum.refundedAmount })).toNumber();
+  }
+
   async findOne(id: string) {
-    const order = await this.prisma.order.findUnique({ where: { id }, include: orderInclude });
+    const order = await this.prisma.order.findUnique({ where: { id }, include: receiptInclude });
     if (!order) throw new NotFoundException('Заказ не найден');
     return order;
   }

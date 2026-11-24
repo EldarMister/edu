@@ -1,8 +1,10 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import { Role } from '@prisma/client';
+import type { Response } from 'express';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
+import { hasPermission, resolvePermissions } from '../common/permissions';
 import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
 import {
@@ -44,6 +46,16 @@ export class WarehouseDocumentsController {
     if (inventoryIngredientId && (typeof inventoryIngredientId !== 'string' || inventoryIngredientId.length > 160))
       throw new BadRequestException('Некорректный идентификатор складской позиции');
     return this.documents.get(id, includeInventoryContext === 'true', inventoryIngredientId);
+  }
+
+  @Get(':id/transfer-act.xlsx')
+  @RequirePermission('actions.exportReports')
+  async getTransferAct(@Param('id') id: string, @CurrentUser() user: AuthUser, @Res() response: Response) {
+    const showCosts = hasPermission(resolvePermissions(user.role as Role, user.permissions), 'actions.warehouseCosts');
+    const workbook = await this.documents.transferAct(id, showCosts);
+    response.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    response.setHeader('Content-Disposition', 'attachment; filename="transfer-act.xlsx"');
+    response.send(workbook);
   }
 
   @Post()

@@ -53,6 +53,11 @@ test('PostgreSQL: shift settlement posts sales and both collection legs once and
     await assert.rejects(pay([['card', 30]]), { status: 409 });
     const shift = await shifts.open(cafeId, waiter.id, 100);
     assert.deepEqual(await balance(), { cash: 10, card: 0, safe: 0 });
+    const firstOpening = (await shifts.list(cafeId, true)).current;
+    const firstDetails = (await shifts.details(cafeId, shift.id)).summary;
+    assert.deepEqual([firstOpening.openingAmount, firstOpening.openingExpectedAmount, firstOpening.openingDifference], [100, 10, 90]);
+    assert.deepEqual([firstDetails.openingAmount, firstDetails.openingExpectedAmount, firstDetails.openingDifference,
+      firstDetails.expectedAmount, firstDetails.difference], [100, 10, 90, 100, null]);
     const mixedOrder = await pay([['cash', 150], ['card', 80]]);
     const returned = await pay([['cash', 12], ['card', 8]]);
     await db.$transaction((tx) => reverseOrderReceipts(tx, cafeId, returned.id, waiter.id));
@@ -138,7 +143,11 @@ test('PostgreSQL: shift settlement posts sales and both collection legs once and
     await finance.reverseTransaction(owner, nonCollection.id, 'Undo test transfer to bank');
     await shifts.correctCashCount(cafeId, owner, shift.id, { actualAmount: 136 });
     assert.deepEqual(await balance(), { cash: 136, card: 80, safe: 100 });
-    assert.equal((await shifts.list(cafeId, true)).current.openingDifference, -1);
+    const nextOpening = (await shifts.list(cafeId, true)).current;
+    const nextDetails = (await shifts.details(cafeId, nextShift.id)).summary;
+    assert.deepEqual([nextOpening.openingAmount, nextOpening.openingExpectedAmount, nextOpening.openingDifference], [135, 136, -1]);
+    assert.deepEqual([nextDetails.openingAmount, nextDetails.openingExpectedAmount, nextDetails.openingDifference,
+      nextDetails.expectedAmount, nextDetails.difference], [135, 136, -1, 135, null]);
     await assert.rejects(shifts.createOperation(cafeId, waiter, shift.id, operation('income', 1)), { status: 409 });
     await db.$transaction((tx) => reverseOrderReceipts(tx, cafeId, mixedOrder.id, waiter.id));
     assert.equal((await shifts.list(cafeId, true)).current.expectedAmount, -15);
@@ -168,7 +177,7 @@ test('PostgreSQL: shift settlement posts sales and both collection legs once and
     await shifts.createOperation(cafeId, waiter, arithmetic.id, operation('collection', 4000));
     const { summary } = await shifts.details(cafeId, arithmetic.id);
     assert.deepEqual(summary, {
-      openingAmount: 1000, cashSales: 5000, cashRefunds: 500, noncashSales: 300, noncashRefunds: 0,
+      openingAmount: 1000, openingExpectedAmount: 0, openingDifference: 1000, cashSales: 5000, cashRefunds: 500, noncashSales: 300, noncashRefunds: 0,
       deposits: 200, expenses: 700, collections: 4000, otherTransfers: 0, adjustments: 0,
       expectedAmount: 1000, actualAmount: null, difference: null,
     });

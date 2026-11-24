@@ -15,6 +15,7 @@ import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, U
 import { getWarehouseBalance, resolveWarehouse, warehouseBalances, warehouseDocumentFilter, WarehouseLocation } from './warehouse-location';
 import { lockRecipeGraph } from './recipe-resolution';
 import { previewWriteoffSources, readWriteoffSnapshot, resolveWriteoffSources, serializeWriteoffSources, sourceInputs, writeoffStockLines } from './writeoff-resolution';
+import { writeTransferAct } from './transfer-act-xlsx';
 
 type Actor = Pick<AuthUser, 'id' | 'role' | 'name' | 'cafeId'> & Partial<Pick<AuthUser, 'permissions'>>;
 type Document = WarehouseDocument & { items: WarehouseDocumentItem[] };
@@ -134,6 +135,19 @@ export class WarehouseDocumentsService {
   async get(id: string, includeInventoryContext = false, inventoryIngredientId?: string) {
     return this.prisma.$transaction(async (tx) => this.preview(tx, await this.load(tx, id), includeInventoryContext, inventoryIngredientId),
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
+  async transferAct(id: string, showCosts: boolean) {
+    const { document, sender, recipient } = await this.prisma.$transaction(async (tx) => {
+      const document = await this.load(tx, id);
+      if (document.kind !== 'transfer' || !document.destinationWarehouseId) throw new NotFoundException('Перемещение не найдено');
+      if (document.status !== 'posted' && document.status !== 'reversed') {
+        throw new BadRequestException('Акт доступен после проведения перемещения');
+      }
+      const [sender, recipient] = await Promise.all([this.warehouse(tx, document.warehouseId), this.warehouse(tx, document.destinationWarehouseId)]);
+      return { document, sender, recipient };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    return writeTransferAct(document, sender.name, recipient.name, showCosts);
   }
 
   async create(actor: Actor, dto: CreateWarehouseDocumentDto) {

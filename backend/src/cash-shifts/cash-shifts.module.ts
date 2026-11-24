@@ -130,6 +130,13 @@ function serialize(shift: CashShift, expected = shift.expectedAmount ?? shift.op
   };
 }
 
+function openingReconciliation(amount: Prisma.Decimal | number, difference = new Prisma.Decimal(0)) {
+  return {
+    openingExpectedAmount: new Prisma.Decimal(amount).sub(difference).toNumber(),
+    openingDifference: difference.toNumber(),
+  };
+}
+
 type Db = Prisma.TransactionClient;
 type CashOperation = CashOperationDto;
 
@@ -263,9 +270,9 @@ export class CashShiftsService {
       });
       const reversed = new Set(reconciliations.flatMap(({ sourceKey }) => sourceKey?.startsWith('void:') ? [sourceKey.slice(5)] : []));
       const collected = new Map<string, Prisma.Decimal>();
-      const openings = new Map<string, number>();
+      const openings = new Map<string, Prisma.Decimal>();
       for (const { id, accountId, cashShiftId, sourceKey, kind, amount, counterparty } of reconciliations) {
-        if (sourceKey?.startsWith(openKey)) openings.set(sourceKey.slice(openKey.length), amount.toNumber());
+        if (sourceKey?.startsWith(openKey)) openings.set(sourceKey.slice(openKey.length), amount);
         if (kind === 'transfer' && counterparty?.isCollection && cashShiftId && shiftsById.get(cashShiftId)?.accountId === accountId
           && amount.lt(0) && !sourceKey?.startsWith('void:') && !reversed.has(id)) {
           collected.set(cashShiftId, (collected.get(cashShiftId) ?? new Prisma.Decimal(0)).sub(amount));
@@ -279,7 +286,7 @@ export class CashShiftsService {
         ...shift, openedByName: names.get(shift.openedById) ?? null,
         closedByName: shift.closedById ? names.get(shift.closedById) ?? null : null,
         collectionAmount: collected.get(shift.id)?.toNumber() ?? 0,
-        openingDifference: openings.get(shift.id) ?? 0,
+        ...openingReconciliation(shift.openingAmount, openings.get(shift.id)),
         number,
       });
       return {
@@ -337,6 +344,7 @@ export class CashShiftsService {
         : shift.openingAmount.add(await drawerDelta(db, shift));
       const summary = {
         openingAmount: shift.openingAmount.toNumber(),
+        ...openingReconciliation(shift.openingAmount, active.find(({ reconciliation }) => reconciliation === 'open')?.amount),
         cashSales: sum((row) => row.cash && row.kind === 'sale'),
         cashRefunds: sum((row) => row.cash && row.kind === 'refund', true),
         noncashSales: sum((row) => !row.cash && row.kind === 'sale'),

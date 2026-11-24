@@ -44,6 +44,8 @@ const { OrderRefundsService } = require('../src/orders/order-refunds.service.ts'
 const { IngredientStockService } = require('../src/warehouse/ingredient-stock.service.ts');
 const { getDefaultPermissionsByRole } = require('../src/common/permissions.ts');
 const { tenantPrismaMiddleware, runWithTenant } = require('../src/tenant/tenant-context.ts');
+const { AdminOrdersController } = require('../src/admin/admin-orders.controller.ts');
+const { AdminOrdersService } = require('../src/admin/admin-orders.service.ts');
 
 const databaseUrl = process.env.ORDER_FEATURE_TEST_DATABASE_URL;
 if (databaseUrl && (!['localhost', '127.0.0.1'].includes(new URL(databaseUrl).hostname)
@@ -66,6 +68,7 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
   const providers = [
     [PrismaService, db], [AuditService, audit], [AuthService, new AuthService(db, new JwtService())],
     [OrdersService, orders], [PaymentsService, new PaymentsService(db, orders, settings)],
+    [AdminOrdersService, new AdminOrdersService(db)],
     [WaiterShiftsService, shifts], [StaffService, staff], [TablesService, new TablesService(db, events)],
     [JwtStrategy, new JwtStrategy(db)],
     [CatalogService, new CatalogService(db, events, audit)], [MenuEntryService, {}], [HallsService, new HallsService(db)],
@@ -74,7 +77,7 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
   ].map(([provide, useValue]) => ({ provide, useValue }));
   class HttpFixtureModule {}
   Module({ imports: [PassportModule.register({ defaultStrategy: 'jwt' })],
-    controllers: [AuthController, OrdersController, OrderRefundsController, PaymentsController, FiscalController, WaiterShiftsController, StaffShiftsController, StaffController, PositionsController, TablesController, SettingsController, ReceiptPrintsController, CatalogController, HallsController], providers })(HttpFixtureModule);
+    controllers: [AuthController, OrdersController, AdminOrdersController, OrderRefundsController, PaymentsController, FiscalController, WaiterShiftsController, StaffShiftsController, StaffController, PositionsController, TablesController, SettingsController, ReceiptPrintsController, CatalogController, HallsController], providers })(HttpFixtureModule);
   const app = await NestFactory.create(HttpFixtureModule, { logger: false });
   app.setGlobalPrefix('api');
   app.use((_req, _res, next) => runWithTenant({}, next));
@@ -264,6 +267,29 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
         ['card', 30.25, 'normal'],
         ['cash', 19.75, 'normal'],
       ]);
+      const receiptQuery = { token, workspace: 'admin' };
+      await db.orderItem.updateMany({ where: { orderId: mixed.id }, data: {
+        dishId: null, dishNameSnapshot: 'Исторический чай', dishVariantNameSnapshot: 'Большой стакан',
+      } });
+      await db.orderItem.create({ data: { cafeId: cafe.id, orderId: mixed.id, dishNameSnapshot: 'Удалённый десерт',
+        status: 'cancelled', priceSnapshot: 0, finalPrice: 0 } });
+      await db.payment.create({ data: { cafeId: cafe.id, orderId: mixed.id, cashierId: fixture.owner.id, method: 'qr', status: 'pending', amount: 10 } });
+      const filters = new URLSearchParams({ tab: 'paid', paymentMethod: 'card', search: ' Исторический чай ' });
+      const list = await request(`/admin/orders?${filters}`, receiptQuery);
+      assert.deepEqual(list.items.map(({ id }) => id), [mixed.id]);
+      assert.deepEqual(list.items[0].payments.map(({ method }) => method).sort(), ['card', 'cash']);
+      const cardSummary = await request(`/admin/orders/summary?${filters}`, receiptQuery);
+      assert.equal(cardSummary.tenderRevenue, 30.25);
+      assert.equal(cardSummary.revenue, 50);
+      filters.set('search', 'Большой стакан');
+      filters.set('paymentMethod', 'cash');
+      assert.equal((await request(`/admin/orders/summary?${filters}`, receiptQuery)).tenderRevenue, 19.75);
+      filters.set('paymentMethod', 'qr');
+      assert.equal((await request(`/admin/orders?${filters}`, receiptQuery)).total, 0);
+      filters.set('paymentMethod', 'mixed');
+      filters.set('search', 'Удалённый десерт');
+      assert.equal((await request(`/admin/orders?${filters}`, receiptQuery)).total, 0);
+      await db.payment.deleteMany({ where: { orderId: mixed.id, status: 'pending' } });
       await request('/admin/settings', { ...admin, body: { payCard: false } });
       await request('/waiter/shifts/end', { token, workspace: 'terminal', method: 'POST', status: 201 });
       assert.equal((await request('/auth/me', { token, workspace: 'terminal' })).role, 'OWNER');

@@ -134,15 +134,23 @@ export function StatisticsReport({ report, data, periodControl }: { report: Repo
     ? rangeDate.format(new Date(data.range.from)) + ' — ' + rangeDate.format(new Date(Date.parse(data.range.to) - 1))
     : t('Всё время');
   const showSearch = report === 'products' || report === 'categories' || report === 'staff';
-  const linkPaidChecks = report === 'sales' && canSection('orders');
+  const linkPaidChecks = (report === 'sales' || report === 'payments') && canSection('orders');
 
   function renderCell(row: Row, { key, format }: Pick<Column, 'key' | 'format'>) {
     const value = formatValue(row[key], format);
-    if (!linkPaidChecks || key !== 'date' || typeof row.date !== 'string') return value;
+    if (!linkPaidChecks || typeof row.date !== 'string') return value;
+    if (key !== 'date' && (report !== 'payments' || !row[key])) return value;
+    const methodKey = key === 'date' ? payment : key;
+    const method = methods.find((entry) => entry.key === methodKey && entry.key !== 'other');
+    if (methodKey && !method) return value;
     const search = new URLSearchParams({ section: 'orders', ordersTab: 'paid', ordersDateField: 'closed',
       ordersPeriod: 'custom', ordersFrom: row.date, ordersTo: row.date });
+    if (method) search.set('ordersPaymentMethod', method.key);
+    const label = [t('Закрытые чеки'), formatValue(row.date, 'date')];
+    if (method) label.push(t(method.label));
+    if (key !== 'date') label.push(value);
     return <Link className="font-medium text-primary hover:underline" to={{ pathname, search: search.toString() }}
-      aria-label={t('Закрытые чеки') + ' · ' + value}>{value}</Link>;
+      aria-label={label.join(' · ')}>{value}</Link>;
   }
 
   return <>

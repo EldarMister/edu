@@ -22,7 +22,7 @@ const orderColumns = {
   waiter: { label: 'Официант', width: 128 },
   amount: { label: 'Сумма', width: 104, className: 'text-right font-medium text-text-primary' },
   status: { label: 'Статус заказа', width: 198, className: 'order-status-cell pl-4' },
-  payment: { label: 'Способ оплаты', width: 164, className: 'whitespace-nowrap' },
+  payment: { label: 'Способ оплаты', width: 164 },
   actions: { label: 'Действия', width: 100, className: 'px-1 text-center' },
 } satisfies Record<string, { label: string; width: number; className?: string }>;
 
@@ -68,7 +68,7 @@ export function OrdersTable({ items, byClose = false, isLoading, error, columns,
       waiter: order.waiter?.name ?? (order.source === 'delivery' ? tr('Онлайн-заказ') : 'QR menu'),
       amount: money(order.finalAmount),
       status: <OrderStatusBadges order={order} size="sm" className="flex flex-wrap items-center gap-1" />,
-      payment: paymentCell(order),
+      payment: paymentCell(order, tr),
       actions: <div className="flex items-center justify-center gap-1">
         {editable && order.status !== 'paid' && <OrderRowAction label={tr('Изменить статус')} onClick={() => onEdit(order)}><IconEdit className="h-4 w-4" /></OrderRowAction>}
         {editable && canOwnerOperation('cancelOrders') && CANCELLABLE.has(order.status) && <OrderRowAction label={tr('Отменить')} danger onClick={() => onCancel(order)}><IconX className="h-4 w-4" /></OrderRowAction>}

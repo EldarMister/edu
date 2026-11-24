@@ -23,6 +23,14 @@ const { printReceipt } = loadSource('features/waiter/printReceipt', {
   '@/lib/format': format, '@/lib/i18n': i18n, '@/lib/receipt': receipt,
 });
 
+test('mixed receipt shows each used tender and combines repeated card payments', () => {
+  const payments = [{ method: 'cash', amount: '60.00' }, { method: 'card', amount: '12.25' }, { method: 'card', amount: '27.75' }];
+  assert.equal(format.paymentCell({ paymentMethod: 'mixed', payments }), 'Смешанная (Наличные 60 с · Карта 40 с)');
+  assert.equal(format.paymentCell({ paymentMethod: 'mixed' }), 'Смешанная');
+  assert.equal(format.paymentCell({ paymentMethod: 'mixed', payments: [payments[0], { method: 'qr', amount: '40.00' }] }),
+    'Смешанная (Наличные 60 с · QR 40 с)');
+});
+
 test('receipt uses the Bishkek business date, selected language, settings, and one row per tender', async () => {
   let html = '';
   let resolvePrint;

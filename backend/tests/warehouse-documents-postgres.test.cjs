@@ -2,6 +2,7 @@ require('ts-node/register/transpile-only');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
+const XLSX = require('xlsx');
 const { PrismaClient, Prisma } = require('@prisma/client');
 const { runWithTenant, tenantPrismaMiddleware } = require('../src/tenant/tenant-context.ts');
 const { IngredientsService } = require('../src/warehouse/ingredients.service.ts');
@@ -211,6 +212,67 @@ test('PostgreSQL: inventory confirms current physical stock and owner approval i
     } finally {
       await db.$disconnect();
     }
+  }
+});
+
+test('PostgreSQL: transfer act exports posted quantities and historical valuation with permission-safe columns', { skip: !url }, async () => {
+  const db = new PrismaClient({ datasourceUrl: url });
+  db.$use(tenantPrismaMiddleware);
+  const cafe = await db.cafe.create({ data: { name: `Transfer act ${randomUUID()}` } });
+  const foreign = await db.cafe.create({ data: { name: `Foreign transfer act ${randomUUID()}` } });
+  const docs = new WarehouseDocumentsService(db);
+  const readAct = async (id, showCosts = true) => {
+    const workbook = XLSX.read(await docs.transferAct(id, showCosts), { type: 'buffer' });
+    return XLSX.utils.sheet_to_json(workbook.Sheets['Акт перемещения'], { header: 1 });
+  };
+  try {
+    await runWithTenant({ cafeId: cafe.id }, async () => {
+      const owner = await db.user.create({ data: { name: 'Owner', role: 'OWNER', phone: randomUUID(), passwordHash: 'test' } });
+      const locations = new WarehouseLocationsService(db, { emitBroadcast() {} });
+      const source = (await locations.list(cafe.id)).locations.find((item) => item.isDefault);
+      const destination = await locations.save(cafe.id, 'Склад получателя');
+      const ingredients = new IngredientsService(db);
+      const flour = await ingredients.create({ name: 'Мука', unit: 'kg', stock: 5, avgCost: 80 });
+      const syrup = await ingredients.create({ name: 'Сироп без цены', unit: 'l', stock: 5 });
+      const note = '=Текст комментария';
+      const input = { warehouseId: source.id, destinationWarehouseId: destination.id, kind: 'transfer', note,
+        items: [{ ingredientId: flour.id, quantity: 1.25 }, { ingredientId: syrup.id, quantity: 0.75 }] };
+      const draft = await docs.create(owner, input);
+      await assert.rejects(docs.transferAct(draft.id, true), { status: 400 });
+      const posted = await docs.create(owner, { ...input, finalize: 'post' });
+      await runWithTenant({ cafeId: foreign.id }, () => assert.rejects(docs.transferAct(posted.id, true), { status: 404 }));
+      await new PurchasesService(db).create({ supplier: 'Новая стоимость', warehouseId: source.id, complete: true,
+        items: [{ ingredientId: flour.id, unit: 'kg', quantity: 1, purchasePrice: 200 }] });
+      const rows = await readAct(posted.id);
+      assert.deepEqual(rows[0], ['Акт перемещения']);
+      const find = (label) => rows.find(([key]) => key === label);
+      assert.deepEqual([find('Документ')[1], find('Со склада')[1], find('На склад')[1], find('Комментарий')[1]],
+        [posted.id, source.name, destination.name, note]);
+      assert.match(find('Дата и время (Бишкек)')[1], /\d{2}\.\d{2}\.\d{4}/);
+      assert.deepEqual(find('Мука'), ['Мука', 'кг', 1.25, 100]);
+      assert.deepEqual(find('Сироп без цены'), ['Сироп без цены', 'л', 0.75, 'Не рассчитано']);
+      assert.equal(find('Итого')[3], 'Не рассчитано');
+      const noCosts = await readAct(posted.id, false);
+      assert.deepEqual(noCosts.find(([label]) => label === 'Мука'), ['Мука', 'кг', 1.25]);
+      assert.deepEqual(noCosts.find(([label]) => label === 'Наименование'), ['Наименование', 'Ед. изм.', 'Количество']);
+      assert.equal(noCosts.some(([label]) => label === 'Итого'), false);
+      assert.equal(await db.stockMovement.count({ where: { sourceId: posted.id } }), 4, 'downloading does not post stock');
+      await docs.reverse(owner, posted.id, 'Проверка сторно', posted.revision);
+      const reversed = await readAct(posted.id);
+      assert.deepEqual(reversed.find(([label]) => label === 'Статус'), ['Статус', 'Сторнировано']);
+      assert.deepEqual(reversed.find(([label]) => label === 'Мука'), ['Мука', 'кг', 1.25, 100]);
+    });
+  } finally {
+    for (const { id: cafeId } of [cafe, foreign]) {
+      await db.stockMovement.deleteMany({ where: { cafeId } });
+      await db.warehouseDocument.deleteMany({ where: { cafeId } });
+      await db.purchase.deleteMany({ where: { cafeId } });
+      await db.warehouseStock.deleteMany({ where: { cafeId } });
+      await db.ingredient.deleteMany({ where: { cafeId } });
+      await db.user.deleteMany({ where: { cafeId } });
+      await db.cafe.delete({ where: { id: cafeId } });
+    }
+    await db.$disconnect();
   }
 });
 

@@ -18,6 +18,10 @@ const PAYMENT_OPTIONS = [
   { value: 'card', label: 'Карта' },
 ];
 
+export function normalizeOrderPaymentMethod(value: string) {
+  return PAYMENT_OPTIONS.some((option) => option.value === value) ? value : '';
+}
+
 const SORT_OPTIONS: { value: OrderSort; label: string }[] = [
   { value: 'default', label: 'По умолчанию' },
   { value: 'date_desc', label: 'Дата: новые → старые' },
@@ -46,7 +50,7 @@ export function OrdersFilters(props: Props) {
   return (
     <div className="orders-filters">
       <Select className={`${ctrl} orders-status-select`} value={props.tab} onChange={props.onTabChange} options={STATUS_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />
-      <Select className={`${ctrl} orders-payment-select`} value={props.paymentMethod} onChange={props.onPaymentMethodChange} options={PAYMENT_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />
+      <Select className={`${ctrl} orders-payment-select`} ariaLabel={tr('Способ оплаты')} value={props.paymentMethod} onChange={props.onPaymentMethodChange} options={PAYMENT_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />
       <Select className={`${ctrl} orders-waiter-select`} value={props.waiterId} onChange={props.onWaiterChange} options={props.waiterOptions} />
       <Select className={`${ctrl} orders-sort-select`} value={props.sort} onChange={(value) => props.onSortChange(value as OrderSort)} options={SORT_OPTIONS.map((option) => ({ ...option, label: tr(option.label) }))} />
       <OrdersSearchField value={props.search} onChange={props.onSearchChange} />
@@ -62,7 +66,7 @@ function OrdersSearchField({ value, onChange }: { value: string; onChange: (valu
         <circle cx="10.8" cy="10.8" r="6.8" />
         <path d="m16 16 4.5 4.5" />
       </svg>
-      <input className="orders-filter-control orders-search-input" placeholder={tr('Поиск по заказам')} aria-label={tr('Поиск по заказам')} value={value} onChange={(event) => onChange(event.target.value)} />
+      <input className="orders-filter-control orders-search-input" placeholder={tr('Номер чека, блюдо или сотрудник')} aria-label={tr('Поиск по заказам')} value={value} onChange={(event) => onChange(event.target.value)} />
     </div>
   );
 }

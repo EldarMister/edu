@@ -53,10 +53,13 @@ export function printRegister(title: string, output: Output) {
   const heading = doc.createElement('h1');
   heading.textContent = title;
   const table = doc.createElement('table');
+  const head = table.createTHead();
+  const body = table.createTBody();
   output.forEach((values, index) => {
-    const row = (index ? table : table.createTHead()).insertRow();
+    const row = (index ? body : head).insertRow();
     values.forEach((value) => {
       const cell = doc.createElement(index ? 'td' : 'th');
+      if (index === 0) cell.setAttribute('scope', 'col');
       cell.textContent = typeof value === 'number' ? value.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : value ?? '';
       row.append(cell);
     });
