@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-type ProductChoice = { id: string; name: string; unit?: string; group?: string; detail?: string };
+export type ProductChoice = { id: string; name: string; unit?: string; group?: string; detail?: string; disabled?: boolean };
 type PopupPosition = { left: number; width: number; maxHeight: number; top?: number; bottom?: number };
 
 /** Keep the selected ID until the user explicitly chooses another product. */
@@ -21,6 +21,7 @@ export function DocumentProductPicker({
   autoFocus = false,
   onSelected,
   onCreate,
+  createLabel,
   id,
 }: {
   value: string;
@@ -39,6 +40,7 @@ export function DocumentProductPicker({
   autoFocus?: boolean;
   onSelected?: () => void;
   onCreate?: (name: string) => void;
+  createLabel?: (name: string) => string | undefined;
   id?: string;
 }) {
   const listId = useId();
@@ -53,12 +55,17 @@ export function DocumentProductPicker({
   const [active, setActive] = useState(0);
   const [position, setPosition] = useState<PopupPosition>();
   const unavailable = loading || !!loadError;
-  const matches = unavailable ? [] : options.filter((option) =>
-    `${option.name} ${option.group ?? ''} ${option.detail ?? ''}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
+  const searchName = search.trim();
+  const matches = !open || unavailable ? [] : options.filter((option) =>
+    `${option.name} ${option.group ?? ''} ${option.detail ?? ''}`.toLocaleLowerCase().includes(searchName.toLocaleLowerCase()),
   );
-  const canCreate = !unavailable && !!onCreate;
-  const optionCount = matches.length + Number(canCreate);
-  const activeIndex = Math.min(active, Math.max(0, optionCount - 1));
+  const createAction = open && !unavailable && onCreate
+    ? createLabel ? createLabel(searchName) : '+ Добавить ингредиент'
+    : undefined;
+  const enabledIndexes = matches.flatMap((option, index) => option.disabled ? [] : [index]);
+  if (createAction) enabledIndexes.push(matches.length);
+  const activeIndex = enabledIndexes.includes(active) ? active
+    : enabledIndexes.find((index) => index >= active) ?? enabledIndexes.at(-1);
 
   useEffect(() => {
     setText(selectedName);
@@ -107,7 +114,7 @@ export function DocumentProductPicker({
     return () => document.removeEventListener('pointerdown', outside);
   }, [open, selectedName]);
   useEffect(() => {
-    if (open)
+    if (open && activeIndex != null)
       list.current
         ?.querySelector<HTMLElement>(`[data-index="${activeIndex}"]`)
         ?.scrollIntoView({ block: 'nearest' });
@@ -140,7 +147,7 @@ export function DocumentProductPicker({
 
   function create() {
     close();
-    onCreate?.(search.trim());
+    onCreate?.(searchName);
   }
 
   return (
@@ -153,7 +160,7 @@ export function DocumentProductPicker({
         aria-autocomplete="list"
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
-        aria-activedescendant={open && optionCount ? `${listId}-${activeIndex}` : undefined}
+        aria-activedescendant={open && activeIndex != null ? `${listId}-${activeIndex}` : undefined}
         aria-busy={loading || undefined}
         aria-invalid={!!error || undefined}
         aria-describedby={error ? `${listId}-error` : undefined}
@@ -189,14 +196,15 @@ export function DocumentProductPicker({
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault();
             if (!open) show();
-            else
-              setActive((current) =>
-                Math.max(0, Math.min(optionCount - 1, current + (event.key === 'ArrowDown' ? 1 : -1))),
-              );
+            else if (activeIndex != null) {
+              const offset = event.key === 'ArrowDown' ? 1 : -1;
+              const next = Math.max(0, Math.min(enabledIndexes.length - 1, enabledIndexes.indexOf(activeIndex) + offset));
+              setActive(enabledIndexes[next]);
+            }
           } else if (event.key === 'Enter') {
             event.preventDefault();
-            if (open && matches[activeIndex]) choose(matches[activeIndex]);
-            else if (open && canCreate) create();
+            if (open && activeIndex != null && matches[activeIndex]) choose(matches[activeIndex]);
+            else if (open && activeIndex === matches.length && createAction) create();
             else show();
           } else if (event.key === 'Escape' && open) {
             event.preventDefault();
@@ -244,10 +252,12 @@ export function DocumentProductPicker({
                   role="option"
                   tabIndex={-1}
                   aria-selected={option.id === value}
+                  aria-disabled={option.disabled || undefined}
+                  disabled={option.disabled}
                   data-index={index}
-                  className={`flex min-h-9 w-full items-center justify-between gap-3 px-3 py-2 text-left ${index === activeIndex ? 'bg-primary/10 text-primary' : 'hover:bg-background'}`}
+                  className={`flex min-h-9 w-full items-center justify-between gap-3 px-3 py-2 text-left disabled:cursor-not-allowed disabled:text-text-muted ${index === activeIndex ? 'bg-primary/10 text-primary' : 'enabled:hover:bg-background'}`}
                   onMouseDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => setActive(index)}
+                  onMouseEnter={() => { if (!option.disabled) setActive(index); }}
                   onClick={() => choose(option)}
                 >
                   <span className="min-w-0 break-words">{option.name}{option.detail && <span className="mt-0.5 block text-xs text-text-muted">{option.detail}</span>}</span>
@@ -261,12 +271,12 @@ export function DocumentProductPicker({
             ) : (
               <p role="status" className="px-3 py-3 text-text-muted">{allowCustomValue ? search.trim() ? 'Это название сохранится в документе.' : 'Выберите из списка или введите название.' : search.trim() ? 'Продукты не найдены. Попробуйте другое название.' : 'Нет доступных продуктов'}</p>
             )}
-            {canCreate && (
+            {createAction && (
               <button id={`${listId}-${matches.length}`} data-index={matches.length}
                 type="button" role="option" aria-selected={false} tabIndex={-1}
                 className={`min-h-9 w-full border-t border-border px-3 py-2 text-left text-primary ${activeIndex === matches.length ? 'bg-primary/10' : 'hover:bg-background'}`}
                 onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setActive(matches.length)} onClick={create}>
-                + Добавить ингредиент
+                {createAction}
               </button>
             )}
           </div>,

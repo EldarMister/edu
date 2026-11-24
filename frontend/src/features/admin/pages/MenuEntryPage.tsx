@@ -523,7 +523,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
             allowCreate={canEditSection('warehouse') && can('actions.warehouseReceive')}
             variants={activeVariants.map((variant) => ({ id: variant.id ?? variant.key, name: variant.name }))}
             preview={preview} previewVariant={costVariant?.key} inputPortions={inputPortions}
-            outputDetails={outputDetails} showBatchPreview={false} batchAction={<>
+            outputDetails={rows.length ? outputDetails : undefined} showBatchPreview={false} batchAction={<>
               {!!rows.length && <button type="button" className="btn-ghost btn-md text-primary"
                 disabled={busy || !preview.data?.items.length || preview.pending} onClick={() => setBatchOpen(true)}>Рассчитать партию</button>}
               {inputPortions > 1 && <button type="button" className="btn-ghost btn-md text-primary"
@@ -582,6 +582,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
                   <textarea id={formId + '-instructions'} className="input min-h-24 py-2" value={metadata.instructions ?? ''} maxLength={12_000}
                     onChange={(event) => setMetadata((current) => ({ ...current, instructions: event.target.value }))} />
                 </FormRow>
+                {!hasStockBinding && rows.length === 0 && outputDetails}
                 {!hasStockBinding && <FormRow label="Нормы рецепта">
                   <button type="button" className="btn-secondary btn-md" onClick={() => setBasisOpen(true)}>Ввести нормы на партию</button>
                 </FormRow>}

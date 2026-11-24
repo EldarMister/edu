@@ -1,11 +1,11 @@
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Modal } from '@/components/Modal';
-import { Select } from '@/components/Select';
-import { IconSettings, IconX } from '../../components/icons';
+import { IconPlus, IconSettings, IconX } from '../../components/icons';
 import { apiError } from '@/lib/api';
 import { money, taxRateLabel } from '@/lib/format';
 import { ItemCard } from './ItemCard';
+import { DocumentProductPicker, type ProductChoice } from './DocumentProductPicker';
 import { PROCESSING_METHODS, useIngredients, useWarehouseLocations, type Ingredient, type ProcessingBasis, type ProcessingStage } from './api';
 import type { RecipePreview, useRecipePreview } from './recipe-preview-api';
 import { displayedProcessingStages, lossFromAmounts, netFromLoss, pieceNetWeight, processingQuantities, processingRetention,
@@ -15,18 +15,19 @@ import { QuantityInput, VolumeNetFields } from './RecipeQuantityInput';
 import { RecipeBatchPreview } from './RecipeBatchPreview';
 import { ALL_UNITS, unitLabel, unitsForType, type UnitCode } from './units';
 
-type IngredientOption = { value: string; label: string };
 type NamedVariant = { id: string; name: string };
 type PreviewRow = RecipePreview['items'][number];
 type WarehouseOptions = { id: string; name: string }[];
 type RowDialog = 'processing' | 'net' | 'settings';
 
+const compositionRowClass = 'relative align-top max-xl:grid max-xl:grid-cols-2 max-xl:gap-3 max-xl:rounded-md max-xl:border max-xl:border-border max-xl:p-3 xl:border-b xl:border-border';
+
 function unitFactor(unit: UnitCode) {
   return ALL_UNITS.find((value) => value.code === unit)!.factor;
 }
 
-function ingredientOption(item: Ingredient): IngredientOption {
-  return { value: item.id, label: item.name + ' · ' + unitLabel(item.baseUnit ?? item.displayUnit) };
+function ingredientOption(item: Ingredient): ProductChoice {
+  return { id: item.id, name: item.name, unit: unitLabel(item.baseUnit ?? item.displayUnit) };
 }
 
 function newRow(item: Ingredient): RecipeDraftRow {
@@ -93,17 +94,28 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
 }) {
   const ingredients = useIngredients('');
   const warehouses = useWarehouseLocations(rows.length > 0);
-  const [createIngredient, setCreateIngredient] = useState(false);
+  const [addingProduct, setAddingProduct] = useState(false);
+  const [newIngredientName, setNewIngredientName] = useState<string>();
+  const [focusGrossId, setFocusGrossId] = useState<string>();
+  const addProductButton = useRef<HTMLButtonElement>(null);
   const existing = new Set(rows.map((row) => row.ingredientId));
-  const activeIngredients = (ingredients.data ?? []).filter((item) => item.isActive);
-  const available = activeIngredients.filter((item) => !existing.has(item.id));
-  const options = available.map(ingredientOption);
+  const options = (ingredients.data ?? []).filter((item) => item.isActive)
+    .map((item) => ({ ...ingredientOption(item), disabled: existing.has(item.id) }));
+  const hasAvailable = options.some((option) => !option.disabled);
   const ingredientsById = new Map(ingredients.data?.map((item) => [item.id, item]));
   const calculatedById = new Map(preview.data?.items.map((item) => [item.ingredientId, item]));
   const namedVariants = variants.filter((variant): variant is NamedVariant => !!variant.id);
 
   function add(item: Ingredient) {
+    if (existing.has(item.id)) return;
+    setAddingProduct(false);
+    setFocusGrossId(item.id);
     onChange([...rows, newRow(item)]);
+  }
+
+  function cancelAdd() {
+    setAddingProduct(false);
+    requestAnimationFrame(() => addProductButton.current?.focus({ preventScroll: true }));
   }
 
   const calculatedOutput = preview.data?.output;
@@ -113,31 +125,26 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
   const compositionCost = preview.data?.compositionCostForScaling ?? preview.data?.compositionFoodCost;
   const footerCost = compositionCost == null ? null : compositionCost * (scaleCostToBatch ? inputPortions : 1);
   const totalLabel = scaleCostToBatch ? 'Итого на партию' : inputPortions > 1 ? 'Итого на порцию' : 'Итого';
-  const addActions = <div className="flex min-w-0 flex-wrap items-center gap-2">
-    <div className="w-full min-w-0 sm:w-64">
-      <Select searchable ariaLabel="Добавить компонент" placeholder="Добавить компонент…" className="h-9 w-full" value=""
-        disabled={disabled || ingredients.isPending || ingredients.isError || !options.length}
-        onChange={(id) => {
-          const selected = ingredientsById.get(id);
-          if (selected && !existing.has(id)) add(selected);
-        }}
-        options={options} />
-    </div>
-    {allowCreate && <button className="btn-ghost btn-md shrink-0 text-primary" type="button" disabled={disabled}
-      onClick={() => setCreateIngredient(true)}>+ Новый ингредиент</button>}
-    {batchAction}
-  </div>;
-
+  const addProduct = !disabled && !addingProduct && <button type="button" ref={addProductButton}
+    className={(rows.length ? 'btn-ghost' : 'btn-secondary') + ' btn-md inline-flex items-center gap-1.5 text-primary'}
+    disabled={!allowCreate && !hasAvailable && !ingredients.isPending && !ingredients.isError}
+    onClick={() => setAddingProduct(true)}>
+    <IconPlus aria-hidden="true" className="h-4 w-4" /> Добавить продукт
+  </button>;
+  const cancelProduct = <button type="button" className="btn-ghost h-9 w-9 text-text-muted hover:text-danger"
+    aria-label="Отменить добавление продукта" title="Отменить добавление продукта" disabled={disabled} onClick={cancelAdd}>
+    <IconX aria-hidden="true" className="h-4 w-4" />
+  </button>;
   return <section className="w-full min-w-0 space-y-3 border-t border-border pt-4" aria-label="Состав техкарты">
     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-      <h3 className="text-lg font-semibold">Состав техкарты</h3>
+      <h3 className="text-lg font-semibold">Состав</h3>
       {inputPortions > 1 && <span className="text-sm text-text-muted">Нормы на {inputPortions.toLocaleString('ru-RU')} порций</span>}
     </div>
-    {rows.length > 0 ? <div className="min-w-0 xl:overflow-x-auto">
+    {rows.length > 0 || addingProduct ? <div className="min-w-0 xl:overflow-x-auto xl:rounded-xl xl:border xl:border-border">
       <table className="w-full text-sm max-xl:block xl:min-w-[800px] xl:table-fixed">
         <thead className="max-xl:sr-only">
           <tr className="border-b border-border text-left text-xs text-text-muted">
-            <th scope="col" className="py-2 pl-2 font-medium">Ингредиент / полуфабрикат</th>
+            <th scope="col" className="py-2 pl-2 font-medium">Продукты</th>
             <th scope="col" className="w-[19%] px-2 font-medium">Обработка</th>
             <th scope="col" className="w-[17%] px-2 font-medium">Брутто</th>
             <th scope="col" className="w-[15%] px-2 font-medium">Нетто</th>
@@ -148,6 +155,7 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
         <tbody className="max-xl:grid max-xl:gap-2">
           {rows.map((row, index) => <CompositionRow key={row.ingredientId} row={row} showCosts={showCosts} disabled={disabled}
             ingredient={ingredientsById.get(row.ingredientId)} options={options}
+            autoFocusGross={focusGrossId === row.ingredientId} canReplace={hasAvailable}
             calculated={calculatedById.get(row.ingredientId)} pending={preview.pending}
             previewVariant={previewVariant} inputPortions={inputPortions}
             variants={namedVariants} locations={warehouses.data?.locations ?? []} loadingWarehouses={warehouses.isPending}
@@ -159,43 +167,74 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
               }
             }}
             onRemove={() => onChange(rows.filter((_, position) => position !== index))} />)}
+          {addingProduct && <tr className={compositionRowClass}>
+            <DraftCell label="Продукт" className="max-xl:col-span-2" mobileActions={cancelProduct}>
+              <DocumentProductPicker value="" label="Продукт для состава" placeholder="Найдите продукт…" options={options}
+                autoFocus disabled={disabled} loading={ingredients.isPending}
+                loadError={ingredients.isError ? apiError(ingredients.error) : undefined} onRetry={() => void ingredients.refetch()}
+                onCreate={allowCreate ? setNewIngredientName : undefined}
+                createLabel={(name) => {
+                  if (!name) return '+ Добавить ингредиент';
+                  if (options.some((option) => option.name.toLocaleLowerCase() === name.toLocaleLowerCase())) return;
+                  return `+ Добавить ингредиент «${name}»`;
+                }}
+                onChange={(id) => {
+                  const selected = ingredientsById.get(id);
+                  if (selected?.isActive) add(selected);
+                }} />
+            </DraftCell>
+            <DraftCell label="Обработка" className="max-xl:hidden"><span className="text-text-muted">—</span></DraftCell>
+            <DraftCell label="Брутто"><span className="text-text-muted">—</span></DraftCell>
+            <DraftCell label="Нетто"><span className="text-text-muted">—</span></DraftCell>
+            {showCosts && <DraftCell label="Себестоимость" className="max-xl:hidden xl:text-right">
+              <span className="text-text-muted">—</span>
+            </DraftCell>}
+            <td className="hidden text-right xl:table-cell">{cancelProduct}</td>
+          </tr>}
         </tbody>
         <tfoot className="max-xl:block">
-          <tr className="max-xl:block">
-            <td colSpan={showCosts ? 6 : 5} className="px-2 py-3 max-xl:block max-xl:!px-0">
-              <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
-                {addActions}
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                  {outputDetails ?? (output && <span>Выход порции: <strong>{output}</strong></span>)}
-                  {showCosts && <span>{totalLabel}: <strong>{footerCost == null
-                    ? preview.pending ? 'Расчёт…' : 'не рассчитано' : money(footerCost)}</strong></span>}
-                </div>
-              </div>
+          <tr className="max-xl:flex max-xl:flex-wrap max-xl:justify-between max-xl:gap-x-3">
+            <td colSpan={3} className="align-top max-xl:w-full max-xl:!px-0 max-xl:!pb-1">
+              <div className="flex flex-wrap items-center gap-2">{addProduct}{batchAction}</div>
             </td>
+            <td className="align-top max-xl:!px-0">
+              {outputDetails ?? <span>Выход порции <strong>{output ?? '—'}</strong></span>}
+            </td>
+            {showCosts && <td className="text-right align-top max-xl:!px-0">
+              {totalLabel}: <strong className="tabular-nums">{footerCost == null
+                ? preview.pending ? 'Расчёт…' : 'не рассчитано' : money(footerCost)}</strong>
+            </td>}
+            <td className="max-xl:hidden" />
           </tr>
         </tfoot>
       </table>
-    </div> : <div className="flex flex-wrap items-center justify-between gap-2">
-      {addActions}
-      {outputDetails}
+    </div> : <div className="space-y-3 rounded-xl border border-border bg-background px-4 py-4 sm:px-5">
+      <div className="space-y-1">
+        <p className="font-medium">В составе пока нет продуктов</p>
+        {!disabled && <p className="text-sm text-text-secondary">Добавьте ингредиенты или полуфабрикаты для расчёта выхода и себестоимости.</p>}
+      </div>
+      {(addProduct || inputPortions > 1) && <div className="flex flex-wrap items-center gap-2">{addProduct}{batchAction}</div>}
     </div>}
     {rows.length > 0 && showBatchPreview && <RecipeBatchPreview preview={preview.data} pending={preview.pending} showCosts={showCosts} />}
-    {ingredients.error && <p role="alert" className="text-sm text-danger">{apiError(ingredients.error)}{' '}
+    {!addingProduct && ingredients.error && <p role="alert" className="text-sm text-danger">{apiError(ingredients.error)}{' '}
       <button type="button" className="underline" onClick={() => void ingredients.refetch()}>Повторить</button></p>}
     {preview.error && <p role="alert" className="text-sm text-danger">{apiError(preview.error)}{' '}
       <button type="button" className="underline" onClick={() => void preview.retry()}>Повторить расчёт</button></p>}
     {showCosts && missingCosts.length > 0 && <p role="status" className="text-sm text-warning">
       Неполная калькуляция. Нет данных о себестоимости: {missingCosts.join(', ')}.
     </p>}
-    {createIngredient && <ItemCard compact defaultKind="raw" onClose={() => setCreateIngredient(false)} onSaved={add} />}
+    {newIngredientName !== undefined && <ItemCard compact defaultKind="raw" initialName={newIngredientName}
+      onClose={() => setNewIngredientName(undefined)} onSaved={add} />}
   </section>;
 }
 
-function CompositionRow({ row, ingredient, options, calculated, pending, showCosts, disabled, previewVariant, inputPortions,
+function CompositionRow({ row, ingredient, options, canReplace, autoFocusGross, calculated, pending, showCosts, disabled, previewVariant, inputPortions,
   variants, locations, loadingWarehouses, onChange, onReplace, onRemove }: {
   row: RecipeDraftRow;
   ingredient?: Ingredient;
-  options: IngredientOption[];
+  options: ProductChoice[];
+  canReplace: boolean;
+  autoFocusGross: boolean;
   calculated?: PreviewRow;
   pending: boolean;
   showCosts: boolean;
@@ -240,7 +279,7 @@ function CompositionRow({ row, ingredient, options, calculated, pending, showCos
   const warehouseOverride = row.warehouseId ? savedWarehouseName : row.fromCommonWarehouse ? 'Общий склад' : null;
   const visibleWarehouse = warehouseOverride ?? (disabled ? calculated?.warehouseName : null);
   const previewCost = calculated?.lineCostForScaling ?? calculated?.lineCost;
-  const selectedOption = ingredient ? ingredientOption(ingredient) : { value: row.ingredientId, label: row.name };
+  const selectedOption = ingredient ? ingredientOption(ingredient) : { id: row.ingredientId, name: row.name };
   const grossLabel = 'Брутто ' + row.name;
   const netLabel = 'Нетто ' + row.name;
   const pieceWeightLabel = pieceGrams == null ? 'Вес штуки не задан в карточке ингредиента' : 'Вес одной штуки: ' + recipeQuantity(pieceGrams, 'г');
@@ -310,10 +349,11 @@ function CompositionRow({ row, ingredient, options, calculated, pending, showCos
       <IconX className="h-4 w-4" />
     </button>
   </div>;
-  return <tr className="relative align-top max-xl:grid max-xl:grid-cols-2 max-xl:gap-3 max-xl:rounded-md max-xl:border max-xl:border-border max-xl:p-3 xl:border-b xl:border-border">
-    <DraftCell label="Ингредиент / полуфабрикат" className="max-xl:col-span-2" mobileActions={rowActions}>
-      <Select searchable ariaLabel={'Ингредиент: ' + row.name} className="h-9 w-full" value={row.ingredientId}
-        disabled={disabled || !options.length} onChange={onReplace} options={[selectedOption, ...options]} />
+  return <tr className={compositionRowClass}>
+    <DraftCell label="Продукт" className="max-xl:col-span-2" mobileActions={rowActions}>
+      <DocumentProductPicker label={'Продукт: ' + row.name} value={row.ingredientId}
+        disabled={disabled || !canReplace} onChange={onReplace}
+        options={[selectedOption, ...options.filter((option) => option.id !== row.ingredientId)]} />
       {ingredient?.isActive === false && <p className="text-xs text-warning">Архивная складская позиция</p>}
       {previewVariant && calculated && <p className="mt-1 text-xs text-text-muted">
         Вариант: {recipeQuantity(calculated.amount, unitLabel(calculated.amountUnit))} брутто
@@ -336,9 +376,9 @@ function CompositionRow({ row, ingredient, options, calculated, pending, showCos
       </p>}
     </DraftCell>
     <DraftCell label="Брутто">
-      <div className="flex min-w-0 items-center gap-1.5">
+      <div className="flex min-w-0 items-center gap-1.5 xl:max-w-40">
         <QuantityInput label={grossLabel} value={row.amount || null} invalid={row.amount <= 0} disabled={disabled}
-          readOnly={processing && basis === 'net'} onChange={changeGross} />
+          autoFocus={autoFocusGross} readOnly={processing && basis === 'net'} onChange={changeGross} />
         {unitsForType(row.unitType).length > 1 ? <select aria-label={'Единица ' + row.name}
           className="max-w-16 shrink-0 rounded border border-border bg-background px-1 py-1 text-xs" value={row.unit} disabled={disabled}
           onChange={(event) => changeUnit(event.target.value as UnitCode)}>
@@ -347,7 +387,7 @@ function CompositionRow({ row, ingredient, options, calculated, pending, showCos
       </div>
     </DraftCell>
     <DraftCell label="Нетто">
-      {processing ? <div className="flex min-w-0 items-center gap-1.5">
+      {processing ? <div className="flex min-w-0 items-center gap-1.5 xl:max-w-36">
         <QuantityInput label={netLabel} value={netAmount} invalid={invalidNet} disabled={disabled}
           readOnly={basis === 'gross'} onChange={(value) => patch({ processingBasis: basis, netAmount: value,
             amount: processingQuantities(row.amount, value ?? 0, basis, retention).amount })} />

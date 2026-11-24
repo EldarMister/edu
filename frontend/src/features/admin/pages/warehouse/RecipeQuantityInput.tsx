@@ -2,15 +2,16 @@ import { useState } from 'react';
 import { recipeQuantity } from './recipe-draft-values';
 
 export function QuantityInput({ label, value, onChange, invalid = false, readOnly = false,
-  disabled, precision = 6, placeholder = '0' }: {
+  disabled, precision = 6, placeholder = '0', autoFocus }: {
   label: string; value: number | null; onChange: (value: number | null) => void; invalid?: boolean;
-  readOnly?: boolean; disabled?: boolean; precision?: 3 | 6; placeholder?: string;
+  readOnly?: boolean; disabled?: boolean; precision?: 3 | 6; placeholder?: string; autoFocus?: boolean;
 }) {
   const [draft, setDraft] = useState<string>();
   const pattern = precision === 3 ? /^\d{0,11}(?:[,.]\d{0,3})?$/ : /^\d{0,11}(?:[,.]\d{0,6})?$/;
   return <input aria-label={label} aria-invalid={invalid || undefined}
     className={'input h-10 w-full min-w-0 tabular-nums' + (invalid ? ' !border-danger' : '')}
     type="text" inputMode="decimal" value={draft ?? value ?? ''} placeholder={placeholder} readOnly={readOnly} disabled={disabled}
+    autoFocus={autoFocus}
     onBlur={() => setDraft(undefined)}
     onChange={(event) => {
       const text = event.target.value;
