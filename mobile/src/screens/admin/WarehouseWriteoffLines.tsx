@@ -72,6 +72,7 @@ export function WarehouseWriteoffLines({ editor, sourceLines = [], disabled = fa
       {showCost ? <Text>{line.total == null ? '—' : money(line.total)}</Text> : null}
     </View>
     {line.packageName ? <Text style={styles.muted}>1 {line.packageName} = {line.packageQuantity} {line.packageUnit ? unitLabel(line.packageUnit) : line.unit}</Text> : null}
+    {line.details ? <Text style={styles.muted}>{line.details}</Text> : null}
     <RecipeParts line={line} />
   </View>)}</Card>;
   function update(row: DraftWriteoffLine, next: DraftWriteoffLine) { editor!.setRows((rows) => rows.map((value) => value.sourceLineId === row.sourceLineId ? next : value)); }
@@ -107,6 +108,8 @@ export function WarehouseWriteoffLines({ editor, sourceLines = [], disabled = fa
             else update(row, changeWriteoffUnit(row, unit as DraftWriteoffLine['unit']));
           }} /></View></View>
         {row.sourceId && showCost ? <Text style={styles.amount}>Сумма: {line?.total == null ? '—' : money(line.total)}</Text> : null}
+        <Field label="Детали" value={row.details ?? ''} maxLength={300} multiline editable={!disabled && !!row.sourceId}
+          onChangeText={(details) => update(row, { ...row, details })} />
         <RecipeParts key={row.sourceId} line={line} />
       </View>;
     })}

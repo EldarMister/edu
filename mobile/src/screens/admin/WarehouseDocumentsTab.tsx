@@ -16,7 +16,6 @@ import {
   type StockDocument,
   type StockDocumentItem,
   type StockDocumentKind,
-  type StockDocumentReason,
   type StockInventoryMode,
 } from '@/services/api/stockDocuments';
 import { qty, useIngredients, type WarehouseLocation } from '@/services/api/warehouse';
@@ -29,24 +28,15 @@ import { WarehouseWorkspace } from './WarehouseWorkspace';
 import { useWarehouseWriteoffLines, WarehouseWriteoffLines } from './WarehouseWriteoffLines';
 import { WarehouseDocumentRegister, type DocumentRegisterScope } from './WarehouseDocumentRegister';
 import { WarehouseInventoryScope } from './WarehouseInventoryScope';
+import { WarehouseWriteoffReasonField, writeoffReasonInput, writeoffReasonLabel } from './WarehouseWriteoffReasonField';
 
 const MODE_OPTIONS: { value: StockInventoryMode; label: string }[] = [
   { value: 'full', label: 'Полная' },
   { value: 'partial', label: 'Частичная' },
 ];
-const REASON_OPTIONS: { value: StockDocumentReason; label: string }[] = [
-  { value: 'spoilage', label: 'Порча' },
-  { value: 'expired', label: 'Просрочка' },
-  { value: 'damage', label: 'Брак' },
-  { value: 'staff_meal', label: 'Питание персонала' },
-  { value: 'tasting', label: 'Дегустация' },
-  { value: 'household', label: 'Хозяйственные нужды' },
-  { value: 'other', label: 'Другое' },
-];
 
 const documentTitle = (kind: StockDocumentKind) => kind === 'inventory' ? 'Инвентаризация' : 'Списание';
 const documentDate = warehouseTimeDisplay;
-const reasonLabel = (reason: StockDocumentReason | null) => REASON_OPTIONS.find((option) => option.value === reason)?.label;
 const modeLabel = (mode: StockInventoryMode | null) => MODE_OPTIONS.find((option) => option.value === mode)?.label;
 const parseQuantity = (value: string) => Number(value.trim().replace(',', '.'));
 type CountFilter = '' | 'uncounted' | 'differences' | 'shortage' | 'surplus';
@@ -84,7 +74,7 @@ function CreateDocumentSheet({ kind, warehouse, locations, onClose, onCreated }:
   const [location, setLocation] = useState(warehouse.id);
   const [mode, setMode] = useState<StockInventoryMode>('full');
   const [selected, setSelected] = useState<string[]>([]);
-  const [reason, setReason] = useState<StockDocumentReason | ''>('');
+  const [reason, setReason] = useState('');
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [requestKey] = useState(() => randomUUID());
@@ -95,7 +85,7 @@ function CreateDocumentSheet({ kind, warehouse, locations, onClose, onCreated }:
   const writeoff = useWarehouseWriteoffLines(!inventory, location);
   const timingError = warehouseTimingError(timing);
   const draftReady = !!location && !timingError && (inventory ? !partial || (items.isSuccess && selected.length > 0) : writeoff.ready);
-  const postReady = draftReady && (inventory || (!!reason && !!writeoff.enteredCount && (reason !== 'other' || !!note.trim())));
+  const postReady = draftReady && (inventory || (!!writeoff.enteredCount && (reason !== 'other' || !!note.trim())));
   const dirty = location !== warehouse.id || mode !== 'full' || selected.length > 0 || !!reason || !!note
     || timing.mode === 'past' || (!inventory && writeoff.dirty);
   const busy = create.isPending;
@@ -117,7 +107,7 @@ function CreateDocumentSheet({ kind, warehouse, locations, onClose, onCreated }:
     try {
       const document = await create.mutateAsync({ warehouseId: location, kind, requestKey, note: note.trim(),
         ...(inventory ? { mode, countedAt: time, items: partial ? selected.map((ingredientId) => ({ ingredientId, quantity: null })) : undefined }
-          : { effectiveAt: time, reason: reason || null, sourceLines: writeoff.input(),
+          : { effectiveAt: time, ...writeoffReasonInput(reason), sourceLines: writeoff.input(),
             finalize: finalize ? canApprove ? 'post' : 'submit' : undefined }) });
       if (inventory) onCreated(document.id);
       else onClose();
@@ -160,7 +150,7 @@ function CreateDocumentSheet({ kind, warehouse, locations, onClose, onCreated }:
           </View>
         </> : <View style={styles.stack}>
           <Text style={styles.muted} translate>Причина</Text>
-          <Select title="Причина списания" placeholder="Выберите причину" value={reason} onChange={setReason} options={REASON_OPTIONS} disabled={busy} />
+          <WarehouseWriteoffReasonField value={reason} onChange={setReason} disabled={busy} />
         </View>}
         <Field label={noteLabel} value={note} onChangeText={setNote} multiline maxLength={1000} editable={!busy} style={styles.note} />
       </Card>
@@ -222,7 +212,7 @@ function DocumentForm({ incoming, warehouseName, onClose }: {
   const [focusedCount, setFocusedCount] = useState<string>();
   const [removed, setRemoved] = useState<string[]>([]);
   const [note, setNote] = useState<string>();
-  const [reason, setReason] = useState<StockDocumentReason>();
+  const [reason, setReason] = useState<string>();
   const [error, setError] = useState('');
   const [editRevision, setEditRevision] = useState<number>();
   const [timing, setTiming] = useState(() => warehouseTimingFor(isInventory ? document.countedAt : document.effectiveAt));
@@ -231,7 +221,7 @@ function DocumentForm({ incoming, warehouseName, onClose }: {
   const inFlight = useRef(false);
   const pending = save.isPending || transition.isPending;
   const currentNote = note ?? document.note ?? '';
-  const currentReason = reason ?? document.reason ?? '';
+  const currentReason = reason ?? document.writeoffReasonId ?? document.reason ?? '';
   const rows = useMemo(() => {
     const current = new Map([...(document.items ?? []), ...localRows].map((row) => [row.ingredientId, row]));
     return [...current.values()].filter((row) => !removed.includes(row.ingredientId));
@@ -252,7 +242,7 @@ function DocumentForm({ incoming, warehouseName, onClose }: {
   const validNumbers = (isWriteoff ? writeoff.ready : values.valid)
     && (reopened ? values.canSubmit : !warehouseTimingError(timing) && time !== undefined);
   const canSubmit = validNumbers && !needsApplyTime && (isWriteoff ? writeoff.enteredCount > 0 : values.canSubmit) &&
-    (isInventory || (!!currentReason && (currentReason !== 'other' || !!currentNote.trim())));
+    (isInventory || currentReason !== 'other' || !!currentNote.trim());
   const dirty = editRevision !== undefined || timingChanged || (isWriteoff && writeoff.dirty);
   // The separately invalidated context query can briefly contain the revision from before our own save.
   const stale = incoming.revision > document.revision;
@@ -332,7 +322,7 @@ function DocumentForm({ incoming, warehouseName, onClose }: {
     try {
       const updated = await save.mutateAsync({
         id: document.id, revision: editRevision ?? document.revision, recount: recount || undefined,
-        reason: currentReason || undefined, note: currentNote,
+        ...(isWriteoff ? writeoffReasonInput(currentReason, document.writeoffReasonId) : {}), note: currentNote,
         items: isWriteoff ? undefined : values.items,
         sourceLines: isWriteoff ? writeoff.input() : undefined,
         countedAt: isInventory && !reopened ? time : undefined, effectiveAt: !isInventory ? time : undefined,
@@ -407,12 +397,12 @@ function DocumentForm({ incoming, warehouseName, onClose }: {
             {document.postedAt ? <Text style={styles.muted}>{t('Проведён')}: {documentDate(document.postedAt)}{document.postedByName ? ` · ${document.postedByName}` : ''}</Text> : null}
             {isInventory ? <Text style={styles.muted} translate>{modeLabel(document.mode)}</Text> : null}
             {editable && isFull ? <Text style={styles.muted} translate>Введите фактический остаток для каждой позиции. Если остатка нет, укажите 0.</Text> : null}
-            {!isInventory && editable ? <Select title="Причина списания" placeholder="Причина списания" value={currentReason} disabled={pending || stale}
-              options={REASON_OPTIONS} onChange={(value) => { markEdited(); setReason(value as StockDocumentReason); }} /> : null}
+            {isWriteoff && editable ? <WarehouseWriteoffReasonField value={currentReason} fallbackLabel={document.reasonLabel}
+              disabled={pending || stale} onChange={(value) => { markEdited(); setReason(value); }} /> : null}
             {editable && currentReason === 'other' && !currentNote.trim() ? (
               <Text style={styles.muted} translate>Укажите причину в комментарии.</Text>
             ) : null}
-            {!editable && document.reason ? <Text style={styles.muted} translate>{reasonLabel(document.reason)}</Text> : null}
+            {!editable && isWriteoff ? <Text style={styles.muted}>{writeoffReasonLabel(document)}</Text> : null}
             {editable ? <Field label={!isInventory && currentReason === 'other' ? 'Уточните причину' : 'Комментарий'} multiline style={styles.note} value={currentNote} maxLength={1000} editable={!pending && !stale}
               onChangeText={(value) => { markEdited(); setNote(value); }} /> : currentNote ? <Text>{currentNote}</Text> : null}
             {isWriteoff ? <WarehouseWriteoffLines editor={editable ? writeoff : undefined} sourceLines={document.sourceLines} disabled={pending || stale} showCost={showCost && !(editable && timing.mode === 'past')} /> : null}

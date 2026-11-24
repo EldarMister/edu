@@ -18,12 +18,14 @@ export interface DraftWriteoffLine {
   quantity: string;
   unit: UnitCode;
   name?: string;
+  details?: string;
 }
 
 export const emptyWriteoffLine = (): DraftWriteoffLine => ({ sourceLineId: randomUUID(), kind: 'ingredient', sourceId: '', quantity: '', unit: 'pcs' });
 
 export function writeoffLineInput(row: DraftWriteoffLine): WriteoffSourceInput {
   return { sourceLineId: row.sourceLineId, kind: row.kind, sourceId: row.sourceId, variantId: row.variantId || undefined, quantity: Number(row.quantity.replace(',', '.')), unit: row.unit,
+    details: row.details?.trim(),
     ...(row.packageId ? { packageId: row.packageId, ...(row.packageSnapshotLineId ? { packageSnapshotLineId: row.packageSnapshotLineId } : {}) } : {}) };
 }
 
@@ -64,14 +66,15 @@ export function writeoffPreviewPlan(rows: DraftWriteoffLine[], snapshots: Writeo
   const saved = new Map(snapshots.map((line) => [line.sourceLineId, line]));
   const inputs = entered.map((row) => {
     const snapshot = saved.get(row.sourceLineId);
-    return { ...writeoffLineInput(row), recipeSignature: !refreshAll && snapshot?.recipeSignature && sameWriteoffSource(row, snapshot) ? snapshot.recipeSignature : undefined };
+    return { ...writeoffLineInput(row), details: undefined,
+      recipeSignature: !refreshAll && snapshot?.recipeSignature && sameWriteoffSource(row, snapshot) ? snapshot.recipeSignature : undefined };
   });
   return { inputs, needed: entered.length > 0 && (refreshAll || entered.length !== snapshots.length || inputs.some((input) => !input.recipeSignature)) };
 }
 
 export function writeoffDraftLines(sourceLines: WriteoffSourceLine[] = [], items: StockDocumentItem[] = []): DraftWriteoffLine[] {
   if (sourceLines.length) return sourceLines.map((line) => ({ sourceLineId: line.sourceLineId, kind: line.kind, sourceId: line.sourceId,
-    variantId: line.variantId, quantity: String(line.quantity), unit: line.unitCode, name: line.name,
+    variantId: line.variantId, quantity: String(line.quantity), unit: line.unitCode, name: line.name, details: line.details,
     ...(line.packageId ? { packageId: line.packageId, packageSnapshotLineId: line.sourceLineId, packageName: line.packageName,
       packageQuantity: line.packageQuantity, packageUnit: line.packageUnit, packageFactor: line.packageFactor } : {}) }));
   if (items.length) return items.map((item) => ({ sourceLineId: randomUUID(), kind: 'ingredient', sourceId: item.ingredientId,

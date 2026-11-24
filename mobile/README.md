@@ -38,6 +38,8 @@ Expo Go не заменяет нативную сборку для провер�
 
 ## APK
 
+Изменения приложения публикуются в ветке `mobile`. Android APK и сборки для TestFlight готовятся из этой ветки.
+
 ```powershell
 cd mobile
 npx expo prebuild --platform android --no-install

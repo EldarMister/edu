@@ -6,6 +6,7 @@ import type { WarehouseItemKind } from './warehouse';
 export type StockDocumentKind = 'inventory' | 'writeoff' | 'transfer' | 'supplier_return';
 export type StockInventoryMode = 'full' | 'partial';
 export type StockDocumentReason = 'spoilage' | 'expired' | 'damage' | 'staff_meal' | 'tasting' | 'household' | 'other';
+export interface WriteoffReasonOption { id: string; label: string; expense?: boolean; custom?: boolean }
 export type StockDocumentStatus = 'draft' | 'submitted' | 'posted' | 'reversed';
 
 export interface StockDocumentItem {
@@ -43,6 +44,7 @@ export interface WriteoffSourceInput {
   quantity: number;
   unit?: UnitCode;
   recipeSignature?: string;
+  details?: string;
 }
 
 export interface WriteoffSourceLine extends Omit<WriteoffSourceInput, 'unit'> {
@@ -85,6 +87,8 @@ export interface StockDocument {
   kind: StockDocumentKind;
   mode: StockInventoryMode | null;
   reason: StockDocumentReason | null;
+  writeoffReasonId?: string | null;
+  reasonLabel?: string | null;
   note: string | null;
   status: StockDocumentStatus;
   revision: number;
@@ -114,6 +118,7 @@ export interface StockDocument {
 
 export interface StockDocumentValues {
   reason?: StockDocumentReason | null;
+  writeoffReasonId?: string | null;
   note?: string | null;
   items?: { ingredientId: string; quantity: number | null }[];
   sourceLines?: WriteoffSourceInput[];
@@ -137,6 +142,25 @@ const key = ['admin', 'warehouse', 'documents'] as const;
 const detailsKey = (id: string) => [...key, 'detail', id] as const;
 const inventoryContextKey = (id: string) => [...detailsKey(id), 'inventory-context'] as const;
 const path = (id: string) => `${endpoint}/${encodeURIComponent(id)}`;
+const reasonsKey = [...key, 'reasons'] as const;
+
+export function useWriteoffReasons(enabled = true) {
+  return useQuery({ queryKey: reasonsKey, enabled,
+    queryFn: async () => (await api.get<WriteoffReasonOption[]>(`${endpoint}/reasons`)).data });
+}
+
+export function useCreateWriteoffReason() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { name: string; expense: boolean }) =>
+      (await api.post<WriteoffReasonOption>(`${endpoint}/reasons`, input)).data,
+    onSuccess: (reason) => {
+      queryClient.setQueryData<WriteoffReasonOption[]>(reasonsKey, (existing) =>
+        [...(existing ?? []).filter(({ id }) => id !== reason.id), reason]);
+      void queryClient.invalidateQueries({ queryKey: reasonsKey });
+    },
+  });
+}
 
 export function useStockDocuments(kind: StockDocumentKind, warehouseId?: string, search?: string, enabled = true) {
   const text = search?.trim();

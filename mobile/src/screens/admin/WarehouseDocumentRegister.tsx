@@ -8,7 +8,7 @@ import { Select } from '@/components/Select';
 import { Alert, Text, TextInput } from '@/components/typography';
 import { Button } from '@/components/ui';
 import { apiError } from '@/lib/api';
-import { useStockDocuments, type StockDocument, type StockDocumentReason } from '@/services/api/stockDocuments';
+import { useStockDocuments, type StockDocument } from '@/services/api/stockDocuments';
 import type { WarehouseLocation } from '@/services/api/warehouse';
 import { colors, spacing, useThemeColors } from '@/theme';
 import { balanceMoney } from '@/utils/warehouseBalance';
@@ -16,14 +16,9 @@ import { documentDisplayStatus, documentOperationDate, STOCK_DOCUMENT_STATUS } f
 import { warehouseLocalTime, warehouseReportRange, warehouseTimeDisplay, type WarehousePeriod } from '@/utils/warehouseTiming';
 import { WarehouseMultiSelect } from './WarehouseMultiSelect';
 import { shareCsv } from './print';
+import { noWriteoffReason, useWriteoffReasonOptions, writeoffReasonLabel } from './WarehouseWriteoffReasonField';
 
 
-export const WRITEOFF_REASONS: { value: StockDocumentReason; label: string }[] = [
-  { value: 'spoilage', label: 'Порча' }, { value: 'expired', label: 'Просрочка' },
-  { value: 'damage', label: 'Брак' }, { value: 'staff_meal', label: 'Питание персонала' },
-  { value: 'tasting', label: 'Дегустация' }, { value: 'household', label: 'Хозяйственные нужды' },
-  { value: 'other', label: 'Другое' },
-];
 const PERIODS: { value: WarehousePeriod; label: string }[] = [
   { value: 'all', label: 'За всё время' }, { value: 'today', label: 'Сегодня' },
   { value: 'yesterday', label: 'Вчера' }, { value: 'week', label: 'Последние 7 дней' },
@@ -31,7 +26,6 @@ const PERIODS: { value: WarehousePeriod; label: string }[] = [
   { value: 'lastMonth', label: 'Прошлый месяц' }, { value: 'custom', label: 'Выбрать период' },
 ];
 const PAGE_SIZE = 25;
-const reasonLabel = (reason: StockDocumentReason | null) => WRITEOFF_REASONS.find((option) => option.value === reason)?.label ?? '—';
 const products = (document: StockDocument) => document.productNames?.length
   ? document.productNames.join(', ') + (document.itemsCount > document.productNames.length ? '…' : '')
   : document.itemsCount ? document.itemsCount + ' позиций' : 'Без продуктов';
@@ -65,6 +59,7 @@ export function WarehouseDocumentRegister({
 }) {
   const inventory = kind === 'inventory';
   const transfer = kind === 'transfer';
+  const { options: reasonOptions } = useWriteoffReasonOptions(kind === 'writeoff');
   const defaultPeriod = transfer ? 'month' : 'all';
   const { width } = useWindowDimensions();
   const palette = useThemeColors();
@@ -91,7 +86,7 @@ export function WarehouseDocumentRegister({
     .sort((a, b) => a.localeCompare(b, 'ru')).map((value) => ({ value, label: value, translate: false }));
   const rows = validDates ? (query.data ?? []).filter((document) => {
     const date = warehouseLocalTime(documentOperationDate(document)).date;
-    return (!status || documentDisplayStatus(document) === status) && (!reason || document.reason === reason)
+    return (!status || documentDisplayStatus(document) === status) && (!reason || (document.writeoffReasonId ?? document.reason ?? noWriteoffReason) === reason)
       && (!categories.length || document.categories?.some((category) => categories.includes(category)))
       && (!employees.length || employees.includes(actor(document)))
       && (!transferLocations.length || transferLocations.includes(document.warehouseId)
@@ -122,7 +117,7 @@ export function WarehouseDocumentRegister({
     ? [warehouseName(document), document.countedAt || document.postedAt ? displayDate(document.countedAt ?? document.postedAt) : 'При проведении',
       displayDate(document.postedAt), mode(document), ...(showCost ? [amount(document.varianceValue)] : []), STOCK_DOCUMENT_STATUS[documentDisplayStatus(document)]]
     : [displayDate(documentOperationDate(document)), ...(!transfer ? [warehouseName(document)] : []), products(document),
-      ...(showCost ? [amount(document.varianceValue)] : []), actor(document), transfer ? warehouseName(document) : reasonLabel(document.reason)];
+      ...(showCost ? [amount(document.varianceValue)] : []), actor(document), transfer ? warehouseName(document) : writeoffReasonLabel(document)];
   const periodControl = <Select title="Период" value={period} options={PERIODS} onChange={filter(setPeriod)} style={styles.filter} />;
   const canAdd = canCreate && !!onCreate;
   const copyButton = (document: StockDocument) => onCopy && <FastPressable style={[styles.textAction, styles.copyButton]}
@@ -155,7 +150,8 @@ export function WarehouseDocumentRegister({
         </> : warehouseFilter}
         {kind === 'writeoff' ? <>
           <WarehouseMultiSelect label="Категории" value={categories} options={options} style={styles.filter} onChange={filter(setCategories)} />
-          <Select title="Причина списания" value={reason} options={[{ value: '', label: 'Причина' }, ...WRITEOFF_REASONS]} onChange={filter(setReason)} style={styles.filter} />
+          <Select title="Причина списания" value={reason} options={[{ value: '', label: 'Причина' },
+            { value: noWriteoffReason, label: 'Без причины' }, ...reasonOptions]} onChange={filter(setReason)} style={styles.filter} />
         </> : null}
         <Select title="Статус документа" value={status} options={[{ value: '', label: status ? 'Все статусы' : '+ Фильтр' },
           ...Object.entries(STOCK_DOCUMENT_STATUS).filter(([value]) => inventory || value !== 'reopened')
@@ -199,7 +195,7 @@ export function WarehouseDocumentRegister({
           {showCost ? <Text>{amount(document.varianceValue)}</Text> : null}
         </View>
         <Text style={styles.muted}>{inventory && !document.countedAt && !document.postedAt ? 'При проведении' : displayDate(documentOperationDate(document))} · {inventory ? mode(document) : warehouseName(document)}</Text>
-        {kind === 'writeoff' ? <Text style={styles.muted}>Причина: {reasonLabel(document.reason)}</Text> : null}
+        {kind === 'writeoff' ? <Text style={styles.muted}>Причина: {writeoffReasonLabel(document)}</Text> : null}
         <View style={styles.actions}>
           <Text style={[styles.status, document.status === 'posted' && styles.posted]} translate>{STOCK_DOCUMENT_STATUS[documentDisplayStatus(document)]}</Text>
           <Text style={styles.muted}>{inventory && document.postedAt && !document.reopenedAt ? 'Проведена ' + warehouseTimeDisplay(document.postedAt) : actor(document)}</Text>
