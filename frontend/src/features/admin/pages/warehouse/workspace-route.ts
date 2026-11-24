@@ -13,7 +13,7 @@ const scrollPositions = new Map<string, number>();
 function scrollKey(pathname: string, search: string) {
   const params = new URLSearchParams(search);
   const editor = params.get('editor');
-  if (editor === 'item' || (params.get('section') === 'staff' && ['employee', 'position'].includes(editor ?? ''))
+  if ((params.get('section') === 'staff' && ['employee', 'position'].includes(editor ?? ''))
     || (params.get('section') === 'menu' && params.get('view') === 'categories' && editor === 'category')) {
     editorKeys.forEach((key) => params.delete(key));
   }

@@ -25,6 +25,10 @@ export function MenuStockCatalogue({ view }: { view: 'ingredients' | 'preparatio
     return <ProductionBatchModal id={editor.id} onClose={closeEditor} />;
   if (editor?.type === 'preparation')
     return <PreparationCardPage id={editor.id} warehouseId={warehouse?.id} onClose={closeEditor} />;
+  if (editor?.type === 'item')
+    return <ItemCard key={editor.id ?? 'new'} id={editor.id} defaultKind="raw" onClose={closeEditor}
+      onHistory={(id) => openEditor({ type: 'history', id })}
+      onRecipe={(item) => openEditor({ type: 'preparation', id: item.id })} />;
   if (editor?.type === 'produce' && editor.id)
     return warehouse ? (
       <PreparationModal
@@ -57,7 +61,7 @@ export function MenuStockCatalogue({ view }: { view: 'ingredients' | 'preparatio
         />
       </EditorPage>
     );
-  return (<>
+  return (
     <IngredientsTab
       catalogue={view}
       filter={filter as StockFilter}
@@ -72,8 +76,5 @@ export function MenuStockCatalogue({ view }: { view: 'ingredients' | 'preparatio
       onHistory={(id) => openEditor({ type: 'history', id })}
       onProduce={(item) => openEditor({ type: 'produce', id: item.id })}
     />
-    {editor?.type === 'item' && <ItemCard id={editor.id} defaultKind="raw" onClose={closeEditor}
-      onHistory={(id) => openEditor({ type: 'history', id })}
-      onRecipe={(item) => openEditor({ type: 'preparation', id: item.id })} />}
-  </>);
+  );
 }

@@ -121,7 +121,7 @@ export function WarehouseSection({
   }
   return (
     <div className="space-y-4">
-      {(!active || active.type === 'item') && (
+      {!active && (
         <>
           <>
             {staffMode && onView && (

@@ -24,6 +24,7 @@ import { useSuppliers } from './settings-api';
 import { DocumentField } from './WarehouseUi';
 import { UNIT_OPTIONS, unitConversionFactor, unitLabel, unitTypeOf, unitsForType, type UnitCode } from './units';
 import { IngredientUsageTable } from './CatalogueDetails';
+import { EditorPage } from './EditorPage';
 import { parsePieceWeightGrams } from './recipe-draft-values';
 
 export function ItemCard({
@@ -53,12 +54,12 @@ export function ItemCard({
     : defaultKind === 'goods'
       ? 'Добавление товара'
       : 'Добавление ингредиента';
-  return createPortal(!id || query.data ? (
+  const content = !id || query.data ? (
     <ItemForm key={id ?? 'new'} title={title} item={query.data} defaultKind={defaultKind} initialName={initialName}
       onClose={onClose} onSaved={onSaved} onHistory={onHistory} onRecipe={onRecipe} compact={compact}
       mutations={mutations} pending={pending} />
   ) : (
-    <Modal open manageFocus onClose={onClose} title={title} panelClassName="max-w-lg">
+    <ItemFrame compact={compact} onClose={onClose} title={title}>
         {id && query.isPending && (
           <div className="flex justify-center p-8">
             <Spinner />
@@ -69,8 +70,23 @@ export function ItemCard({
             {apiError(query.error)}
           </p>
         )}
-    </Modal>
-  ), document.body);
+    </ItemFrame>
+  );
+  return compact ? createPortal(content, document.body) : content;
+}
+
+function ItemFrame({ compact, title, onClose, footer, children }: {
+  compact: boolean;
+  title: string;
+  onClose: () => void;
+  footer?: ReactNode;
+  children: ReactNode;
+}) {
+  return compact ? <Modal open manageFocus title={title} onClose={onClose} panelClassName="max-w-lg" footer={footer}>
+    {children}
+  </Modal> : <EditorPage title={title} onClose={onClose} footer={footer}>
+    {children}
+  </EditorPage>;
 }
 
 function ItemForm({
@@ -231,8 +247,8 @@ function ItemForm({
   };
   return (
     <>
-    <Modal open manageFocus onClose={requestClose} title={title} panelClassName="max-w-lg"
-      footer={<div className="flex flex-wrap justify-end gap-2">
+    <ItemFrame compact={compact} onClose={requestClose} title={title}
+      footer={<div className={`flex flex-wrap gap-2 ${compact ? 'justify-end' : ''}`}>
         <button type="button" className="btn-ghost btn-md" disabled={pending} onClick={requestClose}>
           {editable ? 'Отмена' : 'Закрыть'}
         </button>
@@ -446,15 +462,15 @@ function ItemForm({
         </p>
       )}
     </form>
-    </Modal>
-    {confirmDiscard && <Modal open manageFocus title="Есть несохранённые изменения" onClose={() => setConfirmDiscard(false)}
+    </ItemFrame>
+    {confirmDiscard && createPortal(<Modal open manageFocus title="Есть несохранённые изменения" onClose={() => setConfirmDiscard(false)}
       footer={<div className="flex flex-wrap justify-end gap-2">
         <button type="button" className="btn-secondary btn-md" data-dialog-initial-focus
           onClick={() => setConfirmDiscard(false)}>Продолжить редактирование</button>
         <button type="button" className="btn-danger btn-md" onClick={() => { markSaved(); onClose(); }}>Выйти без сохранения</button>
       </div>}>
       <p className="text-sm text-text-secondary">Изменения в карточке ингредиента ещё не сохранены.</p>
-    </Modal>}
+    </Modal>, document.body)}
     </>
   );
 }

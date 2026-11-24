@@ -354,17 +354,13 @@ export function IngredientsTab({
   return (
     <div className={catalogue ? undefined : 'poster-balance-surface'}>
       {catalogue && <WorkspaceHeaderCount count={query.data ? catalogueRows.length : undefined} />}
-      {catalogue === 'ingredients' && <>
-        <WorkspaceHeaderActions><button type="button" className="supply-header-action print:hidden" aria-haspopup="dialog"
-          onClick={() => setIngredientColumnsOpen(true)}>Столбцы</button></WorkspaceHeaderActions>
-        {ingredientColumnsOpen && <WarehouseColumnSettings columns={selectedIngredientColumns} defaults={ingredientOptions}
-          resetColumns={ingredientDefaults} label={(key) => ingredientColumnSpec(key).label}
-          onClose={() => setIngredientColumnsOpen(false)} onApply={(selection) => {
-            const value = selection.join(',');
-            saveIngredientColumns(value === ingredientDefaults.join(',') ? '' : value);
-            setIngredientColumnsOpen(false);
-          }} />}
-      </>}
+      {catalogue === 'ingredients' && ingredientColumnsOpen && <WarehouseColumnSettings columns={selectedIngredientColumns} defaults={ingredientOptions}
+        resetColumns={ingredientDefaults} label={(key) => ingredientColumnSpec(key).label}
+        onClose={() => setIngredientColumnsOpen(false)} onApply={(selection) => {
+          const value = selection.join(',');
+          saveIngredientColumns(value === ingredientDefaults.join(',') ? '' : value);
+          setIngredientColumnsOpen(false);
+        }} />}
       {!catalogue && <>
         {canExport && <WorkspaceHeaderActions>
           <button type="button" className="supply-header-action" disabled={exporting || !query.isSuccess}
@@ -387,7 +383,7 @@ export function IngredientsTab({
       <div className="poster-toolbar">
         <WorkspaceSearch label="Поиск позиции" placeholder={catalogue ? 'Быстрый поиск' : 'Поиск...'} value={search} onChange={(value) => setBalanceFilter({ search: value })} />
         {filters}
-        {catalogue && (canCreate || canExportPreparations) && <div className="ml-auto flex flex-wrap items-center gap-2">
+        {preparedCatalogue && (canCreate || canExportPreparations) && <div className="ml-auto flex flex-wrap items-center gap-2">
           {canExportPreparations && <RecipeExportButton kind="preparations" ids={rows.map(({ id }) => id)} pending={!catalogueQuery.isSuccess} />}
           {canCreate && <button type="button" className="btn-primary btn-md" onClick={onCreate}>Добавить</button>}
         </div>}
@@ -408,7 +404,7 @@ export function IngredientsTab({
           <>
             {catalogue ? <Select
               ariaLabel="Категория"
-              className="poster-filter w-40"
+              className="poster-filter max-w-52"
               value={category}
               onChange={(value) => setBalanceFilter({ category: value })}
               options={[
@@ -421,7 +417,7 @@ export function IngredientsTab({
             ]} />}
             {catalogue && <Select
               ariaLabel="Единица измерения"
-              className="poster-filter w-40"
+              className="poster-filter max-w-52"
               value={unit}
               onChange={(value) => setBalanceFilter({ unit: value })}
               options={[{ value: '', label: 'Ед. измерения' }, ...UNIT_OPTIONS]}
@@ -469,6 +465,11 @@ export function IngredientsTab({
             )}
           </div>
         </details>
+        {catalogue === 'ingredients' && <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          <button type="button" className="supply-header-action print:hidden" aria-haspopup="dialog"
+            onClick={() => setIngredientColumnsOpen(true)}>Столбцы</button>
+          {canCreate && <button type="button" className="btn-primary btn-md" onClick={onCreate}>Добавить</button>}
+        </div>}
         {!catalogue && (filtered || warehouseId) && <button type="button" className="poster-balance-reset"
           onClick={() => setBalanceFilter({ search: '', kind: '', category: '', unit: '', stockFilter: '', warehouse: '' })}>
           Сбросить всё
