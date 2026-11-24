@@ -27,6 +27,10 @@ const postingTransaction = { timeout: 30_000 };
 
 // Нормализованная позиция закупки: введённые (display) + базовые значения.
 type NormalizedItem = {
+  taxId: string | null;
+  taxName: string | null;
+  taxRate: Prisma.Decimal | null;
+  taxAmount: Prisma.Decimal;
   packageId?: string;
   packageName?: string;
   packageUnit?: string;
@@ -46,6 +50,15 @@ type NormalizedItem = {
 export class PurchasesService {
   constructor(private prisma: PrismaService) {}
 
+  async taxOptions(db: Prisma.TransactionClient = this.prisma) {
+    const cafeId = getCafeId();
+    if (!cafeId) throw new ForbiddenException('Заведение не назначено');
+    const settings = await db.settings.findFirst({ where: { cafeId }, select: { taxesEnabled: true } });
+    if (!settings?.taxesEnabled) return [];
+    return db.menuTax.findMany({ where: { cafeId, type: 'vat' }, orderBy: { name: 'asc' },
+      select: { id: true, name: true, rate: true } });
+  }
+
   private serializeItem(item: {
     id: string;
     ingredientId: string;
@@ -54,7 +67,8 @@ export class PurchasesService {
     quantityBase: Prisma.Decimal;
     purchasePrice: Prisma.Decimal;
     total: Prisma.Decimal;
-  grossTotal: Prisma.Decimal;
+    grossTotal: Prisma.Decimal;
+    taxId: string | null; taxName: string | null; taxRate: Prisma.Decimal | null; taxAmount: Prisma.Decimal;
     ingredient?: { name: string } | null;
     packageId?: string | null; packageName?: string | null; packageUnit?: string | null;
     packageQuantity?: Prisma.Decimal | null; packageFactor?: Prisma.Decimal | null;
@@ -71,6 +85,8 @@ export class PurchasesService {
       quantityBase: Number(item.quantityBase),
       purchasePrice: Number(item.purchasePrice),
       total: Number(item.total), grossTotal: Number(item.grossTotal),
+      taxId: item.taxId, taxName: item.taxName, taxRate: item.taxRate === null ? null : Number(item.taxRate),
+      taxAmount: Number(item.taxAmount), totalWithTax: Number(item.total.add(item.taxAmount)),
     };
   }
 
@@ -284,7 +300,8 @@ export class PurchasesService {
       await tx.$queryRaw`SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtext(${`purchase-request:${cafeId}:${dto.requestKey}`}))) AS request_lock`;
       const previous = await tx.purchase.findUnique({ where: { cafeId_requestKey: { cafeId, requestKey: dto.requestKey } }, include: { items: true } });
       if (previous) {
-        const lineKey = (item: { ingredientId: string; quantityBase: Prisma.Decimal; grossTotal: Prisma.Decimal }) => `${item.ingredientId}:${item.quantityBase}:${item.grossTotal}`;
+        const lineKey = (item: { ingredientId: string; quantityBase: Prisma.Decimal; grossTotal: Prisma.Decimal; taxId?: string | null }) =>
+          JSON.stringify([item.ingredientId, item.quantityBase, item.grossTotal, item.taxId ?? null]);
         if (previous.warehouseId !== (warehouse?.id ?? null) || !previous.discount.eq(discount)
           || previous.effectiveAt?.getTime() !== effectiveAt?.getTime()
           || (dto.supplierId ? previous.supplierId !== dto.supplierId : previous.supplier.trim().toLocaleLowerCase() !== (dto.supplier?.trim() || (allowMissingSupplier ? 'Без поставщика' : '')).toLocaleLowerCase())
@@ -295,7 +312,7 @@ export class PurchasesService {
       }
     }
     const items = this.discountItems(await this.normalizeItems(dto.items, tx), discount);
-    const total = items.reduce((acc, item) => acc.add(item.total), new Prisma.Decimal(0));
+    const total = items.reduce((acc, item) => acc.add(item.total).add(item.taxAmount), new Prisma.Decimal(0));
     const supplier = await resolveWarehouseSupplier(tx, { ...dto, required: !allowMissingSupplier });
     if (dto.complete) await lockIngredients(tx, items.map((item) => item.ingredientId));
     const purchase = await tx.purchase.create({
@@ -327,7 +344,7 @@ export class PurchasesService {
       }
       const quantity = new Prisma.Decimal(item.quantity).toDecimalPlaces(3);
       const factor = original.packageFactor ?? original.quantityBase.div(original.quantity);
-      return { ingredientId: item.ingredientId, quantityBase: quantity.mul(factor).toDecimalPlaces(3),
+      return { ingredientId: item.ingredientId, taxId: item.taxId, quantityBase: quantity.mul(factor).toDecimalPlaces(3),
         grossTotal: (item.total != null ? new Prisma.Decimal(item.total) : quantity.mul(item.purchasePrice!)).toDecimalPlaces(2) };
     });
   }
@@ -354,7 +371,7 @@ export class PurchasesService {
       const supplier = dto.supplier !== undefined || dto.supplierId !== undefined ? await resolveWarehouseSupplier(tx, { ...dto, required: true }) : undefined;
       const discount = new Prisma.Decimal(dto.discount ?? purchase.discount).toDecimalPlaces(2);
       const items = rawItems ? this.discountItems(rawItems, discount) : undefined;
-      const total = items?.reduce((sum, item) => sum.add(item.total), new Prisma.Decimal(0));
+      const total = items?.reduce((sum, item) => sum.add(item.total).add(item.taxAmount), new Prisma.Decimal(0));
       if (items) {
         await tx.purchaseItem.deleteMany({ where: { purchaseId: id } });
         for (const item of items) {
@@ -455,7 +472,7 @@ export class PurchasesService {
       supplier: supplier?.supplier ?? undefined, supplierId: supplier?.supplierId,
       note: dto.note === undefined ? undefined : dto.note?.trim() || null, attachments: dto.attachments,
       discount, warehouseId: nextWarehouse?.id ?? null,
-      totalAmount: items?.reduce((sum, item) => sum.add(item.total), new Prisma.Decimal(0)),
+      totalAmount: items?.reduce((sum, item) => sum.add(item.total).add(item.taxAmount), new Prisma.Decimal(0)),
       updatedAt: new Date(Math.max(Date.now(), purchase.updatedAt.getTime() + 1)),
     }, include: { items: { include: { ingredient: { select: { name: true } } } } } });
     const after = JSON.parse(JSON.stringify(this.serialize(updated))) as Prisma.InputJsonValue;
@@ -540,7 +557,7 @@ export class PurchasesService {
       if (!ingredient) throw new NotFoundException('Сырьё закупки не найдено');
 
       if (item.quantityBase.lte(0)) throw new BadRequestException('Количество должно быть больше нуля');
-      total = total.add(item.total);
+      total = total.add(item.total).add(item.taxAmount);
       const result = await postStockMovement(tx, { ingredientId: item.ingredientId, warehouse,
         change: item.quantityBase, cost: item.total.div(item.quantityBase), costKnown: true, value: item.total, valuation: 'average',
         movement: { type: 'purchase', sourceType: 'purchase', sourceId: purchase.id,
@@ -572,6 +589,7 @@ export class PurchasesService {
       quantity: new Prisma.Decimal(i.quantity),
       purchasePrice: new Prisma.Decimal(i.purchasePrice),
       total: new Prisma.Decimal(i.total), grossTotal: i.grossTotal,
+      taxId: i.taxId, taxName: i.taxName, taxRate: i.taxRate, taxAmount: i.taxAmount,
       quantityBase: new Prisma.Decimal(i.quantityBase),
       unitPriceBase: new Prisma.Decimal(i.unitPriceBase),
     };
@@ -594,10 +612,10 @@ export class PurchasesService {
     for (const item of items) {
       if (!item.purchaseItemId) continue;
       const saved = savedById.get(item.purchaseItemId);
-      if (!saved || !item.packageId || saved.ingredientId !== item.ingredientId || saved.packageId !== item.packageId) {
-        throw new BadRequestException('Сохранённая строка фасовки не относится к этой позиции прихода');
+      if (!saved || saved.ingredientId !== item.ingredientId || saved.packageId !== (item.packageId ?? null)) {
+        throw new BadRequestException('Сохранённая строка не относится к этой позиции прихода');
       }
-      if (usedSnapshots.has(saved.id)) throw new BadRequestException('Сохранённая строка фасовки указана несколько раз');
+      if (usedSnapshots.has(saved.id)) throw new BadRequestException('Сохранённая строка поставки указана несколько раз');
       usedSnapshots.add(saved.id);
     }
     const ids = [...new Set(items.map((i) => i.ingredientId).filter(Boolean))];
@@ -609,6 +627,8 @@ export class PurchasesService {
     const packageIds = [...new Set(items.flatMap((item) => item.packageId ? [item.packageId] : []))];
     const packages = packageIds.length ? await db.warehousePackage.findMany({ where: { id: { in: packageIds }, isActive: true } }) : [];
     const byPackage = new Map(packages.map((item) => [item.id, item]));
+    const needsTaxLookup = items.some(i => i.taxId && (!i.purchaseItemId || savedById.get(i.purchaseItemId)?.taxId !== i.taxId));
+    const taxes = needsTaxLookup ? await this.taxOptions(db) : [];
 
     return items.map((i) => {
       if (!i.ingredientId) throw new BadRequestException('Выберите сырьё в каждой позиции');
@@ -618,7 +638,23 @@ export class PurchasesService {
       if (ingredient.preparationMode === 'virtual') throw new BadRequestException('Заготовка без остатка не может поступать на склад');
       if (!Number.isFinite(i.quantity) || i.quantity <= 0) throw new BadRequestException('Количество должно быть больше 0');
       const quantity = new Prisma.Decimal(i.quantity).toDecimalPlaces(3);
-      const snapshot = i.purchaseItemId ? savedById.get(i.purchaseItemId)! : undefined;
+      const original = i.purchaseItemId ? savedById.get(i.purchaseItemId) : undefined;
+      const snapshot = i.packageId ? original : undefined;
+      let taxSource = original;
+      if (!original && i.taxId === undefined) {
+        const matches = savedItems.filter(saved => !usedSnapshots.has(saved.id) && saved.ingredientId === i.ingredientId
+          && saved.packageId === (i.packageId ?? null) && (!i.unit || saved.unit === i.unit));
+        if (matches.some(saved => saved.taxId)) {
+          const sameProduct = items.filter(other => !other.purchaseItemId && other.ingredientId === i.ingredientId
+            && (other.packageId ?? null) === (i.packageId ?? null) && other.unit === i.unit);
+          if (matches.length !== 1 || sameProduct.length !== 1) throw new BadRequestException('Укажите налог для каждой повторяющейся позиции поставки.');
+          taxSource = matches[0];
+        }
+      }
+      const taxId = i.taxId === undefined ? taxSource?.taxId : i.taxId;
+      const tax = taxId && taxId === taxSource?.taxId && taxSource.taxRate != null
+        ? { id: taxId, name: taxSource.taxName, rate: taxSource.taxRate } : taxes.find(t => t.id === taxId);
+      if (taxId && !tax) throw new BadRequestException('Выберите действующий налог на добавленную стоимость.');
       const pack = i.packageId ? byPackage.get(i.packageId) : undefined;
       if (i.packageId && !pack && !snapshot) throw new BadRequestException('Фасовка не найдена или находится в архиве');
       if (!snapshot && pack && pack.unitType !== ingredient.unitType) throw new BadRequestException('Фасовка несовместима с единицей товара');
@@ -639,6 +675,7 @@ export class PurchasesService {
       const quantityBase = quantity.mul(factor).toDecimalPlaces(3);
       if (quantityBase.lte(0) || quantityBase.gte('100000000000')) throw new BadRequestException('Количество вне допустимого диапазона');
       return { ingredientId: i.ingredientId, unit, quantity, total, grossTotal: total, quantityBase,
+        taxId: tax?.id ?? null, taxName: tax?.name ?? null, taxRate: tax?.rate ?? null, taxAmount: new Prisma.Decimal(0),
         ...(snapshot ? { packageId: snapshot.packageId!, packageName: snapshot.packageName ?? snapshot.unit,
           packageUnit: snapshot.packageUnit ?? undefined, packageQuantity: snapshot.packageQuantity ?? undefined, packageFactor: factor }
           : pack ? { packageId: pack.id, packageName: pack.name, packageUnit: pack.unit, packageQuantity: pack.quantity, packageFactor: factor }
@@ -658,7 +695,8 @@ export class PurchasesService {
       const share = target.sub(allocated);
       allocated = target;
       const total = item.total.sub(share);
-      return { ...item, total, unitPriceBase: total.div(item.quantityBase).toDecimalPlaces(8) };
+      const taxAmount = total.mul(item.taxRate ?? 0).div(100).toDecimalPlaces(2);
+      return { ...item, total, taxAmount, unitPriceBase: total.div(item.quantityBase).toDecimalPlaces(8) };
     });
   }
 

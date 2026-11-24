@@ -44,6 +44,8 @@ export class WriteoffSourceLineDto {
 }
 
 export class WriteoffPreviewDto {
+  @IsOptional() @IsString() @MaxLength(35)
+  effectiveAt?: string | null;
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
   documentId?: string;
   @IsString() @IsNotEmpty() @MaxLength(160)

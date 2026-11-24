@@ -82,6 +82,10 @@ class CashOperationDto {
   @IsOptional()
   @IsISO8601({ strict: true })
   occurredAt?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  dealDate?: string | null;
 }
 
 class CreateCashOperationDto extends CashOperationDto {
@@ -219,8 +223,16 @@ function cashOperationDate(shift: CashShift, input: CashOperation, previous?: Da
   return at;
 }
 
+function cashDealDate(input: CashOperation, previous: Date | null = null) {
+  if (input.kind === 'collection' || input.dealDate === null) return null;
+  if (input.dealDate === undefined) return previous;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.dealDate)) throw new BadRequestException('Укажите дату сделки в формате ГГГГ-ММ-ДД');
+  warehouseDateRange(input.dealDate);
+  return new Date(input.dealDate + 'T00:00:00Z');
+}
+
 async function storeOperation(db: Db, shift: CashShift, actorId: string, input: CashOperation,
-  categoryId: string | null, sourceKey: string, occurredAt: Date,
+  categoryId: string | null, sourceKey: string, occurredAt: Date, dealDate: Date | null,
   previous?: { id: string; counterpartyAccountId: string | null; amount: Prisma.Decimal }, authorId: string | null = actorId) {
   const { cafeId, id: cashShiftId, accountId } = shift;
   const transfer = input.kind === 'collection';
@@ -228,7 +240,7 @@ async function storeOperation(db: Db, shift: CashShift, actorId: string, input: 
     ? previous?.counterpartyAccountId ?? (await ensureCollectionAccount(db, cafeId)).id : null;
   const amount = new Prisma.Decimal(input.amount).mul(input.kind === 'income' ? 1 : -1);
   const data = { kind: transfer ? 'transfer' as const : input.kind as 'income' | 'expense',
-    actorId: authorId, amount, categoryId, counterpartyAccountId: destination, occurredAt, note: input.note?.trim() || null };
+    actorId: authorId, amount, categoryId, counterpartyAccountId: destination, occurredAt, dealDate, note: input.note?.trim() || null };
   const pendingCashShift = !shift.closedAt;
   if (pendingCashShift) {
     await assertDrawerBalance(db, shift, amount.sub(previous?.amount ?? 0));
@@ -318,7 +330,7 @@ export class CashShiftsService {
             { cashShiftId: null, account: { type: 'noncash' }, kind: { in: ['sale', 'refund'] },
               occurredAt: { gte: shift.openedAt, lte: shift.closedAt ?? new Date() } },
           ] },
-          select: { id: true, accountId: true, actorId: true, occurredAt: true, kind: true, sourceKey: true,
+          select: { id: true, accountId: true, actorId: true, occurredAt: true, dealDate: true, kind: true, sourceKey: true,
             note: true, amount: true, category: { select: { id: true, name: true } },
             counterparty: { select: { isCollection: true } } },
         }),
@@ -391,6 +403,7 @@ export class CashShiftsService {
       await lockFinance(db, cafeId);
       const shift = await findShift(db, cafeId, id);
       const sourceKey = posKey + input.requestKey;
+      const dealDate = cashDealDate(input);
       const atRegister = actor.role === Role.WAITER;
       const existing = await db.financeEntry.findUnique({ where: { cafeId_sourceKey: { cafeId, sourceKey } } });
       if (existing) {
@@ -399,6 +412,7 @@ export class CashShiftsService {
         if (existing.cashShiftId !== id || existing.actorId !== actor.id || existing.kind !== kind
           || !existing.amount.eq(amount) || existing.categoryId !== (input.categoryId ?? null)
           || existing.note !== (input.note?.trim() || null)
+          || existing.dealDate?.getTime() !== dealDate?.getTime()
           || (input.occurredAt && new Date(input.occurredAt).getTime() !== existing.occurredAt.getTime())) {
           throw new ConflictException('Этот запрос уже использован для другой операции');
         }
@@ -409,7 +423,7 @@ export class CashShiftsService {
       }
       if (atRegister && (shift.closedAt || input.occurredAt)) throw new ConflictException('Операцию можно провести только в открытой смене');
       const categoryId = await cashCategory(db, cafeId, input, actor.role !== Role.OWNER && !canManageFinance(actor));
-      return storeOperation(db, shift, actor.id, input, categoryId, sourceKey, cashOperationDate(shift, input));
+      return storeOperation(db, shift, actor.id, input, categoryId, sourceKey, cashOperationDate(shift, input), dealDate);
     });
   }
 
@@ -440,7 +454,7 @@ export class CashShiftsService {
           authorChange = `Автор операции кассовой смены изменён с «${previous?.name ?? 'Не указан'}» на «${replacement.name}»`;
         }
         const updated = await storeOperation(db, shift, actor.id, input, categoryId, original.sourceKey,
-          cashOperationDate(shift, input, original.occurredAt), original, input.authorId ?? original.actorId);
+          cashOperationDate(shift, input, original.occurredAt), cashDealDate(input, original.dealDate), original, input.authorId ?? original.actorId);
         return { original, updated, authorChange };
       }
       if (!shift.closedAt) await assertDrawerBalance(db, shift, original.amount.negated());
@@ -455,8 +469,8 @@ export class CashShiftsService {
       return { original, updated: null, authorChange: null };
     });
     if (!result) return { id: entryId };
-    const snapshot = ({ kind, amount, categoryId, occurredAt, note, actorId }: Pick<typeof result.original, 'kind' | 'amount' | 'categoryId' | 'occurredAt' | 'note' | 'actorId'>) =>
-      ({ kind, amount: amount.toNumber(), categoryId, occurredAt: occurredAt.toISOString(), note, actorId });
+    const snapshot = ({ kind, amount, categoryId, occurredAt, dealDate, note, actorId }: Pick<typeof result.original, 'kind' | 'amount' | 'categoryId' | 'occurredAt' | 'dealDate' | 'note' | 'actorId'>) =>
+      ({ kind, amount: amount.toNumber(), categoryId, occurredAt: occurredAt.toISOString(), dealDate: dealDate?.toISOString().slice(0, 10) ?? null, note, actorId });
     await this.audit.log({ actor, actionType: AuditAction.FINANCE_TRANSACTION_UPDATED, entityType: AuditEntity.FINANCE_TRANSACTION,
       entityId: entryId, description: result.updated ? result.authorChange ?? 'Изменена операция кассовой смены' : 'Удалена операция кассовой смены',
       oldValue: snapshot(result.original), newValue: result.updated ? snapshot(result.updated) : null });

@@ -1,4 +1,6 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { extname } from 'node:path';
 import type { Response } from 'express';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Role } from '@prisma/client';
@@ -10,6 +12,8 @@ import { assertWarehousePermission } from './warehouse-permissions';
 import { IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { BalanceExportQuery, BalanceListQuery } from './balance-xlsx';
+import { IngredientImportDto } from './ingredient-import';
+import { readImportSpreadsheet } from './read-import-spreadsheet';
 
 class RenameIngredientCategoryDto {
   @IsString() @IsNotEmpty() @MaxLength(120)
@@ -37,6 +41,30 @@ class IngredientSuppliesQuery {
 @RequirePermission('sections.warehouse')
 export class IngredientsController {
   constructor(private readonly ingredients: IngredientsService) {}
+
+  @Post('import/read')
+  @Roles(Role.ADMIN, Role.OWNER)
+  @RequirePermission('actions.warehouseReceive')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024, files: 1, fields: 0 } }))
+  importFile(@UploadedFile() file?: { originalname: string; buffer: Buffer }) {
+    if (!file) throw new BadRequestException('Выберите таблицу ингредиентов.');
+    try {
+      const sheets = readImportSpreadsheet(file.buffer, extname(file.originalname).toLowerCase());
+      if (sheets.length !== 1) throw new Error('Оставьте один видимый лист с ингредиентами.');
+      const [headings, ...rows] = sheets[0];
+      if (!headings?.length || !rows.length) throw new Error('В таблице нужны заголовки и хотя бы одна строка.');
+      return { headings: headings.map(String), rows: rows.map((row) => row.map(String)) };
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : 'Не удалось прочитать таблицу.');
+    }
+  }
+
+  @Post('import')
+  @Roles(Role.ADMIN, Role.OWNER)
+  @RequirePermission('actions.warehouseReceive')
+  importIngredients(@Body() dto: IngredientImportDto) {
+    return this.ingredients.importCatalogue(dto);
+  }
 
   @Post('categories/rename')
   @Roles(Role.ADMIN, Role.OWNER)

@@ -56,6 +56,7 @@ export function CategoryDirectory({ categories, employees, positions, search, ki
       { key: 'name', label: 'Название', width: '37%', sort: { ascending, toggle: toggleSort } },
       { key: 'type', label: 'Допустимые транзакции', width: '22%' },
       { key: 'pos', label: 'Показывать на кассе', width: '19%' },
+      { key: 'pnl', label: 'Отображать в P&L' },
       { key: 'access', label: 'Дополнительный доступ' },
     ]} reportActions={false} filters={filters} tools={add}
       rows={flatten(null, 0).map(({ category, depth, hasChildren, open }) => {
@@ -72,6 +73,10 @@ export function CategoryDirectory({ categories, employees, positions, search, ki
               : <span className="finance-category-expander" aria-hidden="true">{hasChildren && '⌄'}</span>}{category.name}
           </span> },
           type: { value: categoryType[category.kind] },
+          pnl: { value: category.showInProfitLoss !== false ? 'Да' : 'Нет', display: edit && <button type="button" role="switch"
+            aria-label={'Отображать в P&L — ' + category.name} aria-checked={category.showInProfitLoss !== false}
+            disabled={setCategoryVisibility.isPending} className="finance-category-switch"
+            onClick={() => setCategoryVisibility.mutate({ id: category.id, showInProfitLoss: category.showInProfitLoss === false })}><span /></button> },
           pos: { value: category.showOnPos ? 'Да' : 'Нет', display: edit && <button type="button" role="switch"
             aria-label={'Показывать на кассе: ' + category.name} aria-checked={!!category.showOnPos}
             disabled={setCategoryVisibility.isPending} className="finance-category-switch"

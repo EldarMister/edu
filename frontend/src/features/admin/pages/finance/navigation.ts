@@ -1,6 +1,7 @@
 export const FINANCE_NAV = [
   { key: 'transactions', label: 'Транзакции' },
   { key: 'cashFlow', label: 'Движение денег' },
+  { key: 'profitLoss', label: 'Прибыли и убытки (P&L)' },
   { key: 'cashShifts', label: 'Кассовые смены' },
   { key: 'cashHandover', label: 'Сдача наличных' },
   { key: 'payroll', label: 'Зарплата' },

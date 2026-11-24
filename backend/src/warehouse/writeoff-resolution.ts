@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { getCafeId } from '../tenant/tenant-context';
 import type { WriteoffSourceLineDto } from './documents.dto';
 import { RecipeResolver, recipeAmount, recipeRowsForVariant } from './recipe-resolution';
+import { writeoffRecipeVersion } from './recipe-revisions';
 import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, unitLabel, type UnitCode } from './units';
 import { warehouseBalances, type WarehouseLocation } from './warehouse-location';
 
@@ -29,10 +30,10 @@ export function readWriteoffSnapshot(value: Prisma.JsonValue | null): WriteoffSn
 
 /** Caller holds the shared recipe graph lock before any ingredient locks. */
 export async function resolveWriteoffSources(tx: Prisma.TransactionClient, warehouse: WarehouseLocation,
-  inputs: WriteoffSourceLineDto[], requireSignatures = false, allowEmpty = false, savedSnapshot?: WriteoffSnapshot | null): Promise<WriteoffSnapshot> {
+  inputs: WriteoffSourceLineDto[], requireSignatures = false, allowEmpty = false, savedSnapshot?: WriteoffSnapshot | null, effectiveAt?: Date | null): Promise<WriteoffSnapshot> {
   if (!Array.isArray(inputs) || (!allowEmpty && !inputs.length) || inputs.length > 200) throw new BadRequestException('Добавьте продукты для списания');
   if (new Set(inputs.map((line) => line.sourceLineId)).size !== inputs.length) throw new BadRequestException('Строка списания указана несколько раз');
-  const resolver = new RecipeResolver(tx);
+  const resolver = new RecipeResolver(tx, { effectiveAt, allowInactive: !!effectiveAt });
   const packageIds = [...new Set(inputs.flatMap((input) => input.packageId && !input.packageSnapshotLineId ? [input.packageId] : []))];
   const packages = new Map((packageIds.length ? await tx.warehousePackage.findMany({ where: { cafeId: warehouse.cafeId, id: { in: packageIds }, isActive: true } }) : []).map((pack) => [pack.id, pack]));
   const lines: WriteoffSourceLine[] = [];
@@ -63,10 +64,15 @@ export async function resolveWriteoffSources(tx: Prisma.TransactionClient, wareh
       if (pack) assertUnitMatchesType(pack.packageUnit, ingredient.unitType);
       name = ingredient.name;
       roots.push({ ingredientId: ingredient.id, amount: new Prisma.Decimal(input.quantity).mul(pack?.packageFactor ?? toBase(1, unit)) });
-      recipe = { kind: ingredient.preparationMode === 'virtual' ? 'virtual' : 'stock', preparationMode: ingredient.preparationMode };
+      const { mode } = await resolver.preparation(ingredient);
+      recipe = { kind: mode === 'virtual' ? 'virtual' : 'stock', preparationMode: mode };
     } else if (input.kind === 'dish') {
-      const dish = await tx.dish.findFirst({ where: { id: input.sourceId, cafeId: warehouse.cafeId, isActive: true }, include: { variants: true, recipeItems: true } });
-      if (!dish || dish.isSet) throw new BadRequestException('Техкарта недоступна для списания');
+      const current = await tx.dish.findFirst({ where: { id: input.sourceId, cafeId: warehouse.cafeId, isActive: true }, include: { variants: true, recipeItems: true } });
+      if (!current || effectiveAt && current.createdAt > effectiveAt) throw new BadRequestException('Техкарта недоступна на дату списания');
+      const revision = effectiveAt ? await tx.recipeRevision.findFirst({ where: { dishId: current.id, cafeId: warehouse.cafeId, createdAt: { gt: effectiveAt } },
+        orderBy: [{ createdAt: 'asc' }, { version: 'asc' }] }) : null;
+      const dish = revision ? writeoffRecipeVersion(current, revision) : current;
+      if (dish.isSet) throw new BadRequestException('Техкарта недоступна для списания');
       const variant = input.variantId ? dish.variants.find((entry) => entry.id === input.variantId) : undefined;
       if (input.variantId && !variant) throw new BadRequestException('Вариант не относится к блюду');
       if (dish.variants.length && !variant) throw new BadRequestException('Выберите вариант блюда');
@@ -82,7 +88,7 @@ export async function resolveWriteoffSources(tx: Prisma.TransactionClient, wareh
       name = variant ? `${dish.name} · ${variant.name}` : dish.name;
       const directId = variant?.stockIngredientId ?? dish.stockIngredientId;
       if (directId) roots.push({ ingredientId: directId, amount: (variant?.stockIngredientId ? variant.stockAmount : dish.stockAmount).mul(multiplier) });
-      else for (const row of recipeRowsForVariant(dish.recipeItems, variant)) roots.push({
+      else for (const row of recipeRowsForVariant<{ ingredientId: string; amount: Prisma.Decimal; variantId: string | null; variantAmounts: Prisma.JsonValue }>(dish.recipeItems, variant)) roots.push({
         ingredientId: row.ingredientId, amount: recipeAmount(row, variant?.recipeMetadata == null ? variant?.id : undefined).mul(multiplier),
       });
       recipe = { kind: directId ? 'direct' : 'recipe', dishId: dish.id, recipeVersion: dish.recipeVersion,

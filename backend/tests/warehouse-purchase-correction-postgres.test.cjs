@@ -175,6 +175,43 @@ test('PostgreSQL: return limits aggregate duplicate receipt lines, exclude draft
   assert.equal((await purchases.findOne(purchase.id)).returnableItems[0].remainingQuantity, 2500);
 }));
 
+test('purchase VAT changes the payable amount independently of stock cost and retains the original rate after editing', { skip: !url }, async () => fixture(async ({ db, cafe, warehouse, ingredients, purchases, actor }) => {
+  await db.settings.create({ data: { taxesEnabled: true } });
+  const tax = await db.menuTax.create({ data: { name: 'НС', type: 'vat', rate: 3 } });
+  const turnover = await db.menuTax.create({ data: { name: 'С оборота', type: 'turnover', rate: 10 } });
+  const flour = await ingredients.create({ name: 'Мука НДС', unit: 'kg' });
+  const line = { ingredientId: flour.id, quantity: 1, unit: 'kg', purchasePrice: 100, taxId: tax.id };
+  const payload = { supplier: 'Закупка', complete: true, warehouseId: warehouse.id, requestKey: randomUUID(), items: [line] };
+  assert.deepEqual((await purchases.taxOptions()).map(x => x.id), [tax.id]);
+  await assert.rejects(purchases.create({ ...payload, items: [{ ...line, taxId: turnover.id }] }, actor), /добавленную стоимость/);
+  const purchase = await purchases.create(payload, actor);
+  assert.equal(purchase.totalAmount, 103);
+  assert.equal(purchase.debtAmount, 103);
+  assert.equal(purchase.items[0].total, 100);
+  assert.equal(purchase.items[0].taxAmount, 3);
+  assert.equal((await ingredients.findOne(flour.id)).avgCost, 100);
+  assert.equal((await purchases.create(payload, actor)).id, purchase.id);
+  await assert.rejects(purchases.create({ ...payload, items: [{ ...line, taxId: null }] }, actor), /повторного запроса/);
+  await db.menuTax.update({ where: { id: tax.id }, data: { rate: 5 } });
+  const edited = await purchases.update(purchase.id, { expectedUpdatedAt: purchase.updatedAt.toISOString(), discount: 10,
+    items: [{ ...line, quantity: 2, purchaseItemId: purchase.items[0].id }] }, actor);
+  assert.equal(edited.items[0].taxRate, 3);
+  assert.equal(edited.debtAmount, 195.7);
+  assert.equal(edited.items[0].taxAmount, 5.7);
+  assert.equal((await ingredients.findOne(flour.id)).avgCost, 95);
+  const plainLine = { ingredientId: flour.id, quantity: 2, unit: 'kg', purchasePrice: 100 };
+  const legacy = await purchases.update(purchase.id, { expectedUpdatedAt: edited.updatedAt.toISOString(), items: [plainLine] }, actor);
+  assert.equal(legacy.items[0].taxRate, 3);
+  assert.equal(legacy.debtAmount, 195.7);
+  const untaxed = await purchases.update(purchase.id, { expectedUpdatedAt: legacy.updatedAt.toISOString(),
+    items: [{ ...plainLine, purchaseItemId: legacy.items[0].id, taxId: null }] }, actor);
+  assert.equal(untaxed.items[0].taxAmount, 0);
+  assert.equal(untaxed.debtAmount, 190);
+  await runWithTenant({ cafeId: randomUUID() }, async () => assert.deepEqual(await purchases.taxOptions(), []));
+  await db.settings.deleteMany({ where: { cafeId: cafe.id } });
+  await db.menuTax.deleteMany({ where: { cafeId: cafe.id } });
+}));
+
 test('PostgreSQL: last purchase prices use invoices, warehouse/tenant scope and do not substitute weighted cost', { skip: !url }, async () => fixture(async ({ db, cafe, locations, warehouse, ingredients, purchases }) => {
   const ingredient = await ingredients.create({ name: 'Last price flour', unit: 'kg', stock: 10, avgCost: 1 });
   const earlier = new Date(Date.now() - 86400000).toISOString();

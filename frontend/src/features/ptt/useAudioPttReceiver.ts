@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSocket } from '@/lib/socket';
 import { useAuth } from '@/store/auth';
-import { playRadioAudio } from '@/lib/audio';
+import { getAudioContext, playRadioAudio } from '@/lib/audio';
 import { PttPlayback } from './liveAudio';
 import { createPttOpusDecoder, isPttOpusCodec, preparePttOpus, pttOpusFrames, pttOpusHeader, PTT_OPUS_PROFILES } from './opusAudio';
 import { playPttCue, playPttMessage } from './sounds';
@@ -69,7 +69,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
     const sock = getSocket();
     const onAudio = (payload: PttAudioPayload) => {
       const audibleForCurrentChannel = payload.channel === channel || payload.channel === 'general';
-      if (!audibleForCurrentChannel || payload.senderId === userId || radioInputActive()) return;
+      if (payload.segment || !audibleForCurrentChannel || payload.senderId === userId || radioInputActive()) return;
       queueRef.current.push(payload);
       pump();
     };
@@ -124,6 +124,21 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
 
     function hears(source: PttChannel, senderId: string) {
       return (source === 'general' || source === channel) && senderId !== userId;
+    }
+
+    function onSegment(payload: PttAudioPayload) {
+      const id = payload.talkId;
+      if (!payload.segment || !id || !hears(payload.channel, payload.senderId) || radioInputActive()) return;
+      queue(async () => {
+        const bytes = base64ToBytes(payload.chunk);
+        const buffer = await getAudioContext().decodeAudioData(bytes.buffer as ArrayBuffer);
+        if (!active || radioInputActive()) return;
+        const startsTalk = talkId !== id;
+        window.clearTimeout(endTimer);
+        talkId = id;
+        if (startsTalk) setLiveSpeaker({ id: payload.senderId, name: payload.senderName, role: payload.senderRole });
+        if (!playback.pushSegment(buffer, startsTalk) && startsTalk) void playPttCue('start', 'receiver');
+      });
     }
 
     function onBusy(payload: PttBusyPayload) {
@@ -219,6 +234,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
 
     socket.on(PTT_EVENTS.CHANNEL_BUSY, onBusy);
     socket.on(PTT_EVENTS.AUDIO_PACKET, onPacket);
+    socket.on(PTT_EVENTS.AUDIO_MESSAGE, onSegment);
     socket.on(PTT_EVENTS.AUDIO_BATCH, sequenced.batch);
     socket.on(PTT_EVENTS.PRESENCE, onPresence);
     socket.on(PTT_EVENTS.AUDIO_FRAME, onFrame);
@@ -228,6 +244,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
       active = false;
       socket.off(PTT_EVENTS.CHANNEL_BUSY, onBusy);
       socket.off(PTT_EVENTS.AUDIO_PACKET, onPacket);
+      socket.off(PTT_EVENTS.AUDIO_MESSAGE, onSegment);
       socket.off(PTT_EVENTS.AUDIO_BATCH, sequenced.batch);
       socket.off(PTT_EVENTS.PRESENCE, onPresence);
       stopOnInput();

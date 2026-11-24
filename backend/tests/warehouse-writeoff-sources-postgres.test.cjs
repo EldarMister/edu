@@ -8,6 +8,8 @@ const { IngredientsService } = require('../src/warehouse/ingredients.service.ts'
 const { WarehouseLocationsService } = require('../src/warehouse/locations.service.ts');
 const { WarehouseDocumentsService } = require('../src/warehouse/documents.service.ts');
 const { lockRecipeGraph } = require('../src/warehouse/recipe-resolution.ts');
+const { archiveDishRecipe } = require('../src/warehouse/recipe-revisions.ts');
+const { PreparationProductionService } = require('../src/warehouse/preparation-production.ts');
 const { redactWarehouseCosts } = require('../src/warehouse/warehouse-cost.interceptor.ts');
 
 const url = process.env.ORDER_FEATURE_TEST_DATABASE_URL;
@@ -20,6 +22,7 @@ test('PostgreSQL: recipe writeoffs retain source lines and immutable ingredient 
   try {
     await runWithTenant({ cafeId: cafe.id }, async () => {
       const owner = { id: randomUUID(), role: 'OWNER', name: 'Owner', cafeId: cafe.id };
+      await db.user.create({ data: { ...owner, phone: randomUUID(), passwordHash: 'unused-test-password' } });
       const ingredients = new IngredientsService(db);
       const locations = new WarehouseLocationsService(db, { emitBroadcast() {} });
       const docs = new WarehouseDocumentsService(db);
@@ -46,6 +49,70 @@ test('PostgreSQL: recipe writeoffs retain source lines and immutable ingredient 
       const withSignatures = (rows, preview) => rows.map((row) => ({ ...row, recipeSignature: preview.sourceLines.find((line) => line.sourceLineId === row.sourceLineId).recipeSignature }));
       const stock = async (id) => (await ingredients.findOne(id)).balances.find((balance) => balance.warehouseId === main.id).stock;
       let posted;
+      await t.test('backdated writeoff uses the dish, its deleted variant and recursive preparation as of the stock date', async () => {
+        const preparations = new PreparationProductionService(db);
+        const prep = await preparations.saveCard({ requestKey: randomUUID(), name: 'Old stock recipe', unit: 'kg', mode: 'virtual',
+          outputQuantity: 100, outputUnit: 'g', items: [{ ingredientId: flour.id, quantity: 100, unit: 'g' }] });
+        const historicalDish = await db.dish.create({ data: { name: 'Dumplings', price: 50, categoryId: category.id } });
+        const size = await db.dishVariant.create({ data: { dishId: historicalDish.id, name: 'Small', price: 25 } });
+        await db.recipeItem.create({ data: { dishId: historicalDish.id, ingredientId: prep.id, amount: 100, variantAmounts: { [size.id]: '50' } } });
+        const effectiveAt = new Date().toISOString();
+        const line = source('dish', historicalDish.id, 2, 'pcs', size.id);
+        const initial = await docs.writeoffPreview({ warehouseId: main.id, effectiveAt, sourceLines: [line] });
+        assert.equal(initial.sourceLines[0].parts[0].quantity, 0.1);
+        await preparations.saveRecipe(prep.id, { outputQuantity: 100, outputUnit: 'g', mode: 'stocked',
+          items: [{ ingredientId: water.id, quantity: 100, unit: 'ml' }] });
+        await db.$transaction(async (tx) => {
+          await lockRecipeGraph(tx);
+          await archiveDishRecipe(tx, historicalDish.id);
+          await tx.dishVariant.delete({ where: { id: size.id } });
+          await tx.recipeItem.deleteMany({ where: { dishId: historicalDish.id } });
+          await tx.dish.update({ where: { id: historicalDish.id }, data: { name: 'New dumplings', stockIngredientId: water.id, stockAmount: 250, recipeVersion: { increment: 1 } } });
+        });
+        const chooser = await docs.writeoffOptions(effectiveAt);
+        assert.equal(chooser.dishes.find((d) => d.id === historicalDish.id).variants[0].id, size.id);
+        assert.equal((await docs.writeoffOptions()).dishes.find((d) => d.id === historicalDish.id).variants.length, 0);
+        const past = await docs.writeoffPreview({ warehouseId: main.id, effectiveAt, sourceLines: [line] });
+        assert.deepEqual(past.sourceLines[0], initial.sourceLines[0]);
+        const today = await docs.writeoffPreview({ warehouseId: main.id, sourceLines: [{ ...line, variantId: undefined }] });
+        assert.equal(today.sourceLines[0].parts[0].ingredientId, water.id);
+        assert.equal(today.sourceLines[0].parts[0].quantity, 0.5);
+        const draft = await docs.create(owner, { warehouseId: main.id, kind: 'writeoff', effectiveAt, reason: 'tasting', sourceLines: withSignatures([line], initial) });
+        const submitted = await docs.submit(owner, draft.id, draft.revision);
+        const posted = await docs.approve(owner, draft.id, submitted.revision);
+        assert.equal(posted.sourceLines[0].name, 'Dumplings · Small');
+        assert.equal(posted.items[0].ingredientId, flour.id);
+        const movement = await db.stockMovement.findFirstOrThrow({ where: { sourceId: posted.id } });
+        assert.equal(movement.ingredientId, flour.id);
+        assert.equal(Number(movement.change), -100);
+        await docs.reverse(owner, posted.id, 'Test balance restored', posted.revision);
+      });
+      await t.test('changing only the date updates a stored draft and selects the weighted base on that date', async () => {
+        const weighted = await db.dish.create({ data: { name: 'Weighted sauce', price: 40, categoryId: category.id,
+          isWeighted: true, weightedPriceBase: 100, weightedMeasure: 'weight', stockIngredientId: flour.id, stockAmount: 80 } });
+        const historicalTime = new Date().toISOString();
+        const row = source('dish', weighted.id, 200, 'g');
+        const old = await docs.writeoffPreview({ warehouseId: main.id, effectiveAt: historicalTime, sourceLines: [row] });
+        assert.equal(old.sourceLines[0].parts[0].quantity, 0.16);
+        await db.$transaction(async (tx) => {
+          await lockRecipeGraph(tx);
+          await archiveDishRecipe(tx, weighted.id);
+          await tx.dish.update({ where: { id: weighted.id }, data: { recipeVersion: { increment: 1 }, weightedPriceBase: 1000, stockAmount: 300 } });
+        });
+        const draft = await docs.create(owner, { warehouseId: main.id, kind: 'writeoff', sourceLines: [row] });
+        assert.equal(draft.sourceLines[0].parts[0].quantity, 0.06);
+        const dated = await docs.update(owner, draft.id, { revision: draft.revision, effectiveAt: historicalTime });
+        assert.equal(dated.sourceLines[0].recipeSignature, old.sourceLines[0].recipeSignature);
+        assert.equal(dated.items[0].quantity, 0.16);
+        const undated = await docs.update(owner, draft.id, { revision: dated.revision, effectiveAt: null });
+        assert.equal(undated.items[0].quantity, 0.06);
+      });
+      await t.test('writeoffs cannot infer a pre-migration preparation from its present recipe', async () => {
+        const legacy = await ingredients.create({ name: 'Legacy preparation', unit: 'kg', kind: 'preparation' });
+        await db.preparationRecipeRevision.create({ data: { cafeId: cafe.id, ingredientId: legacy.id, replacedAt: new Date() } });
+        await assert.rejects(docs.writeoffPreview({ warehouseId: main.id, effectiveAt: new Date(Date.now() - 60_000).toISOString(),
+          sourceLines: [source('ingredient', legacy.id, 1, 'kg')] }), /на выбранную дату не сохранён/);
+      });
       await t.test('variant and virtual recipes expand; stocked preparations stay leaves; selected warehouse wins', async () => {
         const options = await docs.writeoffOptions();
         assert.equal(options.dishes.find((entry) => entry.id === dish.id).variants[0].name, 'Large');
@@ -232,6 +299,8 @@ test('PostgreSQL: recipe writeoffs retain source lines and immutable ingredient 
     await db.preparationRecipeItem.deleteMany({ where: { cafeId: cafe.id } });
     await db.preparationRecipe.deleteMany({ where: { cafeId: cafe.id } });
     await db.ingredient.deleteMany({ where: { cafeId: cafe.id } });
+    await db.auditLog.deleteMany({ where: { cafeId: cafe.id } });
+    await db.user.deleteMany({ where: { cafeId: cafe.id } });
     await db.cafe.delete({ where: { id: cafe.id } });
     await db.$disconnect();
   }

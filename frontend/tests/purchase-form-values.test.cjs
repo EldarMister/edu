@@ -20,6 +20,49 @@ function loadTypeScript(filename) {
 
 const values = loadTypeScript(resolve(__dirname, '../src/features/admin/pages/warehouse/purchase-form-values.ts'));
 const balances = loadTypeScript(resolve(__dirname, '../src/features/admin/pages/warehouse/balance-format.ts'));
+const invoices = loadTypeScript(resolve(__dirname, '../src/features/admin/pages/warehouse/invoice-import-values.ts'));
+
+test('invoice review only selects unique active products and compatible units', () => {
+  const flour = { id: 'flour', name: 'Мука', unitType: 'mass', isActive: true };
+  const rows = invoices.invoiceRows([
+    { name: 'Мука пшеничная', unit: 'кг', quantity: 2, price: 14, total: 32 },
+    { name: 'Мука', unit: 'мешок', quantity: 1, price: 42, total: null },
+    { name: 'Упаковка', unit: 'шт.', quantity: 1, price: 0, total: 0 },
+    { name: 'Соус', unit: 'кг', quantity: 1, price: 30, total: 30 },
+  ], [flour, { ...flour, name: 'Соус', preparationMode: 'virtual' }]);
+  assert.equal(rows[0].ingredientId, flour.id);
+  assert.equal(rows[0].unit, 'kg');
+  assert.equal(rows[0].sourcePrice, 14);
+  assert.equal(rows[0].price, '16');
+  assert.equal(rows[1].unit, '');
+  assert.equal(rows[2].ingredientId, '');
+  assert.equal(rows[2].price, '0');
+  assert.equal(rows[3].ingredientId, '');
+  assert.equal(invoices.invoiceRows([{ name: 'Мука', unit: 'кг', quantity: 1, price: 14, total: 14 }],
+    [flour, { ...flour, id: 'duplicate' }])[0].ingredientId, '');
+});
+
+test('input VAT follows the discounted amounts of taxable lines only', () => {
+  assert.equal(values.purchaseTaxTotal([{ amount: 100, rate: 3 }], 0), 3);
+  assert.equal(values.purchaseTaxTotal([{ amount: 30, rate: 0 }, { amount: 70, rate: 3 }], 10), 1.89);
+});
+
+test('invoice preview reuses only one matching VAT rate and never re-taxes the gross amount', () => {
+  const line = { name: 'Мука', unit: 'кг', quantity: 2, price: 100, total: 200,
+    tax: { rate: 3, amount: 6, totalWithTax: 206, needsReview: false } };
+  const options = [{ id: 'input-tax', rate: '3.00' }];
+  const [row] = invoices.invoiceRows([line], [], options);
+  assert.equal(row.taxId, 'input-tax');
+  assert.equal(row.taxReview, false);
+  assert.equal(row.price, '100');
+  assert.equal(row.total, '200');
+  assert.equal(values.purchaseRowTotal(row) + values.purchaseTaxTotal([{ amount: 200, rate: 3 }], 0), 206);
+  for (const taxes of [[], [...options, { id: 'another', rate: 3 }]]) {
+    const [ambiguous] = invoices.invoiceRows([line], [], taxes);
+    assert.equal(ambiguous.taxId, null);
+    assert.equal(ambiguous.taxReview, true);
+  }
+});
 
 test('balance valuation uses the precise base-unit price and preserves unknown costs', () => {
   assert.equal(balances.balanceValue({ stock: 22, avgCost: 46.59, stockBase: 22000, avgCostBase: 0.04659091 }), 1025);

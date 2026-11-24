@@ -227,7 +227,7 @@ function senderHarness({ captureFails = false, pendingPermission = false, pendin
     if (id === '@/lib/socket') return { getSocket: () => socket };
     if (id === '@/lib/audio') return { unlockAudio() {}, setAudioRecording: (value) => modes.push(value) };
     if (id === './sounds') return { playPttCue: (kind) => cues.push(kind) };
-    if (id === './sequencedAudio') return {};
+    if (id === './sequencedAudio') return { createPttNativeClips: () => ({ enable() {}, push() {}, flush() {} }) };
     if (id === './radioAudioGate') return { startRadioInput: () => () => {} };
     if (id === './liveAudio') return {
       async createPttCapture(_stream, sendFrame) {
@@ -566,9 +566,22 @@ test('radio packs Opus frames and flushes the last partial batch before the chan
   const sent = [];
   const batcher = sequencedModule.createPttBatcher(2, (first, audio) => sent.push([first, Array.from(new Uint8Array(audio))]));
   for (let frame = 1; frame <= 6; frame++) batcher.push(new Uint8Array(18).fill(frame).buffer);
-  assert.deepEqual(sent, [[0, [1, 1, 2, 2, 3, 3, 4, 4]]]);
+  assert.deepEqual(sent, [[0, [1, 1]], [1, [2, 2, 3, 3, 4, 4, 5, 5]]]);
   assert.equal(batcher.flush(), 6);
-  assert.deepEqual(sent[1], [4, [5, 5, 6, 6]]);
+  assert.deepEqual(sent[2], [5, [6, 6]]);
   assert.equal(batcher.flush(), 6);
-  assert.equal(sent.length, 2);
+  assert.equal(sent.length, 3);
+});
+
+test('native compatibility emits only on demand and preserves the last short clip', () => {
+  const clips = [];
+  const native = sequencedModule.createPttNativeClips((first, data) => clips.push([first, data.byteLength]));
+  const frame = new ArrayBuffer(960);
+  for (let i = 0; i < 22; i++) native.push(frame);
+  assert.deepEqual(clips, []);
+  native.enable();
+  for (let i = 0; i < 18; i++) native.push(frame);
+  native.flush();
+  native.flush();
+  assert.deepEqual(clips, [[22 * 480, 16 * 960], [38 * 480, 2 * 960]]);
 });

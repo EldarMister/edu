@@ -3,7 +3,9 @@ import { Ingredient, IngredientKind, IngredientUnitType, Prisma } from '@prisma/
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateIngredientDto, UpdateIngredientDto } from './dto';
 import { syncIngredientPackages } from './packages';
-import { lockRecipeGraph, RecipeResolver, type ResolvedRecipePart } from './recipe-resolution';
+import { importCatalogue, type IngredientImportDto } from './ingredient-import';
+import { archivePreparation, lockRecipeGraph, RecipeResolver, type ResolvedRecipePart } from './recipe-resolution';
+import { RecipeCalculator, type RecipeCostRow } from './recipe-calculation';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { resolveWarehouseSupplier } from './suppliers';
 import { purchaseUnitsFor, validatePurchaseUnits } from './purchase-units';
@@ -40,6 +42,10 @@ type IngredientRow = Ingredient & { supplierRecord?: { name: string } | null };
 @Injectable()
 export class IngredientsService {
   constructor(private prisma: PrismaService, private purchases: PurchasesService = new PurchasesService(prisma)) {}
+
+  importCatalogue(dto: IngredientImportDto) {
+    return this.prisma.$transaction((db) => importCatalogue(db, dto));
+  }
 
   async renameCategory(from: string, to: string) {
     const name = to.trim();
@@ -134,16 +140,23 @@ export class IngredientsService {
         const recipe = recipesById.get(item.id);
         let recipeUnitCost: number | null = null;
         let recipeTotalCost: number | null = null;
-        if (parts?.length && parts.every((part) => balances.get(part.ingredient.id)?.valuationKnown)) {
-          const cost = parts.reduce((sum, part) => sum.add(part.amount.mul(balances.get(part.ingredient.id)!.avgCost)), new Prisma.Decimal(0));
-          recipeUnitCost = Number(cost.toDecimalPlaces(8));
-          if (recipe) recipeTotalCost = Number(cost.mul(recipe.outputAmount).div(toBase(1, normalizeUnit(item.displayUnit))).toDecimalPlaces(2));
+        let knownRecipeTotalCost = 0;
+        if (recipe && parts?.length) {
+          const cost = parts.reduce((sum, part) => {
+            const balance = balances.get(part.ingredient.id);
+            return balance?.valuationKnown ? sum.add(part.amount.mul(balance.avgCost)) : sum;
+          }, new Prisma.Decimal(0));
+          knownRecipeTotalCost = Number(cost.mul(recipe.outputAmount).div(toBase(1, normalizeUnit(item.displayUnit))).toDecimalPlaces(2));
+          if (parts.every((part) => balances.get(part.ingredient.id)?.valuationKnown)) {
+            recipeUnitCost = Number(cost.toDecimalPlaces(8));
+            recipeTotalCost = knownRecipeTotalCost;
+          }
         }
         const balance = balances.get(item.id)!;
         const receiptPrice = receiptPrices?.get(item.id);
         const retailPrice = retailPrices?.get(item.id);
         const knownStockValue = balance.knownStockValue.toNumber();
-        return { ...this.serialize({ ...item, ...balance }), recipeUnitCost, recipeTotalCost,
+        return { ...this.serialize({ ...item, ...balance }), recipeUnitCost, recipeTotalCost, knownRecipeTotalCost,
           stockValue: balance.stockValueKnown ? knownStockValue : null, knownStockValue,
           lastPurchasePrice: receiptPrice == null ? null : Number(receiptPrice.mul(toBase(1, normalizeUnit(item.displayUnit))).toDecimalPlaces(8)),
           retailValue: retailPrice == null || (item.isPrepared && item.preparationMode === 'virtual')
@@ -232,15 +245,16 @@ export class IngredientsService {
           stock: fromBase(Number(balance.stock), unit), avgCost: balance.valuationKnown ? costFromBase(Number(balance.avgCost), unit) : null, valuationKnown: balance.valuationKnown };
       }));
       const cafeId = ingredient.cafeId;
-      const dishFields = { id: true, name: true, catalogKind: true, isActive: true, isSet: true } as const;
+      const dishFields = { id: true, name: true, catalogKind: true, isActive: true, isSet: true, prepStation: true,
+        category: { select: { prepStation: true } } } as const;
       const [recipes, direct, variants, preparations, modifiers, latest, aggregateBalances] = await Promise.all([
-        db.recipeItem.findMany({ where: { ingredientId: id, cafeId, dish: { cafeId } }, select: { id: true,
-          amount: true, amountUnit: true, dish: { select: dishFields }, variant: { select: { id: true, name: true } } } }),
+        db.recipeItem.findMany({ where: { ingredientId: id, cafeId, dish: { cafeId } },
+          include: { dish: { select: dishFields }, variant: { select: { id: true, name: true } } } }),
         db.dish.findMany({ where: { stockIngredientId: id, cafeId }, select: { ...dishFields, stockAmount: true } }),
         db.dishVariant.findMany({ where: { stockIngredientId: id, cafeId, dish: { cafeId } }, select: { id: true, name: true,
           stockAmount: true, dish: { select: dishFields } } }),
         cafeId ? db.preparationRecipeItem.findMany({ where: { ingredientId: id, cafeId, recipe: { cafeId, ingredient: { cafeId } } },
-          select: { amount: true, unit: true, recipe: { select: { ingredient: { select: { id: true, name: true, isActive: true } } } } } }) : Promise.resolve([]),
+          include: { recipe: { select: { ingredient: { select: { id: true, name: true, isActive: true } } } } } }) : Promise.resolve([]),
         db.menuModifierOption.findMany({ where: { ingredientId: id, cafeId, group: { cafeId, dish: { cafeId } } }, select: { id: true,
           name: true, isActive: true, amount: true, amountUnit: true, group: { select: { name: true, dish: { select: dishFields } } } } }),
         db.$queryRaw<Array<{ unitPriceBase: Prisma.Decimal | null }>>`
@@ -264,19 +278,29 @@ export class IngredientsService {
         sourceId, targetId: dish.id, name: dish.name, kind, label, active, catalogKind: dish.catalogKind, isSet: dish.isSet,
         ...displayQuantity(amount, unit),
       });
+      const calculator = await RecipeCalculator.create(db);
+      const amounts = async (row: RecipeCostRow, station: string, variantId?: string) => {
+        const { items: [item] } = await calculator.composition([row], station, variantId);
+        const net = item.netAmount ?? item.amount * (1 - item.lossPercent / 100);
+        return { quantity: item.amount, unit: item.unit, netQuantity: item.netWeightGrams ?? net,
+          netUnit: item.netWeightGrams == null ? item.unit : 'г', lineCost: item.lineCost };
+      };
       const usage = [
-        ...recipes.map((row) => ({
+        ...await Promise.all(recipes.map(async (row) => ({
           ...menuUsage(row.id, row.dish, 'recipe', row.amount, row.amountUnit, row.variant?.name),
+          ...await amounts({ ...row, ingredient }, row.dish.prepStation ?? row.dish.category.prepStation, row.variant?.id),
           ...(row.variant && { variantId: row.variant.id }),
-        })),
+        }))),
         ...direct.map((dish) => menuUsage(dish.id, dish, 'stock', dish.stockAmount, unit)),
         ...variants.map((variant) => ({
           ...menuUsage(variant.id, variant.dish, 'variant', variant.stockAmount, unit, variant.name),
           variantId: variant.id,
         })),
-        ...preparations.map(({ recipe: { ingredient: product }, amount, unit }) => ({
-          sourceId: product.id, targetId: product.id, name: product.name, kind: 'preparation' as const, label: null, active: product.isActive,
-          catalogKind: null, isSet: false, ...displayQuantity(amount, unit),
+        ...await Promise.all(preparations.map(async (row) => {
+          const product = row.recipe.ingredient;
+          return { sourceId: product.id, targetId: product.id, name: product.name, kind: 'preparation' as const, label: null,
+            active: product.isActive, catalogKind: null, isSet: false,
+            ...await amounts({ ...row, ingredient, amountUnit: row.unit, warehouseId: null, fromCommonWarehouse: true, variantAmounts: null }, '') };
         })),
         ...modifiers.map((option) => menuUsage(option.id, option.group.dish, 'modifier', option.amount, option.amountUnit,
           `${option.group.name} · ${option.name}`, option.group.dish.isActive && option.isActive)),
@@ -475,6 +499,8 @@ export class IngredientsService {
       if (!before.stock.eq(after.stock) || !before.avgCost.eq(after.avgCost)) {
         throw new BadRequestException('Остаток и себестоимость изменяются документом прихода или инвентаризации');
       }
+      if ((data.isPrepared !== undefined && data.isPrepared !== current.isPrepared) ||
+          (data.preparationMode !== undefined && data.preparationMode !== current.preparationMode)) await archivePreparation(tx, current);
       const updated = await tx.ingredient.update({ where: { id }, data });
       await syncIngredientPackages(tx, updated);
       return this.serialize({ ...updated, ...after });

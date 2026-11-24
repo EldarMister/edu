@@ -172,7 +172,7 @@ export function WarehouseSection({
                       filters={warehouseFilter}
                       warehouseId={scopedWarehouse}
                       onOpen={(id, edit) => setActive({ type: 'purchase', id, action: edit ? 'correct' : undefined })}
-                      onCreate={() => setActive({ type: 'purchase' })}
+                      onCreate={(importInvoice) => setActive({ type: 'purchase', action: importInvoice ? 'import' : undefined })}
                     />
                   )}
                   {view === 'processing' && (
@@ -290,6 +290,7 @@ export function WarehouseSection({
                 key={`${active.id ?? 'new'}:${active.action ?? ''}`}
                 id={active.id}
                 edit={active.action === 'correct'}
+                importInvoice={active.action === 'import'}
                 warehouseId={warehouse.id}
                 locations={locations}
                 onClose={close}

@@ -79,6 +79,23 @@ export function purchaseRowTotalText(row: PurchaseRowValues): string {
   return Number.isFinite(total) ? total.toFixed(2) : '';
 }
 
+/** Allocate an invoice-wide discount in cents the same way as the posting transaction. */
+export function purchaseTaxTotal(lines: { amount: number; rate: number }[], discount: number) {
+  const subtotal = roundPurchaseMoney(lines.reduce((sum, row) => sum + row.amount, 0));
+  if (!(subtotal > 0)) return 0;
+  let running = 0;
+  let allocated = 0;
+  let tax = 0;
+  for (const row of lines) {
+    running = roundPurchaseMoney(running + row.amount);
+    const target = roundPurchaseMoney(running * discount / subtotal);
+    const discountedAmount = roundPurchaseMoney(row.amount - (target - allocated));
+    tax += roundPurchaseMoney(discountedAmount * row.rate / 100);
+    allocated = target;
+  }
+  return roundPurchaseMoney(tax);
+}
+
 export function purchasePriceFromTotal(quantity: string, total: string): string {
   const count = roundPurchaseQuantity(Number(quantity));
   const amount = Number(total);

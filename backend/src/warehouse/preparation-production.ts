@@ -12,7 +12,7 @@ import { lockIngredients, lockWarehouseCatalog } from './stock-lock';
 import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, unitLabel, unitType as unitTypeOf, type UnitCode } from './units';
 import { getWarehouseBalance, resolveWarehouse, warehouseBalances } from './warehouse-location';
 import { IngredientsService } from './ingredients.service';
-import { lockRecipeGraph, RecipeResolver, warehouseKey } from './recipe-resolution';
+import { archivePreparation, lockRecipeGraph, RecipeResolver, warehouseKey } from './recipe-resolution';
 import { massProcessing, measuredNetWeight, nonMassProcessing, processingSnapshot, processingStageResults, readProcessingStages } from './recipe-processing';
 import { ProcessingOptionsDto } from './recipe-processing.dto';
 import { postStockMovement } from './stock-posting';
@@ -105,14 +105,14 @@ export class PreparationProductionService {
       let rowCost = new Prisma.Decimal(0), rowKnown = true;
       for (const part of await resolver.expand(item.ingredientId, item.amount, warehouse)) {
         const balance = await getWarehouseBalance(this.prisma, warehouse, part.ingredient);
-        rowCost = rowCost.add(part.amount.mul(balance.avgCost));
         if (!balance.valuationKnown) { missingCosts.add(part.ingredient.name); rowKnown = false; }
+        else rowCost = rowCost.add(part.amount.mul(balance.avgCost));
       }
       totalCost = totalCost.add(rowCost); itemCosts.set(item.ingredientId, { cost: rowCost, known: rowKnown });
     }
     return { id, updatedAt: ingredient.updatedAt.toISOString(), name: ingredient.name, category: ingredient.category, displayUnit: ingredient.displayUnit,
       unitType: ingredient.unitType, mode: ingredient.preparationMode, kind: ingredient.kind === 'prepared_dish' ? 'prepared_dish' as const : 'preparation' as const,
-      instructions: recipe?.instructions ?? '', outputQuantity: recipe ? fromBase(Number(recipe.outputAmount), outputUnit) : 1, outputUnit, totalCost: missingCosts.size || !recipe?.items.length ? null : Number(totalCost.toDecimalPlaces(2)), costKnown: !missingCosts.size && !!recipe?.items.length, missingCosts: [...missingCosts],
+      instructions: recipe?.instructions ?? '', outputQuantity: recipe ? fromBase(Number(recipe.outputAmount), outputUnit) : 1, outputUnit, knownTotalCost: Number(totalCost.toDecimalPlaces(2)), totalCost: missingCosts.size || !recipe?.items.length ? null : Number(totalCost.toDecimalPlaces(2)), costKnown: !missingCosts.size && !!recipe?.items.length, missingCosts: [...missingCosts],
       items: recipe?.items.map((item) => {
         const unit = item.unit as UnitCode;
         const stages = readProcessingStages(item.processingStages);
@@ -122,7 +122,7 @@ export class PreparationProductionService {
         const netAmount = item.netAmount ?? item.amount.mul(new Prisma.Decimal(100).sub(item.lossPercent)).div(100);
         const netWeightGrams = measuredNetWeightGrams ?? (pieceWeight ? Number(pieceWeight.mul(netAmount).toDecimalPlaces(3)) : null);
         return { ingredientId: item.ingredientId, name: item.ingredient.name, lineCost: cost?.known ? Number(cost.cost.toDecimalPlaces(2)) : null,
-          costKnown: cost?.known ?? false, quantity: fromBase(Number(item.amount), unit),
+          costKnown: cost?.known ?? false, knownLineCost: Number(cost?.cost.toDecimalPlaces(2) ?? 0), quantity: fromBase(Number(item.amount), unit),
           netAmount: item.netAmount == null ? null : fromBase(Number(item.netAmount), unit), lossPercent: Number(item.lossPercent),
           measuredNetWeightGrams, netWeightGrams,
           processingMethod: item.processingMethod, processingStages: stages, processingBasis: item.processingBasis,
@@ -265,6 +265,7 @@ export class PreparationProductionService {
       for (const child of graph.get(node) ?? []) visit(child, next);
     };
     visit(id, new Set());
+    await archivePreparation(tx, output);
     await tx.ingredient.update({ where: { id }, data: { preparationMode: mode } });
     await tx.preparationRecipe.upsert({ where: { ingredientId: id }, create: { cafeId, ingredientId: id, outputUnit, outputAmount, instructions: dto.instructions }, update: { outputUnit, outputAmount, instructions: dto.instructions } });
     await tx.preparationRecipeItem.deleteMany({ where: { recipeId: id } });

@@ -144,7 +144,6 @@ function StockDocumentDraft({
     `actions.${document.kind === 'inventory' ? 'warehouseCount' : document.kind === 'writeoff' ? 'warehouseWriteoff' : document.kind === 'transfer' ? 'warehouseTransfer' : 'warehouseReceive'}`,
   );
   const ingredients = useIngredients('', warehouse.id);
-  const writeoffLines = useWriteoffLines(document.kind === 'writeoff', warehouse.id, document);
   const sourcePurchase = usePurchase(document.kind === 'supplier_return' ? document.sourcePurchaseId ?? null : null);
   const returnable = new Map(sourcePurchase.data?.returnableItems?.map((item) => [item.ingredientId, item]));
   const push = useNotifications((state) => state.push);
@@ -162,6 +161,7 @@ function StockDocumentDraft({
   const countedAt = document.kind === 'inventory' ? trackedCountedAt : undefined;
   const [savedEffectiveAt, setSavedEffectiveAt] = useState(document.effectiveAt ?? null);
   const effectiveAt = supportsStockDate ? inventoryTimingValue(timing, savedEffectiveAt) : undefined;
+  const writeoffLines = useWriteoffLines(document.kind === 'writeoff', warehouse.id, document, effectiveAt);
   const historical = supportsStockDate && timing.mode === 'past';
   const timingChanged = document.kind === 'inventory' && countedAt !== savedCountedAt;
   const historicalScopeChanged = document.kind === 'inventory' && !!countedAt && items.some(({ item }) => !document.items.some((saved) => saved.ingredientId === item.ingredientId));

@@ -17,6 +17,7 @@ import { SERVER_EVENTS } from '../realtime/events';
 import { AuditService, AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { MenuEntryDto } from './menu-entry.dto';
+import { MAIN_SCREEN, ensureMainMenuCategory } from './main-menu-category';
 import { dishTaxFields } from '../settings/order-taxes';
 import { createHash } from 'node:crypto';
 
@@ -128,7 +129,7 @@ export class MenuEntryService {
             throw new BadRequestException('Единица существующего товара не меняется');
         }
         if (!dto.dish.name.trim()) throw new BadRequestException('Укажите название');
-        const category = await tx.category.findUnique({
+        const category = dto.dish.categoryId === MAIN_SCREEN ? await ensureMainMenuCategory(tx) : await tx.category.findUnique({
           where: { id: dto.dish.categoryId },
         });
         if (!category) throw new BadRequestException('Категория не найдена');

@@ -37,10 +37,10 @@ export interface WriteoffOptions {
 
 export interface WriteoffPreview { sourceLines: WriteoffSourceLine[]; total: number | null }
 
-export function useWriteoffOptions(enabled: boolean) {
+export function useWriteoffOptions(enabled: boolean, effectiveAt?: string | null) {
   return useQuery({
-    queryKey: ['admin', 'warehouse', 'writeoff-options'],
-    queryFn: async () => (await api.get<WriteoffOptions>('/admin/warehouse/documents/writeoff-options')).data,
+    queryKey: ['admin', 'warehouse', 'writeoff-options', effectiveAt],
+    queryFn: async () => (await api.get<WriteoffOptions>('/admin/warehouse/documents/writeoff-options', { params: { effectiveAt } })).data,
     enabled,
   });
 }
@@ -51,10 +51,10 @@ export function useWriteoffPackages(enabled: boolean) {
     enabled });
 }
 
-export function useWriteoffPreview(warehouseId: string, sourceLines: WriteoffSourceInput[], enabled: boolean, refreshVersion = 0, documentId?: string) {
+export function useWriteoffPreview(warehouseId: string, sourceLines: WriteoffSourceInput[], enabled: boolean, refreshVersion = 0, documentId?: string, effectiveAt?: string | null) {
   return useQuery({
-    queryKey: ['admin', 'warehouse', 'writeoff-preview', warehouseId, sourceLines, refreshVersion, documentId],
-    queryFn: async () => (await api.post<WriteoffPreview>('/admin/warehouse/documents/writeoff-preview', { warehouseId, sourceLines, documentId })).data,
+    queryKey: ['admin', 'warehouse', 'writeoff-preview', warehouseId, sourceLines, refreshVersion, documentId, effectiveAt],
+    queryFn: async () => (await api.post<WriteoffPreview>('/admin/warehouse/documents/writeoff-preview', { warehouseId, sourceLines, documentId, effectiveAt })).data,
     enabled,
     retry: false,
     refetchOnWindowFocus: false,

@@ -37,7 +37,7 @@ const TENANT_MODELS = new Set<string>([
   'QrTableSession', 'QrGuest', 'QrSessionItem', 'Ingredient', 'RecipeItem',
   'Purchase', 'PurchaseItem', 'StockMovement', 'PreparationStation',
   'FinanceAccount', 'FinanceCategory', 'FinanceEntry', 'SalaryAccrual',
-  'Warehouse', 'WarehouseStock', 'StationWarehouse', 'PreparationRecipe', 'PreparationRecipeItem',
+  'Warehouse', 'WarehouseStock', 'StationWarehouse', 'PreparationRecipe', 'PreparationRecipeItem', 'PreparationRecipeRevision',
   'WarehouseDocument', 'WarehouseDocumentItem', 'PreparationBatch', 'RecipeRevision', 'WarehouseSupplier', 'WarehousePackage', 'ProcessingDocument', 'ProcessingLine', 'MenuModifierGroup', 'MenuModifierOption',
 ]);
 

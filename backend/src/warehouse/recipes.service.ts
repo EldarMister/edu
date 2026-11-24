@@ -3,6 +3,7 @@ import { SERVER_EVENTS } from '../realtime/events';
 import { BadRequestException, ConflictException, Injectable, Optional, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { getCafeId } from '../tenant/tenant-context';
+import { MAIN_SCREEN } from '../admin/main-menu-category';
 import { assertAssignableStation } from '../kitchen/preparation-stations';
 import { PrismaService } from '../prisma/prisma.service';
 import { MAX_RECIPE_PORTIONS, RecipeCostsQuery, RecipeDraftDto, RecipeItemInputDto, RecipeItemUpdateDto, RecipePreviewDto, RecipeSettingsDto } from './recipes.dto';
@@ -98,7 +99,8 @@ export class RecipesService {
       if (dto.dishId && !dish) throw new NotFoundException('Блюдо не найдено');
       const categoryId = dto.categoryId ?? dish?.categoryId;
       if (!categoryId) throw new BadRequestException('Выберите категорию блюда');
-      const category = await tx.category.findUnique({ where: { id: categoryId, cafeId }, include: { tax: true } });
+      const category = categoryId === MAIN_SCREEN ? { prepStation: 'none', tax: null }
+        : await tx.category.findUnique({ where: { id: categoryId, cafeId }, include: { tax: true } });
       if (!category) throw new NotFoundException('Категория не найдена');
       if (dto.prepStation != null) await assertAssignableStation(tx, dto.prepStation);
       const station = (dto.prepStation === undefined ? dish?.prepStation : dto.prepStation) ?? category.prepStation;

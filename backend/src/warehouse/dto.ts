@@ -146,7 +146,10 @@ export class UpdateRecipeItemDto {
 // ---------- Закупки ----------
 
 export class PurchaseItemInputDto {
-  // Only PATCH may reuse the package snapshot of this exact saved purchase line.
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  taxId?: string | null;
+
+  // PATCH can preserve the package and tax snapshots of this saved line.
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
   purchaseItemId?: string;
 

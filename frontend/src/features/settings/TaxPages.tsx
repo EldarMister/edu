@@ -8,14 +8,15 @@ import { apiError } from '@/lib/api';
 import { taxRateLabel } from '@/lib/format';
 import { printReport } from '@/lib/report-output';
 import type { MenuTax, MenuTaxType } from '@/types';
-import { IconEdit, IconTrash } from '../admin/components/icons';
+import { IconTrash } from '../admin/components/icons';
 import { WorkspaceHeaderActions, WorkspaceHeaderCount } from '../admin/pages/WorkspaceHeader';
 import { WorkspaceSearch } from '../admin/pages/WorkspaceSearch';
 import { balanceMoney } from '../admin/pages/warehouse/balance-format';
 import { useListPeriod } from '../admin/pages/warehouse/ListPeriodFilter';
 import { visibleWarehouseColumns, WarehouseColumnSettings } from '../admin/pages/warehouse/WarehouseColumnSettings';
-import { QueryState } from '../admin/pages/warehouse/WarehouseUi';
-import { usePageFilters } from '../admin/pages/warehouse/workspace-route';
+import { DocumentField, QueryState } from '../admin/pages/warehouse/WarehouseUi';
+import { EditorPage } from '../admin/pages/warehouse/EditorPage';
+import { useEditorRoute, usePageFilters } from '../admin/pages/warehouse/workspace-route';
 import { downloadTaxes, TAX_DIRECTORY_ENDPOINT, TAX_REPORT_ENDPOINT, TAX_REPORT_LABELS, TAX_TYPE_LABELS,
   useTaxDirectory, useTaxMutations, useTaxReport } from './taxes-api';
 
@@ -59,6 +60,26 @@ function TaxTableActions({ endpoint, params, table, canExport }: {
 }
 
 export function TaxesPage() {
+  const { canEditSection } = usePermissions();
+  const { editor, openEditor, closeEditor } = useEditorRoute();
+  if (editor?.type !== 'tax') return <TaxDirectory onEdit={(id) => openEditor({ type: 'tax', id })} />;
+  if (!canEditSection('settings')) return <EditorPage title="Налог" onClose={closeEditor}>
+    <p role="status">Редактирование налогов недоступно для вашей роли.</p>
+  </EditorPage>;
+  return editor.id ? <TaxById key={editor.id} id={editor.id} onClose={closeEditor} />
+    : <TaxEditor key="new" onClose={closeEditor} />;
+}
+
+function TaxById({ id, onClose }: { id: string; onClose: () => void }) {
+  const query = useTaxDirectory({});
+  const tax = query.data?.find((rate) => rate.id === id);
+  if (tax) return <TaxEditor tax={tax} onClose={onClose} />;
+  return <EditorPage title="Редактирование налога" onClose={onClose}>
+    <QueryState pending={query.isPending} error={query.error}><p role="status">Налог не найден.</p></QueryState>
+  </EditorPage>;
+}
+
+function TaxDirectory({ onEdit }: { onEdit: (id?: string) => void }) {
   const { canAction, canEditSection } = usePermissions();
   const editable = canEditSection('settings');
   const [filters, setFilters] = usePageFilters({ search: '', type: '', rate: '', sort: 'asc', taxColumns: '' });
@@ -70,32 +91,39 @@ export function TaxesPage() {
   const [savedColumns, saveColumns] = useColumnPreference('settings-taxes');
   const columns = visibleWarehouseColumns(filters.taxColumns || savedColumns, defaultColumns);
   const [columnsOpen, setColumnsOpen] = useState(false);
-  const [editor, setEditor] = useState<MenuTax | 'new' | null>(null);
+  const [rateOpen, setRateOpen] = useState(Boolean(filters.rate));
   const [toDelete, setToDelete] = useState<MenuTax | null>(null);
   const { remove } = useTaxMutations();
   const text = (tax: MenuTax) => ({ name: tax.name, rate: taxRateLabel(tax.rate), type: TAX_TYPE_LABELS[tax.type] });
+  const invalidRate = filters.rate !== '' && queryParams.rate === undefined;
+  const visible = invalidRate ? [] : taxes;
   const table = { title: 'Налоги', headers: columns.map((key) => labels[key]),
-    rows: taxes.map((tax) => { const values = text(tax); return columns.map((key) => values[key]); }) };
+    rows: visible.map((tax) => { const values = text(tax); return columns.map((key) => values[key]); }) };
   const filtered = Boolean(filters.search || filters.type || filters.rate);
   return <div className="space-y-3">
-    <WorkspaceHeaderCount count={list.isSuccess ? taxes.length : undefined} />
+    <WorkspaceHeaderCount count={list.isSuccess ? visible.length : undefined} />
+    <WorkspaceHeaderActions>
+      <button type="button" className="supply-header-action" aria-haspopup="dialog" onClick={() => setColumnsOpen(true)}>Столбцы</button>
+      <TaxTableActions endpoint={TAX_DIRECTORY_ENDPOINT} params={{ ...queryParams, columns: columns.join(',') }}
+        table={table} canExport={canAction('exportReports')} />
+      {editable && <button type="button" className="btn-primary btn-md" onClick={() => onEdit()}>Добавить</button>}
+    </WorkspaceHeaderActions>
     <div className="poster-toolbar">
       <WorkspaceSearch label="Поиск налогов" value={filters.search} onChange={(search) => setFilters({ search: search.slice(0, 80) })} />
       <Select ariaLabel="Тип налога" className="poster-filter w-auto gap-2" value={filters.type}
         options={[{ value: '', label: 'Тип' }, ...taxTypes]} onChange={(type) => setFilters({ type })} />
-      <label className="flex items-center gap-2 text-sm text-text-secondary">
+      <button type="button" className="text-sm text-primary" aria-expanded={rateOpen} onClick={() => {
+        if (rateOpen) setFilters({ rate: '' });
+        setRateOpen(!rateOpen);
+      }}>{rateOpen ? '− Фильтр' : '+ Фильтр'}</button>
+      {rateOpen && <label className="flex items-center gap-2 text-sm text-text-secondary">
         Ставка, %
         <input aria-label="Ставка налога" className="input h-9 w-20" type="text" inputMode="decimal" maxLength={6}
-          value={filters.rate} aria-invalid={filters.rate !== '' && queryParams.rate === undefined}
+          value={filters.rate} aria-invalid={invalidRate}
           onChange={(event) => setFilters({ rate: event.target.value })} />
-      </label>
+      </label>}
       {filtered && <button type="button" className="text-sm text-primary"
-        onClick={() => setFilters({ search: '', type: '', rate: '' })}>Сбросить</button>}
-      <button type="button" className="supply-header-action ml-auto shrink-0 print:hidden"
-        onClick={() => setColumnsOpen(true)}>Столбцы</button>
-      <TaxTableActions endpoint={TAX_DIRECTORY_ENDPOINT} params={{ ...queryParams, columns: columns.join(',') }}
-        table={table} canExport={canAction('exportReports')} />
-      {editable && <button type="button" className="btn-primary btn-md" onClick={() => setEditor('new')}>Добавить налог</button>}
+        onClick={() => { setFilters({ search: '', type: '', rate: '' }); setRateOpen(false); }}>Сбросить</button>}
     </div>
     <QueryState pending={list.isPending} error={list.error}>
       <div className="overflow-x-auto">
@@ -110,21 +138,21 @@ export function TaxesPage() {
             {columns.slice(1).map((key) => <th key={key} scope="col">{labels[key]}</th>)}
             {editable && <th scope="col"><span className="sr-only">Действия</span></th>}
           </tr></thead>
-          <tbody>{taxes.map((tax) => {
+          <tbody>{visible.map((tax) => {
             const values = text(tax);
             return <tr key={tax.id}>
               {columns.map((key) => <td key={key}>{values[key]}</td>)}
               {editable && <td className="w-24"><div className="flex justify-end gap-2">
-                <button type="button" className="rounded-lg p-2 text-text-muted hover:bg-background hover:text-primary"
-                  aria-label={`Редактировать налог «${tax.name}»`} onClick={() => setEditor(tax)}><IconEdit className="h-4 w-4" /></button>
+                <button type="button" className="px-2 text-primary"
+                  aria-label={`Редактировать налог «${tax.name}»`} onClick={() => onEdit(tax.id)}>Ред.</button>
                 <button type="button" className="rounded-lg p-2 text-text-muted hover:bg-background hover:text-danger"
                   aria-label={`Удалить налог «${tax.name}»`} onClick={() => { remove.reset(); setToDelete(tax); }}><IconTrash className="h-4 w-4" /></button>
               </div></td>}
             </tr>;
           })}</tbody>
         </table>
-        {!taxes.length && <p role="status" className="py-10 text-center text-sm text-text-muted">
-          {filtered ? 'Нет налогов по выбранным условиям' : 'Налоговых ставок пока нет'}
+        {!visible.length && <p role="status" className="py-10 text-center text-sm text-text-muted">
+          {invalidRate ? 'Укажите ставку от 0 до 100 с точностью до двух знаков.' : filtered ? 'Нет налогов по выбранным условиям' : 'Налоговых ставок пока нет'}
         </p>}
       </div>
     </QueryState>
@@ -135,7 +163,6 @@ export function TaxesPage() {
         setFilters({ taxColumns: value });
         setColumnsOpen(false);
       }} />}
-    {editor && <TaxEditor tax={editor === 'new' ? undefined : editor} onClose={() => setEditor(null)} />}
     {toDelete && <Modal open title="Удаление налога" onClose={() => !remove.isPending && setToDelete(null)}
       footer={<div className="flex justify-end gap-2">
         <button type="button" className="btn-secondary btn-md" disabled={remove.isPending} onClick={() => setToDelete(null)}>Отмена</button>
@@ -160,7 +187,7 @@ function TaxEditor({ tax, onClose }: { tax?: MenuTax; onClose: () => void }) {
   const dirty = name !== (tax?.name ?? '') || rate !== (tax ? String(tax.rate) : '') || type !== initialType;
   const { markSaved } = useEditorDirty(dirty, saveTax);
   const close = () => {
-    if (!submitting.current && (!dirty || window.confirm('Закрыть форму без сохранения?'))) onClose();
+    if (!submitting.current) onClose();
   };
 
   async function saveTax() {
@@ -169,7 +196,6 @@ function TaxEditor({ tax, onClose }: { tax?: MenuTax; onClose: () => void }) {
     try {
       await save.mutateAsync({ id: tax?.id, name: name.trim(), rate: percent, type });
       markSaved();
-      onClose();
       return true;
     } catch {
       return false;
@@ -180,30 +206,32 @@ function TaxEditor({ tax, onClose }: { tax?: MenuTax; onClose: () => void }) {
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    void saveTax();
+    void saveTax().then((saved) => { if (saved) onClose(); });
   }
-  return <Modal open manageFocus title={tax ? 'Редактирование налога' : 'Добавление налога'} onClose={close}
-    footer={<div className="flex justify-end gap-2">
-      <button type="button" className="btn-secondary btn-md" onClick={close} disabled={save.isPending}>Отмена</button>
+  return <EditorPage title={tax ? 'Редактирование налога' : 'Добавление налога'} onClose={close}
+    footer={<div className="flex flex-wrap gap-3">
       <button type="submit" form={id} className="btn-primary btn-md" disabled={!name.trim() || percent === undefined || save.isPending}>Сохранить</button>
+      <button type="button" className="btn-ghost btn-md" onClick={close} disabled={save.isPending}>Отмена</button>
     </div>}>
     <form id={id} onSubmit={submit}>
-      <fieldset disabled={save.isPending} className="grid gap-4 text-sm">
-        <label className="grid gap-1">Название<input className="input" data-dialog-initial-focus required maxLength={80} value={name}
-          onChange={(event) => setName(event.target.value)} /></label>
-        <label className="grid gap-1">Процент<input className="input" inputMode="decimal" required maxLength={6} value={rate}
-          onChange={(event) => setRate(event.target.value)} /></label>
-        {rate && percent === undefined && <p role="alert" className="text-danger">Укажите процент от 0 до 100 с точностью до двух знаков.</p>}
-        <div className="grid gap-1"><span>Тип</span>
+      <fieldset disabled={save.isPending} className="grid gap-4 py-3 text-sm">
+        <DocumentField label="Название"><input className="input w-full" required maxLength={80} value={name}
+          onChange={(event) => setName(event.target.value)} /></DocumentField>
+        <DocumentField label="Процент">
+          <span className="poster-number-unit"><input aria-label="Процент" className="input" inputMode="decimal" required maxLength={6} value={rate}
+            aria-invalid={Boolean(rate && percent === undefined)} onChange={(event) => setRate(event.target.value)} /><span>%</span></span>
+          {rate && percent === undefined && <span role="alert" className="mt-1 block text-danger">Укажите процент от 0 до 100 с точностью до двух знаков.</span>}
+        </DocumentField>
+        <DocumentField label="Тип">
           <Select ariaLabel="Тип налога" value={type} options={taxTypes} disabled={save.isPending} onChange={(value) => setType(value as MenuTaxType)} />
-        </div>
-        <p className="text-text-muted">
-          {type === 'vat' ? 'НДС выделяется из цены продажи с учётом скидки.' : 'Налог считается от суммы продажи с учётом скидки.'}
-        </p>
+          <span className="mt-2 block text-text-muted">
+            {type === 'vat' ? 'НДС выделяется из цены продажи с учётом скидки.' : 'Налог считается от суммы продажи с учётом скидки.'}
+          </span>
+        </DocumentField>
       </fieldset>
       {save.error && <p role="alert" className="mt-2 text-sm text-danger">{apiError(save.error)}</p>}
     </form>
-  </Modal>;
+  </EditorPage>;
 }
 
 const reportHeaders = ['Название', 'Процент', 'Тип', 'Операция', 'Сумма продаж', 'Сумма налога'];

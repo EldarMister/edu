@@ -77,8 +77,20 @@ test('PostgreSQL: shift settlement posts sales and both collection legs once and
     assert.ok(deletedDeposit.deletedAt instanceof Date);
     assert.equal((await shifts.list(cafeId, true)).current.expectedAmount, 250);
     await assert.rejects(shifts.createOperation(cafeId, waiter, shift.id, operation('expense', 1, { categoryId: hidden.id })), { status: 400 });
-    await shifts.createOperation(cafeId, waiter, shift.id, operation('income', 20, { categoryId: category.id }));
-    const expense = await shifts.createOperation(cafeId, waiter, shift.id, operation('expense', 30, { categoryId: category.id }));
+    const dealDate = '2024-02-29';
+    const dealTotals = async () => {
+      const report = await finance.profitLoss(owner, { from: dealDate, to: dealDate });
+      return ['Доходы', 'Расходы'].map((label) => report.rows.find((row) => !row.detail && row.label === label).value);
+    };
+    await assert.rejects(shifts.createOperation(cafeId, waiter, shift.id, operation('income', 20, { dealDate: '2025-02-29' })), { status: 400 });
+    const cashIncome = operation('income', 20, { categoryId: category.id, dealDate });
+    const income = await shifts.createOperation(cafeId, waiter, shift.id, cashIncome);
+    assert.equal((await shifts.createOperation(cafeId, waiter, shift.id, cashIncome)).id, income.id);
+    await assert.rejects(shifts.createOperation(cafeId, waiter, shift.id, { ...cashIncome, dealDate: null }), { status: 409 });
+    const expense = await shifts.createOperation(cafeId, waiter, shift.id, operation('expense', 30, { categoryId: category.id, dealDate }));
+    assert.ok(expense.occurredAt >= shift.openedAt);
+    assert.equal(expense.dealDate.toISOString().slice(0, 10), dealDate);
+    assert.deepEqual(await dealTotals(), [0, 0]);
     const collection = operation('collection', 100);
     const transfer = await shifts.createOperation(cafeId, waiter, shift.id, collection);
     assert.equal((await shifts.createOperation(cafeId, waiter, shift.id, collection)).id, transfer.id);
@@ -100,6 +112,7 @@ test('PostgreSQL: shift settlement posts sales and both collection legs once and
     assert.equal(retry.id, closed.id);
     assert.equal(closed.difference, -5);
     assert.equal(closed.closingComment, 'Проведена сверка');
+    assert.deepEqual(await dealTotals(), [20, 30]);
     assert.equal((await shifts.list(cafeId, true)).history[0].closingComment, 'Проведена сверка');
     assert.deepEqual(staffEvents.map(({ id, event, shift }) => [id, event, shift.id, shift.status]), [
       [waiter.id, 'waiter:shift_ended', employeeShift.id, 'closed'],
@@ -130,6 +143,12 @@ test('PostgreSQL: shift settlement posts sales and both collection legs once and
     assert.equal(await db.financeEntry.count({ where: { cafeId, pendingCashShift: true } }), 0);
 
     await shifts.updateOperation(cafeId, owner, shift.id, expense.id, { kind: 'expense', amount: 35, categoryId: category.id });
+    assert.deepEqual(await dealTotals(), [20, 35]);
+    const editedExpense = (await shifts.movements(cafeId, shift.id)).find((row) => row.id === expense.id);
+    assert.equal(editedExpense.dealDate.toISOString().slice(0, 10), dealDate);
+    assert.equal(+editedExpense.occurredAt, +expense.occurredAt);
+    await shifts.updateOperation(cafeId, owner, shift.id, expense.id, { kind: 'expense', amount: 35, categoryId: category.id, dealDate: null });
+    assert.deepEqual(await dealTotals(), [20, 0]);
     assert.equal((await shifts.list(cafeId, true)).history[0].difference, 0);
     assert.equal(await db.financeEntry.count({ where: { cafeId, sourceKey: 'cash-close:' + shift.id } }), 0);
     assert.deepEqual(await balance(), { cash: 135, card: 80, safe: 100 });
@@ -218,12 +237,13 @@ test('PostgreSQL: cash operation author is independent of the editor and follows
     assert.ok(authors.every((row) => Object.keys(row).sort().join() === 'id,name'));
     await service.setting(cafeId, true);
     const shift = await service.open(cafeId, waiter.id, 500);
-    const expense = await service.createOperation(cafeId, waiter, shift.id, { kind: 'expense', amount: 30, requestKey: randomUUID() });
+    const expense = await service.createOperation(cafeId, waiter, shift.id, { kind: 'expense', amount: 30, requestKey: randomUUID(), dealDate: '2026-01-31' });
     await service.close(cafeId, waiter.id, { shiftId: shift.id, amount: 468, expectedAmount: 470 });
     const collection = { kind: 'collection', amount: 30 };
     const legs = () => db.financeEntry.findMany({ where: { cafeId, sourceKey: { in: [expense.sourceKey, expense.sourceKey + ':in'] } }, orderBy: { amount: 'asc' } });
 
     await service.updateOperation(cafeId, owner, shift.id, expense.id, collection);
+    assert.ok((await legs()).every((entry) => entry.dealDate === null));
     assert.deepEqual((await legs()).map(({ actorId, amount }) => [actorId, amount.toNumber()]), [[waiter.id, -30], [waiter.id, 30]]);
     for (const unavailable of [inactive, foreign]) {
       await assert.rejects(service.updateOperation(cafeId, owner, shift.id, expense.id, { ...collection, authorId: unavailable.id }), { status: 400 });

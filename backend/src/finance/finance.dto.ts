@@ -47,6 +47,7 @@ class FinanceCategoryGrantsDto {
   @IsOptional() @IsArray() @ArrayMaxSize(200) @IsString({ each: true }) @Length(1, 120, { each: true }) positionIds?: string[];
   @IsOptional() @IsString() @Length(1, 120) parentId?: string | null;
   @IsOptional() @IsBoolean() showOnPos?: boolean;
+  @IsOptional() @IsBoolean() showInProfitLoss?: boolean;
 }
 
 export class FinanceCategoryUpdateDto extends FinanceCategoryGrantsDto {
@@ -73,6 +74,7 @@ class MoneyPostDto extends MoneyFieldsDto {
 }
 
 export class FinanceTransactionEditDto extends MoneyFieldsDto {
+  @IsOptional() @Matches(datePattern) dealDate?: string | null;
   @IsIn(['income', 'expense', 'transfer']) kind!: 'income' | 'expense' | 'transfer';
   @IsString() @Length(1, 120) accountId!: string;
   @IsOptional() @IsString() @Length(1, 120) categoryId?: string;

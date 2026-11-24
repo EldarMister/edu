@@ -3,6 +3,7 @@ import { Prisma, TableStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../realtime/events.gateway';
 import { getCafeId } from '../tenant/tenant-context';
+import { mainMenuCategoryId } from './main-menu-category';
 import { SERVER_EVENTS } from '../realtime/events';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
@@ -286,6 +287,7 @@ export class CatalogService {
   }
 
   async updateCategory(id: string, dto: UpdateCategoryDto, actor: AuditActor) {
+    if (id === mainMenuCategoryId()) throw new BadRequestException('Главный экран — корневой раздел меню');
     const before = await this.ensureCategory(id);
     const { position, ...fields } = dto;
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -294,7 +296,7 @@ export class CatalogService {
       await assertMenuTax(tx, fields.taxId);
       const data = { ...fields, prepStation: fields.prepStation ?? undefined };
       if (position != null) {
-        const categories = await tx.category.findMany({ orderBy: categoryOrder, select: { id: true, sortOrder: true } });
+        const categories = await tx.category.findMany({ where: { id: { not: mainMenuCategoryId() } }, orderBy: categoryOrder, select: { id: true, sortOrder: true } });
         const index = categories.findIndex((category) => category.id === id);
         if (index < 0) throw new NotFoundException('Категория не найдена');
         if (position < 1 || position > categories.length) {
@@ -325,6 +327,7 @@ export class CatalogService {
   }
 
   async deleteCategory(id: string, dto: DeleteCategoryDto, actor: AuditActor) {
+    if (id === mainMenuCategoryId()) throw new BadRequestException('Главный экран — корневой раздел меню');
     const before = await this.ensureCategory(id);
     const dishes = await this.prisma.dish.count({ where: { categoryId: id } });
 

@@ -23,6 +23,7 @@ export interface FinanceCategory {
   kind: CategoryKind;
   parentId: string | null;
   showOnPos?: boolean;
+  showInProfitLoss?: boolean;
   userIds: string[];
   positionIds: string[];
 }
@@ -39,6 +40,7 @@ export interface FinanceEntry {
   counterpartyArchived?: boolean;
   note?: string;
   occurredAt: string;
+  dealDate?: string | null;
   actorName?: string;
   sourceKey?: string;
   purchaseId?: string | null;
@@ -202,7 +204,7 @@ export function useTrashedFinanceAccounts() {
     retry: false,
   });
 }
-type CategoryInput = Pick<FinanceCategory, 'name' | 'kind' | 'parentId' | 'showOnPos' | 'userIds' | 'positionIds'>;
+type CategoryInput = Pick<FinanceCategory, 'name' | 'kind' | 'parentId' | 'showOnPos' | 'showInProfitLoss' | 'userIds' | 'positionIds'>;
 type TransactionValues = {
   kind: TransactionKind;
   accountId: string;
@@ -211,6 +213,7 @@ type TransactionValues = {
   amount: number;
   note?: string;
   occurredAt?: string;
+  dealDate?: string | null;
 };
 type AccrualInput = { userId: string; month: string; amount: number; note?: string; requestKey: string; supplemental?: boolean };
 type PayoutInput = { accountId: string; amount: number; note?: string; requestKey: string };
@@ -268,8 +271,8 @@ export function useFinanceWrites() {
       onSuccess: () => Promise.all([onSuccess(), cache.invalidateQueries({ queryKey: cashShiftKey })]),
     }),
     setCategoryVisibility: useMutation({
-      mutationFn: ({ id, showOnPos }: { id: string; showOnPos: boolean }) =>
-        api.patch(entrypoint + '/categories/' + id, { showOnPos }),
+      mutationFn: ({ id, ...visibility }: { id: string; showOnPos?: boolean; showInProfitLoss?: boolean }) =>
+        api.patch(entrypoint + '/categories/' + id, visibility),
       onSuccess: () => Promise.all([onSuccess(), cache.invalidateQueries({ queryKey: cashShiftKey })]),
     }),
     deleteCategory: useMutation({

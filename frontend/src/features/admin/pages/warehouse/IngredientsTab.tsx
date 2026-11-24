@@ -6,9 +6,9 @@ import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { useAuth } from '@/store/auth';
 import { PROCESSING_METHODS, qty, useBalances, useIngredients, type Ingredient } from './api';
 import { QueryState } from './WarehouseUi';
-import { usePageFilter, usePageFilters } from './workspace-route';
+import { useEditorRoute, usePageFilter, usePageFilters } from './workspace-route';
 import { useWarehousePolicy } from './settings-api';
-import { UNIT_OPTIONS, unitLabel } from './units';
+import { UNIT_OPTIONS, unitConversionFactor } from './units';
 import { WorkspaceHeaderActions, WorkspaceHeaderCount } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { BalanceSupplies } from './BalanceSupplies';
@@ -17,6 +17,9 @@ import { CatalogueUsage, PreparationComposition } from './CatalogueDetails';
 import { WarehouseMultiFilter, warehouseMultiFilterValues } from './WarehouseMultiFilter';
 import { visibleWarehouseColumns, WarehouseColumnSettings } from './WarehouseColumnSettings';
 import { RecipeExportButton } from './RecipeExportButton';
+import { printReport, exportCsv } from '@/lib/report-output';
+import { IngredientImportButton } from './IngredientImportButton';
+import { PreparationCost } from './PreparationCost';
 
 const balanceColumns = {
   name: { label: 'Название', width: 210 },
@@ -98,6 +101,11 @@ export function IngredientsTab({
   const dataColumns = columns.slice(1);
   const suppliesVisible = can('actions.warehouseReports') && costs;
   const preparedCatalogue = catalogue === 'preparations';
+  const { openEditor } = useEditorRoute();
+  const prepLabels: Record<string, string> = { name: 'Название', output: 'Выход', cost: 'Себестоимость' };
+  const prepAvailable = costs ? ['name', 'output', 'cost'] : ['name', 'output'];
+  const [prepPreference, savePrepColumns] = useColumnPreference('menu-preparations');
+  const prepColumns = visibleWarehouseColumns(prepPreference, prepAvailable);
   const canExportPreparations = preparedCatalogue && can('sections.menu') && can('actions.exportReports');
   const [ingredientColumnPreference, saveIngredientColumns] = useColumnPreference('menu-ingredients');
   const [ingredientColumnsOpen, setIngredientColumnsOpen] = useState(false);
@@ -106,7 +114,7 @@ export function IngredientsTab({
   const selectedIngredientColumns = ingredientColumnPreference
     ? visibleWarehouseColumns(ingredientColumnPreference, ingredientOptions) : ingredientDefaults;
   const ingredientDataColumns = selectedIngredientColumns.slice(1);
-  const catalogueColumnCount = preparedCatalogue ? (costs ? 4 : 3) : selectedIngredientColumns.length + 1;
+  const catalogueColumnCount = (preparedCatalogue ? prepColumns.length : selectedIngredientColumns.length) + 1;
   const [balanceFilters, updateBalanceFilters] = usePageFilters({ search: '', kind: '', category: '', unit: '', stockFilter: '',
     warehouse: '', balanceWarehouses: '', balancePage: '1', balanceExpanded: '', balanceSort: 'asc' });
   const { search, kind, category, unit, balanceExpanded: expanded, balanceSort: sort } = balanceFilters;
@@ -115,11 +123,11 @@ export function IngredientsTab({
   }
   const setExpanded = (value: string) => updateBalanceFilters({ balanceExpanded: value });
   const [catalogueExpanded, setCatalogueExpanded] = usePageFilter('catalogueExpanded');
-  const catalogueDetail = catalogueExpanded.startsWith('composition:')
-    ? { id: catalogueExpanded.slice('composition:'.length), kind: 'composition' as const }
-    : catalogueExpanded.startsWith('usage:')
-      ? { id: catalogueExpanded.slice('usage:'.length), kind: 'usage' as const }
-      : null;
+  const catalogueDetailsOpen = new Map(catalogueExpanded.split(',').flatMap((entry) => {
+    const divider = entry.indexOf(':');
+    const kind = entry.slice(0, divider), id = entry.slice(divider + 1);
+    return id && (kind === 'composition' || kind === 'usage') ? [[id, kind] as const] : [];
+  }));
   const detailId = useId();
   const [catalogueSort, setCatalogueSort] = usePageFilter('nameSort', 'asc');
   const balanceKinds = warehouseMultiFilterValues(kind);
@@ -179,16 +187,19 @@ export function IngredientsTab({
       + (includeUnit ? ` ${item.unit}` : '');
   const output = (item: Ingredient) =>
     item.recipeOutputQuantity != null && item.recipeOutputUnit
-      ? balanceQuantity(item.recipeOutputQuantity, unitLabel(item.recipeOutputUnit))
+      ? balanceQuantity(item.recipeOutputQuantity * (unitConversionFactor(item.recipeOutputUnit, item.displayUnit) ?? 1), item.unit, item.unitType)
       : 'Не задан';
   const valuedRows = rows.filter((item) => !virtual(item));
   const total = catalogue ? valuedRows.reduce((sum, item) => sum + (balanceValue(item) ?? 0), 0) : balances.data?.stockValue ?? 0;
   const unknown = catalogue ? valuedRows.some((item) => item.avgCost == null && item.stockBase !== 0) : !!balances.data?.incompleteStockValue;
-  const toggleCatalogue = (id: string, kind: 'usage' | 'composition') =>
-    setCatalogueExpanded(catalogueDetail?.id === id && catalogueDetail.kind === kind ? '' : `${kind}:${id}`);
+  const toggleCatalogue = (id: string, kind: 'usage' | 'composition') => {
+    const next = new Map(catalogueDetailsOpen);
+    if (next.get(id) === kind) next.delete(id); else next.set(id, kind);
+    setCatalogueExpanded([...next].map(([id, kind]) => `${kind}:${id}`).join(','));
+  };
   const catalogueDetails = (item: Ingredient) => (
-    <div className="poster-catalogue-detail" role="region" aria-label={`${catalogueDetail?.kind === 'composition' ? 'Состав' : 'Использование'}: ${item.name}`}>
-      {catalogueDetail?.kind === 'composition'
+    <div className="poster-catalogue-detail" role="region" aria-label={`${catalogueDetailsOpen.get(item.id) === 'composition' ? 'Состав' : 'Использование'}: ${item.name}`}>
+      {catalogueDetailsOpen.get(item.id) === 'composition'
         ? <PreparationComposition id={item.id} warehouseId={warehouseId} />
         : <CatalogueUsage id={item.id} prepared={preparedCatalogue} />}
     </div>
@@ -198,7 +209,7 @@ export function IngredientsTab({
       {catalogue && (
         <button type="button"
           aria-label={`${preparedCatalogue ? 'Состав' : 'Детали'}: ${item.name}`}
-          aria-expanded={catalogueDetail?.id === item.id && catalogueDetail.kind === (preparedCatalogue ? 'composition' : 'usage')}
+          aria-expanded={catalogueDetailsOpen.get(item.id) === (preparedCatalogue ? 'composition' : 'usage')}
           onClick={() => toggleCatalogue(item.id, preparedCatalogue ? 'composition' : 'usage')}>
           {preparedCatalogue ? 'Состав' : 'Детали'}
         </button>
@@ -217,6 +228,8 @@ export function IngredientsTab({
             ? catalogue ? 'Ред.' : 'Изменить'
             : 'Открыть'}
       </button>
+      {preparedCatalogue && can('actions.warehouseRecipes') && <button type="button" title="Копировать полуфабрикат"
+        onClick={() => openEditor({ type: 'preparation', id: item.id, action: 'copy' })}>Копировать</button>}
       {production &&
         item.isPrepared &&
         item.preparationMode !== 'virtual' &&
@@ -331,6 +344,18 @@ export function IngredientsTab({
     }
   }
 
+  function reportCatalogue(print: boolean) {
+    const title = preparedCatalogue ? 'Полуфабрикаты' : 'Ингредиенты';
+    const headings = preparedCatalogue ? prepColumns.map((key) => prepLabels[key]) : selectedIngredientColumns.map((key) => ingredientColumnSpec(key).label);
+    const data = rows.map((item) => preparedCatalogue ? prepColumns.map((key) => key === 'name' ? item.name : key === 'output' ? output(item)
+      : listCost(item) == null ? '—' : amount(listCost(item)!)) : selectedIngredientColumns.map((key) => key === 'losses'
+        ? item.unitType === 'mass' ? PROCESSING_METHODS.map(({ value, label }) => `${label} ${item.processingLosses?.[value] ?? 0}%`).join(', ') : '—'
+        : key === 'category' && !print ? item.category ?? '' : String(ingredientCell(item, key))));
+    if (print) {
+      if (!printReport(title, '', headings, data)) setExportError('Разрешите открытие окна печати в браузере.');
+    } else exportCsv(title, headings, data);
+  }
+
   const emptyState = (
     <div className="py-6 text-center">
       <p className="font-medium text-text-primary">
@@ -358,6 +383,19 @@ export function IngredientsTab({
   return (
     <div className={catalogue ? undefined : 'poster-balance-surface'}>
       {catalogue && <WorkspaceHeaderCount count={query.data ? catalogueRows.length : undefined} />}
+      {catalogue && <WorkspaceHeaderActions>
+        <button type="button" className="supply-header-action" aria-haspopup="dialog" onClick={() => setIngredientColumnsOpen(true)}>Столбцы</button>
+        {canExportPreparations && <RecipeExportButton kind="preparations" ids={rows.map(({ id }) => id)} pending={!catalogueQuery.isSuccess} />}
+        {!preparedCatalogue && can('actions.exportReports') && <button type="button" className="supply-header-action" disabled={!query.isSuccess}
+          onClick={() => reportCatalogue(false)}>Экспорт CSV</button>}
+        {!preparedCatalogue && canCreate && <IngredientImportButton />}
+        <button type="button" className="supply-header-action" disabled={!query.isSuccess} onClick={() => reportCatalogue(true)}>Печать</button>
+        {canCreate && <button type="button" className="btn-primary btn-md" onClick={onCreate}>Добавить</button>}
+      </WorkspaceHeaderActions>}
+      {catalogue && exportError && <p role="alert" className="py-2 text-sm text-danger">{exportError}</p>}
+      {preparedCatalogue && ingredientColumnsOpen && <WarehouseColumnSettings columns={prepColumns} defaults={prepAvailable}
+        label={(key) => prepLabels[key]} onClose={() => setIngredientColumnsOpen(false)}
+        onApply={(selection) => { savePrepColumns(selection.join(',')); setIngredientColumnsOpen(false); }} />}
       {catalogue === 'ingredients' && ingredientColumnsOpen && <WarehouseColumnSettings columns={selectedIngredientColumns} defaults={ingredientOptions}
         resetColumns={ingredientDefaults} label={(key) => ingredientColumnSpec(key).label}
         onClose={() => setIngredientColumnsOpen(false)} onApply={(selection) => {
@@ -387,10 +425,6 @@ export function IngredientsTab({
       <div className="poster-toolbar">
         <WorkspaceSearch label="Поиск позиции" placeholder={catalogue ? 'Быстрый поиск' : 'Поиск...'} value={search} onChange={(value) => setBalanceFilter({ search: value })} />
         {filters}
-        {preparedCatalogue && (canCreate || canExportPreparations) && <div className="ml-auto flex flex-wrap items-center gap-2">
-          {canExportPreparations && <RecipeExportButton kind="preparations" ids={rows.map(({ id }) => id)} pending={!catalogueQuery.isSuccess} />}
-          {canCreate && <button type="button" className="btn-primary btn-md" onClick={onCreate}>Добавить</button>}
-        </div>}
         {!catalogue && (
           <WarehouseMultiFilter
             label="Тип"
@@ -469,11 +503,6 @@ export function IngredientsTab({
             )}
           </div>
         </details>
-        {catalogue === 'ingredients' && <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-          <button type="button" className="supply-header-action print:hidden" aria-haspopup="dialog"
-            onClick={() => setIngredientColumnsOpen(true)}>Столбцы</button>
-          {canCreate && <button type="button" className="btn-primary btn-md" onClick={onCreate}>Добавить</button>}
-        </div>}
         {!catalogue && (filtered || warehouseId || warehouseIds) && <button type="button" className="poster-balance-reset"
           onClick={() => setBalanceFilter({ search: '', kind: '', category: '', unit: '', stockFilter: '', warehouse: '', balanceWarehouses: '' })}>
           Сбросить всё
@@ -512,8 +541,7 @@ export function IngredientsTab({
                 </th>
                 {catalogue ? <>
                   {preparedCatalogue ? <>
-                    <th className="text-right">Выход</th>
-                    {costs && <th className="text-right">Себестоимость</th>}
+                    {prepColumns.slice(1).map((key) => <th key={key} className="text-right">{prepLabels[key]}</th>)}
                   </> : ingredientDataColumns.map((key) => <th key={key} scope="col" data-column={key}
                     className={ingredientColumnSpec(key).numeric ? 'text-right' : key === 'losses' ? 'text-center' : undefined}>
                     {ingredientColumnSpec(key).label}
@@ -527,13 +555,13 @@ export function IngredientsTab({
             <tbody>
               {rows.map((item) => (
                 <Fragment key={item.id}>
-                <tr data-expanded={(catalogue ? catalogueDetail?.id === item.id : expanded === item.id) ? 'true' : undefined}>
+                <tr data-expanded={(catalogue ? catalogueDetailsOpen.has(item.id) : expanded === item.id) ? 'true' : undefined}>
                   <td>
                     {catalogue ? <button
                       type="button"
                       className={`text-left ${preparedCatalogue ? 'text-primary' : 'text-text-primary'}`}
                       title={preparedCatalogue ? 'Где используется полуфабрикат' : 'Остатки и использование ингредиента'}
-                      aria-expanded={catalogueDetail?.id === item.id && catalogueDetail.kind === 'usage'}
+                      aria-expanded={catalogueDetailsOpen.get(item.id) === 'usage'}
                       onClick={() => toggleCatalogue(item.id, 'usage')}
                     >
                       {item.name}
@@ -541,10 +569,9 @@ export function IngredientsTab({
                   </td>
                   {catalogue ? <>
                     {preparedCatalogue ? <>
-                      <td className="text-right whitespace-nowrap">{output(item)}</td>
-                      {costs && <td className="text-right whitespace-nowrap">
-                        {listCost(item) == null ? '—' : amount(listCost(item)!)}
-                      </td>}
+                      {prepColumns.slice(1).map((key) => <td key={key} className="text-right whitespace-nowrap">
+                        {key === 'output' ? output(item) : <PreparationCost value={listCost(item)} known={item.knownRecipeTotalCost} />}
+                      </td>)}
                     </> : ingredientDataColumns.map((key) => <td key={key} data-column={key}
                       className={ingredientColumnSpec(key).numeric ? 'text-right whitespace-nowrap tabular-nums' : undefined}>
                       {ingredientCell(item, key)}
@@ -556,7 +583,7 @@ export function IngredientsTab({
                       data-column={key} title={value}>{value}</td>;
                   })}
                 </tr>
-                {catalogue && catalogueDetail?.id === item.id && (
+                {catalogue && catalogueDetailsOpen.has(item.id) && (
                   <tr className="poster-catalogue-detail-row">
                     <td colSpan={catalogueColumnCount}>
                       {catalogueDetails(item)}
@@ -607,17 +634,17 @@ export function IngredientsTab({
               {catalogue ? <>
               <div className="flex items-start justify-between gap-3">
                 <button type="button" className="text-left text-sm text-primary"
-                  aria-expanded={catalogueDetail?.id === item.id && catalogueDetail.kind === 'usage'}
+                  aria-expanded={catalogueDetailsOpen.get(item.id) === 'usage'}
                   onClick={() => toggleCatalogue(item.id, 'usage')}>
                   {item.name}
                 </button>
-                {preparedCatalogue && costs && (
+                {preparedCatalogue && prepColumns.includes('cost') && (
                   <span className="shrink-0 text-sm">
-                    {listCost(item) == null ? '—' : amount(listCost(item)!)}
+                    <PreparationCost value={listCost(item)} known={item.knownRecipeTotalCost} />
                   </span>
                 )}
               </div>
-              {preparedCatalogue ? <div className="mt-1 flex justify-between gap-3 text-xs text-text-muted">
+              {preparedCatalogue ? prepColumns.includes('output') && <div className="mt-1 flex justify-between gap-3 text-xs text-text-muted">
                 <span>Выход</span><span>{output(item)}</span>
               </div> : ingredientDataColumns.length > 0 && <dl className="poster-balance-mobile-values mt-2">
                 {ingredientDataColumns.map((key) => <div key={key}>
@@ -631,13 +658,12 @@ export function IngredientsTab({
                 </dl>}
               </>}
               {catalogue ? <div className="mt-2">{actions(item)}</div> : expanded === item.id && details(item, `${detailId}-mobile-${item.id}`)}
-              {catalogue && catalogueDetail?.id === item.id && catalogueDetails(item)}
+              {catalogue && catalogueDetailsOpen.has(item.id) && catalogueDetails(item)}
             </article>
           ))}
           {!rows.length && emptyState}
           {showTotal && (
             <p className="flex justify-between py-3 text-sm font-medium">
-              {catalogue === 'ingredients' && <span>{totalLabel}</span>}
               <span>{totalLabel}</span>
               <span>{amount(total)}</span>
             </p>

@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { BadRequestException } from '@nestjs/common';
 import type { AuditActor } from '../audit/audit.service';
 import { getCafeId } from '../tenant/tenant-context';
 import { readProcessingStages } from './recipe-processing';
@@ -26,6 +27,7 @@ export async function archiveDishRecipe(tx: Prisma.TransactionClient, dishId: st
   await tx.recipeRevision.upsert({
     where: { dishId_version: { dishId, version: dish.recipeVersion } },
     create: { dishId, version: dish.recipeVersion, snapshot: JSON.parse(JSON.stringify({
+      writeoffBasis: { name: dish.name, isSet: dish.isSet, isWeighted: dish.isWeighted, weightedMeasure: dish.weightedMeasure, weightedPriceBase: dish.weightedPriceBase },
       replacedBy: editor ? { id: editor.id, name: editor.name ?? null } : null,
       modifierGroups: dish.modifierGroups, allowIngredientExclusions: dish.allowIngredientExclusions,
       excludableIngredientIds: dish.excludableIngredientIds, metadata: dish.recipeMetadata,
@@ -48,6 +50,26 @@ const number = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 const enumValue = <T extends string>(value: unknown, values: readonly T[]) => values.find((option) => option === value) ?? null;
+
+export function writeoffRecipeVersion(dish: Pick<Prisma.DishGetPayload<{}>, 'id' | 'name' | 'isSet' | 'isWeighted' | 'weightedMeasure' | 'weightedPriceBase' | 'stockIngredientId' | 'stockAmount' | 'recipeVersion'>,
+  revision: { version: number; snapshot: Prisma.JsonValue }) {
+  const snapshot = object(revision.snapshot);
+  if (!Array.isArray(snapshot.items) || !Array.isArray(snapshot.variants)) throw new BadRequestException('Состав техкарты на выбранную дату не сохранён');
+  const basis = object(snapshot.writeoffBasis);
+  if (!Object.keys(basis).length && dish.isWeighted) throw new BadRequestException('Вес порции в этой версии техкарты не сохранён. Укажите ингредиенты списания отдельно.');
+  const decimal = (value: Prisma.JsonValue | undefined) => {
+    if (number(value) === null) throw new BadRequestException('В старой техкарте не сохранена норма списания');
+    return new Prisma.Decimal(String(value));
+  };
+  return { ...dish, name: string(basis.name) ?? dish.name, isSet: typeof basis.isSet === 'boolean' ? basis.isSet : dish.isSet,
+    isWeighted: typeof basis.isWeighted === 'boolean' ? basis.isWeighted : dish.isWeighted,
+    weightedMeasure: string(basis.weightedMeasure) ?? dish.weightedMeasure, weightedPriceBase: number(basis.weightedPriceBase) ?? dish.weightedPriceBase,
+    recipeVersion: revision.version, stockIngredientId: string(snapshot.stockIngredientId), stockAmount: decimal(snapshot.stockAmount ?? 1),
+    variants: records(snapshot.variants).map((v) => ({ id: String(v.id), name: String(v.name), recipeMetadata: v.recipeMetadata ?? null,
+      stockIngredientId: string(v.stockIngredientId), stockAmount: decimal(v.stockAmount ?? 1) })),
+    recipeItems: records(snapshot.items).map((r) => ({ ingredientId: String(r.ingredientId), amount: decimal(r.amount),
+      variantId: string(r.variantId), variantAmounts: r.variantAmounts ?? null })) };
+}
 
 function unitCode(value: unknown) {
   if (!string(value)) return null;

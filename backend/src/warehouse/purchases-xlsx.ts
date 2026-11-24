@@ -40,8 +40,11 @@ export function purchaseExportColumns(selection?: string): Column[] {
 export function writePurchaseWorkbook(purchases: ExportPurchase[], warehouseNames: Map<string, string>, defaultWarehouseName: string, selection: Column[]): Buffer {
   const sheet = XLSX.utils.aoa_to_sheet([selection.map((key) => columns[key].label)]);
   sheet['!cols'] = selection.map((key) => ({ wch: columns[key].width }));
-  const lines = XLSX.utils.aoa_to_sheet([['№ поставки', 'Дата', 'Поставщик', 'Склад', 'Товар', 'Категория', 'Ед. изм.', 'Количество', 'Цена до скидки', 'Сумма до скидки', 'Сумма со скидкой']]);
-  lines['!cols'] = [17, 22, 30, 25, 35, 25, 20, 18, 20, 20, 20].map((wch) => ({ wch }));
+  const hasTax = purchases.some(purchase => purchase.items.some(item => item.taxId));
+  const taxColumns = hasTax ? ['Налог', 'Сумма налога', 'Общая сумма с налогом'] : [];
+  const lines = XLSX.utils.aoa_to_sheet([['№ поставки', 'Дата', 'Поставщик', 'Склад', 'Товар', 'Категория', 'Ед. изм.', 'Количество', 'Цена до скидки', 'Сумма до скидки',
+    hasTax ? 'Сумма без налога со скидкой' : 'Сумма со скидкой', ...taxColumns]]);
+  lines['!cols'] = [17, 22, 30, 25, 35, 25, 20, 18, 20, 20, 28, ...taxColumns.map(() => 24)].map((wch) => ({ wch }));
   let lineIndex = 1;
   for (const [index, purchase] of purchases.entries()) {
     const number = `ЗКП-${String(purchase.number).padStart(6, '0')}`;
@@ -62,11 +65,13 @@ export function writePurchaseWorkbook(purchases: ExportPurchase[], warehouseName
       let unit: string;
       try { unit = unitLabel(normalizeUnit(item.unit)); } catch { unit = item.unit; }
       if (item.packageName) unit = item.packageName;
+      const taxCells = hasTax ? [item.taxId ? `${item.taxName} (${item.taxRate}%)` : 'Без налога', Number(item.taxAmount ?? 0),
+        new Prisma.Decimal(item.total).add(item.taxAmount ?? 0).toNumber()] : [];
       XLSX.utils.sheet_add_aoa(lines, [[number, date, purchase.supplier, warehouse, item.ingredient.name, item.ingredient.category ?? '', unit,
-        Number(item.quantity), Number(item.purchasePrice), Number(item.grossTotal), Number(item.total)]], { origin: { r: lineIndex, c: 0 } });
+        Number(item.quantity), Number(item.purchasePrice), Number(item.grossTotal), Number(item.total), ...taxCells]], { origin: { r: lineIndex, c: 0 } });
       lines[XLSX.utils.encode_cell({ r: lineIndex, c: 1 })].z = 'dd.mm.yyyy hh:mm';
       lines[XLSX.utils.encode_cell({ r: lineIndex, c: 7 })].z = '#,##0.000';
-      for (const c of [8, 9, 10]) lines[XLSX.utils.encode_cell({ r: lineIndex, c })].z = '#,##0.00 "с"';
+      for (const c of hasTax ? [8, 9, 10, 12, 13] : [8, 9, 10]) lines[XLSX.utils.encode_cell({ r: lineIndex, c })].z = '#,##0.00 "с"';
       lineIndex += 1;
     }
   }

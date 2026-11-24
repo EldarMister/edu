@@ -14,6 +14,8 @@ import { DocumentProductPicker } from './DocumentProductPicker';
 import { focusDocumentInput } from './document-focus';
 import { StockOperationDateField } from './StockOperationDateField';
 import { PurchaseSettlementPanel } from './PurchaseSettlementPanel';
+import { PurchaseInvoiceImport } from './PurchaseInvoiceImport';
+import { invoiceRows, invoiceUnit, type InvoiceLine, type InvoicePreview } from './invoice-import-values';
 import { inventoryLocalTime, inventoryTimeDisplay, inventoryTimingError, inventoryTimingFor, inventoryTimingValue } from './inventory-time';
 import './document-workspace.css';
 import './inventory-workspace.css';
@@ -23,6 +25,7 @@ import {
   usePurchase,
   usePurchaseMutations,
   useLastPurchasePrices,
+  usePurchaseTaxOptions,
   purchaseNumber,
   type Purchase,
   type WarehouseLocation,
@@ -36,6 +39,7 @@ import {
   purchasePriceFromTotal,
   purchaseRowTotal,
   purchaseRowTotalText,
+  purchaseTaxTotal,
   purchaseUnitFactor,
   roundPurchaseMoney,
   roundPurchaseQuantity,
@@ -53,6 +57,7 @@ export function PurchaseModal({
   onProcessPayment,
   openPayment = false,
   edit = false,
+  importInvoice = false,
 }: {
   id?: string;
   warehouseId: string;
@@ -63,6 +68,7 @@ export function PurchaseModal({
   onProcessPayment?: (id: string) => void;
   openPayment?: boolean;
   edit?: boolean;
+  importInvoice?: boolean;
 }) {
   const query = usePurchase(id ?? null);
   const permissions = usePermissions();
@@ -100,6 +106,7 @@ export function PurchaseModal({
           onProcessPayment={onProcessPayment}
           openPayment={openPayment}
           correcting={correcting}
+          importInvoice={importInvoice}
           onCorrecting={setCorrecting}
         />
       )}
@@ -107,7 +114,8 @@ export function PurchaseModal({
   );
 }
 
-type Row = PurchaseRowValues & { key: string; ingredientId: string; unit: string };
+type Row = PurchaseRowValues & { key: string; ingredientId: string; unit: string; taxId?: string | null;
+  sourceName?: string; sourceUnit?: string; sourcePrice?: number | null; sourceTax?: InvoiceLine['tax']; taxReview?: boolean };
 const priceChangeFormatter = new Intl.NumberFormat('ru-RU', { style: 'percent', maximumFractionDigits: 1, signDisplay: 'exceptZero' });
 const emptyRow = (): Row => ({
   key: crypto.randomUUID(),
@@ -127,6 +135,7 @@ function PurchaseForm({
   openPayment,
   correcting,
   onCorrecting,
+  importInvoice,
 }: {
   purchase?: Purchase;
   warehouseId: string;
@@ -138,6 +147,7 @@ function PurchaseForm({
   openPayment: boolean;
   correcting: boolean;
   onCorrecting: (value: boolean) => void;
+  importInvoice: boolean;
 }) {
   const purchaseSnapshot = useRef(latestPurchase).current;
   const purchase = !correcting && latestPurchase?.status === 'completed' ? latestPurchase : purchaseSnapshot;
@@ -154,13 +164,13 @@ function PurchaseForm({
   const [dateValid, setDateValid] = useState(true);
   const [timing, setTiming] = useState(() => inventoryTimingFor(purchase ? purchase.effectiveAt ?? purchase.postedAt : initialOperationAt));
   const [timingValid, setTimingValid] = useState(true);
-  const [focusedPrice, setFocusedPrice] = useState<string | null>(null);
   const packages = usePackages();
   const [rows, setRows] = useState<Row[]>(
     () =>
       purchase?.items?.map((item) => ({
         key: item.id,
         ingredientId: item.ingredientId,
+        taxId: item.taxId ?? null,
         quantity: String(item.quantity),
         unit: item.packageId ? `package:${item.packageId}` : item.unitCode,
         price: item.purchasePrice == null ? '' : String(item.purchasePrice),
@@ -171,6 +181,8 @@ function PurchaseForm({
   const [discountVisible, setDiscountVisible] = useState(Number(purchase?.discount ?? 0) > 0);
   const [note, setNote] = useState(purchase?.note ?? '');
   const [error, setError] = useState('');
+  const [readingInvoice, setReadingInvoice] = useState(false);
+  const [imported, setImported] = useState<{ filename: string; preview: InvoicePreview; entireInvoice: boolean }>();
   const [validationAttempt, setValidationAttempt] = useState(0);
   const formRef = useRef<HTMLDivElement>(null);
   const formId = useId();
@@ -179,6 +191,13 @@ function PurchaseForm({
   const byId = new Map((ingredients.data ?? []).map((item) => [item.id, item]));
   const editable = canReceive && (!purchase || purchase.status === 'draft' || correcting);
   const stockEditable = editable && (purchase?.status !== 'completed' || purchase.canCorrectStock === true);
+  const taxOptions = usePurchaseTaxOptions(stockEditable);
+  const showTax = !!taxOptions.data?.length || !!purchase?.items?.some(item => item.taxId) || rows.some(row => row.sourceTax);
+  function rateFor(row: Row) {
+    if (!row.taxId) return 0;
+    const saved = purchase?.items?.find(item => item.id === row.key && item.ingredientId === row.ingredientId && item.taxId === row.taxId);
+    return saved?.taxRate ?? Number(taxOptions.data?.find(tax => tax.id === row.taxId)?.rate ?? 0);
+  }
   const historicalCorrection = correcting && purchase?.historicalStockCorrection === true;
   const compositionEditable = stockEditable && !historicalCorrection;
   const timingEditable = editable && (!purchase || purchase.status === 'draft');
@@ -194,7 +213,7 @@ function PurchaseForm({
   const returns = useStockDocuments(purchase?.warehouseId ?? undefined, 'supplier_return');
   const linkedReturns = (returns.data ?? []).filter((document) => document.sourcePurchaseId === purchase?.id);
   const catalogReady = ingredients.isSuccess && packages.isSuccess;
-  const busy =
+  const busy = readingInvoice ||
     mutations.create.isPending ||
     mutations.update.isPending ||
     mutations.complete.isPending ||
@@ -202,16 +221,20 @@ function PurchaseForm({
   const subtotal = roundPurchaseMoney(rows.reduce((sum, row) => sum + purchaseRowTotal(row), 0));
   const discountInput = Number(discount || 0);
   const discountAmount = roundPurchaseMoney(discountInput);
-  const total = !stockEditable && purchase ? purchase.totalAmount : roundPurchaseMoney(subtotal - discountAmount);
-  const enteredRows = rows.filter((row) => row.ingredientId || row.quantity || row.price || row.total);
+  const taxTotal = !stockEditable && purchase ? roundPurchaseMoney((purchase.items ?? []).reduce((sum, item) => sum + (item.taxAmount ?? 0), 0))
+    : purchaseTaxTotal(rows.map(row => ({ amount: purchaseRowTotal(row), rate: rateFor(row) })), discountAmount);
+  const total = !stockEditable && purchase ? purchase.totalAmount : roundPurchaseMoney(subtotal - discountAmount + taxTotal);
+  const enteredRows = rows.filter((row) => row.ingredientId || row.quantity || row.price || row.total || row.sourceName);
   const supplierError = supplier.trim() ? '' : 'Укажите поставщика.';
   const locationError = location ? '' : 'Выберите склад.';
   const discountError = !Number.isFinite(discountInput) || discountInput < 0 || discountAmount > subtotal
     ? 'Скидка должна быть от 0 до суммы товаров.' : '';
-  const rowErrors = new Map<string, { product?: string; quantity?: string; price?: string; total?: string }>();
+  const rowErrors = new Map<string, { product?: string; unit?: string; quantity?: string; price?: string; total?: string; tax?: string }>();
   for (const row of enteredRows) {
-    const issues: { product?: string; quantity?: string; price?: string; total?: string } = {};
+    const issues: { product?: string; unit?: string; quantity?: string; price?: string; total?: string; tax?: string } = {};
+    if (row.taxReview) issues.tax = 'Сверьте налог с накладной и выберите ставку.';
     if (!row.ingredientId) issues.product = 'Выберите продукт.';
+    if (row.ingredientId && !row.unit) issues.unit = 'Укажите единицу из накладной.';
     if (!Number.isFinite(Number(row.quantity)) || !(roundPurchaseQuantity(Number(row.quantity)) > 0))
       issues.quantity = 'Введите количество больше нуля.';
     if (!(row.total ?? row.price).trim() || !Number.isFinite(Number(row.total ?? row.price)) ||
@@ -231,7 +254,9 @@ function PurchaseForm({
     setRows((current) => {
       const index = current.findIndex((row) => row.key === key);
       if (index < 0) return current;
-      const selected = selectPurchaseProduct(current[index], item);
+      const source = current[index];
+      const selected = source.sourceName ? { ...source, ingredientId: item.id, unit: invoiceUnit(source.sourceUnit ?? '', item) }
+        : selectPurchaseProduct(source, item);
       return selected === current[index]
         ? current
         : current.map((row, rowIndex) => rowIndex === index ? selected : row);
@@ -240,7 +265,20 @@ function PurchaseForm({
   function update(key: string, patch: Partial<Row>) {
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)));
   }
+  function selectTax(row: Row, taxId: string) {
+    const change: Partial<Row> = { taxId: taxId || null, taxReview: false };
+    if (row.taxReview && row.sourceTax?.totalWithTax != null && !row.price && row.total == null) {
+      const rate = Number(taxOptions.data?.find(tax => tax.id === taxId)?.rate ?? 0);
+      change.total = String(roundPurchaseMoney(row.sourceTax.totalWithTax / (1 + rate / 100)));
+      change.price = purchasePriceFromTotal(row.quantity, change.total);
+    }
+    update(row.key, change);
+  }
   function changeUnit(row: Row, unit: string) {
+    if (!row.unit && row.sourceName) {
+      update(row.key, { unit });
+      return;
+    }
     const item = byId.get(row.ingredientId);
     const original = purchase?.items?.find((entry) => entry.id === row.key && entry.ingredientId === row.ingredientId);
     update(row.key, {
@@ -252,6 +290,19 @@ function PurchaseForm({
       ),
       total: undefined,
     });
+  }
+  function addInvoice(preview: InvoicePreview, filename: string) {
+    const added = invoiceRows(preview.lines, ingredients.data ?? [], taxOptions.data);
+    setRows(current => [...current.filter(row => row.ingredientId || row.quantity || row.price || row.total || row.sourceName), ...added]);
+    const knownSupplier = suppliers.data?.find(s => s.name.trim().toLocaleLowerCase() === preview.supplier.trim().toLocaleLowerCase());
+    if (!supplier.trim() && knownSupplier) setSupplier(knownSupplier.name);
+    if (!separateInvoiceDate && preview.invoiceDate) {
+      setSeparateInvoiceDate(true);
+      setDate(preview.invoiceDate + 'T' + date.slice(11));
+      setDateValid(true);
+    }
+    setImported({ filename, preview, entireInvoice: enteredRows.length === 0 });
+    setError('');
   }
   async function save(complete: boolean, processPayment = false) {
     if (busy || !editable || (stockEditable && !catalogReady) || !dateValid || !date || !timingReady) return;
@@ -285,7 +336,7 @@ function PurchaseForm({
               ? [{ name: item.purchaseUnit, factor: item.purchaseFactor }]
               : [];
           const globalPackage = row.unit.startsWith('package:') ? row.unit.slice(8) : undefined;
-          const original = purchase?.items?.find((entry) => entry.id === row.key && entry.ingredientId === row.ingredientId && entry.packageId === globalPackage);
+          const original = purchase?.items?.find((entry) => entry.id === row.key && entry.ingredientId === row.ingredientId && (entry.packageId ?? undefined) === globalPackage);
           const lineValue =
             row.total === undefined
               ? { purchasePrice: Number(row.price) }
@@ -295,6 +346,7 @@ function PurchaseForm({
               ingredientId: row.ingredientId,
               quantity,
               packageId: globalPackage,
+              taxId: row.taxId ?? null,
               ...(original ? { purchaseItemId: original.id } : {}),
               ...lineValue,
             };
@@ -303,6 +355,8 @@ function PurchaseForm({
           return {
             ingredientId: row.ingredientId,
             quantity: quantity * factor,
+            taxId: row.taxId ?? null,
+            ...(original ? { purchaseItemId: original.id } : {}),
             unit: pack ? item?.displayUnit : row.unit,
             ...(row.total === undefined && !pack
               ? { purchasePrice: Number(row.price) / factor }
@@ -401,6 +455,18 @@ function PurchaseForm({
         </DocumentField>
       </div>
       <div className="poster-purchase-products">
+        {compositionEditable && !correcting && <div className="mb-4">
+          <PurchaseInvoiceImport initialOpen={importInvoice} disabled={busy || !catalogReady || taxOptions.isPending} onBusy={setReadingInvoice} onRead={addInvoice} />
+          {imported && <div role="status" className="mt-2 rounded-lg border border-border p-3 text-sm">
+            <p>Проверьте позиции из файла «{imported.filename}» перед сохранением. Распознано строк — {imported.preview.lines.length}.</p>
+            {imported.preview.supplier && <p>Поставщик в накладной — {imported.preview.supplier}{!supplier.trim() ? '. Выберите поставщика в форме.' : ''}</p>}
+            {imported.preview.total != null && <p>Итого в накладной — {balanceMoney(imported.preview.total)}</p>}
+            {imported.entireInvoice && imported.preview.total != null && Math.abs(total - imported.preview.total) >= 0.009 &&
+              <p className="text-warning">Разница с итогом поставки — {balanceMoney(Math.abs(total - imported.preview.total))}. Проверьте строки, скидку и налог.</p>}
+            {!!imported.preview.warnings.length && <details className="mt-1"><summary className="cursor-pointer text-warning">Проверить непрочитанные строки</summary>
+              {imported.preview.warnings.map((line, i) => <p key={i}>{line}</p>)}</details>}
+          </div>}
+        </div>}
         {stockEditable && (ingredients.isPending || packages.isPending) && <p role="status" className="mb-3 text-sm text-text-muted">Загрузка продуктов и фасовок…</p>}
         {stockEditable && (ingredients.isError || packages.isError) && (
           <div role="alert" className="mb-3 text-sm text-danger">
@@ -409,13 +475,15 @@ function PurchaseForm({
           </div>
         )}
         <div className="poster-document-table overflow-x-auto">
+          {taxOptions.isError && <p className="mb-2 text-sm text-danger" role="alert">Не удалось загрузить ставки налога. <button type="button" className="text-primary" onClick={() => void taxOptions.refetch()}>Повторить</button></p>}
           <table className="poster-table poster-purchase-table w-full min-w-[850px] table-fixed text-left text-sm">
             <colgroup>
               <col />
-              <col style={{ width: '16%' }} />
-              <col style={{ width: '17%' }} />
-              <col style={{ width: '17%' }} />
-              <col style={{ width: '17%' }} />
+              <col style={{ width: showTax ? '11%' : '16%' }} />
+              <col style={{ width: showTax ? '10%' : '17%' }} />
+              <col style={{ width: showTax ? '14%' : '17%' }} />
+              <col style={{ width: showTax ? '13%' : '17%' }} />
+              {showTax && <><col style={{ width: '13%' }} /><col style={{ width: '13%' }} /></>}
               <col style={{ width: 40 }} />
             </colgroup>
             <thead>
@@ -424,7 +492,8 @@ function PurchaseForm({
                 <th className="px-2 pb-3 font-normal">Фасовки</th>
                 <th className="px-2 pb-3 text-right font-normal">Количество</th>
                 <th className="px-2 pb-3 text-right font-normal">{costs && <>Цена<br />за единицу</>}</th>
-                <th className="px-2 pb-3 text-right font-normal">{costs && <>Общая<br />сумма</>}</th>
+                <th className="px-2 pb-3 text-right font-normal">{costs && (showTax ? <>Сумма<br />без налога</> : <>Общая<br />сумма</>)}</th>
+                {showTax && <><th className="px-2 pb-3 font-normal">Налог</th><th className="px-2 pb-3 text-right font-normal">Общая сумма</th></>}
                 <th />
               </tr>
             </thead>
@@ -470,7 +539,7 @@ function PurchaseForm({
                       : ''}`;
                   }
                 }
-                if (!options.some((o) => o.value === row.unit))
+                if (row.unit && !options.some((o) => o.value === row.unit))
                   options.push({
                     value: row.unit,
                     label: original?.packageName ?? unitLabel((original?.unit ?? row.unit) as UnitCode),
@@ -487,6 +556,7 @@ function PurchaseForm({
                       {compositionEditable ? (
                         <DocumentProductPicker
                           id={`${errorId}-product-input`}
+                          placeholder={row.sourceName ? 'Сопоставить с продуктом…' : undefined}
                           value={row.ingredientId}
                           options={(ingredients.data ?? []).filter((entry) => entry.preparationMode !== 'virtual').map((entry) => ({ ...entry, detail: entry.category ?? undefined }))}
                           onChange={(id) => choose(row.key, id)}
@@ -505,11 +575,14 @@ function PurchaseForm({
                       ) : (
                         <span>{original?.ingredientName ?? item?.name ?? 'Продукт'}</span>
                       )}
+                      {row.sourceName && <p className="mt-1 text-xs text-text-muted">В накладной — {row.sourceName}{row.sourceUnit ? ', ' + row.sourceUnit : ''}</p>}
                     </td>
                     <td className="px-2 py-2">
                       {compositionEditable ? (
                         <Select
                           ariaLabel="Единица закупки"
+                          ariaInvalid={!!issues?.unit}
+                          placeholder="Выберите единицу"
                           className="h-9 w-full"
                           value={row.unit}
                           options={
@@ -529,6 +602,7 @@ function PurchaseForm({
                             : original?.unit ?? options.find((entry) => entry.value === row.unit)?.label ?? row.unit}
                         </span>
                       )}
+                      {issues?.unit && <p className="mt-1 text-xs text-danger">{issues.unit}</p>}
                     </td>
                     <td className="px-2 py-2">
                       {stockEditable ? (
@@ -580,22 +654,24 @@ function PurchaseForm({
                                 aria-label={`Цена ${item?.name ?? 'продукта'}`}
                                 aria-invalid={!!issues?.price || undefined}
                                 aria-describedby={issues?.price ? `${errorId}-price` : undefined}
-                                value={focusedPrice === row.key ? row.price : formatPurchaseUnitPrice(row.price, true)}
-                                onFocus={() => setFocusedPrice(row.key)}
-                                onBlur={() => setFocusedPrice(null)}
+                                value={row.price}
+                                onBlur={() => update(row.key, { price: formatPurchaseUnitPrice(row.price, true) })}
                                 disabled={busy || !row.ingredientId}
                                 onChange={(e) => update(row.key, { price: e.target.value, total: undefined })}
                               />
                               <span className="poster-value-unit__suffix">с</span>
                             </div>
-                            {previousPriceAmount && <button type="button" className="mt-1 block w-full text-right text-xs text-primary hover:underline"
-                              aria-label={`Подставить предыдущую цену ${previousPriceAmount}`} disabled={busy}
-                              title={previousPriceDetails} onClick={() => update(row.key, { price: previousConverted, total: undefined })}>
-                              Предыдущая: {previousPriceAmount}
-                              {previousPriceDelta && previousPriceDelta.difference !== 0 && (
-                                <span aria-hidden="true"> {previousPriceDelta.difference > 0 ? '↑' : '↓'}</span>
-                              )}
-                            </button>}
+                            {previousPriceAmount && <div className="mt-1 space-y-1 text-right text-xs">
+                              <p className="text-text-muted" title={previousPriceDetails}>Прошлая цена — {previousPriceAmount}</p>
+                              {previousPriceDelta && previousPriceDelta.difference !== 0 && <p className={previousPriceDelta.difference > 0 ? 'text-warning' : 'text-success'}>
+                                Цена {previousPriceDelta.difference > 0 ? 'выросла' : 'снизилась'} на {formatPurchaseUnitPrice(String(Math.abs(previousPriceDelta.difference)))}
+                                {previousPriceDelta.ratio != null && <> ({priceChangeFormatter.format(previousPriceDelta.ratio)})</>}
+                              </p>}
+                              {(!previousPriceDelta || previousPriceDelta.difference !== 0) && <button type="button" className="text-primary hover:underline"
+                                aria-label={`Подставить предыдущую цену ${previousPriceAmount}`} disabled={busy} title={previousPriceDetails}
+                                onClick={() => update(row.key, { price: previousConverted, total: undefined })}>Применить прошлую цену</button>}
+                            </div>}
+                            {row.sourcePrice != null && <p className="mt-1 text-xs text-warning">В накладной цена {formatPurchaseUnitPrice(String(row.sourcePrice))}. Проверьте расхождение с суммой строки.</p>}
                             {issues?.price && <p id={`${errorId}-price`} className="mt-1 text-xs text-danger">{issues.price}</p>}
                           </>
                         ) : (
@@ -639,6 +715,32 @@ function PurchaseForm({
                           </span>
                         ))}
                     </td>
+                    {showTax && <>
+                      <td className="px-2 py-2">
+                        {stockEditable ? <Select ariaLabel={`Налог ${item?.name ?? 'продукта'}`} ariaInvalid={!!issues?.tax}
+                          placeholder="Выберите налог" value={row.taxReview ? '' : row.taxId || 'none'}
+                          options={[{ value: 'none', label: 'Без налога' }, ...(taxOptions.data ?? []).filter(t => t.id !== original?.taxId)
+                            .map(t => ({ value: t.id, label: `${Number(t.rate)}% (${t.name})` })),
+                            ...(original?.taxId ? [{ value: original.taxId, label: `${original.taxRate}% (${original.taxName})` }] : [])]}
+                          disabled={busy || !row.ingredientId} onChange={taxId => selectTax(row, taxId === 'none' ? '' : taxId)} />
+                        : <span>{original?.taxId ? `${original.taxRate}% (${original.taxName})` : 'Без налога'}</span>}
+                        {row.sourceTax && <p className="mt-1 text-xs text-text-muted">
+                          НДС в накладной{row.sourceTax.rate != null ? ' ' + row.sourceTax.rate + '%' : ''}
+                          {row.sourceTax.amount != null ? ' · ' + balanceMoney(row.sourceTax.amount) : ''}
+                          {row.sourceTax.totalWithTax != null ? ' · Всего ' + balanceMoney(row.sourceTax.totalWithTax) : ''}
+                        </p>}
+                        {row.taxReview && <p className="mt-1 text-xs text-warning">{issues?.tax ?? 'Проверьте сумму и выберите налог.'}</p>}
+                      </td>
+                      <td className="px-2 py-2 text-right">
+                        {stockEditable && row.taxId ? <input className="input h-9 w-full text-right" aria-label={`Сумма с налогом ${item?.name ?? ''}`}
+                          type="number" inputMode="decimal" min="0" step="0.01" disabled={busy || !row.ingredientId || !(Number(row.quantity) > 0)}
+                          value={purchaseRowTotalText(row) === '' ? '' : String(roundPurchaseMoney(purchaseRowTotal(row) * (1 + rateFor(row) / 100)))}
+                          onChange={e => {
+                            const net = e.target.value === '' ? '' : String(roundPurchaseMoney(Number(e.target.value) / (1 + rateFor(row) / 100)));
+                            update(row.key, { total: net, price: purchasePriceFromTotal(row.quantity, net) });
+                          }} /> : <span>{balanceMoney(roundPurchaseMoney(purchaseRowTotal(row) * (1 + rateFor(row) / 100)))}</span>}
+                      </td>
+                    </>}
                     <td className="!px-0 py-2 text-center">
                       {compositionEditable && (
                         <button
@@ -712,6 +814,7 @@ function PurchaseForm({
             {!!validationAttempt && discountError && <p id={`${formId}-discount-error`} className="w-full text-right text-xs text-danger">{discountError}</p>}
           </div>
         )}
+        {costs && showTax && <p className="text-right text-sm">Сумма без налога — {balanceMoney(roundPurchaseMoney(subtotal - discountAmount))} · Налог — {balanceMoney(taxTotal)}</p>}
       </div>
       {(editable || separateInvoiceDate) && (
         <details className="poster-advanced">

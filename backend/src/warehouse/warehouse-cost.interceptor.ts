@@ -4,7 +4,7 @@ import { map } from 'rxjs/operators';
 import { hasPermission, resolvePermissions } from '../common/permissions';
 
 const costFields = new Set(['recipeTotalCost', 'recipeUnitCost', 'avgCost', 'avgCostBase', 'costAtMoment', 'stockValue', 'knownStockValue', 'foodCost', 'totalCost',
-  'lineCost', 'lineCostForScaling', 'cost', 'margin', 'marginAmount', 'marginPercent', 'foodCostPercent', 'directCost', 'ingredientCost', 'packagingCost',
+  'lineCost', 'knownLineCost', 'knownTotalCost', 'knownRecipeTotalCost', 'lineCostForScaling', 'cost', 'margin', 'marginAmount', 'marginPercent', 'foodCostPercent', 'directCost', 'ingredientCost', 'packagingCost',
   'compositionFoodCost', 'compositionCostForScaling', 'productionCost', 'profit', 'markupPercent', 'taxAmount',
   'netRevenue', 'actualCost', 'grossMargin',
   'valuationAdjustment', 'totalValuationAdjustment',

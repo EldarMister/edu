@@ -32,6 +32,18 @@ test(
       await runWithTenant({ cafeId: cafe.id }, async () => {
         const ingredients = new IngredientsService(db);
         const service = new PreparationProductionService(db);
+        await t.test('ingredient imports preview mapped cells, skip repeats and apply valid batches atomically', async () => {
+          const rows = [{ name: 'Кардамон из Excel', category: 'Специи', unit: 'кг' },
+            { name: 'Помело из CSV', category: '', unit: 'шт.' }];
+          const preview = await ingredients.importCatalogue({ rows, apply: false });
+          assert.equal(preview.count, 2);
+          assert.equal(await db.ingredient.count({ where: { name: rows[0].name } }), 0);
+          await assert.rejects(ingredients.importCatalogue({ rows: [...rows, { ...rows[0], unit: 'шт' }], apply: true }), /ошибками/);
+          assert.equal(await db.ingredient.count({ where: { name: rows[0].name } }), 0);
+          const results = await Promise.all([1, 2].map(() => ingredients.importCatalogue({ rows, apply: true })));
+          assert.deepEqual(results.map(({ count }) => count).sort(), [0, 2]);
+          assert.deepEqual((await ingredients.importCatalogue({ rows, apply: false })).rows.map((row) => row.status), ['skip', 'skip']);
+        });
         const flour = await ingredients.create({ name: 'Мука', unit: 'kg' });
         const payload = {
           name: 'Тесто',

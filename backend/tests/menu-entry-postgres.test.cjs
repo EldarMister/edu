@@ -635,6 +635,23 @@ test(
             }
           },
         );
+        await t.test('main screen accepts zero-price goods and recipes, and previews never create a category', async () => {
+          const { MAIN_SCREEN, mainMenuCategoryId } = require('../src/admin/main-menu-category.ts');
+          const root = mainMenuCategoryId();
+          await new RecipesService(db).preview({ categoryId: MAIN_SCREEN, price: 0, items: [] });
+          assert.equal(await db.category.count({ where: { id: root } }), 0);
+          const saveOnMain = (name, catalogKind) => service.save(null, {
+            catalogKind, requestKey: randomUUID(), dish: { ...product.dish, name, categoryId: MAIN_SCREEN, price: 0 },
+            ...(catalogKind === 'recipe' ? { recipe: { items: [] } } : {}),
+          }, actor);
+          const [first, second] = await Promise.all([saveOnMain('Пробный товар', 'goods'), saveOnMain('Пробное блюдо', 'recipe')]);
+          for (const { dish } of [first, second]) {
+            assert.equal(dish.categoryId, root);
+            assert.equal(Number(dish.price), 0);
+            assert.equal(dish.prepStation, 'none');
+          }
+          assert.equal(await db.category.count({ where: { name: 'Главный экран' } }), 1);
+        });
       });
     } finally {
       await db.$transaction(async (tx) => {

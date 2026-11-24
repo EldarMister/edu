@@ -1,6 +1,7 @@
 import { useId, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Modal } from '@/components/Modal';
+import { DatePicker } from '@/components/DatePicker';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { api, apiError } from '@/lib/api';
 import { clientId } from '@/lib/id';
@@ -16,6 +17,7 @@ export type CashOperation = {
   amount: number;
   note: string | null;
   occurredAt: string;
+  dealDate?: string | null;
   actorId?: string | null;
   actorName: string | null;
 };
@@ -46,13 +48,19 @@ export function CashOperationDialog({ shiftId, operation, cashier = false, onClo
   const [note, setNote] = useState(operation?.note ?? '');
   const initialTime = operation ? localTime(operation.occurredAt) : '';
   const [dateTime, setDateTime] = useState(initialTime);
+  const initialDealDate = operation?.dealDate?.slice(0, 10) ?? '';
+  const [separateDate, setSeparateDate] = useState(Boolean(initialDealDate));
+  const [dealDate, setDealDate] = useState(initialDealDate);
+  const [dealDateValid, setDealDateValid] = useState(true);
+  const hasDealDate = kind !== 'collection' && separateDate;
   const initialAuthor = operation?.actorId ?? '';
   const [authorId, setAuthorId] = useState(initialAuthor);
   const editAuthor = !!operation && !cashier;
   const authorChanged = editAuthor && authorId !== initialAuthor;
   const submitted = useRef(false);
   const dirty = kind !== (operation?.kind ?? 'expense') || amount !== (operation ? String(Math.abs(operation.amount)) : '')
-    || categoryId !== (operation?.categoryId ?? '') || note !== (operation?.note ?? '') || dateTime !== initialTime || authorChanged;
+    || categoryId !== (operation?.categoryId ?? '') || note !== (operation?.note ?? '') || dateTime !== initialTime
+    || (hasDealDate ? dealDate : '') !== initialDealDate || authorChanged;
   const { markSaved } = useEditorDirty(dirty);
   const base = cashier ? '/cash-shifts' : '/admin/cash-shifts';
   const categories = useQuery({
@@ -72,6 +80,7 @@ export function CashOperationDialog({ shiftId, operation, cashier = false, onClo
     mutationFn: () => {
       const url = base + '/' + shiftId + '/operations';
       const values = { kind, amount: parsed, categoryId: kind === 'collection' || !categoryId ? undefined : categoryId,
+        dealDate: hasDealDate ? dealDate : null,
         note, occurredAt: !cashier && dateTime && dateTime !== initialTime ? new Date(dateTime + '+06:00').toISOString() : undefined };
       return operation ? api.patch(url + '/' + operation.id, { ...values, authorId: authorChanged ? authorId : undefined })
         : api.post(url, { ...values, requestKey });
@@ -84,7 +93,7 @@ export function CashOperationDialog({ shiftId, operation, cashier = false, onClo
     onSettled: () => { submitted.current = false; },
   });
   const label = operation ? 'Сохранить' : cashier ? 'Создать' : 'Добавить';
-  const disabled = parsed == null || parsed <= 0 || save.isPending;
+  const disabled = parsed == null || parsed <= 0 || (hasDealDate && (!dealDate || !dealDateValid)) || save.isPending;
   const close = () => {
     if (!submitted.current && (!dirty || window.confirm('Закрыть форму без сохранения?'))) onClose();
   };
@@ -125,6 +134,15 @@ export function CashOperationDialog({ shiftId, operation, cashier = false, onClo
           <input type="datetime-local" className="input w-full" aria-label="Дата и время" step={1} value={dateTime} onChange={(event) => setDateTime(event.target.value)} />
           {!operation && <span className="text-xs text-text-muted">Если поле пустое, используется время проведения или закрытия смены.</span>}
         </label>}
+        {kind !== 'collection' && <div className="grid gap-2 text-sm">
+          <label className="flex items-center gap-2"><input type="checkbox" checked={separateDate}
+            onChange={(event) => {
+              setSeparateDate(event.target.checked);
+              if (event.target.checked && !dealDate) setDealDate(dateTime.slice(0, 10) || financeDay());
+            }} />Дата сделки другая</label>
+          {hasDealDate && <DatePicker value={dealDate} onChange={setDealDate} onValidityChange={setDealDateValid}
+            aria-label="Дата сделки" className="input w-40" required />}
+        </div>}
         {editAuthor && <label className="grid gap-1.5 text-sm">Автор операции
           <select className="input w-full" value={authorId} disabled={!authors.data} onChange={(event) => setAuthorId(event.target.value)}>
             {!authors.data?.some(({ id }) => id === initialAuthor) && <option value={initialAuthor}>{operation.actorName ?? 'Не указан'}</option>}

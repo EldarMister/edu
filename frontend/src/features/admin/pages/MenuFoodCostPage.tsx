@@ -4,11 +4,11 @@ import { apiError } from '@/lib/api';
 import { exportCsv } from '@/lib/report-output';
 import { WorkspacePending } from '../components/WorkspacePending';
 import { MenuFoodCostCalculation } from './MenuFoodCostCalculation';
-import { FoodCostPositions, FoodCostIngredients, foodCostExportRows, formatFoodCost, formatPercent } from './FoodCostReportTables';
+import { FoodCostPositions, FoodCostIngredients, foodCostExportRows, formatFoodCost, formatPercent, priceCaption } from './FoodCostReportTables';
 import { FoodCostPriceBasket, usePriceBasket } from './FoodCostPriceBasket';
 import { downloadFoodCostExcel, useFoodCostAnalysis, useFoodCostReport, type FoodCostMetric, type FoodCostPosition, type FoodCostRange, type FoodCostReport, type FoodCostTab } from './food-cost-api';
-import { foodCostInsights, percentChange } from './food-cost-model';
-import { financeDateTime, financeMoney } from './finance/finance-format';
+import { foodCostInsights, MAX_MENU_PRICE, percentChange, projectFoodCostPrice } from './food-cost-model';
+import { financeDateTime, financeMoney, parseMoney } from './finance/finance-format';
 import type { MenuCostRow } from './menu-cost-api';
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { COMPARISON_PERIODS, ReportPeriodFilter } from './warehouse/ReportPeriodFilter';
@@ -135,8 +135,9 @@ function FoodCostControl({ onOpen }: { onOpen: (row: MenuLink) => void }) {
               </summary>
               <div className="food-cost-recommendation-body">
                 <p>{item.text}</p>
-                {canApply && row?.dishId && row.price != null && newPrice != null && <button type="button" className="btn-secondary btn-md"
-                  onClick={() => basket.set(row, newPrice)}>Добавить в план цену {financeMoney(newPrice)}</button>}
+                {row?.dishId && row.active && row.price != null && newPrice != null && <RecommendationPrice
+                  key={[newPrice, row.price, basket.prices[row.id]].join(':')} report={data} row={row} suggested={newPrice}
+                  planned={basket.prices[row.id]} onPlan={canApply ? basket.set : undefined} />}
               </div>
             </details>;
           })}
@@ -171,8 +172,35 @@ function FoodCostControl({ onOpen }: { onOpen: (row: MenuLink) => void }) {
   </>;
 }
 
+function RecommendationPrice({ report, row, suggested, planned, onPlan }: {
+  report: FoodCostReport; row: FoodCostPosition; suggested: number; planned?: number;
+  onPlan?: (position: FoodCostPosition, price: number) => void;
+}) {
+  const [input, setInput] = useState(String(planned ?? suggested));
+  const price = parseMoney(input);
+  const valid = price != null && price >= 0 && price <= MAX_MENU_PRICE;
+  const projection = valid && price !== row.price ? projectFoodCostPrice(report, row.id, price)?.position : null;
+  return <form className="mt-3 flex flex-wrap items-end gap-3" onSubmit={(event) => {
+    event.preventDefault();
+    if (projection && price != null && price !== planned) onPlan?.(row, price);
+  }}>
+    <label className="grid gap-1 text-sm">
+      <span>Цена меню {financeMoney(row.price)}{priceCaption(row)} → Новая цена{priceCaption(row)}</span>
+      <input className="input w-32" inputMode="decimal" aria-label={'Предложенная цена — ' + row.name}
+        value={input} aria-invalid={!valid} onChange={(event) => setInput(event.target.value)} />
+    </label>
+    {onPlan && <button type="submit" className="btn-secondary btn-md" disabled={!projection || price === planned}>
+      {price === planned ? 'В плане цен' : 'Добавить в план'}
+    </button>}
+    <output className="basis-full text-sm">{!valid ? 'Введите неотрицательную цену с точностью до двух знаков.' :
+      projection ? 'Фудкост ' + formatFoodCost(projection.foodCostPercent) + ' · Изменение маржи за 30 дней ' +
+        financeMoney(projection.monthlyMarginChange) : 'Цена совпадает с ценой меню.'}</output>
+  </form>;
+}
+
 function FoodCostAnalysis({ range, drivers }: { range: FoodCostRange; drivers: ReturnType<typeof foodCostInsights>['drivers'] }) {
   const { available, analysis } = useFoodCostAnalysis(range);
+  const [expanded, setExpanded] = useState(false);
   return <section aria-labelledby="food-cost-review" className="food-cost-panel food-cost-review">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h3 id="food-cost-review">Что изменилось</h3>
@@ -180,10 +208,12 @@ function FoodCostAnalysis({ range, drivers }: { range: FoodCostRange; drivers: R
         onClick={() => analysis.mutate()}>{analysis.isPending ? 'Готовим сводку…' : 'Объяснить с ИИ'}</button>}
     </div>
     {drivers.length ? <ul className="food-cost-drivers">
-      {drivers.map((driver) => <li key={driver.kind}><strong>{driver.title}</strong><p>{driver.text}</p></li>)}
+      {(expanded ? drivers : drivers.slice(0, 1)).map((driver) => <li key={driver.kind}><strong>{driver.title}</strong><p>{driver.text}</p></li>)}
     </ul> : <p className="text-sm text-text-muted">
       Пока недостаточно сопоставимых продаж и поставок, чтобы определить причины изменений.
     </p>}
+    {drivers.length > 1 && <button type="button" className="mt-3 text-sm text-primary" aria-expanded={expanded}
+      onClick={() => setExpanded(!expanded)}>{expanded ? 'Свернуть' : 'Показать больше'}</button>}
     {analysis.data && <div className="mt-4 border-t border-border pt-3" role="status">
       <h4 className="font-semibold">Сводка ИИ</h4>
       <p className="mt-1 whitespace-pre-wrap text-sm text-text-secondary">{analysis.data.text}</p>
@@ -217,14 +247,21 @@ function FoodCostSummary({ report }: { report: FoodCostReport }) {
 }
 
 function DailyTrend({ days, measure, label }: { days: FoodCostReport['current']['days']; measure: Measure; label: string }) {
-  const maximum = Math.max(0, ...days.map((day: FoodCostMetric) => Math.abs(day[measure] ?? 0)));
-  if (days.length < 2 || !maximum) return null;
-  return <div className="food-cost-trend" role="img" aria-label={`Динамика по дням. ${label}`}>
-    {days.map((day) => {
-      const value = day[measure];
-      const height = value == null ? 0 : Math.max(5, Math.abs(value) / maximum * 100);
-      return <span key={day.date} data-negative={value != null && value < 0} style={{ height: height + '%' }}
-        title={formatDay(day.date) + ' · ' + (measure === 'foodCostPercent' ? formatFoodCost(value) : financeMoney(value))} />;
-    })}
-  </div>;
+  const values = days.map((day: FoodCostMetric) => day[measure]);
+  const known = values.filter((value): value is number => value != null);
+  if (known.length < 2) return null;
+  const min = Math.min(...known), max = Math.max(...known);
+  const points = values.map((value, i) => value == null ? null : {
+    x: 3 + i * 66 / (days.length - 1), y: min === max ? 15 : 27 - (value - min) * 24 / (max - min),
+  });
+  const path = points.map((point, i) => point ? (points[i - 1] ? 'L' : 'M') + point.x + ' ' + point.y : '').join(' ');
+  const last = points[values.lastIndexOf(known[known.length - 1])];
+  const delta = known[known.length - 1] - known[0];
+  const positive = measure === 'margin' || measure === 'revenue' ? delta > 0 : delta < 0;
+  return <svg className="food-cost-trend" viewBox="0 0 72 30" role="img" data-tone={delta === 0 ? 'neutral' : positive ? 'positive' : 'negative'}
+    aria-label={'Динамика по дням. ' + label}>
+    <title>{days.map((day) => formatDay(day.date) + ' · ' + (measure === 'foodCostPercent' ? formatFoodCost(day[measure]) : financeMoney(day[measure]))).join('\n')}</title>
+    <path d={path} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" fill="none" />
+    {last && <circle cx={last.x} cy={last.y} r="2.5" fill="currentColor" />}
+  </svg>;
 }

@@ -146,7 +146,7 @@ async function purchasesByDay(db: Prisma.TransactionClient, cafeId: string, rang
       SUM(pi.quantity_base) AS "quantity", SUM(pi.total) AS "total"
     FROM purchases p JOIN purchase_items pi ON pi.purchase_id = p.id
     WHERE p.cafe_id = ${cafeId} AND pi.cafe_id = ${cafeId} AND p.status = 'completed'
-      AND COALESCE(p.effective_at, p.stock_posted_at, p.date) BETWEEN ${range.gte} AND ${range.lte}
+      AND COALESCE(p.effective_at, p.stock_posted_at, p.date) BETWEEN (${range.gte} AT TIME ZONE 'UTC') AND (${range.lte} AT TIME ZONE 'UTC')
       AND pi.quantity_base > 0
     GROUP BY pi.ingredient_id, 2
     ORDER BY "date"

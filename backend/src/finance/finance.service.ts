@@ -12,6 +12,7 @@ import {
 } from './finance.dto';
 import { ensureFinanceAccounts, findAccount, lockFinance, shiftForEntry } from './finance-ledger';
 import { cashHandoverKey } from './cash-custody';
+import { readProfitLoss } from './profit-loss';
 import { currentPayrollMonth, payrollPeriodReport, payrollReport } from './payroll';
 import { canReverseEntry, type AccountShift } from './entry-reversal';
 import { editSalaryAccrual, salaryAccrualDetails, reverseSalaryPayment } from './salary-corrections';
@@ -40,6 +41,12 @@ function transactionDate(value?: string) {
     throw new BadRequestException('Укажите дату, которая не позже текущего времени');
   }
   return date;
+}
+
+function accountingDate(value: string | null | undefined) {
+  if (!value) return null;
+  businessMidnight(value);
+  return new Date(value + 'T00:00:00Z');
 }
 
 function period(query: FinanceQueryDto) {
@@ -182,6 +189,15 @@ export class FinanceService {
       && !!await this.prisma.financeCategory.findFirst({ where: grantWhere(user), select: { id: true } });
     return { allowed: canViewAll || limited, canViewAll, canManage,
       level: canManage ? 'full' : canViewAll ? 'view' : limited ? 'limited' : 'none' };
+  }
+
+  async profitLoss(user: AuthUser, query: FinanceQueryDto) {
+    const cafeId = financeTenant(user, false);
+    const bounds = period(query);
+    const report = await this.prisma.$transaction((tx) => readProfitLoss(tx, cafeId, bounds), {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 60000,
+    });
+    return { ...report, from: warehouseDay(bounds.from), to: warehouseDay(new Date(+bounds.to - 1)) };
   }
 
   async overview(user: AuthUser, query: FinanceQueryDto) {
@@ -558,7 +574,8 @@ export class FinanceService {
           throw new BadRequestException('Выберите должности с доступом к админ-панели этого заведения');
         }
       }
-      const data = { name, kind, parentId, userIds, positionIds, showOnPos: input.showOnPos ?? previous?.showOnPos ?? false };
+      const data = { name, kind, parentId, userIds, positionIds, showOnPos: input.showOnPos ?? previous?.showOnPos ?? false,
+        showInProfitLoss: input.showInProfitLoss ?? previous?.showInProfitLoss ?? true };
       return id ? db.financeCategory.update({ where: { cafeId, id }, data })
         : db.financeCategory.create({ data: { cafeId, ...data } });
     });
@@ -628,6 +645,7 @@ export class FinanceService {
       }
 
       const occurredAt = input.occurredAt ? transactionDate(input.occurredAt) : before.occurredAt;
+      const dealDate = transfer ? null : input.dealDate === undefined ? before.dealDate : accountingDate(input.dealDate);
       await findAccount(db, cafeId, input.accountId);
       if (destination) await findAccount(db, cafeId, destination);
       if (!canEditAt(occurredAt, shifts.get(input.accountId)) || (destination && !canEditAt(occurredAt, shifts.get(destination)))) {
@@ -643,9 +661,9 @@ export class FinanceService {
       const comment = note(input.note);
       if (before.kind === input.kind && before.accountId === input.accountId && before.categoryId === categoryId
         && before.counterpartyAccountId === destination && before.amount.eq(amount) && before.note === comment
-        && +before.occurredAt === +occurredAt) return { before, updated: before };
+        && +before.occurredAt === +occurredAt && before.dealDate?.getTime() === dealDate?.getTime()) return { before, updated: before };
       const values = { kind: input.kind, accountId: input.accountId, categoryId, counterpartyAccountId: destination,
-        amount, note: comment, occurredAt };
+        amount, note: comment, occurredAt, dealDate };
       const updated = await db.financeEntry.update({ where: { cafeId, id: before.id }, data: values });
       if (destination) {
         const incomingValues = { ...values, accountId: destination, amount: amount.negated(), counterpartyAccountId: input.accountId };
@@ -663,7 +681,7 @@ export class FinanceService {
     if (before !== updated) {
       const details = (entry: FinanceEntry) => ({
         kind: entry.kind, accountId: entry.accountId, counterpartyAccountId: entry.counterpartyAccountId,
-        categoryId: entry.categoryId, amount: entry.amount.toString(), note: entry.note, occurredAt: entry.occurredAt.toISOString(),
+        categoryId: entry.categoryId, amount: entry.amount.toString(), note: entry.note, occurredAt: entry.occurredAt.toISOString(), dealDate: entry.dealDate,
       });
       await this.audit.log({
         actor: user, actionType: AuditAction.FINANCE_TRANSACTION_UPDATED, entityType: AuditEntity.FINANCE_TRANSACTION,
@@ -707,7 +725,7 @@ export class FinanceService {
         cashShiftId: line.cashShiftId, counterpartyAccountId: line.counterpartyAccountId,
         kind: line.kind === 'transfer' ? 'transfer' as const : 'adjustment' as const,
         sourceKey: reversalKey + line.id, amount: line.amount.negated(), note: description,
-        occurredAt: line.occurredAt, createdAt: reversedAt,
+        occurredAt: line.occurredAt, dealDate: line.dealDate, createdAt: reversedAt,
       })) });
       return { id, reversedAt };
     });
@@ -726,6 +744,7 @@ export class FinanceService {
     }
     if (!transfer && input.destinationAccountId) throw new BadRequestException('Счёт получателя нужен только для перевода');
     const sourceKey = manualKey + input.requestKey;
+    const dealDate = transfer ? null : accountingDate(input.dealDate);
     return this.prisma.$transaction(async (db) => {
       await lockFinance(db, cafeId);
       let category: FinanceCategory | null = null;
@@ -740,6 +759,7 @@ export class FinanceService {
         if (existing.kind !== input.kind || existing.actorId !== user.id || existing.accountId !== input.accountId ||
           existing.categoryId !== (category?.id ?? null) || existing.counterpartyAccountId !== (input.destinationAccountId ?? null) ||
           !existing.amount.eq(amount) || existing.note !== description ||
+          existing.dealDate?.getTime() !== dealDate?.getTime() ||
           (input.occurredAt && existing.occurredAt.getTime() !== at.getTime())) throw new ConflictException('Этот запрос уже использован для другой операции');
         return existing;
       }
@@ -747,7 +767,7 @@ export class FinanceService {
       const shiftId = await shiftForEntry(db, cafeId, input.accountId, at, amount);
       const entry = await db.financeEntry.create({
         data: { cafeId, accountId: input.accountId, actorId: user.id, sourceKey, kind: input.kind, amount,
-          cashShiftId: shiftId, categoryId: category?.id, counterpartyAccountId: input.destinationAccountId, note: description, occurredAt: at },
+          cashShiftId: shiftId, categoryId: category?.id, counterpartyAccountId: input.destinationAccountId, note: description, occurredAt: at, dealDate },
       });
       if (transfer && input.destinationAccountId) {
         await findAccount(db, cafeId, input.destinationAccountId);

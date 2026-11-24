@@ -9,6 +9,7 @@ import {
 import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
+import { randomUUID } from 'node:crypto';
 import { getJwtAccessSecret } from '../auth/jwt.config';
 import { PrismaService } from '../prisma/prisma.service';
 import { assertCafeActive } from '../platform/cafe-status';
@@ -25,6 +26,10 @@ const PTT_EVENTS = {
   CHANNEL_BUSY: 'ptt_channel_busy',
   CHANNEL_FREE: 'ptt_channel_free',
   AUDIO_MESSAGE: 'ptt_audio_message',
+  NATIVE_CHUNK: 'ptt_chunk',
+  NATIVE_STREAM: 'ptt_audio_stream',
+  NATIVE_LISTENER: 'ptt_native_listener',
+  NATIVE_PCM: 'ptt_native_pcm',
   AUDIO_FRAME: 'ptt_audio_frame',
   AUDIO_PACKET: 'ptt_audio_packet',
   AUDIO_BATCH: 'ptt_audio_batch',
@@ -73,6 +78,7 @@ interface TalkLock {
   startedAt: string;
   role: string;
   name?: string;
+  fileTalkId?: string;
   live?: {
     id: string;
     opus?: { profile: OpusProfile; header: Buffer };
@@ -83,6 +89,7 @@ interface TalkLock {
       subscribed: Map<string, string>;
     };
     stream?: PttStreamBuffer;
+    nativePcm?: { enabled: boolean; nextSample: number };
     frames: number;
     lastFrameAt: number;
     timeout: NodeJS.Timeout;
@@ -101,6 +108,7 @@ interface TalkBody {
   codec?: 'opus' | 'livekit';
   preferHq?: boolean;
   sequenced?: boolean;
+  nativePcm?: boolean;
   frames?: number;
 }
 
@@ -130,6 +138,7 @@ export class PttGateway implements OnGatewayDisconnect {
 
   private readonly logger = new Logger('PttGateway');
   private readonly locks = new Map<string, TalkLock>();
+  private readonly joining = new WeakMap<Socket, Promise<unknown>>();
   private readonly recentStreams = new Map<string, { channel: PttChannel; lock: TalkLock; expires: number }>();
 
   constructor(
@@ -148,6 +157,18 @@ export class PttGateway implements OnGatewayDisconnect {
 
   @SubscribeMessage(PTT_EVENTS.JOIN)
   async handleJoin(@ConnectedSocket() client: Socket, @MessageBody() body: JoinBody) {
+    const previous = this.joining.get(client);
+    const joining = Promise.resolve(previous).catch(() => undefined).then(() => this.updateMembership(client, body));
+    this.joining.set(client, joining);
+    try {
+      return await joining;
+    } finally {
+      if (this.joining.get(client) === joining) this.joining.delete(client);
+    }
+  }
+
+  private async updateMembership(client: Socket, body: JoinBody) {
+    if (!client.connected) return { ok: false, reason: 'disconnected' };
     const user = await this.getUser(client);
     if (!user) return this.deny(client, undefined, 'unauthorized');
 
@@ -156,6 +177,7 @@ export class PttGateway implements OnGatewayDisconnect {
       this.releaseTalker(client);
       client.data.pttHq = false;
       client.data.pttSequenced = false;
+      client.data.pttFiles = false;
       await client.leave(this.accountRoom(user));
       this.leaveLiveKit(client);
       await this.leaveCurrentChannel(client);
@@ -165,6 +187,8 @@ export class PttGateway implements OnGatewayDisconnect {
 
     client.data.pttSequenced = body.sequenced === true;
     client.data.pttHq = Array.isArray(body.codecs) && body.codecs.includes('opus-hq');
+    // Released Expo builds join without a codec and play independently decodable files.
+    client.data.pttFiles = !body.codecs && !client.data.pttSequenced;
     const onlineCount = await this.joinChannel(client, user, nextChannel);
     return { ok: true, channel: nextChannel, onlineCount };
   }
@@ -265,7 +289,11 @@ export class PttGateway implements OnGatewayDisconnect {
 
     const rooms = this.broadcastRooms(user.cafeId, channel);
     let codec: OpusProfile | undefined = requestedCodec;
-    if (requestedCodec === 'opus' && body.preferHq === true && await this.canUseHq(client, rooms)) codec = 'opus-hq';
+    const supportsNative = requestedCodec === 'opus' && body.sequenced === true && body.nativePcm === true;
+    const listeners = requestedCodec === 'opus' ? await this.radioListeners(rooms) : undefined;
+    if (requestedCodec === 'opus' && body.preferHq === true
+      && listeners?.every((peer) => peer.id === client.id || peer.data.pttHq || (supportsNative && peer.data.pttFiles))) codec = 'opus-hq';
+    const fileListener = supportsNative && (!listeners || listeners.some((peer) => peer.data.pttFiles && peer.data.user?.id !== user.id));
     if (!client.connected || client.data.pttChannel !== channel) return { ok: false, reason: 'disconnected' };
 
     const key = this.lockKey(user.cafeId, channel);
@@ -273,7 +301,8 @@ export class PttGateway implements OnGatewayDisconnect {
     if (current) {
       if (this.locks.get(key) === current && current.socketId === client.id
         && current.live?.id === id && (current.live?.opus ? 'opus' : undefined) === requestedCodec) {
-        return { ok: true, channel, talkId: id, codec: current.live?.opus?.profile, sequenced: !!current.live?.stream };
+        return { ok: true, channel, talkId: id, codec: current.live?.opus?.profile, sequenced: !!current.live?.stream,
+          ...(current.live?.nativePcm?.enabled && { nativePcm: true }) };
       }
       return this.deny(client, channel, 'busy', current.userId);
     }
@@ -292,10 +321,12 @@ export class PttGateway implements OnGatewayDisconnect {
       const stream = opus && body.sequenced === true && client.data.pttSequenced === true
         ? new PttStreamBuffer(OPUS_PROFILES[opus.profile].frameBytes) : undefined;
       lock.live = { id, opus, stream, frames, lastFrameAt: Date.now(), timeout };
-    }
+      if (stream && supportsNative) lock.live.nativePcm = { enabled: fileListener, nextSample: 0 };
+    } else lock.fileTalkId = randomUUID();
     this.locks.set(key, lock);
     this.server.to(rooms).emit(PTT_EVENTS.CHANNEL_BUSY, this.talker(channel, lock));
-    return { ok: true, channel, talkId: id, codec, sequenced: !!lock.live?.stream };
+    return { ok: true, channel, talkId: id, codec, sequenced: !!lock.live?.stream,
+      ...(lock.live?.nativePcm?.enabled && { nativePcm: true }) };
   }
 
   private async startLiveKitTalk(client: Socket, user: AuthenticatedSocketUser, channel: PttChannel, talkId: string) {
@@ -410,27 +441,28 @@ export class PttGateway implements OnGatewayDisconnect {
   }
 
   @SubscribeMessage(PTT_EVENTS.AUDIO_SYNC)
-  syncAudio(@ConnectedSocket() client: Socket, @MessageBody() body: TalkBody & { fromFrame?: number }) {
+  syncAudio(@ConnectedSocket() client: Socket, @MessageBody() body: TalkBody & { fromFrame?: number; maxFrames?: number }) {
     const user = this.getCachedUser(client);
     const joined = client.data.pttChannel;
     if (!user || !this.isChannel(joined) || client.data.pttSequenced !== true
       || typeof body?.talkId !== 'string' || !TALK_ID.test(body.talkId)
-      || typeof body.fromFrame !== 'number' || !Number.isSafeInteger(body.fromFrame) || body.fromFrame < 0) return { ok: false };
+      || typeof body.fromFrame !== 'number' || !Number.isSafeInteger(body.fromFrame) || body.fromFrame < 0
+      || (body.maxFrames !== undefined && (!Number.isSafeInteger(body.maxFrames) || body.maxFrames < 1 || body.maxFrames > 400))) return { ok: false };
 
     for (const channel of new Set<PttChannel>(['general', joined])) {
       const active = this.locks.get(this.lockKey(user.cafeId, channel));
-      if (active?.live?.id === body.talkId) return this.replayFor(user, channel, active, body.fromFrame, false);
+      if (active?.live?.id === body.talkId) return this.replayFor(user, channel, active, body.fromFrame, false, body.maxFrames);
     }
     const recent = this.recentStreams.get(this.streamKey(user.cafeId, body.talkId));
     if (!recent || recent.expires <= Date.now()
       || (recent.channel !== 'general' && recent.channel !== joined)) return { ok: false };
-    return this.replayFor(user, recent.channel, recent.lock, body.fromFrame, true);
+    return this.replayFor(user, recent.channel, recent.lock, body.fromFrame, true, body.maxFrames);
   }
 
-  private replayFor(user: AuthenticatedSocketUser, channel: PttChannel, lock: TalkLock, fromFrame: number, finished: boolean) {
+  private replayFor(user: AuthenticatedSocketUser, channel: PttChannel, lock: TalkLock, fromFrame: number, finished: boolean, maxFrames?: number) {
     const stream = lock.live?.stream;
     if (!stream || lock.userId === user.id) return { ok: false };
-    const replay = stream.read(fromFrame);
+    const replay = stream.read(maxFrames ? Math.max(fromFrame, stream.nextFrame - maxFrames) : fromFrame);
     return {
       ok: true, finished, nextFrame: stream.nextFrame,
       batch: replay ? { ...this.streamMetadata(channel, lock), ...replay } : undefined,
@@ -461,14 +493,9 @@ export class PttGateway implements OnGatewayDisconnect {
 
   private talker(channel: PttChannel, lock: TalkLock) {
     return {
-      channel, talkId: lock.live?.id, codec: lock.live?.liveKit ? 'livekit' : lock.live?.opus?.profile,
+      channel, talkId: lock.live?.id ?? lock.fileTalkId, codec: lock.live?.liveKit ? 'livekit' : lock.live?.opus?.profile,
       speaker: { id: lock.userId, role: lock.role, name: lock.name }, startedAt: lock.startedAt,
     };
-  }
-
-  private async canUseHq(client: Socket, rooms: string | string[]) {
-    const listeners = await this.radioListeners(rooms);
-    return !!listeners?.every((socket) => socket.id === client.id || socket.data.pttHq === true);
   }
 
   private async radioListeners(rooms: string | string[]) {
@@ -487,6 +514,16 @@ export class PttGateway implements OnGatewayDisconnect {
 
   @SubscribeMessage(PTT_EVENTS.AUDIO_MESSAGE)
   async handleAudioMessage(@ConnectedSocket() client: Socket, @MessageBody() body: AudioMessageBody) {
+    return this.relayFile(client, body, false);
+  }
+
+  @SubscribeMessage(PTT_EVENTS.NATIVE_CHUNK)
+  async handleNativeChunk(@ConnectedSocket() client: Socket, @MessageBody() body: AudioMessageBody) {
+    if (typeof body?.chunk !== 'string' || body.chunk.length > 64000) return { ok: false, reason: 'invalid_audio' };
+    return this.relayFile(client, body, true);
+  }
+
+  private async relayFile(client: Socket, body: AudioMessageBody, segment: boolean) {
     const user = await this.getUser(client);
     if (!user) return this.deny(client, body?.channel, 'unauthorized');
 
@@ -504,7 +541,7 @@ export class PttGateway implements OnGatewayDisconnect {
 
     // Telegram-модель: получили цельный base64-файл. Обычные каналы слышит
     // только своя комната, а канал «Все» транслируется во все PTT-комнаты кафе.
-    client.to(this.broadcastRooms(user.cafeId, channel)).except(this.accountRoom(user)).emit(PTT_EVENTS.AUDIO_MESSAGE, {
+    const payload = {
       channel,
       senderId: user.id,
       senderRole: user.role,
@@ -512,8 +549,47 @@ export class PttGateway implements OnGatewayDisconnect {
       mimeType: typeof body.mimeType === 'string' ? body.mimeType.slice(0, 80) : 'application/octet-stream',
       chunk,
       sentAt: new Date().toISOString(),
-    });
+      ...(segment && { segment, talkId: lock.fileTalkId }),
+    };
+    client.to(this.broadcastRooms(user.cafeId, channel)).except(this.accountRoom(user)).emit(PTT_EVENTS.AUDIO_MESSAGE, payload);
+    this.emitNativeFile(client, user, channel, payload);
     return { ok: true };
+  }
+
+  @SubscribeMessage(PTT_EVENTS.NATIVE_PCM)
+  handleNativePcm(@ConnectedSocket() client: Socket, @MessageBody() body: AudioFrameBody & { firstSample?: number }) {
+    const user = this.getCachedUser(client);
+    const channel = body?.channel;
+    if (!user || !this.isChannel(channel) || channel !== client.data.pttChannel) return;
+    const lock = this.locks.get(this.lockKey(user.cafeId, channel));
+    const live = lock?.live;
+    const audio = body.audio;
+    const first = body.firstSample;
+    if (lock?.socketId !== client.id || !live?.nativePcm?.enabled || !live.stream || !live.opus
+      || live.id !== body.talkId || !Buffer.isBuffer(audio) || !audio.length
+      || audio.length > 19200 || audio.length % 960 !== 0
+      || typeof first !== 'number' || !Number.isSafeInteger(first) || first < live.nativePcm.nextSample) return;
+    const endSample = first + audio.length / 2;
+    const sentSamples = live.stream.nextFrame * (live.opus.profile === 'opus-hq' ? 480 : 960);
+    // The primary Opus batch may still hold four frames at the end of this PCM segment.
+    if (endSample > sentSamples + 3840 || sentSamples - endSample > 19200) return;
+    live.nativePcm.nextSample = endSample;
+    const wav = Buffer.alloc(44 + audio.length);
+    wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8);
+    wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+    wav.writeUInt32LE(24000, 24); wav.writeUInt32LE(48000, 28); wav.writeUInt16LE(2, 32);
+    wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(audio.length, 40);
+    audio.copy(wav, 44);
+    this.emitNativeFile(client, user, channel, { senderId: user.id, senderName: user.name,
+      senderRole: user.role, mimeType: 'audio/wav', chunk: wav.toString('base64') });
+  }
+
+  private emitNativeFile(client: Socket, user: AuthenticatedSocketUser, channel: PttChannel, payload: object) {
+    // The original Android build filters by its selected channel even for an all-staff broadcast.
+    for (const target of channel === 'general' ? PTT_CHANNELS : [channel]) {
+      client.to(this.fileRoom(user.cafeId, target)).except(this.accountRoom(user))
+        .emit(PTT_EVENTS.NATIVE_STREAM, { ...payload, channel: target });
+    }
   }
 
   @SubscribeMessage(PTT_EVENTS.STOP_TALK)
@@ -570,6 +646,8 @@ export class PttGateway implements OnGatewayDisconnect {
     const hqRoom = this.room(user.cafeId, nextChannel, true);
     const sequencedRoom = this.sequencedRoom(user.cafeId, nextChannel);
     const rooms = [room, this.accountRoom(user)];
+    if (client.data.pttFiles) rooms.push(this.fileRoom(user.cafeId, nextChannel));
+    else await client.leave(this.fileRoom(user.cafeId, nextChannel));
     if (client.data.pttHq === true) rooms.push(hqRoom);
     else await client.leave(hqRoom);
     if (client.data.pttSequenced === true) rooms.push(sequencedRoom);
@@ -578,8 +656,12 @@ export class PttGateway implements OnGatewayDisconnect {
     client.data.pttChannel = nextChannel;
     const general = this.locks.get(this.lockKey(user.cafeId, 'general'));
     const active = general ?? this.locks.get(this.lockKey(user.cafeId, nextChannel));
-    if (active?.live?.opus || active?.live?.liveKit) {
+    if (active) {
       client.emit(PTT_EVENTS.CHANNEL_BUSY, this.talker(general ? 'general' : nextChannel, active));
+      if (client.data.pttFiles && active.live?.nativePcm && !active.live.nativePcm.enabled && active.userId !== user.id) {
+        active.live.nativePcm.enabled = true;
+        this.server.to(active.socketId).emit(PTT_EVENTS.NATIVE_LISTENER, { talkId: active.live.id });
+      }
     }
     return this.emitPresenceFor(user.cafeId, nextChannel);
   }
@@ -598,6 +680,7 @@ export class PttGateway implements OnGatewayDisconnect {
       client.leave(this.room(cafeId, channel)),
       client.leave(this.room(cafeId, channel, true)),
       client.leave(this.sequencedRoom(cafeId, channel)),
+      client.leave(this.fileRoom(cafeId, channel)),
     ]);
   }
 
@@ -665,7 +748,7 @@ export class PttGateway implements OnGatewayDisconnect {
       }, REPLAY_TTL_MS).unref();
     }
     this.server.to(this.broadcastRooms(user.cafeId, channel)).emit(PTT_EVENTS.CHANNEL_FREE, {
-      channel, talkId: lock.live?.id, frames: lock.live?.stream?.nextFrame, speakerId: user.id, freedAt: new Date().toISOString(),
+      channel, talkId: lock.live?.id ?? lock.fileTalkId, frames: lock.live?.stream?.nextFrame, speakerId: user.id, freedAt: new Date().toISOString(),
     });
   }
 
@@ -676,8 +759,14 @@ export class PttGateway implements OnGatewayDisconnect {
   }
 
   private async emitPresenceFor(cafeId: string, channel: PttChannel): Promise<number> {
+    const counts = await Promise.all((channel === 'general' ? ['general'] as const : [channel, 'general'] as const)
+      .map((target) => this.announceListeners(cafeId, target)));
+    return counts[0];
+  }
+
+  private async announceListeners(cafeId: string, channel: PttChannel): Promise<number> {
     const room = this.room(cafeId, channel);
-    const sockets = await this.server.in(room).fetchSockets();
+    const sockets = await this.server.in(this.broadcastRooms(cafeId, channel)).fetchSockets();
     const uniqueUsers = new Set<string>();
     for (const socket of sockets) {
       const socketUser = socket.data.user as SocketUser | undefined;
@@ -765,6 +854,7 @@ export class PttGateway implements OnGatewayDisconnect {
   }
 
   private streamKey(cafeId: string, talkId: string) { return cafeId + ':' + talkId; }
+  private fileRoom(cafeId: string, channel: PttChannel) { return `ptt:files:${cafeId}:${channel}`; }
 
   private accountRoom(user: AuthenticatedSocketUser) {
     return `ptt:account:${user.cafeId}:${user.id}`;

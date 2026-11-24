@@ -4,6 +4,7 @@ import { IngredientsService } from './ingredients.service';
 import { RecipePreviewController, RecipesController } from './recipes.controller';
 import { RecipesService } from './recipes.service';
 import { PurchasesController } from './purchases.controller';
+import { InvoiceImportController } from './invoice-import.controller';
 import { PurchasesService } from './purchases.service';
 import { PurchaseSettlementService } from './purchase-settlement';
 import { MovementsController } from './movements.controller';
@@ -35,6 +36,7 @@ import { RecipeExportController } from './recipe-export.controller';
     RecipePreviewController,
     RecipeExportController,
     PurchasesController,
+    InvoiceImportController,
     MovementsController,
     WarehouseOverviewController,
     WarehouseLocationsController,

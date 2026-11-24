@@ -16,6 +16,8 @@ export type PttAudioPayload = {
   mimeType: string;
   chunk: string;
   sentAt?: string;
+  segment?: boolean;
+  talkId?: string;
 };
 
 export type PttFramePayload = {
@@ -76,6 +78,8 @@ export const PTT_EVENTS = {
   CHANNEL_BUSY: 'ptt_channel_busy',
   CHANNEL_FREE: 'ptt_channel_free',
   AUDIO_MESSAGE: 'ptt_audio_message',
+  NATIVE_PCM: 'ptt_native_pcm',
+  NATIVE_LISTENER: 'ptt_native_listener',
   AUDIO_FRAME: 'ptt_audio_frame',
   AUDIO_PACKET: 'ptt_audio_packet',
   AUDIO_BATCH: 'ptt_audio_batch',

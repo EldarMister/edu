@@ -8,6 +8,7 @@ import { useIngredient, usePreparationRecipe, useRecipe, type IngredientDetails,
 import { recipeProcessingLabel } from './RecipeProcessingFields';
 import { RecipeHistoryDrawer } from './RecipeHistoryDrawer';
 import { PreparationPrintButton } from './PreparationPrintButton';
+import { PreparationCost } from './PreparationCost';
 import { normalizeUnitLabel, unitLabel } from './units';
 import { recipeQuantity } from './recipe-draft-values';
 import { QueryState } from './WarehouseUi';
@@ -21,9 +22,10 @@ export function CatalogueUsage({ id, prepared }: { id: string; prepared: boolean
     <CatalogueState pending={query.isPending} error={query.error} onRetry={() => void query.refetch()}>
       {item && (
         <>
+          <IngredientUsageTable item={item} />
           {!prepared && (
-            <>
-              <h3 className="mb-3 font-medium">Остатки на складах</h3>
+            <details className="mt-4">
+              <summary className="mb-3 cursor-pointer text-sm text-primary">Остатки на складах</summary>
               <div className="overflow-x-auto"><table className="poster-table poster-catalogue-detail-table w-full min-w-[400px]">
                 <thead><tr><th>Склад</th><th className="text-right">Остатки</th>{costs && <th className="text-right">Себестоимость</th>}</tr></thead>
                 <tbody>
@@ -37,18 +39,20 @@ export function CatalogueUsage({ id, prepared }: { id: string; prepared: boolean
                   {!item.balances.length && <tr><td colSpan={costs ? 3 : 2}>Остатков по складам пока нет.</td></tr>}
                 </tbody>
               </table></div>
-            </>
+            </details>
           )}
-          <div className={prepared ? undefined : 'mt-5'}><IngredientUsageTable item={item} /></div>
         </>
       )}
     </CatalogueState>
   );
 }
 
-const uses: Record<IngredientUsage['kind'], string> = {
-  recipe: 'Техкарта', stock: 'Прямая продажа', variant: 'Вариант', preparation: 'Рецептура выпуска', modifier: 'Модификатор',
-};
+const usageGroups: { title: string; kinds: IngredientUsage['kind'][]; composition?: boolean }[] = [
+  { title: 'Используется в полуфабрикатах', kinds: ['preparation'], composition: true },
+  { title: 'Используется в техкартах', kinds: ['recipe'], composition: true },
+  { title: 'Прямая продажа', kinds: ['stock', 'variant'] },
+  { title: 'Используется в модификаторах', kinds: ['modifier'] },
+];
 
 function MenuUsageLink({ id, kind, variantId, children }: {
   id: string; kind: 'recipe' | 'goods' | 'set' | 'preparation'; variantId?: string | null; children: ReactNode;
@@ -69,6 +73,7 @@ function MenuUsageLink({ id, kind, variantId, children }: {
 
 export function IngredientUsageTable({ item }: { item: IngredientDetails }) {
   const rows = item.usage;
+  const costs = usePermissions().can('actions.warehouseCosts');
   const title = <h3 className="mb-3 font-medium">Где используется</h3>;
   if (!rows && item.usedInDishes?.length) return <>
     {title}
@@ -76,19 +81,26 @@ export function IngredientUsageTable({ item }: { item: IngredientDetails }) {
       <MenuUsageLink id={dish.id} kind="recipe">{dish.name}</MenuUsageLink>
     </li>)}</ul>
   </>;
-  return <>
-    {title}
-    {rows?.length ? <div className="overflow-x-auto"><table className="poster-table poster-catalogue-detail-table w-full min-w-[440px]">
-      <thead><tr><th scope="col">Позиция</th><th scope="col">Использование</th><th scope="col" className="text-right">Количество</th></tr></thead>
-      <tbody>{rows.map((row) => <tr key={`${row.kind}:${row.sourceId}`}>
+  if (!rows?.length) return <p className="text-sm text-text-muted">Пока нигде не используется.</p>;
+  return <div className="space-y-5">{usageGroups.map((group) => {
+    const entries = rows.filter((row) => group.kinds.includes(row.kind));
+    if (!entries.length) return null;
+    return <section key={group.title}><h3 className="mb-2 font-medium">{group.title}</h3>
+      <div className="overflow-x-auto"><table className="poster-table poster-catalogue-detail-table w-full min-w-[440px]">
+      <thead><tr><th scope="col">Название</th><th scope="col" className="text-right">{group.composition ? 'Брутто' : 'Количество'}</th>
+        {group.composition && <th scope="col" className="text-right">Нетто</th>}
+        {group.composition && costs && <th scope="col" className="text-right">Цена, с</th>}</tr></thead>
+      <tbody>{entries.map((row) => <tr key={`${row.kind}:${row.sourceId}`}>
         <td><MenuUsageLink id={row.targetId} variantId={row.variantId}
           kind={row.kind === 'preparation' ? 'preparation' : row.isSet ? 'set' : row.catalogKind === 'goods' ? 'goods' : 'recipe'}>
-          {row.name}</MenuUsageLink>{!row.active && <span className="ml-2 text-xs text-text-muted">Неактивно</span>}</td>
-        <td>{uses[row.kind]}{row.label && <span className="block text-xs text-text-muted">{row.label}</span>}</td>
+          {row.name}</MenuUsageLink>{row.label && <span className="ml-2 text-xs text-text-muted">{row.label}</span>}
+          {!row.active && <span className="ml-2 text-xs text-text-muted">Неактивно</span>}</td>
         <td className="whitespace-nowrap text-right tabular-nums">{row.quantity == null || !row.unit ? '—' : recipeQuantity(row.quantity, row.unit)}</td>
+        {group.composition && <td className="whitespace-nowrap text-right tabular-nums">{row.netQuantity == null || !row.netUnit ? '—' : recipeQuantity(row.netQuantity, row.netUnit)}</td>}
+        {group.composition && costs && <td className="whitespace-nowrap text-right tabular-nums">{row.lineCost == null ? '—' : money(row.lineCost)}</td>}
       </tr>)}</tbody>
-    </table></div> : <p className="text-sm text-text-muted">Нет связанных техкарт, вариантов или модификаторов.</p>}
-  </>;
+    </table></div></section>;
+  })}</div>;
 }
 
 export function DishComposition({ dish }: { dish: AdminDish }) {
@@ -185,28 +197,24 @@ export function PreparationComposition({ id, warehouseId }: { id: string; wareho
           </div>
           <div className="overflow-x-auto">
             <table className="poster-table poster-catalogue-detail-table w-full min-w-[620px]">
-              <thead><tr><th>Продукты</th><th>Метод приготовления</th><th className="text-right">Брутто</th><th className="text-right">Нетто</th>{costs && <th className="text-right">Себестоимость</th>}</tr></thead>
+              <thead><tr><th>Ингредиент</th><th className="text-right">Брутто</th><th className="text-right">Нетто</th>{costs && <th className="text-right">Себестоимость</th>}</tr></thead>
               <tbody>
                 {query.data.items.map((item) => {
                   const unit = unitLabel(item.unit);
                   const net = item.netAmount ?? item.quantity * (1 - (item.lossPercent ?? 0) / 100);
                   return <tr key={item.ingredientId}>
-                      <td>{item.name}<span className="text-text-muted">, {unit}</span></td>
-                      <td>{recipeProcessingLabel(item) || '—'}</td>
+                      <td>{item.name}{recipeProcessingLabel(item) && <span className="ml-2 text-xs text-text-muted">{recipeProcessingLabel(item)}</span>}</td>
                       <td className="text-right whitespace-nowrap">{qty(item.quantity, unit)}</td>
-                      <td className="text-right whitespace-nowrap">{item.netWeightGrams == null ? qty(net, unit) : <>
-                        {recipeQuantity(item.netWeightGrams, 'г')}
-                        <span className="block text-xs text-text-muted">{recipeQuantity(net, unit)}</span>
-                      </>}</td>
-                      {costs && <td className="text-right whitespace-nowrap">{item.lineCost == null ? '—' : money(item.lineCost)}</td>}
+                      <td className="text-right whitespace-nowrap">{item.netWeightGrams == null ? qty(net, unit) : recipeQuantity(item.netWeightGrams, 'г')}</td>
+                      {costs && <td className="text-right whitespace-nowrap"><PreparationCost value={item.lineCost} known={item.knownLineCost} /></td>}
                     </tr>;
                 })}
-                {!query.data.items.length && <tr><td colSpan={costs ? 5 : 4}>Состав пока не задан.</td></tr>}
+                {!query.data.items.length && <tr><td colSpan={costs ? 4 : 3}>Состав пока не задан.</td></tr>}
               </tbody>
               <tfoot><tr>
-                <td colSpan={3} />
+                <td colSpan={2} />
                 <td className="text-right whitespace-nowrap">Выход: {qty(query.data.outputQuantity, unitLabel(query.data.outputUnit))}</td>
-                {costs && <td className="text-right whitespace-nowrap">{query.data.totalCost == null ? '—' : money(query.data.totalCost)}</td>}
+                {costs && <td className="text-right whitespace-nowrap"><PreparationCost value={query.data.totalCost} known={query.data.knownTotalCost} /></td>}
               </tr></tfoot>
             </table>
           </div>

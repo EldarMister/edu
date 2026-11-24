@@ -3,6 +3,30 @@ import { PTT_EVENTS, type PttBatchPayload, type PttFreePayload, type PttOpusCode
 const OPUS_HEADER_BYTES = 16;
 const FRAMES_PER_BATCH = 4;
 
+// The native app plays self-contained files. Emit PCM only when such a listener is present.
+export function createPttNativeClips(send: (firstSample: number, audio: ArrayBuffer) => void) {
+  const clip = new Uint8Array(960 * 16);
+  let length = 0;
+  let nextSample = 0;
+  let enabled = false;
+  function flush() {
+    if (!length) return;
+    send(nextSample - length / 2, clip.slice(0, length).buffer);
+    length = 0;
+  }
+  return {
+    enable() { enabled = true; },
+    push(frame: ArrayBuffer) {
+      nextSample += frame.byteLength / 2;
+      if (!enabled) return;
+      clip.set(new Uint8Array(frame), length);
+      length += frame.byteLength;
+      if (length === clip.length) flush();
+    },
+    flush,
+  };
+}
+
 export function createPttBatcher(frameBytes: number, send: (firstFrame: number, audio: ArrayBuffer) => void) {
   const buffer = new Uint8Array(frameBytes * FRAMES_PER_BATCH);
   let count = 0;
@@ -20,7 +44,8 @@ export function createPttBatcher(frameBytes: number, send: (firstFrame: number, 
       const audio = new Uint8Array(packet).subarray(OPUS_HEADER_BYTES);
       if (audio.length !== frameBytes) throw new Error('Invalid radio frame');
       buffer.set(audio, count * frameBytes);
-      if (++count === FRAMES_PER_BATCH) flush();
+      count++;
+      if (nextFrame === 0 || count === FRAMES_PER_BATCH) flush();
     },
     flush,
   };
@@ -38,7 +63,7 @@ type Decoder = { frameBytes: number; frameSamples: number; sampleRate: number; d
 type ReceiveOptions = {
   hears(batch: PttBatchPayload): boolean;
   openDecoder(codec: PttOpusCodec): Decoder | Promise<Decoder>;
-  sync(talkId: string, fromFrame: number): Promise<PttSyncReply>;
+  sync(talkId: string, fromFrame: number, maxFrames: number): Promise<PttSyncReply>;
   play(batch: PttBatchPayload, samples: Float32Array, sampleRate: number): void;
   end(talkId: string): void;
 };
@@ -106,7 +131,9 @@ export function createPttStreamReceiver(options: ReceiveOptions) {
   async function recover() {
     const talk = current;
     if (!talk) return undefined;
-    const response = await options.sync(talk.id, talk.nextFrame).catch(() => ({ ok: false }) as PttSyncReply);
+    // Preserve a short interruption, and rejoin a long-running conversation close to live.
+    const maxFrames = talk.codec === 'opus-hq' ? 25 : 13;
+    const response = await options.sync(talk.id, talk.nextFrame, maxFrames).catch(() => ({ ok: false }) as PttSyncReply);
     if (disposed || current !== talk) return undefined;
     if (response.ok && response.batch) await process(response.batch, true);
     return response;
@@ -155,5 +182,6 @@ export function createPttStreamReceiver(options: ReceiveOptions) {
 }
 
 export function pttAudioHistory(socket: { timeout(ms: number): { emitWithAck(event: string, body: unknown): Promise<PttSyncReply> } }) {
-  return (talkId: string, fromFrame: number) => socket.timeout(2200).emitWithAck(PTT_EVENTS.AUDIO_SYNC, { talkId, fromFrame });
+  return (talkId: string, fromFrame: number, maxFrames: number) =>
+    socket.timeout(700).emitWithAck(PTT_EVENTS.AUDIO_SYNC, { talkId, fromFrame, maxFrames });
 }

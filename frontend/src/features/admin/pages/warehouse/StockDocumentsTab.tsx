@@ -127,7 +127,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
   const formRef = useRef<HTMLDivElement>(null);
   const formId = useId();
   const [requestKey] = useState(() => crypto.randomUUID());
-  const writeoffLines = useWriteoffLines(kind === 'writeoff', location);
+  const writeoffLines = useWriteoffLines(kind === 'writeoff', location, undefined, inventoryTimingValue(timing, initialOperationAt));
   const changedItems = JSON.stringify(rows.filter(({ id, quantity }) => id || quantity).map(({ id, quantity }) => [id, quantity])) !==
     JSON.stringify(initialRows.map(({ id, quantity }) => [id, quantity]));
   const { markSaved } = useEditorDirty(location !== warehouseId || destination !== (initialTransfer?.destination ?? '') || source !== (sourcePurchaseId ?? '') ||

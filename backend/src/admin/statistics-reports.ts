@@ -135,12 +135,14 @@ function taxesForOrder(order: Order) {
     }
   }
   const byItem = new Map<string, number>();
+  const byRate = new Map<string, number>();
   let totalTax = new Prisma.Decimal(0);
   let allAttributed = true;
   for (const tax of order.taxes) {
     const amount = tax.amount.sub(refunds.get(tax.taxId) ?? 0);
     if (amount.isZero()) continue;
     totalTax = totalTax.add(amount);
+    byRate.set(tax.taxId, (byRate.get(tax.taxId) ?? 0) + amount.toNumber());
     const saved = tax.itemAmounts;
     // A legacy receipt may only have a check-level tax. Its rate can be attributed
     // to every line only when its recorded base covers the entire receipt.
@@ -169,7 +171,7 @@ function taxesForOrder(order: Order) {
       assigned = through;
     }
   }
-  return { total: totalTax.toNumber(), byItem, allAttributed };
+  return { total: totalTax.toNumber(), byItem, byRate, allAttributed };
 }
 
 export function orderProductSales<ItemType extends Item>(order: Omit<Order, 'items'> & { items: ItemType[] }, costs: Map<string, number | null>, showCosts: boolean) {
@@ -180,6 +182,7 @@ export function orderProductSales<ItemType extends Item>(order: Omit<Order, 'ite
   const itemPayables = allocateOrderItemCents(productPayable, order.items);
   return {
     totalTax: taxes.total,
+    taxByRate: taxes.byRate,
     lines: order.items.map((item, index) => {
       const attribution = itemCosts.get(item.id);
       const quantity = netItemQuantity(item);

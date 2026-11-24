@@ -172,6 +172,16 @@ test('PostgreSQL food cost report reconciles periods, weighted sales, refunds, t
         { quantity: 0.75, gross: 90, revenue: 90, cost: 17.5, tax: 3, margin: 69.5, foodCostPercent: 19.4444 });
       assert.deepEqual(report.previous.totals,
         { quantity: 0.5, gross: 60, revenue: 60, cost: 30, tax: 0, margin: 30, foodCostPercent: 50 });
+      const { readProfitLoss } = require('../src/finance/profit-loss.ts');
+      const pnl = async () => {
+        const data = await db.$transaction((tx) => readProfitLoss(tx, cafes[0].id, {
+          from: new Date('2026-11-16T00:00:00+06:00'), to: new Date('2026-11-23T00:00:00+06:00'),
+        }));
+        return Object.fromEntries(data.rows.map((row) => [row.label, row.value]));
+      };
+      const profit = await pnl();
+      assert.deepEqual([profit['Доходы'], profit['Продажи товаров и техкарт'], profit['Обслуживание'], profit['Себестоимость продаж'],
+        profit['Налог (10%)'], profit['Прибыль после налогообложения']], [95, 90, 5, 17.5, 3, 74.5]);
       assert.equal(report.positions.length, 1, 'orders with different measures are grouped into one weighted menu item');
       const [position] = report.positions;
       assert.deepEqual([position.name, position.price, position.priceBasis, position.priceUnit, position.category], [drink.name, 120, 1000, 'ml', 'Напитки']);
@@ -189,6 +199,8 @@ test('PostgreSQL food cost report reconciles periods, weighted sales, refunds, t
       assert.equal(row['Закупочная цена тек. периода'], 105);
       const unmatched = XLSX.read(writeFoodCostWorkbook(report, { tab: 'positions', search: 'Нет такой позиции' }), { type: 'buffer' });
       assert.deepEqual(XLSX.utils.sheet_to_json(unmatched.Sheets['Позиции']), []);
+      const early = await db.ingredient.create({ data: { name: 'Поставка в полночь', unitType: 'volume', displayUnit: 'l' } });
+      await purchase(early.id, '2026-11-08T18:00:00Z', 1000, 80);
       await assert.rejects(service.foodCost({ from: '2026-02-30', to: '2026-05-30' }), { status: 400 });
 
       const product = await db.dish.create({ data: { categoryId: category.id, name: 'Морс', price: 40, catalogKind: 'goods' } });
@@ -205,6 +217,8 @@ test('PostgreSQL food cost report reconciles periods, weighted sales, refunds, t
       assert.equal(incomplete.current.totals.revenue, 160);
       assert.equal(incomplete.current.totals.cost, null);
       assert.equal(incomplete.current.totals.margin, null);
+      assert.equal(incomplete.ingredients.find((row) => row.id === early.id).previous.purchasePrice, 80);
+      assert.equal((await pnl())['Прибыль после налогообложения'], null);
     });
   } finally {
     for (const { id: cafeId } of cafes) {

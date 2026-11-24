@@ -268,12 +268,12 @@ export function PttOverlay() {
       if (payload.channel === channel) setOnlineCount(payload.onlineCount);
     };
     const onBusy = (payload: PttBusyPayload) => {
-      if (payload.channel === channel) {
+      if (payload.channel === channel || payload.channel === 'general') {
         setBusySpeaker({ id: payload.speaker?.id ?? 'unknown', name: payload.speaker?.name });
       }
     };
     const onFree = (payload: PttFreePayload) => {
-      if (payload.channel === channel) setBusySpeaker(null);
+      if (payload.channel === channel || payload.channel === 'general') setBusySpeaker(null);
     };
     sock.on(PTT_EVENTS.PRESENCE, onPresence);
     sock.on(PTT_EVENTS.CHANNEL_BUSY, onBusy);
@@ -292,7 +292,7 @@ export function PttOverlay() {
     setChannel(next);
   };
 
-  const speakingOther = !!busySpeaker && busySpeaker.id !== user?.id && !sender.talking;
+  const speakingOther = !sender.talking && (receiver.receiving || (!!busySpeaker && busySpeaker.id !== user?.id));
   const state: RadioState = !connected
     ? 'error'
     : sender.talking

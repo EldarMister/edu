@@ -191,6 +191,7 @@ export function CategoryForm({ category, categories, employees, positions, canEd
   const [expense, setExpense] = useState(() => !!category && categoryAccepts(category, 'expense'));
   const [parentId, setParent] = useState(category?.parentId ?? '');
   const [showOnPos, setShowOnPos] = useState(category?.showOnPos ?? false);
+  const [showInProfitLoss, setShowInProfitLoss] = useState(category?.showInProfitLoss ?? true);
   const [userIds, setUserIds] = useState(category?.userIds ?? []);
   const [positionIds, setPositionIds] = useState(category?.positionIds ?? []);
   const kind: CategoryKind = income ? (expense ? 'both' : 'income') : 'expense';
@@ -199,7 +200,7 @@ export function CategoryForm({ category, categories, employees, positions, canEd
     && !categoryAncestors(entry, byId).some(({ id }) => id === category.id)));
   return <FormPage title={category ? 'Редактирование категории' : 'Добавление категории транзакций'}
     disabled={!name.trim() || (!income && !expense)} onClose={onClose}
-    onSubmit={() => saveCategory.mutateAsync({ id: category?.id, values: { name: name.trim(), kind, parentId: parentId || null, showOnPos, userIds, positionIds } })}>
+    onSubmit={() => saveCategory.mutateAsync({ id: category?.id, values: { name: name.trim(), kind, parentId: parentId || null, showOnPos, showInProfitLoss, userIds, positionIds } })}>
     <DocumentField label="Название"><input className="input w-full" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required /></DocumentField>
     <Choice label="Родительская категория" value={parentId} onChange={setParent} options={parentOptions} empty="Главный уровень" />
     <DocumentField label="Допустимые транзакции">
@@ -211,6 +212,8 @@ export function CategoryForm({ category, categories, employees, positions, canEd
     <OperationKind label="Показывать на кассе" value={showOnPos ? 'yes' : 'no'} onChange={(value) => setShowOnPos(value === 'yes')}
       options={[{ value: 'yes', label: 'Да' }, { value: 'no', label: 'Нет' }]}
       hint="При выборе «Да» кассир сможет выбрать эту категорию при внесении или расходе наличных в кассовой смене." />
+    <OperationKind label="Отображать в P&L" value={showInProfitLoss ? 'yes' : 'no'} onChange={(value) => setShowInProfitLoss(value === 'yes')}
+      options={[{ value: 'yes', label: 'Да' }, { value: 'no', label: 'Нет' }]} />
     {canEditPermissions && <div className="border-t border-border pt-4">
       <h2 className="mb-3 font-semibold text-text-primary">Ограниченный доступ к категории</h2>
       <div className="grid gap-4">
@@ -252,8 +255,12 @@ export function TransactionForm({ accounts, categories, owner, entry, initialAcc
   const [hour, setHour] = useState(initialDateTime.slice(11, 13));
   const [minute, setMinute] = useState(initialDateTime.slice(14, 16));
   const [dateInputValid, setDateInputValid] = useState(true);
+  const [separateDealDate, setSeparateDealDate] = useState(!!entry?.dealDate);
+  const [dealDate, setDealDate] = useState(entry?.dealDate?.slice(0, 10) ?? date);
+  const [dealDateValid, setDealDateValid] = useState(true);
   const [note, setNote] = useState(entry?.note ?? '');
-  const snapshot = JSON.stringify([kind, accountId, categoryId, destinationAccountId, amount, date, hour, minute, note]);
+  const hasDealDate = kind !== 'transfer' && separateDealDate;
+  const snapshot = JSON.stringify([kind, accountId, categoryId, destinationAccountId, amount, date, hour, minute, note, hasDealDate && dealDate]);
   const [originalSnapshot] = useState(snapshot);
   const validAmount = parseMoney(amount);
   const time = [hour, minute].map((part) => part.padStart(2, '0')).join(':');
@@ -270,13 +277,13 @@ export function TransactionForm({ accounts, categories, owner, entry, initialAcc
   const validCategory = categoryId ? eligible.some(({ value }) => value === categoryId) : owner;
   return <FormPage title={entry ? 'Редактирование транзакции' : 'Добавить транзакцию'} onClose={onClose} dialog
     changed={snapshot !== originalSnapshot}
-    disabled={!validAccount || !validDate || validAmount == null || validAmount <= 0 || (kind === 'transfer' ? !validDestination : !validCategory)}
+    disabled={!validAccount || !validDate || (hasDealDate && (!dealDate || !dealDateValid)) || validAmount == null || validAmount <= 0 || (kind === 'transfer' ? !validDestination : !validCategory)}
     onSubmit={() => {
       const keepTimestamp = dateTime === initialDateTime;
       const values = {
         kind, accountId, amount: validAmount!, categoryId: kind === 'transfer' ? undefined : categoryId || undefined,
         destinationAccountId: kind === 'transfer' ? destinationAccountId : undefined,
-        note: note.trim() || undefined, occurredAt: keepTimestamp ? undefined : effectiveTime.toISOString(),
+        note: note.trim() || undefined, occurredAt: keepTimestamp ? undefined : effectiveTime.toISOString(), dealDate: hasDealDate ? dealDate : null,
       };
       return entry ? editTransactionDetails.mutateAsync({ id: entry.id, values }) : postTransaction.mutateAsync({ ...values, requestKey });
     }}>
@@ -308,6 +315,14 @@ export function TransactionForm({ accounts, categories, owner, entry, initialAcc
       </div>
       {futureDateTime && <p className="mt-1.5 text-xs text-danger" role="alert">Дата и время транзакции ещё не наступили.</p>}
     </DocumentField>
+    {kind !== 'transfer' && <DocumentField label="Дата сделки"><label className="flex items-center gap-2">
+      <input type="checkbox" checked={separateDealDate} onChange={(event) => {
+        setSeparateDealDate(event.target.checked);
+        if (event.target.checked && !entry?.dealDate) setDealDate(date);
+      }} />Дата сделки другая</label>
+      {hasDealDate && <DatePicker value={dealDate} onChange={setDealDate} onValidityChange={setDealDateValid}
+        className="input mt-2 w-[140px]" aria-label="Дата сделки" required />}
+    </DocumentField>}
     <Comment value={note} onChange={setNote} compact />
   </FormPage>;
 }
@@ -334,6 +349,7 @@ export function TransactionDetail({ entry, accounts, categories, owner, onClose 
   const fields = <>
     <DocumentField label="Тип"><p>{entryLabel(entry)}</p></DocumentField>
     <DocumentField label="Дата и время"><p>{financeDateTime(entry.occurredAt)}</p></DocumentField>
+    {entry.dealDate && <DocumentField label="Дата сделки"><p>{entry.dealDate.slice(0, 10).split('-').reverse().join('.')}</p></DocumentField>}
     {entry.kind === 'transfer' ? <>
       <DocumentField label="На счёт"><p>{incoming ? primary : counterparty}</p></DocumentField>
       <DocumentField label="Со счёта"><p>{incoming ? counterparty : primary}</p></DocumentField>

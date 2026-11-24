@@ -34,6 +34,7 @@ export interface Ingredient {
   recipeOutputQuantity?: number | null;
   recipeOutputUnit?: UnitCode | null;
   recipeTotalCost?: number | null;
+  knownRecipeTotalCost?: number | null;
   recipeUnitCost?: number | null; // cost per display unit for virtual preparations
   valuationKnown?: boolean;
   processingLosses?: Partial<Record<ProcessingMethod, number>>;
@@ -156,6 +157,11 @@ export interface PurchasePayment {
 }
 
 export interface PurchaseItem {
+  taxId?: string | null;
+  taxName?: string | null;
+  taxRate?: number | null;
+  taxAmount?: number;
+  totalWithTax?: number;
   grossTotal?: number;
   packageId?: string | null;
   packageName?: string | null;
@@ -425,6 +431,9 @@ export type IngredientUsage = {
   isSet: boolean;
   quantity?: number;
   unit?: string;
+  netQuantity?: number;
+  netUnit?: string;
+  lineCost?: number | null;
 };
 export function useIngredient(id: string | null) {
   return useQuery({
@@ -562,13 +571,14 @@ interface PreparationRecipeInput {
 export interface PreparationRecipe extends Omit<PreparationRecipeInput, 'items'> {
   kind?: 'preparation' | 'prepared_dish';
   totalCost?: number | null;
+  knownTotalCost?: number | null;
   missingCosts?: string[];
   id: string;
   name: string;
   displayUnit: UnitCode;
   unitType: UnitType;
   items: (PreparationRecipeInput['items'][number] & {
-    name: string; lineCost?: number | null; costKnown?: boolean; netWeightGrams?: number | null;
+    name: string; lineCost?: number | null; knownLineCost?: number | null; costKnown?: boolean; netWeightGrams?: number | null;
   })[];
 }
 
@@ -803,6 +813,11 @@ export function usePurchaseMutations() {
   return { create, update, complete, cancel };
 }
 
+export function usePurchaseTaxOptions(enabled: boolean) {
+  return useQuery({ queryKey: [...KEY, 'purchase-tax-options'], enabled,
+    queryFn: () => get<{ id: string; name: string; rate: string }[]>('/admin/warehouse/purchases/tax-options') });
+}
+
 export function useLastPurchasePrices(ingredientIds: string[], warehouseId?: string, excludePurchaseId?: string, before?: string) {
   const ids = [...new Set(ingredientIds.filter(Boolean))].sort().join(',');
   const query = new URLSearchParams({ ingredientIds: ids });
@@ -812,8 +827,17 @@ export function useLastPurchasePrices(ingredientIds: string[], warehouseId?: str
   return useQuery({
     queryKey: [...KEY, 'last-purchase-prices', ids, warehouseId, excludePurchaseId, before],
     enabled: !!ids,
-    queryFn: () => get<{ ingredientId: string; unit: string; unitCode: UnitCode; unitPrice: number; date: string; purchaseId: string; supplier: string }[]>(
-      `/admin/warehouse/purchases/last-prices?${query}`),
+    queryFn: async () => {
+      type LastPrice = { ingredientId: string; unit: string; unitCode: UnitCode; unitPrice: number; date: string; purchaseId: string; supplier: string };
+      const selected = ids.split(',');
+      const prices: LastPrice[] = [];
+      for (let offset = 0; offset < selected.length; offset += 60) {
+        const batch = new URLSearchParams(query);
+        batch.set('ingredientIds', selected.slice(offset, offset + 60).join(','));
+        prices.push(...await get<LastPrice[]>(`/admin/warehouse/purchases/last-prices?${batch}`));
+      }
+      return prices;
+    },
   });
 }
 

@@ -15,8 +15,8 @@ import { changeWriteoffPackage, changeWriteoffUnit, emptyWriteoffLine, sameWrite
 type Choice = { id: string; name: string; group: string; detail?: string; unit: string; unitCode: UnitCode; kind: 'ingredient' | 'dish'; sourceId: string; variantId?: string };
 const choiceId = (row: Pick<DraftWriteoffLine, 'kind' | 'sourceId' | 'variantId'>) => `${row.kind}:${row.sourceId}:${row.variantId ?? ''}`;
 
-export function useWriteoffLines(enabled: boolean, warehouseId: string, document?: StockDocumentDetails) {
-  const options = useWriteoffOptions(enabled);
+export function useWriteoffLines(enabled: boolean, warehouseId: string, document?: StockDocumentDetails, effectiveAt?: string | null) {
+  const options = useWriteoffOptions(enabled, effectiveAt);
   const packages = useWriteoffPackages(enabled);
   const [rows, setRows] = useState(() => writeoffDraftLines(enabled ? document?.sourceLines : undefined, enabled ? document?.items : undefined));
   const [snapshots, setSnapshots] = useState(enabled ? document?.sourceLines ?? [] : []);
@@ -29,7 +29,8 @@ export function useWriteoffLines(enabled: boolean, warehouseId: string, document
     quantity: row.sourceId || row.quantity ? documentQuantityError(row.quantity, false) || (Number(row.quantity) < 0.000001 ? 'Минимальное количество — 0,000001.' : undefined) : undefined,
   }]));
   const firstError = [...issues.values()].flatMap((issue) => [issue.product, issue.quantity]).find(Boolean);
-  const plan = writeoffPreviewPlan(rows, snapshots, refreshVersion > 0);
+  const forcePreview = refreshVersion > 0 || (effectiveAt ?? null) !== (document?.effectiveAt ?? null);
+  const plan = writeoffPreviewPlan(rows, snapshots, forcePreview);
   const needsPreview = plan.needed;
   const serialized = JSON.stringify(plan.inputs);
   const [settled, setSettled] = useState(serialized);
@@ -38,13 +39,13 @@ export function useWriteoffLines(enabled: boolean, warehouseId: string, document
     return () => window.clearTimeout(timer);
   }, [serialized]);
   const previewInputs: WriteoffSourceInput[] = JSON.parse(settled);
-  const preview = useWriteoffPreview(warehouseId, previewInputs, enabled && !!warehouseId && !firstError && needsPreview && settled === serialized, refreshVersion, document?.id);
+  const preview = useWriteoffPreview(warehouseId, previewInputs, enabled && !!warehouseId && !firstError && needsPreview && settled === serialized, refreshVersion, document?.id, effectiveAt);
   const previewById = new Map((settled === serialized && !preview.isError ? preview.data?.sourceLines ?? [] : []).map((line) => [line.sourceLineId, line]));
   const lines = entered.flatMap((row) => {
     const snapshot = snapshotById.get(row.sourceLineId);
     const latest = document?.sourceLines?.find((line) => line.sourceLineId === row.sourceLineId && line.recipeSignature === snapshot?.recipeSignature && sameWriteoffSource(row, line));
     const line = needsPreview && previewById.has(row.sourceLineId) ? previewById.get(row.sourceLineId)
-      : refreshVersion === 0 && snapshot?.recipeSignature && sameWriteoffSource(row, snapshot) ? latest ?? snapshot : undefined;
+      : !forcePreview && snapshot?.recipeSignature && sameWriteoffSource(row, snapshot) ? latest ?? snapshot : undefined;
     return line ? [line] : [];
   });
   const calculating = enabled && !firstError && needsPreview && (settled !== serialized || preview.isFetching || preview.isPending);

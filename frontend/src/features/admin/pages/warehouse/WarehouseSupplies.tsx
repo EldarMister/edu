@@ -58,7 +58,7 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
   warehouseId?: string;
   filters?: ReactNode;
   onOpen: (id: string, edit?: boolean) => void;
-  onCreate: () => void;
+  onCreate: (importInvoice?: boolean) => void;
 }) {
   const permissions = usePermissions();
   const canEdit = permissions.canEditSection('warehouse') && permissions.canAction('warehouseReceive') && permissions.canAction('warehouseCosts');
@@ -182,6 +182,8 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
         {canExport && <button type="button" className="supply-header-action" disabled={exporting}
           onClick={() => void exportWorkbook()}>{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
         {period.filter}
+        {canEdit && <button type="button" className="supply-header-action" onClick={() => onCreate(true)}>Импорт с ИИ</button>}
+        {canEdit && <button type="button" className="btn-primary btn-md" onClick={() => onCreate()}>Добавить</button>}
       </WorkspaceHeaderActions>
       {settingsOpen && <WarehouseColumnSettings columns={columns} defaults={allowedColumns} resetColumns={resetColumns}
         label={(key) => supplyColumns[key].label} onClose={() => setSettingsOpen(false)}
@@ -214,7 +216,6 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
           filter({ supplySearch: '', supplyStatus: '', supplyPayment: '', supplySupplier: '', supplyCategories: '', warehouse: '',
             supplyPeriod: 'all', supplyFrom: '', supplyTo: '' });
         }}>Сбросить всё</button>}
-        {canEdit && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
       </div>
       {exportError && <p role="alert" className="p-3 text-sm text-danger">{exportError}</p>}
       <QueryState pending={query.isPending} error={query.error}>
@@ -298,7 +299,7 @@ function SupplyLines({ id, number }: { id: string; number: number }) {
       <tbody>{query.data?.items?.map((item) => <tr key={item.id}>
         <td>{item.ingredientName}</td>
         <td className="whitespace-nowrap text-right tabular-nums">{balanceQuantity(item.quantity, item.unit, item.packageId ? 'count' : undefined)}</td>
-        <td className="whitespace-nowrap text-right tabular-nums">{balanceMoney(item.total)}</td>
+        <td className="whitespace-nowrap text-right tabular-nums">{balanceMoney(item.totalWithTax ?? item.total)}</td>
       </tr>)}</tbody>
     </table>
     {query.data && !query.data.items?.length && <p className="p-3 text-sm text-text-muted">В поставке нет позиций.</p>}

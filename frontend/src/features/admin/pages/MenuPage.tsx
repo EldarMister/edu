@@ -510,7 +510,7 @@ export function MenuCategoriesPage() {
   const { reorder } = useCategoryMutations();
   const push = useNotifications((state) => state.push);
   const [deleteTarget, setDeleteTarget] = useState<AdminCategory | null>(null);
-  const sorted = [...(categoriesQ.data ?? [])].sort((a, b) => a.sortOrder - b.sortOrder);
+  const sorted = (categoriesQ.data ?? []).filter((category) => !category.id.startsWith('menu-root:')).sort((a, b) => a.sortOrder - b.sortOrder);
   const rows = sorted.filter((category) =>
     category.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
   );

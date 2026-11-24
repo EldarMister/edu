@@ -383,10 +383,10 @@ test(
           assert.equal((await service.getByDish(set.id)).components[0].quantity, 3);
         });
         await t.test('ingredient usage reports direct and variant sales, preparation recipes and archived modifiers', async () => {
-          const ingredient = await db.ingredient.create({ data: { name: 'Сливки для связей', unitType: 'volume', displayUnit: 'l' } });
+          const ingredient = await db.ingredient.create({ data: { name: 'Сливки для связей', unitType: 'volume', displayUnit: 'l', avgCost: 0.04, valuationKnown: true } });
           const preparation = await db.ingredient.create({ data: { name: 'Крем', isPrepared: true, kind: 'preparation', unitType: 'mass', displayUnit: 'kg' } });
           await db.preparationRecipe.create({ data: { ingredientId: preparation.id, outputAmount: 1000, outputUnit: 'kg',
-            items: { create: [{ ingredientId: ingredient.id, amount: 250, unit: 'l' }] } } });
+            items: { create: [{ ingredientId: ingredient.id, amount: 250, unit: 'l', measuredNetWeightGrams: 238 }] } } });
           const drinks = await db.dish.create({ data: { name: 'Сливочный кофе', categoryId: category.id, price: 150,
             stockIngredientId: ingredient.id, stockAmount: 100,
             recipeItems: { create: [{ ingredientId: ingredient.id, amount: 75, amountUnit: 'ml' }] },
@@ -403,6 +403,10 @@ test(
               await assert.rejects(new IngredientsService(db).findOne(ingredient.id), /не найден/i);
             });
             const { usage, usedInDishes } = await new IngredientsService(db).findOne(ingredient.id);
+            const prepUse = usage.find((row) => row.kind === 'preparation');
+            assert.deepEqual([prepUse.netQuantity, prepUse.netUnit, prepUse.lineCost], [238, 'г', 10]);
+            const recipeUse = usage.find((row) => row.kind === 'recipe');
+            assert.deepEqual([recipeUse.netQuantity, recipeUse.netUnit, recipeUse.lineCost], [75, 'мл', 3]);
             assert.deepEqual(usedInDishes, [{ id: drinks.id, name: drinks.name }]);
             const values = Object.fromEntries(usage.map(({ kind, quantity, unit, active, label }) => [kind, [quantity, unit, active, label]]));
             assert.deepEqual(values, { preparation: [0.25, 'л', true, null], recipe: [75, 'мл', true, null], stock: [0.1, 'л', true, null],

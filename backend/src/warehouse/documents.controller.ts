@@ -32,7 +32,7 @@ export class WarehouseDocumentsController {
   }
 
   @Get('writeoff-options')
-  writeoffOptions() { return this.documents.writeoffOptions(); }
+  writeoffOptions(@Query('effectiveAt') effectiveAt?: string) { return this.documents.writeoffOptions(effectiveAt); }
 
   @Post('writeoff-preview')
   @RequirePermission('actions.warehouseWriteoff')

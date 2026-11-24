@@ -43,7 +43,7 @@ export function useChangeCashShift() {
 export function useCashOperation() {
   const cache = useQueryClient();
   return useMutation({
-    mutationFn: ({ shiftId, ...values }: { shiftId: string; amount: number; kind: CashOperationKind; note: string; requestKey: string; categoryId?: string }) =>
+    mutationFn: ({ shiftId, ...values }: { shiftId: string; amount: number; kind: CashOperationKind; note: string; requestKey: string; categoryId?: string; dealDate?: string | null }) =>
       api.post(`${endpoint}/${shiftId}/operations`, values),
     onSettled: () => cache.invalidateQueries({ queryKey: key }),
   });

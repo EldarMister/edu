@@ -1,4 +1,5 @@
 import React from 'react';
+import { AppState } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import { getSocket } from '@/services/socket';
@@ -35,176 +36,132 @@ const RECORDING_OPTIONS: Audio.RecordingOptions = {
 };
 
 type Ack = { ok: boolean; reason?: string };
+type Attempt = {
+  connection?: string;
+  requested: boolean;
+  released: boolean;
+  wake?: () => void;
+};
 
-function socketAck(event: string, payload: unknown): Promise<Ack> {
-  return new Promise((resolve) => {
-    getSocket().emit(event, payload, (ack: Ack | undefined) => resolve(ack ?? { ok: false }));
-  });
-}
-
-async function configureRecordingAudio() {
-  await Audio.setAudioModeAsync({
-    allowsRecordingIOS: true,
+function configureAudio(recording: boolean) {
+  return Audio.setAudioModeAsync({
+    allowsRecordingIOS: recording,
     playsInSilentModeIOS: true,
     staysActiveInBackground: false,
-    shouldDuckAndroid: false,
+    shouldDuckAndroid: !recording,
     playThroughEarpieceAndroid: false,
   });
 }
 
-async function configurePlaybackAudio() {
-  await Audio.setAudioModeAsync({
-    allowsRecordingIOS: false,
-    playsInSilentModeIOS: true,
-    staysActiveInBackground: false,
-    shouldDuckAndroid: true,
-    playThroughEarpieceAndroid: false,
+function waitForSegment(attempt: Attempt) {
+  return new Promise<void>((resolve) => {
+    const done = () => { clearTimeout(timer); attempt.wake = undefined; resolve(); };
+    const timer = setTimeout(done, SEGMENT_MS);
+    attempt.wake = done;
+    if (attempt.released) done();
   });
 }
 
 export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
   const [talking, setTalking] = React.useState(false);
   const [deniedReason, setDeniedReason] = React.useState<string | null>(null);
-  const activeRef = React.useRef(false);
-  const holdRef = React.useRef(false);
-  const finishingRef = React.useRef(false);
-  const recordingRef = React.useRef<Audio.Recording | null>(null);
-  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const seqRef = React.useRef(0);
-  const finishSegmentRef = React.useRef<(continueLoop: boolean) => Promise<void>>(async () => undefined);
-
-  const clearTimer = React.useCallback(() => {
-    if (!timerRef.current) return;
-    clearTimeout(timerRef.current);
-    timerRef.current = null;
+  const current = React.useRef<Attempt | null>(null);
+  const stop = React.useCallback(() => {
+    const attempt = current.current;
+    if (!attempt) return;
+    attempt.released = true;
+    attempt.wake?.();
+    setTalking(false);
   }, []);
 
-  const recordSegment = React.useCallback(async () => {
-    if (!activeRef.current || recordingRef.current || finishingRef.current) return;
-    const recording = new Audio.Recording();
-    recordingRef.current = recording;
+  const start = React.useCallback(async () => {
+    if (!enabled || current.current) return false;
+    const socket = getSocket();
+    if (!socket.connected) return false;
+    const attempt: Attempt = { connection: socket.id, requested: false, released: false };
+    current.current = attempt;
+    setDeniedReason(null);
+    let audioConfigured = false;
+    let sendFiles = Promise.resolve();
+    const connected = () => socket.connected && socket.id === attempt.connection;
     try {
-      await recording.prepareToRecordAsync(RECORDING_OPTIONS);
-      await recording.startAsync();
-      timerRef.current = setTimeout(() => {
-        void finishSegmentRef.current(true);
-      }, SEGMENT_MS);
-    } catch {
-      recordingRef.current = null;
-      activeRef.current = false;
-      setTalking(false);
-      setDeniedReason('Не удалось включить микрофон');
-      getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
-      await configurePlaybackAudio().catch(() => undefined);
-    }
-  }, [channel]);
-
-  const finishSegment = React.useCallback(async (continueLoop: boolean) => {
-    if (finishingRef.current) return;
-    const recording = recordingRef.current;
-    if (!recording) return;
-    finishingRef.current = true;
-    clearTimer();
-    recordingRef.current = null;
-    let uri: string | null = null;
-    try {
-      await recording.stopAndUnloadAsync();
-      uri = recording.getURI();
-      if (uri) {
-        const chunk = await FileSystem.readAsStringAsync(uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        if (chunk) {
-          getSocket().emit(PTT_EVENTS.CHUNK, {
-            channel,
-            mimeType: MIME_TYPE,
-            seq: seqRef.current,
-            chunk,
-          });
-          seqRef.current += 1;
+      const permission = await Audio.requestPermissionsAsync();
+      if (!permission.granted) {
+        setDeniedReason('Разрешите доступ к микрофону');
+        return false;
+      }
+      if (attempt.released || !connected()) return false;
+      attempt.requested = true;
+      const ack: Ack = await socket.timeout(3500).emitWithAck(PTT_EVENTS.START_TALK, { channel });
+      if (!ack.ok) {
+        attempt.requested = false;
+        setDeniedReason(ack.reason === 'busy' ? 'Канал занят' : 'Не удалось начать разговор');
+        return false;
+      }
+      if (attempt.released || !connected()) return false;
+      await configureAudio(true);
+      audioConfigured = true;
+      let sequence = 0;
+      while (!attempt.released && connected()) {
+        const recording = new Audio.Recording();
+        await recording.prepareToRecordAsync(RECORDING_OPTIONS);
+        try {
+          if (attempt.released) break;
+          await recording.startAsync();
+          if (!attempt.released) setTalking(true);
+          await waitForSegment(attempt);
+        } finally {
+          try { await recording.stopAndUnloadAsync(); }
+          catch (error) { if (!attempt.released) throw error; }
+          const uri = recording.getURI();
+          if (uri) {
+            const seq = sequence++;
+            // Start the next recording while the completed segment is read and delivered.
+            sendFiles = sendFiles.then(async () => {
+              try {
+                if (!connected()) return;
+                const chunk = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+                if (chunk && connected()) socket.emit(PTT_EVENTS.CHUNK, { channel, mimeType: MIME_TYPE, seq, chunk });
+              } finally { await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined); }
+            }).catch(() => setDeniedReason('Не удалось передать часть фразы'));
+          }
         }
       }
+      return true;
     } catch {
-      // Android can throw E_AUDIO_NODATA when stopped too early. Discard that segment.
+      if (!attempt.released) setDeniedReason('Не удалось начать или продолжить передачу');
+      return false;
     } finally {
-      if (uri) await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined);
-      finishingRef.current = false;
-      if (activeRef.current && continueLoop) void recordSegment();
+      setTalking(false);
+      if (audioConfigured) await configureAudio(false).catch(() => undefined);
+      await sendFiles;
+      if (attempt.requested && connected()) socket.emit(PTT_EVENTS.STOP_TALK, { channel });
+      if (current.current === attempt) current.current = null;
     }
-  }, [channel, clearTimer, recordSegment]);
-  finishSegmentRef.current = finishSegment;
-
-  const stop = React.useCallback(() => {
-    holdRef.current = false;
-    if (!activeRef.current && !recordingRef.current) return;
-    activeRef.current = false;
-    setTalking(false);
-    void finishSegmentRef.current(false).finally(() => {
-      getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
-      void configurePlaybackAudio().catch(() => undefined);
-    });
-  }, [channel]);
-
-  const start = React.useCallback(async () => {
-    if (!enabled || activeRef.current) return false;
-    holdRef.current = true;
-    setDeniedReason(null);
-    const permission = await Audio.requestPermissionsAsync();
-    if (!permission.granted) {
-      setDeniedReason('Разрешите доступ к микрофону');
-      return false;
-    }
-
-    const ack = await socketAck(PTT_EVENTS.START_TALK, { channel });
-    if (!ack.ok) {
-      setDeniedReason(ack.reason === 'busy' ? 'Канал занят' : 'Не удалось начать разговор');
-      return false;
-    }
-
-    if (!holdRef.current) {
-      getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
-      return false;
-    }
-
-    try {
-      await configureRecordingAudio();
-    } catch {
-      setDeniedReason('Не удалось включить микрофон');
-      getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
-      await configurePlaybackAudio().catch(() => undefined);
-      return false;
-    }
-    if (!holdRef.current) {
-      getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
-      await configurePlaybackAudio().catch(() => undefined);
-      return false;
-    }
-    seqRef.current = 0;
-    activeRef.current = true;
-    setTalking(true);
-    void recordSegment();
-    return true;
-  }, [channel, enabled, recordSegment]);
-
-  React.useEffect(() => {
-    const sock = getSocket();
-    const onDenied = (payload: PttDeniedPayload) => {
-      if (payload.channel && payload.channel !== channel) return;
-      if (!holdRef.current && !activeRef.current) return;
-      setDeniedReason(payload.reason === 'busy' ? 'Канал занят' : 'Разговор недоступен');
-      stop();
-    };
-    sock.on(PTT_EVENTS.TALK_DENIED, onDenied);
-    return () => {
-      sock.off(PTT_EVENTS.TALK_DENIED, onDenied);
-    };
-  }, [channel, stop]);
+  }, [channel, enabled]);
 
   React.useEffect(() => {
     if (!enabled) stop();
-  }, [enabled, stop]);
-
-  React.useEffect(() => () => stop(), [stop]);
+    const socket = getSocket();
+    const denied = (payload: PttDeniedPayload) => {
+      if ((payload.channel && payload.channel !== channel) || !current.current) return;
+      setDeniedReason(payload.reason === 'busy' ? 'Канал занят' : 'Разговор недоступен');
+      stop();
+    };
+    const disconnect = () => {
+      if (current.current) setDeniedReason('Связь прервалась. Повторите фразу после подключения');
+      stop();
+    };
+    const appState = AppState.addEventListener('change', (state) => { if (state === 'background') stop(); });
+    socket.on(PTT_EVENTS.TALK_DENIED, denied);
+    socket.on('disconnect', disconnect);
+    return () => {
+      appState.remove();
+      socket.off(PTT_EVENTS.TALK_DENIED, denied);
+      socket.off('disconnect', disconnect);
+      stop();
+    };
+  }, [channel, enabled, stop]);
 
   return { talking, deniedReason, start, stop };
 }

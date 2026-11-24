@@ -6,6 +6,7 @@ import { useEditorRoute } from './workspace-route';
 import { useWarehousePolicy } from './settings-api';
 import { useSavePreparationCard, type PreparationCard } from './preparation-card-api';
 import { Select } from '@/components/Select';
+import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
 import { costLabel } from './cost-format';
@@ -30,11 +31,12 @@ import { DocumentField, DocumentFooter, QueryState } from './WarehouseUi';
 import { UNIT_OPTIONS, unitLabel, unitTypeOf, unitsForType, type UnitCode } from './units';
 import { inventoryTimeDisplay, inventoryTimeIso } from './inventory-time';
 import { displayedProcessingStages, lossFromAmounts, pieceNetWeight, preparationYieldBase, processingQuantities,
-  processingRetention, recipeQuantity, supportsProcessing, validRecipeRows } from './recipe-draft-values';
+  processingRetention, supportsProcessing, validRecipeRows } from './recipe-draft-values';
 import { RecipeProcessingFields, recipeProcessingLabel } from './RecipeProcessingFields';
-import { VolumeNetFields } from './RecipeQuantityInput';
+import { QuantityInput, VolumeNetFields } from './RecipeQuantityInput';
 import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { PreparationPrintButton } from './PreparationPrintButton';
+import { PreparationCost } from './PreparationCost';
 
 type PreparationAction = {
   kind: 'recipe' | 'produce';
@@ -72,14 +74,16 @@ export function PreparationModal({
 
 export function PreparationCardPage({
   id,
+  copy = false,
   warehouseId,
   onClose,
 }: {
   id?: string;
+  copy?: boolean;
   warehouseId?: string;
   onClose: () => void;
 }) {
-  if (id) return <ExistingPreparation id={id} warehouseId={warehouseId} onClose={onClose} />;
+  if (id) return <ExistingPreparation id={id} copy={copy} warehouseId={warehouseId} onClose={onClose} />;
   const empty: PreparationCard = {
     id: '',
     name: '',
@@ -88,7 +92,7 @@ export function PreparationCardPage({
     kind: 'preparation',
     mode: 'virtual',
     outputQuantity: 0,
-    outputUnit: 'kg',
+    outputUnit: 'g',
     items: [],
   };
   return (
@@ -100,10 +104,12 @@ export function PreparationCardPage({
 
 function ExistingPreparation({
   id,
+  copy,
   warehouseId,
   onClose,
 }: {
   id: string;
+  copy: boolean;
   warehouseId?: string;
   onClose: () => void;
 }) {
@@ -114,12 +120,12 @@ function ExistingPreparation({
     ? readyDish ? 'Редактирование готового блюда' : 'Редактирование полуфабриката'
     : readyDish ? 'Готовое блюдо' : 'Полуфабрикат';
   return (
-    <EditorPage title={title} onClose={onClose}>
-      {query.data && <WorkspaceHeaderActions>
+    <EditorPage title={copy ? 'Копирование полуфабриката' : title} onClose={onClose}>
+      {query.data && !copy && <WorkspaceHeaderActions>
         <PreparationPrintButton recipe={query.data} />
       </WorkspaceHeaderActions>}
       <QueryState pending={query.isPending} error={query.error}>
-        {query.data && <RecipeForm key={id} recipe={query.data} warehouseId={warehouseId} onClose={onClose} />}
+        {query.data && <RecipeForm key={id + String(copy)} recipe={query.data} copy={copy} warehouseId={warehouseId} onClose={onClose} />}
       </QueryState>
     </EditorPage>
   );
@@ -160,6 +166,7 @@ interface RecipeDraft extends RecipeProcessing {
   netAmount: string;
   measuredNetWeightGrams?: number | null;
   volumeNetEdited?: boolean;
+  linkVolumeGrams?: boolean;
   lossPercent: string;
   processingMethod: ProcessingMethod | '';
 }
@@ -175,7 +182,7 @@ const blankRow = (): RecipeDraft => ({
 const unitFactor = (unit: UnitCode) => (unit === 'kg' || unit === 'l' ? 1000 : 1);
 const recipeWeight = (amount: number) => String(Number(amount.toFixed(6)));
 
-function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard; warehouseId?: string; onClose: () => void }) {
+function RecipeForm({ recipe, copy = false, warehouseId, onClose }: { recipe: PreparationCard; copy?: boolean; warehouseId?: string; onClose: () => void }) {
   const formId = useId();
   const focusNewRow = useRef<string | null>(null);
   const submitting = useRef(false);
@@ -188,17 +195,18 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
   const production =
     policy.data?.warehouseProductionEnabled || policy.data?.productionInUse || recipe.mode === 'stocked';
   const [expectedUpdatedAt] = useState(recipe.updatedAt);
-  const [name, setName] = useState(recipe.name);
+  const [name, setName] = useState(copy ? `${recipe.name} (копия)` : recipe.name);
   const [kind, setKind] = useState(recipe.kind ?? 'preparation');
   const [category, setCategory] = useState(recipe.category ?? '');
   const [mode, setMode] = useState(recipe.mode ?? 'virtual');
   const [instructions, setInstructions] = useState(recipe.instructions ?? '');
   const push = useNotifications((state) => state.push);
-  const [enteredOutput, setEnteredOutput] = useState(recipe.id ? String(recipe.outputQuantity) : null);
+  const [enteredOutput, setEnteredOutput] = useState<string | null | undefined>();
   const [outputUnit, setOutputUnit] = useState(recipe.outputUnit);
   const [requestKey] = useState(() => crypto.randomUUID());
-  const [quickIngredient, setQuickIngredient] = useState(false);
+  const [quickIngredient, setQuickIngredient] = useState<{ key: string; name: string } | null>(null);
   const [replacingIngredient, setReplacingIngredient] = useState<string | null>(null);
+  const [processingRow, setProcessingRow] = useState<string | null>(null);
   const [rows, setRows] = useState<RecipeDraft[]>(() =>
     recipe.items.length
       ? recipe.items.map((item) => ({
@@ -206,8 +214,9 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
           ingredientId: item.ingredientId,
           quantity: String(item.quantity),
           unit: item.unit,
-          netAmount: String(item.netAmount ?? item.quantity),
+          netAmount: recipeWeight(item.netAmount ?? item.quantity * (1 - (item.lossPercent ?? 0) / 100)),
           measuredNetWeightGrams: item.measuredNetWeightGrams,
+          linkVolumeGrams: unitTypeOf(item.unit) === 'volume' && item.measuredNetWeightGrams === Number((item.quantity * unitFactor(item.unit)).toFixed(3)),
           lossPercent: String(item.lossPercent ?? 0),
           processingMethod: item.processingMethod ?? '',
           processingBasis: item.processingBasis,
@@ -222,6 +231,14 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
   const options = ingredients.data?.filter((item) => item.id !== recipe.id) ?? [];
   const byId = new Map(options.map((item) => [item.id, item]));
   const savedItems = new Map(recipe.items.map((item) => [item.ingredientId, item]));
+  // A saved measured yield can differ from the sum of its ingredients.
+  const originalNet = preparationYieldBase(recipe.unitType, recipe.items
+    .filter((item) => byId.get(item.ingredientId)?.kind !== 'consumable')
+    .map((item) => ({ unitType: unitTypeOf(item.unit), unitFactor: unitFactor(item.unit),
+      netAmount: item.netAmount ?? item.quantity * (1 - (item.lossPercent ?? 0) / 100),
+      measuredNetWeightGrams: item.netWeightGrams })));
+  const savedManualOutput = recipe.id && (originalNet === null || Math.abs(originalNet - recipe.outputQuantity * unitFactor(recipe.outputUnit)) > 0.0005)
+    ? recipeWeight(recipe.outputQuantity * unitFactor(recipe.outputUnit) / unitFactor(outputUnit)) : null;
   const selected = new Set(rows.map((row) => row.ingredientId));
   const yieldRows = rows.filter((row) => byId.get(row.ingredientId)?.kind !== 'consumable');
   const netBase = preparationYieldBase(unitTypeOf(outputUnit), yieldRows.map((row) => ({
@@ -232,7 +249,8 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
     measuredNetWeightGrams: row.measuredNetWeightGrams,
   })));
   const requiresMeasuredYield = netBase === null && yieldRows.every(({ unit, netAmount }) => !!unit && netAmount !== '');
-  const outputQuantity = enteredOutput ?? (netBase != null && netBase > 0 ? recipeWeight(netBase / unitFactor(outputUnit)) : '');
+  const fixedOutput = enteredOutput === undefined ? savedManualOutput : enteredOutput;
+  const outputQuantity = fixedOutput ?? (netBase != null && netBase > 0 ? recipeWeight(netBase / unitFactor(outputUnit)) : '');
   const canSave =
     name.trim() &&
     isPositive(outputQuantity) &&
@@ -271,6 +289,13 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
       : ingredient.avgCostBase * Number(row.quantity) * unitFactor(row.unit);
   }
   const rowCosts = rows.map(rowCost);
+  const knownCosts = rows.map((row, index) => {
+    if (rowCosts[index] != null) return rowCosts[index]!;
+    const ingredient = byId.get(row.ingredientId);
+    if (ingredient?.preparationMode !== 'virtual' || !ingredient.recipeOutputQuantity || !ingredient.recipeOutputUnit || !row.unit) return 0;
+    return (ingredient.knownRecipeTotalCost ?? 0) * Number(row.quantity) * unitFactor(row.unit)
+      / (ingredient.recipeOutputQuantity * unitFactor(ingredient.recipeOutputUnit));
+  });
   const totalCost =
     rowCosts.length > 0 && rowCosts.every((cost) => cost != null)
       ? rowCosts.reduce<number>((sum, cost) => sum + (cost ?? 0), 0)
@@ -285,12 +310,12 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
     setError('');
     try {
       await save.mutateAsync({
-        id: recipe.id || undefined,
-        expectedUpdatedAt,
+        id: copy ? undefined : recipe.id || undefined,
+        expectedUpdatedAt: copy ? undefined : expectedUpdatedAt,
         name: name.trim(),
         category: category.trim() || null,
-        unit: recipe.id ? recipe.displayUnit : outputUnit,
-        ...(!recipe.id ? { kind } : {}),
+        unit: recipe.displayUnit,
+        ...(!recipe.id || copy ? { kind } : {}),
         requestKey,
         outputQuantity: Number(outputQuantity),
         outputUnit,
@@ -306,7 +331,7 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
           const implicitVolume = unitType === 'volume' && prior?.netAmount == null && !volumeNetEdited;
           return { ingredientId, quantity: Number(quantity), unit, processingStages, processingBasis,
             netAmount: preserveSavedNet || implicitVolume || processingBasis === 'gross' ? undefined : Number(netAmount),
-            ...(unitType === 'volume' && { measuredNetWeightGrams }),
+            ...(unitType !== 'mass' && { measuredNetWeightGrams }),
             lossPercent: processingStages?.length ? undefined : Number(lossPercent),
             processingMethod: processingStages?.length ? undefined : processingMethod || null };
         }),
@@ -352,7 +377,7 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
         <fieldset disabled={!editable || save.isPending} className="poster-recipe-panel mt-6">
           <h3>Состав</h3>
           <div className="overflow-x-auto">
-            <table className="poster-table poster-recipe-table w-full min-w-[840px]">
+            <table className="poster-table poster-recipe-table preparation-composition w-full min-w-[840px]">
               <thead>
                 <tr>
                   <th className="w-[28%]">Продукты</th>
@@ -371,7 +396,7 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
                   const pieces = unitType === 'count';
                   const volume = unitType === 'volume';
                   const pieceNet = pieces && row.netAmount !== '' ? Number(row.netAmount) : null;
-                  const netGrams = pieceNetWeight(pieceNet, ingredient?.pieceWeightGrams);
+                  const netGrams = row.measuredNetWeightGrams ?? pieceNetWeight(pieceNet, ingredient?.pieceWeightGrams);
                   const saved = savedItems.get(row.ingredientId);
                   const processingConfig = { processingStages: row.processingStages, lossPercent: Number(row.lossPercent),
                     processingMethod: row.processingMethod || null };
@@ -394,7 +419,7 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
                         focusNewRow.current = null;
                       }
                     }}>
-                      <td>
+                      <td data-label="Продукт">
                         {row.ingredientId && replacingIngredient !== row.key ? (
                           <button type="button" className="poster-recipe-product text-left"
                             title="Заменить ингредиент" disabled={!editable}
@@ -405,7 +430,9 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
                         ) : <DocumentProductPicker
                           label={`Ингредиент ${index + 1}`}
                           value={row.ingredientId}
-                          options={choices}
+                          options={choices.map((item) => ({ ...item, unit: unitLabel(item.baseUnit ?? item.displayUnit) }))}
+                          onCreate={can('actions.warehouseReceive') ? (name) => setQuickIngredient({ key: row.key, name }) : undefined}
+                          createLabel={(name) => !name ? '+ Создать ингредиент' : options.some((item) => item.name.toLocaleLowerCase() === name.toLocaleLowerCase()) ? undefined : `Создать ингредиент «${name}»`}
                           fallbackName={
                             savedItems.get(row.ingredientId)?.name ??
                             (row.ingredientId ? 'Недоступный ингредиент' : undefined)
@@ -414,13 +441,15 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
                           onChange={(ingredientId) => {
                             setReplacingIngredient(null);
                             if (ingredientId === row.ingredientId) return;
+                            const selectedItem = byId.get(ingredientId);
                             update(row.key, {
                               ingredientId,
-                              unit: byId.get(ingredientId)?.displayUnit ?? '',
+                              unit: selectedItem?.baseUnit ?? selectedItem?.displayUnit ?? '',
                               processingMethod: '',
                               processingStages: undefined,
                               processingBasis: undefined,
-                              measuredNetWeightGrams: undefined,
+                              measuredNetWeightGrams: selectedItem?.unitType === 'volume' && row.quantity ? Number(row.quantity) : undefined,
+                              linkVolumeGrams: selectedItem?.unitType === 'volume',
                               volumeNetEdited: undefined,
                               lossPercent: '0',
                               netAmount: row.quantity,
@@ -428,14 +457,18 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
                           }}
                         />}
                       </td>
-                      <td>
-                        {processing ? <RecipeProcessingFields label={`Обработка ${index + 1}`} basis={basis} stages={stages}
+                      <td data-label="Метод приготовления">
+                        {processing ? <><button type="button" className="text-primary" aria-label={`Метод приготовления ${index + 1}`}
+                          onClick={() => setProcessingRow(row.key)}>{recipeProcessingLabel(processingConfig) || '—'}</button>
+                        {processingRow === row.key && <Modal open manageFocus title={`Обработка · ${ingredient?.name ?? saved?.name ?? ''}`}
+                          onClose={() => setProcessingRow(null)} footer={<button type="button" className="btn-primary btn-md" onClick={() => setProcessingRow(null)}>Готово</button>}>
+                          <RecipeProcessingFields label={`Обработка ${index + 1}`} basis={basis} stages={stages}
                           gross={Number(row.quantity)} unit={row.unit ? unitLabel(row.unit) : ''} defaults={ingredient?.processingLosses}
                           disabled={!row.ingredientId || !editable || save.isPending} onBasis={(nextBasis) => updateProcessing(nextBasis)}
-                          onStages={(nextStages) => updateProcessing(basis, nextStages)} />
+                          onStages={(nextStages) => updateProcessing(basis, nextStages)} /></Modal>}</>
                         : <span className="text-text-muted">{recipeProcessingLabel(processingConfig) || '—'}</span>}
                       </td>
-                      <td>
+                      <td data-label="Брутто">
                         <div className="flex items-center gap-1.5">
                           <input
                             aria-label={`Брутто ${index + 1}`}
@@ -458,7 +491,8 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
                                 netAmount = recipeWeight(Number(quantity) * saved.netAmount / saved.quantity);
                               }
                               if (unitType === 'volume' && row.netAmount !== row.quantity && row.netAmount !== '') netAmount = row.netAmount;
-                              update(row.key, { quantity, netAmount, ...(processing && { processingBasis: basis }) });
+                              update(row.key, { quantity, netAmount, ...(processing && { processingBasis: basis }),
+                                ...(volume && row.linkVolumeGrams && { measuredNetWeightGrams: quantity && row.unit ? Number(quantity) * unitFactor(row.unit) : null }) });
                             }}
                           />
                           <select
@@ -484,18 +518,20 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
                           </select>
                         </div>
                       </td>
-                      <td>
+                      <td data-label="Нетто">
                         <div className="flex items-center gap-1.5">
-                          {pieces ? <output aria-label={`Нетто ${index + 1}`} className="py-2 text-text-secondary tabular-nums">
-                            {netGrams == null ? (pieceNet == null ? '—' : qty(pieceNet, unitLabel(row.unit || 'pcs'))) : <>
-                              <span className="whitespace-nowrap">{recipeQuantity(netGrams, 'г')}</span>
-                              {pieceNet != null && <span className="block whitespace-nowrap text-xs text-text-muted">{qty(pieceNet, unitLabel(row.unit || 'pcs'))}</span>}
-                            </>}
-                          </output> : volume ? <VolumeNetFields label={`Нетто ${index + 1}`}
+                          {processing && <button type="button" aria-label={`Указать нетто вручную ${index + 1}`}
+                            aria-pressed={basis === 'manual'} title="Связать брутто и нетто или указать их вручную"
+                            className="prep-quantity-link" onClick={() => updateProcessing(basis === 'manual' ? 'gross' : 'manual')}>📎</button>}
+                          {pieces ? <div className="flex w-32 items-center gap-1">
+                            <QuantityInput label={`Нетто ${index + 1}, г`} precision={3} value={netGrams} placeholder="—"
+                              disabled={!editable} onChange={(value) => update(row.key, { measuredNetWeightGrams: value })} />
+                            <span className="text-xs">г</span>
+                          </div> : volume ? <VolumeNetFields label={`Нетто ${index + 1}`}
                             unit={row.unit ? unitLabel(row.unit) : ''} grams={row.measuredNetWeightGrams ?? null}
                             volume={row.netAmount === '' ? null : Number(row.netAmount)}
                             invalidVolume={Number(row.netAmount) > Number(row.quantity)} disabled={!row.ingredientId || !editable}
-                            onGrams={(measuredNetWeightGrams) => update(row.key, { measuredNetWeightGrams })}
+                            onGrams={(measuredNetWeightGrams) => update(row.key, { measuredNetWeightGrams, linkVolumeGrams: false })}
                             onVolume={(value) => {
                               const netAmount = value ?? Number(row.quantity);
                               update(row.key, { netAmount: String(netAmount), volumeNetEdited: true,
@@ -527,7 +563,7 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
                         </div>
                       </td>
                       {costs && (
-                        <td className="text-right whitespace-nowrap">{costLabel(rowCosts[index])}</td>
+                        <td data-label="Себестоимость" className="text-right whitespace-nowrap"><PreparationCost value={rowCosts[index]} known={knownCosts[index]} /></td>
                       )}
                       <td>
                         <button
@@ -559,11 +595,6 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
                         >
                           Добавить ингредиент
                         </button>
-                        {can('actions.warehouseReceive') && (
-                          <button type="button" onClick={() => setQuickIngredient(true)}>
-                            Создать ингредиент
-                          </button>
-                        )}
                       </div>
                     )}
                   </td>
@@ -588,9 +619,9 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
                         value={outputUnit}
                         onChange={(e) => {
                           const next = e.target.value as UnitCode;
-                          if (enteredOutput !== null)
+                          if (fixedOutput !== null)
                             setEnteredOutput(
-                              recipeWeight((Number(enteredOutput) * unitFactor(outputUnit)) / unitFactor(next)),
+                              recipeWeight((Number(fixedOutput) * unitFactor(outputUnit)) / unitFactor(next)),
                             );
                           setOutputUnit(next);
                         }}
@@ -604,7 +635,7 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
                     </div>
                   </td>
                   {costs && (
-                    <td className="text-right font-medium whitespace-nowrap">{costLabel(totalCost)}</td>
+                    <td className="text-right font-medium whitespace-nowrap"><PreparationCost value={totalCost} known={knownCosts.reduce((sum, cost) => sum + cost, 0)} /></td>
                   )}
                   <td />
                 </tr>
@@ -664,14 +695,13 @@ function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard;
         <ItemCard
           compact
           defaultKind="raw"
-          onClose={() => setQuickIngredient(false)}
+          initialName={quickIngredient.name}
+          onClose={() => setQuickIngredient(null)}
           onSaved={(item) =>
             setRows((current) => {
-              const next = { ...blankRow(), ingredientId: item.id, unit: item.displayUnit };
-              const empty = current.findIndex((row) => !row.ingredientId);
-              return empty < 0
-                ? [...current, next]
-                : current.map((row, index) => (index === empty ? next : row));
+              return current.map((row) => row.key === quickIngredient.key
+                ? { ...blankRow(), key: row.key, ingredientId: item.id, unit: item.baseUnit ?? item.displayUnit, linkVolumeGrams: item.unitType === 'volume' }
+                : row);
             })
           }
         />

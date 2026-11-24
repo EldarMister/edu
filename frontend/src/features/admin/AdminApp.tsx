@@ -208,6 +208,7 @@ export function AdminApp() {
   const mayViewFinances = isOwner || financeAccess.data?.canViewAll === true;
   const mayUseCashShifts = can('actions.financeCashShifts') || mayViewFinances;
   const financeNav = FINANCE_NAV.filter(({ key }) => key === 'cashShifts' ? mayUseCashShifts
+    : key === 'profitLoss' ? mayViewFinances && canSection('warehouse') && can('actions.warehouseCosts')
     : key === 'transactions' ? mayPostFinances : mayViewFinances);
   const personnelNav = PERSONNEL_NAV.filter(({ key }) => key !== 'positions' || isOwner);
 

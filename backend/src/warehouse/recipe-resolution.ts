@@ -18,11 +18,45 @@ export type ResolvedRecipePart = {
   preparations: PreparationSnapshot[];
 };
 
+type StoredPreparation = {
+  mode: string;
+  recipe: Omit<PreparationSnapshot, 'signature'> | null;
+};
+
+async function currentPreparation(tx: Prisma.TransactionClient, ingredient: { id: string; isPrepared: boolean; preparationMode: string }): Promise<StoredPreparation> {
+  const mode = ingredient.isPrepared ? ingredient.preparationMode : 'stocked';
+  const recipe = mode === 'virtual' ? await tx.preparationRecipe.findUnique({ where: { ingredientId: ingredient.id }, include: { items: true } }) : null;
+  return { mode, recipe: recipe ? { ingredientId: ingredient.id, outputAmount: recipe.outputAmount.toString(), outputUnit: recipe.outputUnit, instructions: recipe.instructions,
+    items: recipe.items.map((item) => ({ ingredientId: item.ingredientId, amount: item.amount.toString(), unit: item.unit,
+      netAmount: item.netAmount?.toString() ?? null, lossPercent: item.lossPercent.toString(), processingMethod: item.processingMethod,
+      ...processingSnapshot(item) })).sort((a, b) => a.ingredientId.localeCompare(b.ingredientId)) } : null };
+}
+
+export async function archivePreparation(tx: Prisma.TransactionClient, ingredient: { id: string; isPrepared: boolean; preparationMode: string; cafeId: string | null }) {
+  if (!ingredient.cafeId) return;
+  const previous = await currentPreparation(tx, ingredient);
+  // Preserve field order for signatures issued before this edit (jsonb normalizes object keys).
+  await tx.preparationRecipeRevision.create({ data: { cafeId: ingredient.cafeId, ingredientId: ingredient.id, replacedAt: new Date(), snapshot: JSON.stringify(previous) } });
+}
+
 /** Shared expansion for costing and actual consumption. A stocked preparation is always a leaf. */
 export class RecipeResolver {
   private ingredients = new Map<string, Prisma.IngredientGetPayload<{}>>();
-  private recipes = new Map<string, Prisma.PreparationRecipeGetPayload<{ include: { items: true } }> | null>();
-  constructor(private tx: Prisma.TransactionClient, private options: { allowInactive?: boolean } = {}) {}
+  private recipes = new Map<string, StoredPreparation>();
+  constructor(private tx: Prisma.TransactionClient, private options: { allowInactive?: boolean; effectiveAt?: Date | null } = {}) {}
+
+  async preparation(ingredient: Prisma.IngredientGetPayload<{}>) {
+    const cached = this.recipes.get(ingredient.id);
+    if (cached) return cached;
+    const date = this.options.effectiveAt;
+    const revision = date ? await this.tx.preparationRecipeRevision.findFirst({
+      where: { cafeId: getCafeId(), ingredientId: ingredient.id, replacedAt: { gt: date } }, orderBy: [{ replacedAt: 'asc' }, { id: 'asc' }],
+    }) : null;
+    if (revision && revision.snapshot === null) throw new BadRequestException(`Состав заготовки «${ingredient.name}» на выбранную дату не сохранён. Укажите известные ингредиенты отдельно.`);
+    const state: StoredPreparation = revision?.snapshot ? JSON.parse(revision.snapshot) : await currentPreparation(this.tx, ingredient);
+    this.recipes.set(ingredient.id, state);
+    return state;
+  }
 
   async expand(ingredientId: string, amount: Prisma.Decimal, warehouse: Pick<Prisma.WarehouseGetPayload<{}>, 'id' | 'name' | 'cafeId' | 'isDefault'> | null, path: string[] = [], preparations: PreparationSnapshot[] = []): Promise<ResolvedRecipePart[]> {
     if (path.includes(ingredientId)) throw new BadRequestException('Циклическая зависимость в рецептуре полуфабриката');
@@ -35,20 +69,15 @@ export class RecipeResolver {
       this.ingredients.set(ingredientId, ingredient);
     }
     const nextPath = [...path, ingredientId];
-    if (!ingredient.isPrepared || ingredient.preparationMode !== 'virtual') {
+    const { mode, recipe: recipeSnapshot } = await this.preparation(ingredient);
+    if (mode !== 'virtual') {
       return [{ ingredient, amount, warehouse, path: nextPath, preparations }];
     }
-    if (!this.recipes.has(ingredientId)) this.recipes.set(ingredientId, await this.tx.preparationRecipe.findUnique({ where: { ingredientId }, include: { items: true } }));
-    const recipe = this.recipes.get(ingredientId);
-    if (!recipe?.items.length || recipe.outputAmount.lte(0)) throw new BadRequestException(`Не настроена рецептура заготовки «${ingredient.name}»`);
+    if (!recipeSnapshot?.items.length || !new Prisma.Decimal(recipeSnapshot.outputAmount).gt(0)) throw new BadRequestException(`Не настроена рецептура заготовки «${ingredient.name}»`);
     const parts: ResolvedRecipePart[] = [];
-    const recipeSnapshot = { ingredientId, outputAmount: recipe.outputAmount.toString(), outputUnit: recipe.outputUnit, instructions: recipe.instructions,
-      items: recipe.items.map((item) => ({ ingredientId: item.ingredientId, amount: item.amount.toString(), unit: item.unit,
-        netAmount: item.netAmount?.toString() ?? null, lossPercent: item.lossPercent.toString(), processingMethod: item.processingMethod,
-        ...processingSnapshot(item) })).sort((a, b) => a.ingredientId.localeCompare(b.ingredientId)) };
     const signature = createHash('sha256').update(JSON.stringify(recipeSnapshot)).digest('hex');
     const snapshot = { ...recipeSnapshot, signature };
-    for (const item of recipe.items) parts.push(...await this.expand(item.ingredientId, item.amount.mul(amount).div(recipe.outputAmount), warehouse, nextPath, [...preparations, snapshot]));
+    for (const item of recipeSnapshot.items) parts.push(...await this.expand(item.ingredientId, amount.mul(item.amount).div(recipeSnapshot.outputAmount), warehouse, nextPath, [...preparations, snapshot]));
     return parts;
   }
 }

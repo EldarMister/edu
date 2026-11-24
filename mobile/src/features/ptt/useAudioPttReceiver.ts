@@ -6,6 +6,7 @@ import { useAuth } from '@/store/auth';
 import { PTT_EVENTS, type PttAudioPayload, type PttChannel } from './types';
 
 function extensionForMime(mimeType: string) {
+  if (mimeType.includes('wav')) return 'wav';
   if (mimeType.includes('webm')) return 'webm';
   if (mimeType.includes('mp4')) return 'm4a';
   if (mimeType.includes('mpeg')) return 'mp3';
@@ -86,12 +87,13 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
 
     const sock = getSocket();
     const onAudio = (payload: PttAudioPayload) => {
-      if (payload.channel !== channel || payload.senderId === userId) return;
+      if ((payload.channel !== channel && payload.channel !== 'general') || payload.senderId === userId) return;
       queueRef.current.push(payload);
       pump();
     };
     sock.on(PTT_EVENTS.AUDIO_STREAM, onAudio);
     return () => {
+      queueRef.current.length = 0;
       sock.off(PTT_EVENTS.AUDIO_STREAM, onAudio);
     };
   }, [channel, enabled, pump, userId]);

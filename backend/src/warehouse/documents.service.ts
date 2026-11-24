@@ -143,19 +143,32 @@ export class WarehouseDocumentsService {
     }));
   }
 
-  async writeoffOptions() {
+  async writeoffOptions(effectiveAt?: string) {
     const cafeId = this.cafeId();
-    const [ingredients, dishes] = await Promise.all([
+    const date = documentEffectiveAt('writeoff', effectiveAt);
+    const [ingredients, dishes, revisions] = await Promise.all([
       this.prisma.ingredient.findMany({ where: { cafeId, isActive: true }, orderBy: { name: 'asc' },
         select: { id: true, name: true, category: true, displayUnit: true, kind: true, preparationMode: true } }),
-      this.prisma.dish.findMany({ where: { cafeId, isActive: true, isSet: false, catalogKind: { not: 'goods' } }, orderBy: { name: 'asc' },
-        select: { id: true, name: true, isWeighted: true, weightedMeasure: true,
+      this.prisma.dish.findMany({ where: { cafeId, isActive: true, isSet: date ? undefined : false, createdAt: date ? { lte: date } : undefined, catalogKind: { not: 'goods' } }, orderBy: { name: 'asc' },
+        select: { id: true, name: true, isSet: true, isWeighted: true, weightedMeasure: true,
           category: { select: { name: true } }, variants: { select: { id: true, name: true } } } }),
+      date ? this.prisma.recipeRevision.findMany({ where: { cafeId, createdAt: { gt: date } }, distinct: ['dishId'],
+        orderBy: [{ dishId: 'asc' }, { createdAt: 'asc' }, { version: 'asc' }], select: { dishId: true, snapshot: true } }) : [],
     ]);
+    const historical = new Map(revisions.map((row) => [row.dishId, row.snapshot]));
     return { ingredients: ingredients.map(({ displayUnit, ...item }) => ({ ...item, unit: unitLabel(normalizeUnit(displayUnit)), unitCode: displayUnit })),
-      dishes: dishes.map(({ category, weightedMeasure, ...dish }) => ({
-        ...dish, category: category.name, unitCode: writeoffDishUnit({ ...dish, weightedMeasure }),
-      })) };
+      dishes: dishes.flatMap((dish) => {
+        const raw = historical.get(dish.id);
+        const snapshot = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null;
+        const metadata = snapshot?.writeoffBasis;
+        const basis = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {};
+        if (basis.isSet ?? dish.isSet) return [];
+        const variants = Array.isArray(snapshot?.variants) ? snapshot.variants.flatMap((item) =>
+          item && typeof item === 'object' && !Array.isArray(item) && typeof item.id === 'string' && typeof item.name === 'string' ? [{ id: item.id, name: item.name }] : []) : dish.variants;
+        const isWeighted = typeof basis.isWeighted === 'boolean' ? basis.isWeighted : dish.isWeighted;
+        return [{ id: dish.id, name: typeof basis.name === 'string' ? basis.name : dish.name, isWeighted, variants, category: dish.category.name,
+          unitCode: writeoffDishUnit({ isWeighted, weightedMeasure: typeof basis.weightedMeasure === 'string' ? basis.weightedMeasure : dish.weightedMeasure }) }];
+      }) };
   }
 
   async writeoffPreview(dto: WriteoffPreviewDto) {
@@ -165,7 +178,8 @@ export class WarehouseDocumentsService {
       const saved = dto.documentId ? await this.load(tx, dto.documentId) : null;
       if (saved && (saved.kind !== 'writeoff' || saved.warehouseId !== warehouse.id))
         throw new BadRequestException('Черновик должен относиться к списанию на выбранном складе');
-      const snapshot = await resolveWriteoffSources(tx, warehouse, dto.sourceLines, false, true, readWriteoffSnapshot(saved?.sourceLines ?? null));
+      const date = dto.effectiveAt === undefined ? saved?.effectiveAt : documentEffectiveAt('writeoff', dto.effectiveAt);
+      const snapshot = await resolveWriteoffSources(tx, warehouse, dto.sourceLines, false, true, readWriteoffSnapshot(saved?.sourceLines ?? null), date);
       return previewWriteoffSources(tx, warehouse, snapshot);
     }, { ...transactionOptions, isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
@@ -260,7 +274,7 @@ export class WarehouseDocumentsService {
       let inputs = dto.items ?? [];
       if (dto.sourceLines) {
         await lockRecipeGraph(tx, true);
-        const snapshot = await resolveWriteoffSources(tx, warehouse, dto.sourceLines, !!dto.finalize, !dto.finalize);
+        const snapshot = await resolveWriteoffSources(tx, warehouse, dto.sourceLines, !!dto.finalize, !dto.finalize, null, effectiveAt);
         await tx.warehouseDocument.update({ where: { id: document.id }, data: { sourceLines: snapshot as unknown as Prisma.InputJsonValue } });
         inputs = await writeoffStockLines(tx, snapshot);
       }
@@ -280,9 +294,12 @@ export class WarehouseDocumentsService {
       if (dto.sourceLines && (document.kind !== 'writeoff' || dto.items)) throw new BadRequestException('Составные строки доступны только для списания и заменяют список ингредиентов');
       if (document.sourceLines && dto.items) throw new BadRequestException('Сохраните исходные строки списания, а не рассчитанные ингредиенты');
       if (dto.recount && document.kind !== 'inventory') throw new BadRequestException('Пересчёт доступен только для инвентаризации');
-      if (dto.sourceLines) {
+      const previous = readWriteoffSnapshot(document.sourceLines);
+      const dateChanged = effectiveAt !== undefined && effectiveAt?.getTime() !== document.effectiveAt?.getTime();
+      const sourceLines = dto.sourceLines ?? (dateChanged && previous ? sourceInputs(previous).map((line) => ({ ...line, recipeSignature: undefined })) : null);
+      if (sourceLines) {
         await lockRecipeGraph(tx, true);
-        const snapshot = await resolveWriteoffSources(tx, warehouse, dto.sourceLines, !!dto.finalize, !dto.finalize, readWriteoffSnapshot(document.sourceLines));
+        const snapshot = await resolveWriteoffSources(tx, warehouse, sourceLines, !!dto.finalize, !dto.finalize, previous, effectiveAt === undefined ? document.effectiveAt : effectiveAt);
         const items = await writeoffStockLines(tx, snapshot, document.items);
         await this.saveLines(tx, warehouse, document, items, false);
         await tx.warehouseDocument.update({ where: { id }, data: { sourceLines: snapshot as unknown as Prisma.InputJsonValue } });
@@ -766,7 +783,7 @@ export class WarehouseDocumentsService {
     const snapshot = readWriteoffSnapshot(document.sourceLines);
     if (!snapshot) return;
     await lockRecipeGraph(tx, true);
-    await resolveWriteoffSources(tx, await this.warehouse(tx, document.warehouseId), sourceInputs(snapshot), true, false, snapshot);
+    await resolveWriteoffSources(tx, await this.warehouse(tx, document.warehouseId), sourceInputs(snapshot), true, false, snapshot, document.effectiveAt);
   }
 
   private async lockCatalog(tx: Prisma.TransactionClient, warehouse: WarehouseLocation, ids: string[], full: boolean) {

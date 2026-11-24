@@ -107,15 +107,10 @@ export class PttPlayback {
       : PTT_OPUS_PROFILES.opus.frameSamples;
     const sampleCount = buffered && audio instanceof Float32Array ? audio.length : frameSamples;
     if (sampleCount < frameSamples || sampleCount % frameSamples !== 0) return false;
-    const startBuffer = buffered ? 0.32 : START_BUFFER_SECONDS;
-    const maxBuffer = buffered ? 0.72 : MAX_BUFFER_SECONDS;
     if (!(audio instanceof ArrayBuffer && audio.byteLength === frameSamples * 2)
       && !(audio instanceof Float32Array && audio.length === sampleCount)) return false;
     const ctx = getAudioContext();
     if (ctx.state !== 'running') return false;
-    if (this.context !== ctx) this.stop();
-    this.context = ctx;
-
     const buffer = ctx.createBuffer(1, sampleCount, sampleRate);
     const samples = buffer.getChannelData(0);
     if (audio instanceof Float32Array) samples.set(audio);
@@ -123,6 +118,19 @@ export class PttPlayback {
       const input = new DataView(audio);
       for (let index = 0; index < samples.length; index++) samples[index] = input.getInt16(index * 2, true) / 32768;
     }
+    return this.schedule(ctx, buffer, startsTalk, framesInPacket, buffered);
+  }
+
+  pushSegment(buffer: AudioBuffer, startsTalk: boolean) {
+    return this.schedule(getAudioContext(), buffer, startsTalk, 1, true);
+  }
+
+  private schedule(ctx: AudioContext, buffer: AudioBuffer, startsTalk: boolean, framesInPacket: number, buffered: boolean) {
+    if (ctx.state !== 'running') return false;
+    if (this.context !== ctx) this.stop();
+    this.context = ctx;
+    const startBuffer = START_BUFFER_SECONDS;
+    const maxBuffer = buffered ? 0.45 : MAX_BUFFER_SECONDS;
     const now = ctx.currentTime;
     if (framesInPacket > 0) {
       if (this.lastArrival !== undefined) {

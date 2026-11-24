@@ -45,6 +45,12 @@ export class PurchasesController {
     return this.purchases.lastPrices({ ingredientIds, warehouseId, excludePurchaseId, before });
   }
 
+  @Get('tax-options')
+  @RequirePermission('actions.warehouseCosts')
+  taxOptions() {
+    return this.purchases.taxOptions();
+  }
+
   @Get(':id')
   @RequirePermission('actions.warehouseCosts')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {

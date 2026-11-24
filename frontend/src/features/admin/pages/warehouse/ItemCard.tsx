@@ -293,7 +293,10 @@ function ItemForm({
             Укажите положительный вес с точностью до трёх знаков после запятой.
           </span>}
         </DocumentField>}
-        <DocumentField label="Категория">
+        <details className="poster-advanced">
+          <summary>Дополнительно</summary>
+          <div className="space-y-4 pt-5">
+            <DocumentField label="Категория">
           <input
             aria-label="Категория ингредиента"
             className="input w-full"
@@ -302,10 +305,7 @@ function ItemForm({
             onChange={(e) => setCategory(e.target.value)}
           />
           <datalist id={categoriesId}>{categories.map((entry) => <option key={entry} value={entry} />)}</datalist>
-        </DocumentField>
-        <details className="poster-advanced">
-          <summary>Дополнительно</summary>
-          <div className="space-y-4 pt-5">
+            </DocumentField>
             {mass && PROCESSING_METHODS.map((method) => (
               <DocumentField key={method.value} label={lossLabels[method.value]}>
                 <div className="poster-number-unit w-[136px]">
@@ -369,8 +369,8 @@ function ItemForm({
             )}
           </div>
         </details>
-        {showOpening && <details ref={openingDetails} className="border-t border-border pt-3">
-          <summary className="cursor-pointer text-sm font-medium text-primary">Начальная поставка</summary>
+        {showOpening && <details ref={openingDetails} open={!compact} className="border-t border-border pt-4">
+          <summary className="cursor-pointer text-base font-semibold text-text-primary">Складской учёт</summary>
           <div className="mt-3 space-y-4">
           <p className="max-w-3xl text-sm text-text-secondary">
             Если ингредиент уже есть в наличии, укажите количество, цену и склад. При сохранении будет проведена поставка.

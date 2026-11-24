@@ -150,6 +150,7 @@ const shiftEntryLabel: Record<EntryKind, string> = {
 
 type ShiftEntry = {
   id: string; occurredAt: string; kind: EntryKind; category: string | null; categoryId: string | null;
+  dealDate?: string | null;
   note: string | null; actorName: string | null; amount: number; cash: boolean; editable: boolean;
   actorId?: string | null;
   collection?: boolean;

@@ -1,4 +1,8 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
+import { assertWarehousePermission } from '../warehouse/warehouse-permissions';
+import { sendWarehouseWorkbook } from '../warehouse/warehouse-register-xlsx';
+import { profitLossWorkbook } from './profit-loss';
 import { Role } from '@prisma/client';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -40,6 +44,20 @@ export class FinanceController {
   @Get()
   overview(@CurrentUser() actor: AuthUser, @Query() query: FinanceQueryDto) {
     return this.finance.overview(actor, query);
+  }
+
+  @Get('profit-loss')
+  profitLoss(@CurrentUser() actor: AuthUser, @Query() query: FinanceQueryDto) {
+    assertWarehousePermission(actor, 'warehouseCosts');
+    return this.finance.profitLoss(actor, query);
+  }
+
+  @Get('profit-loss.xlsx')
+  async exportProfitLoss(@CurrentUser() actor: AuthUser, @Query() query: FinanceQueryDto, @Res() response: Response) {
+    assertWarehousePermission(actor, 'warehouseCosts');
+    assertWarehousePermission(actor, 'exportReports');
+    const report = await this.finance.profitLoss(actor, query);
+    sendWarehouseWorkbook(response, profitLossWorkbook(report, report.from, report.to), 'profit-loss.xlsx');
   }
 
   @Post('accounts')

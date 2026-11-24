@@ -353,3 +353,23 @@ div.poster-select-menu { border-radius: 8px; padding: 3px; box-shadow: 0 3px 10p
   .poster-workspace .editor-footer,
   .poster-workspace .document-footer { margin-left: -12px; margin-right: -12px; padding: 14px 12px max(14px, env(safe-area-inset-bottom)); }
 }
+.prep-quantity-link {
+  border: 1px solid rgb(var(--edu-border));
+  background: rgb(var(--edu-card));
+  border-radius: 4px;
+  padding: 4px;
+  filter: grayscale(1);
+}
+.prep-quantity-link[aria-pressed="true"] { outline: 1px solid currentColor; }
+@media (max-width: 860px) {
+  .poster-workspace .preparation-composition { display: block; min-width: 0; }
+  .poster-workspace .preparation-composition thead { display: none; }
+  .poster-workspace .preparation-composition :is(tbody, tfoot) { display: block; }
+  .poster-workspace .preparation-composition tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding-block: 12px; }
+  .poster-workspace .preparation-composition td { display: block; min-width: 0; padding: 0; text-align: left; }
+  .poster-workspace .preparation-composition td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 4px; font-size: 12px; color: rgb(var(--edu-muted)); }
+  .poster-workspace .preparation-composition tbody td:first-child { grid-column: 1 / -1; }
+  .poster-workspace .preparation-composition td input { max-width: 100%; min-width: 0; }
+  .poster-workspace .preparation-composition tfoot td { grid-column: 1 / -1; }
+  .poster-workspace .preparation-composition tfoot td > div { justify-content: flex-start; }
+}

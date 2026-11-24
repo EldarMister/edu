@@ -24,7 +24,7 @@ export function MenuStockCatalogue({ view }: { view: 'ingredients' | 'preparatio
   if ((editor?.type === 'productionBatch' || editor?.type === 'batch') && editor.id)
     return <ProductionBatchModal id={editor.id} onClose={closeEditor} />;
   if (editor?.type === 'preparation')
-    return <PreparationCardPage id={editor.id} warehouseId={warehouse?.id} onClose={closeEditor} />;
+    return <PreparationCardPage id={editor.id} copy={editor.action === 'copy'} warehouseId={warehouse?.id} onClose={closeEditor} />;
   if (editor?.type === 'item')
     return <ItemCard key={editor.id ?? 'new'} id={editor.id} defaultKind="raw" onClose={closeEditor}
       onHistory={(id) => openEditor({ type: 'history', id })}

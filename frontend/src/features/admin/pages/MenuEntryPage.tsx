@@ -54,6 +54,7 @@ type VariantRecipeDraft = { rows: RecipeDraftRow[]; metadata: RecipeMetadata };
 const emptyModifiers: ModifierDraft = { allowIngredientExclusions: false, groups: [] };
 const maxRecipePortions = 10_000;
 const addCategoryOption = { value: '__new_category__', label: 'Добавить новую категорию…', alwaysVisible: true };
+const mainScreen = { value: '__main_screen__', label: 'Главный экран' };
 
 function validPortionCount(count: number) {
   return Number.isSafeInteger(count) && count >= 1 && count <= maxRecipePortions;
@@ -134,11 +135,11 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
   const [tax, setTax] = useState(() => dishTaxValue(source));
   const [form, setForm] = useState(() => ({
     name: copy && source ? `${source.name.slice(0, 112).trimEnd()} (копия)` : source?.name ?? '',
-    categoryId: source?.categoryId ?? categoryId ?? '',
-    price: source ? String(Number(source.price)) : '',
+    categoryId: (source?.categoryId ?? categoryId) || mainScreen.value,
+    price: source ? String(Number(source.price)) : '0',
     description: source?.description ?? '',
     voiceName: source?.voiceName ?? '',
-    prepStation: source?.prepStation ?? '',
+    prepStation: source ? source.prepStation ?? '' : 'none',
     imageUrl: source?.imageUrl ?? '',
     isAvailable: copy ? false : source?.isAvailable ?? true,
     isWeighted: source?.isWeighted ?? false,
@@ -480,7 +481,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
             <FormRow label="Категория" stacked={!isGoods}>
               <div ref={categoryPickerRef}>
                 <Select searchable ariaLabel="Категория" placeholder="Выберите категорию" className="h-11 w-full"
-                  value={categoryFormOpen ? addCategoryOption.value : form.categoryId} disabled={!canEdit || busy || categorySaving}
+                  value={categoryFormOpen ? addCategoryOption.value : form.categoryId.startsWith('menu-root:') ? mainScreen.value : form.categoryId} disabled={!canEdit || busy || categorySaving}
                   onChange={(value) => {
                     if (value === addCategoryOption.value) setCategoryFormOpen(true);
                     else {
@@ -488,7 +489,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
                       if (categoryFormOpen) closeCategoryForm();
                     }
                   }}
-                  options={[...categories.map(({ id, name }) => ({ value: id, label: name })), ...(canEdit ? [addCategoryOption] : [])]} />
+                  options={[mainScreen, ...categories.filter(({ id }) => !id.startsWith('menu-root:')).map(({ id, name }) => ({ value: id, label: name })), ...(canEdit ? [addCategoryOption] : [])]} />
               </div>
               {categoryFormOpen && <NewMenuCategoryFields disabled={busy || categorySaving} saving={categorySaving}
                 error={categoryError} onSave={addCategory} onCancel={closeCategoryForm} />}

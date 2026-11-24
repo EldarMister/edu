@@ -189,14 +189,15 @@ export function FoodCostIngredients({ rows, search }: { rows: FoodCostIngredient
   if (!rows.length) return <ReportEmpty searched={search} noun="За выбранный период нет данных о закупках и расходе ингредиентов" />;
   return <div className="food-cost-panel food-cost-table-scroll" role="region" tabIndex={0} aria-label="Динамика цен ингредиентов">
     <table className="food-cost-table">
-      <thead><tr>{['Ингредиент', 'Расход в продажах', 'Сумма расхода', 'Цена пред. периода', 'Цена текущего периода', 'Изменение цены']
+      <thead><tr>{['Ингредиент', 'Оборот', 'Изменение оборота', 'Цена пред. периода', 'Цена текущего периода', 'Изменение цены']
         .map((heading) => <th key={heading} scope="col">{heading}</th>)}</tr></thead>
       <tbody>{rows.map((item) => <Fragment key={item.id}>
         <tr>
           <th scope="row">{item.prices.length > 0 ? <button type="button" className="food-cost-expand" aria-expanded={expanded === item.id}
             onClick={() => setExpanded(expanded === item.id ? null : item.id)}>{expanded === item.id ? '▾' : '▸'} {item.name}</button> : item.name}</th>
-          <td>{decimal.format(item.current.quantity)} {normalizeUnitLabel(item.unit)} {compare(item.current.quantity, item.previous.quantity, false)}</td>
-          <td>{financeMoney(item.current.cost)} {compare(item.current.cost, item.previous.cost, true)}</td>
+          <td>{financeMoney(item.current.cost)}<small className="block text-text-muted">
+            {decimal.format(item.current.quantity)} {normalizeUnitLabel(item.unit)}</small></td>
+          <td>{compare(item.current.cost, item.previous.cost, false) ?? '—'}</td>
           <td>{financeMoney(item.previous.purchasePrice)}</td>
           <td>{financeMoney(item.current.purchasePrice)}{item.current.purchasePrice != null && ` / ${normalizeUnitLabel(item.unit)}`}</td>
           <td>{compare(item.current.purchasePrice, item.previous.purchasePrice, true) ?? '—'}</td>

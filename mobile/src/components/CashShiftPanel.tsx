@@ -11,6 +11,13 @@ import { moneyCents } from '@/utils/payment';
 type Mode = 'open' | 'close' | 'operation';
 const kinds = [{ key: 'income', label: 'Внесение' }, { key: 'expense', label: 'Расход' }, { key: 'collection', label: 'Инкассация' }] as const;
 
+function parseDealDay(value: string) {
+  if (!/^\d{2}\.\d{2}\.\d{4}$/.test(value)) return null;
+  const iso = value.split('.').reverse().join('-');
+  const date = new Date(iso + 'T00:00:00Z');
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === iso ? iso : null;
+}
+
 export function CashShiftPanel() {
   const { canView, canManage } = useCashAccess();
   const shift = useCashShiftState(canView);
@@ -36,6 +43,10 @@ export function CashShiftEditor({ mode, current, onClose, onComplete }: {
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [closeStaff, setCloseStaff] = useState(false);
+  const [separateDate, setSeparateDate] = useState(false);
+  const [dealDay, setDealDay] = useState(() => new Intl.DateTimeFormat('ru-RU', {
+    timeZone: 'Asia/Bishkek', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date()));
   const [requestKey] = useState(makeIdempotencyKey);
   const submitting = useRef(false);
   const change = useChangeCashShift();
@@ -45,14 +56,16 @@ export function CashShiftEditor({ mode, current, onClose, onComplete }: {
   const categories = useCashCategories(operation && kind !== 'collection');
   const availableCategories = categories.data?.filter((category) => category.kind === kind || category.kind === 'both');
   const amountInCents = moneyCents(amount);
-  const valid = amountInCents != null && (!operation || amountInCents > 0);
+  const hasDealDate = operation && kind !== 'collection' && separateDate;
+  const dealDate = hasDealDate ? parseDealDay(dealDay) : null;
+  const valid = amountInCents != null && (!operation || amountInCents > 0) && (!hasDealDate || dealDate !== null);
   const busy = change.isPending || create.isPending;
   const error = change.error ?? create.error ?? (operation && kind !== 'collection' ? categories.error : null);
   const finish = onComplete ?? onClose;
 
   function dismiss() {
     if (submitting.current) return;
-    if (amount || note || closeStaff || categoryId) {
+    if (amount || note || closeStaff || categoryId || hasDealDate) {
       Alert.alert('Есть несохранённые изменения', 'Закрыть форму без сохранения?', [
         { text: 'Продолжить редактирование', style: 'cancel' }, { text: 'Выйти', onPress: onClose },
       ]);
@@ -65,7 +78,7 @@ export function CashShiftEditor({ mode, current, onClose, onComplete }: {
     const value = amountInCents / 100;
     try {
       if (operation && current) await create.mutateAsync({ shiftId: current.id, amount: value, kind,
-        categoryId: kind === 'collection' ? undefined : categoryId, note: note.trim(), requestKey });
+        categoryId: kind === 'collection' ? undefined : categoryId, note: note.trim(), requestKey, dealDate });
       else await change.mutateAsync(closing && current ? { amount: value, shiftId: current.id,
         expectedAmount: current.expectedAmount, closingComment: note.trim() || undefined,
         closeEmployeeShifts: canCloseStaff && closeStaff ? true : undefined } : { amount: value });
@@ -93,6 +106,15 @@ export function CashShiftEditor({ mode, current, onClose, onComplete }: {
       {operation && kind !== 'collection' && availableCategories?.length ? <PillTabs
         items={[{ key: '', label: 'Кассовые смены' }, ...availableCategories.map(({ id, name }) => ({ key: id, label: name }))]}
         value={categoryId ?? ''} onChange={(value) => { if (!busy) setCategoryId(value || undefined); }} /> : null}
+      {operation && kind !== 'collection' && <View style={styles.row}>
+        <Text>Дата сделки другая</Text>
+        <Switch accessibilityLabel="Дата сделки другая" value={separateDate} disabled={busy} onValueChange={setSeparateDate} />
+      </View>}
+      {hasDealDate && <Field label="Дата сделки" placeholder="ДД.ММ.ГГГГ" keyboardType="number-pad" editable={!busy} value={dealDay}
+        onChangeText={(text) => {
+          const digits = text.replace(/\D/g, '').slice(0, 8);
+          setDealDay([digits.slice(0, 2), digits.slice(2, 4), digits.slice(4)].filter(Boolean).join('.'));
+        }} />}
       {operation || closing ? <Field label="Комментарий" maxLength={500} editable={!busy} value={note} onChangeText={setNote} /> : null}
       {closing && canCloseStaff ? <View style={styles.row}>
         <Text>Закрыть смены сотрудников</Text>

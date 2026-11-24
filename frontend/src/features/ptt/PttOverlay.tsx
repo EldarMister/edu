@@ -452,6 +452,7 @@ export function PttOverlay({
   const panel = useRef<HTMLElement>(null);
   const [channel, setChannel] = useState<PttChannel>(() => initialChannel(effectiveRole ?? undefined));
   const [onlineCount, setOnlineCount] = useState(0);
+  const [joinedChannel, setJoinedChannel] = useState<PttChannel | null>(null);
   const [busySpeaker, setBusySpeaker] = useState<{ id: string; name?: string } | null>(null);
   const effectiveButtonHidden = buttonHidden || overlayOpen;
 
@@ -462,36 +463,50 @@ export function PttOverlay({
     ? 'calc(var(--edu-ptt-floating-bottom, 78px) + env(safe-area-inset-bottom, 0px))'
     : 'calc(24px + env(safe-area-inset-bottom, 0px))';
 
-  const joinSeqRef = useRef(0);
-  const joinChannel = useCallback(() => {
-    const sock = getSocket();
-    const seq = ++joinSeqRef.current;
-    const attempt = (retriesLeft: number) => {
-      if (joinSeqRef.current !== seq) return;
-      sock.emit(PTT_EVENTS.JOIN, { channel, codecs: ['opus-hq'], sequenced: true }, (ack: { ok?: boolean; onlineCount?: number } | undefined) => {
-        if (joinSeqRef.current !== seq) return;
-        if (ack?.ok) {
-          if (typeof ack.onlineCount === 'number') setOnlineCount(ack.onlineCount);
-          return;
-        }
-        if (retriesLeft > 0) setTimeout(() => attempt(retriesLeft - 1), 1000);
-      });
-    };
-    attempt(5);
-  }, [channel]);
-
   useEffect(() => {
     setChannel(initialChannel(effectiveRole ?? undefined));
   }, [effectiveRole]);
 
   useEffect(() => {
+    if (!user?.id) return;
     const sock = getSocket();
-    joinChannel();
-    sock.on('connect', joinChannel);
-    return () => {
-      sock.off('connect', joinChannel);
+    let revision = 0;
+    let timer: number | undefined;
+    const reset = () => {
+      revision++;
+      window.clearTimeout(timer);
+      setJoinedChannel(null);
+      setOnlineCount(0);
     };
-  }, [joinChannel]);
+    const join = () => {
+      reset();
+      const expected = revision;
+      const attempt = (delay: number) => {
+        if (expected !== revision || !sock.connected) return;
+        sock.timeout(3000).emit(PTT_EVENTS.JOIN, { channel, codecs: ['opus-hq'], sequenced: true },
+          (error: Error | null, ack?: { ok: boolean; channel: PttChannel; onlineCount: number }) => {
+            if (expected !== revision) return;
+            if (!error && ack?.ok && ack.channel === channel) {
+              setOnlineCount(ack.onlineCount);
+              setJoinedChannel(channel);
+            } else {
+              timer = window.setTimeout(() => attempt(Math.min(5000, delay * 2)), delay);
+            }
+          });
+      };
+      attempt(500);
+    };
+    join();
+    sock.on('connect', join);
+    sock.on('disconnect', reset);
+    return () => {
+      revision++;
+      window.clearTimeout(timer);
+      sock.off('connect', join);
+      sock.off('disconnect', reset);
+      if (sock.connected) sock.emit(PTT_EVENTS.JOIN, { channel: null });
+    };
+  }, [channel, user?.id]);
 
   useEffect(() => {
     const sock = getSocket();
@@ -532,6 +547,7 @@ export function PttOverlay({
   };
 
   const onPressStart = (event: PointerEvent<HTMLButtonElement>) => {
+    if (!event.isPrimary || event.button !== 0 || joinedChannel !== channel) return;
     event.currentTarget.setPointerCapture?.(event.pointerId);
     void sender.start();
   };
@@ -571,16 +587,17 @@ export function PttOverlay({
         ? 'Вы говорите'
         : state === 'speakingOther'
           ? `Говорит: ${otherSpeaker?.name ?? 'Сотрудник'}`
-          : 'Готово к разговору';
+          : joinedChannel === channel ? 'Готово к разговору' : 'Подключаем канал…';
 
   const statusHint =
     state === 'error'
-      ? 'Повторите попытку'
+      ? 'Восстанавливаем связь…'
       : state === 'speakingSelf'
         ? 'Отпустите для остановки'
         : state === 'speakingOther'
           ? 'Дождитесь освобождения канала'
-          : (sender.deniedReason ?? (sender.starting ? 'Подключаем микрофон…' : 'Нажмите и удерживайте'));
+          : joinedChannel !== channel ? 'Ожидаем соединения с рацией'
+            : (sender.deniedReason ?? (sender.starting ? 'Подключаем микрофон…' : 'Нажмите и удерживайте'));
 
   return (
     <>
@@ -609,7 +626,7 @@ export function PttOverlay({
             <RadioMetaRow onlineCount={onlineCount} />
             <PushToTalkCircle
               state={state}
-              disabled={state === 'error' || speakingOther}
+              disabled={state === 'error' || joinedChannel !== channel || speakingOther}
               size={isMobile ? 122 : 140}
               onPressStart={onPressStart}
               onPressStop={onPressStop}
