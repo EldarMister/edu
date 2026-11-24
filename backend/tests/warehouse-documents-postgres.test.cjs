@@ -261,6 +261,29 @@ test('PostgreSQL: transfer act exports posted quantities and historical valuatio
       await runWithTenant({ cafeId: foreign.id }, () => assert.rejects(docs.transferAct(posted.id, true), { status: 404 }));
       await new PurchasesService(db).create({ supplier: 'Новая стоимость', warehouseId: source.id, complete: true,
         items: [{ ingredientId: flour.id, unit: 'kg', quantity: 1, purchasePrice: 200 }] });
+      const known = await docs.create(owner, { ...input, note: 'Только мука', finalize: 'post',
+        items: [{ ingredientId: flour.id, quantity: 1 }] });
+      const exportRows = async (showCosts) => {
+        const workbook = XLSX.read(await docs.transferRegister({
+          ids: [posted.id, 'unavailable', known.id], columns: ['date', 'note', 'warehouses', 'amount'],
+        }, showCosts), { type: 'buffer', cellNF: true });
+        const sheet = workbook.Sheets['Перемещения'];
+        assert.equal(sheet.A2.t, 'n');
+        assert.equal(sheet.A2.z, 'dd.mm.yyyy hh:mm');
+        assert.equal(sheet.B2.t, 's', 'a note starting with an equals sign stays text');
+        assert.equal(sheet.B2.f, undefined);
+        return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+      };
+      const exported = await exportRows(true);
+      assert.deepEqual(exported[0], ['Дата', 'Комментарий', 'Склады', 'Сумма']);
+      assert.deepEqual(exported[1].slice(1), [note, source.name + ' → ' + destination.name, null]);
+      assert.deepEqual(exported[2].slice(1, 3), ['Только мука', source.name + ' → ' + destination.name]);
+      assert.equal(typeof exported[2][3], 'number');
+      assert.deepEqual((await exportRows(false))[0], ['Дата', 'Комментарий', 'Склады']);
+      const foreignWorkbook = XLSX.read(await runWithTenant({ cafeId: foreign.id }, () =>
+        docs.transferRegister({ ids: [posted.id], columns: ['date', 'note'] }, true)));
+      assert.deepEqual(XLSX.utils.sheet_to_json(foreignWorkbook.Sheets['Перемещения'], { header: 1 }), [['Дата', 'Комментарий']]);
+      await assert.rejects(docs.transferRegister({ ids: [posted.id], columns: ['date', 'invalid'] }, true), { status: 400 });
       const rows = await readAct(posted.id);
       assert.deepEqual(rows[0], ['Акт перемещения']);
       const find = (label) => rows.find(([key]) => key === label);

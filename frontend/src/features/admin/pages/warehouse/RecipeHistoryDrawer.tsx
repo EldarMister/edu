@@ -28,7 +28,12 @@ interface HistoricalItem extends HistoricalIngredient {
   variantAmounts: { variantId: string; name: string | null; amount: number }[];
 }
 
-interface RecipeRevision {
+interface HistoricalRecipeMetadata {
+  instructions: string | null;
+  output: { amount: number; unit: string | null } | null;
+}
+
+interface RecipeRevision extends HistoricalRecipeMetadata {
   id: string;
   version: number;
   savedAt: string | null;
@@ -37,11 +42,9 @@ interface RecipeRevision {
   replacedBy: string | null;
   items: HistoricalItem[];
   stockItem: HistoricalIngredient | null;
-  variants: { id: string; name: string | null; stockItem: HistoricalIngredient | null }[];
+  variants: { id: string; name: string | null; stockItem: HistoricalIngredient | null; ownRecipe?: HistoricalRecipeMetadata }[];
   components: { id: string; dishId: string; name: string | null; variantId: string | null; variantName: string | null; quantity: number | null }[] | null;
   modifierGroups: { id: string; name: string; options: { id: string; name: string; ingredient: HistoricalIngredient | null }[] }[];
-  instructions: string | null;
-  output: { amount: number; unit: string | null } | null;
 }
 
 const basisLabels = { gross: 'От брутто', net: 'От нетто', manual: 'Вручную' };
@@ -93,6 +96,9 @@ function HistoryField({ label, children }: { label: string; children: React.Reac
 
 function RevisionComposition({ revision, isSet }: { revision: RecipeRevision; isSet: boolean }) {
   const bindings = revision.variants.filter(({ stockItem }) => stockItem != null);
+  const ownVariants = revision.variants.filter(({ id, ownRecipe }) => ownRecipe || revision.items.some(({ variantId }) => variantId === id));
+  const ownIds = new Set(ownVariants.map(({ id }) => id));
+  const shared = revision.items.filter(({ variantId }) => !variantId || !ownIds.has(variantId));
   return <div className="space-y-4 text-sm">
     {(revision.stockItem || bindings.length > 0) && <section aria-label="Прямое списание" className="space-y-2">
       <h4 className="font-medium">Прямое списание</h4>
@@ -101,9 +107,21 @@ function RevisionComposition({ revision, isSet }: { revision: RecipeRevision; is
         {bindings.map(({ id, name, stockItem }) => stockItem && <BindingRow key={id} item={stockItem} variant={name ?? 'ID ' + id} />)}
       </ul>
     </section>}
-    {revision.items.length > 0 && <ul aria-label="Ингредиенты прежнего состава" className="divide-y divide-border rounded-lg border border-border">
-      {revision.items.map((item) => <IngredientRow key={(item.variantId ?? '') + ':' + item.ingredientId} item={item} />)}
-    </ul>}
+    {shared.length > 0 && <section className="space-y-2">
+      {ownVariants.length > 0 && <h4 className="font-medium">Общий состав</h4>}
+      <ul aria-label="Ингредиенты прежнего состава" className="divide-y divide-border rounded-lg border border-border">
+        {shared.map((item) => <IngredientRow key={(item.variantId ?? '') + ':' + item.ingredientId} item={item} />)}
+      </ul>
+    </section>}
+    {ownVariants.map(({ id, name, ownRecipe }) => <section key={id} className="space-y-2">
+      <h4 className="font-medium">Состав варианта · {name ?? id}</h4>
+      {ownRecipe?.output && <dl><HistoryField label="Выход">{amountLabel(ownRecipe.output.amount, ownRecipe.output.unit)}</HistoryField></dl>}
+      <ul className="divide-y divide-border rounded-lg border border-border">
+        {revision.items.filter(({ variantId }) => variantId === id)
+          .map((item) => <IngredientRow key={item.ingredientId} item={item} showVariant={false} />)}
+      </ul>
+      {ownRecipe?.instructions && <PreparationInstructions instructions={ownRecipe.instructions} />}
+    </section>)}
     {!!revision.components?.length && <ul aria-label="Прежний состав сета" className="divide-y divide-border rounded-lg border border-border">
       {revision.components.map((component) => <li key={component.id} className="flex justify-between gap-3 p-3">
         <span className="min-w-0 break-words">{component.name ?? 'Блюдо · ID ' + component.dishId}
@@ -121,11 +139,15 @@ function RevisionComposition({ revision, isSet }: { revision: RecipeRevision; is
         <ul>{group.options.map((option) => <li key={option.id}>{option.name}{option.ingredient && <> · {itemName(option.ingredient)} · {amountLabel(option.ingredient.amount, option.ingredient.unit)}</>}</li>)}</ul>
       </div>)}
     </details>}
-    {revision.instructions && <details className="rounded-lg border border-border p-3">
-      <summary className="cursor-pointer font-medium">Технология приготовления</summary>
-      <p className="mt-2 whitespace-pre-wrap break-words">{revision.instructions}</p>
-    </details>}
+    {revision.instructions && <PreparationInstructions instructions={revision.instructions} />}
   </div>;
+}
+
+function PreparationInstructions({ instructions }: { instructions: string }) {
+  return <details className="rounded-lg border border-border p-3">
+    <summary className="cursor-pointer font-medium">Технология приготовления</summary>
+    <p className="mt-2 whitespace-pre-wrap break-words">{instructions}</p>
+  </details>;
 }
 
 function BindingRow({ item, variant }: { item: HistoricalIngredient; variant?: string }) {
@@ -135,12 +157,12 @@ function BindingRow({ item, variant }: { item: HistoricalIngredient; variant?: s
   </li>;
 }
 
-function IngredientRow({ item }: { item: HistoricalItem }) {
+function IngredientRow({ item, showVariant = true }: { item: HistoricalItem; showVariant?: boolean }) {
   const stages = item.processingStages.length ? item.processingStages : item.processingMethod
     ? [{ method: item.processingMethod, lossPercent: item.lossPercent }] : [];
   return <li className="space-y-2 p-3">
     <p className="break-words font-medium">{itemName(item)}</p>
-    {item.variantId && <p className="text-xs text-text-muted">Вариант · {item.variantName ?? item.variantId}</p>}
+    {showVariant && item.variantId && <p className="text-xs text-text-muted">Вариант · {item.variantName ?? item.variantId}</p>}
     <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
       <HistoryField label="Брутто">{amountLabel(item.amount, item.unit)}</HistoryField>
       <HistoryField label="Нетто">{amountLabel(item.netAmount, item.unit)}</HistoryField>

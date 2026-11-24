@@ -419,12 +419,24 @@ function recipeMetric(rows: MenuCostRow[] | undefined, metric: 'foodCost' | 'mar
   return min === max ? format(min) : `${format(min)} – ${format(max)}`;
 }
 function dishOutput(dish: AdminDish, costs?: MenuCostRow[]) {
+  if (costs?.length) {
+    const outputs = costs.flatMap(({ output }) => output ? [output] : []);
+    if (!outputs.length) return '—';
+    const units = new Set(outputs.map(({ unit }) => normalizeUnitLabel(unit)));
+    if (units.size > 1 || outputs.length !== costs.length) return 'По вариантам';
+    const amounts = outputs.map(({ amount }) => amount);
+    const min = Math.min(...amounts);
+    const max = Math.max(...amounts);
+    return min === max ? menuOutputLabel(outputs[0])
+      : `${balanceQuantity(min, normalizeUnitLabel(outputs[0].unit), undefined, false)} – ${menuOutputLabel({ amount: max, unit: outputs[0].unit })}`;
+  }
+  if (dish.variants.length) return 'По вариантам';
   const metadata = (
     dish as AdminDish & { recipeMetadata?: { outputQuantity?: number; outputUnit?: string } | null }
   ).recipeMetadata;
   return metadata?.outputQuantity != null
     ? balanceQuantity(metadata.outputQuantity, metadata.outputUnit ? normalizeUnitLabel(metadata.outputUnit) : '')
-    : costs?.length === 1 ? menuOutputLabel(costs[0].output) : '—';
+    : '—';
 }
 function ListLoadError({
   error,

@@ -14,9 +14,11 @@ import { lockIngredients, lockWarehouseCatalog } from './stock-lock';
 import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, UnitCode, unitLabel } from './units';
 import { getWarehouseBalance, resolveWarehouse, warehouseBalances, warehouseDocumentFilter, WarehouseLocation } from './warehouse-location';
 import { lockRecipeGraph } from './recipe-resolution';
-import { previewWriteoffSources, readWriteoffSnapshot, resolveWriteoffSources, serializeWriteoffSources, sourceInputs, writeoffStockLines } from './writeoff-resolution';
+import { previewWriteoffSources, readWriteoffSnapshot, resolveWriteoffSources, serializeWriteoffSources, sourceInputs, writeoffDishUnit, writeoffStockLines } from './writeoff-resolution';
 import { writeTransferAct } from './transfer-act-xlsx';
 import { writeInventoryWorkbook } from './inventory-xlsx';
+import { warehouseDateColumn, warehouseMoneyFormat, warehouseRegisterColumns, warehouseRegisterRows,
+  writeWarehouseRegister, type WarehouseRegisterExportDto } from './warehouse-register-xlsx';
 
 type Actor = Pick<AuthUser, 'id' | 'role' | 'name' | 'cafeId'> & Partial<Pick<AuthUser, 'permissions'>>;
 type Document = WarehouseDocument & { items: WarehouseDocumentItem[] };
@@ -26,6 +28,14 @@ const maxQuantity = new Prisma.Decimal('99999999999.999');
 const zero = new Prisma.Decimal(0);
 const inventoryCostReset = 'inventory_zero_cost';
 const transactionOptions = { timeout: 30_000 };
+const transferRegisterColumns = {
+  date: warehouseDateColumn,
+  products: { label: 'Наименование', width: 52 },
+  note: { label: 'Комментарий', width: 42 },
+  amount: { label: 'Сумма', width: 17, format: warehouseMoneyFormat },
+  employee: { label: 'Сотрудник', width: 28 },
+  warehouses: { label: 'Склады', width: 38 },
+};
 
 function documentEffectiveAt(kind: WarehouseDocumentKind, value: string | null | undefined) {
   if (value != null && kind !== 'transfer' && kind !== 'writeoff') {
@@ -38,7 +48,8 @@ function documentEffectiveAt(kind: WarehouseDocumentKind, value: string | null |
 export class WarehouseDocumentsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(warehouseId?: string, kind?: WarehouseDocumentKind, search?: string) {
+  async list(warehouseId?: string, kind?: WarehouseDocumentKind, search?: string, ids?: string[]) {
+    if (ids?.length === 0) return [];
     const cafeId = this.cafeId();
     if (warehouseId !== undefined) await this.warehouse(this.prisma, warehouseId);
     const text = search?.trim();
@@ -53,7 +64,7 @@ export class WarehouseDocumentsService {
           WHERE strpos(lower(source_line->>'name'), lower(${text})) > 0
         )
       ` : [];
-    const where: Prisma.WarehouseDocumentWhereInput = { cafeId, kind,
+    const where: Prisma.WarehouseDocumentWhereInput = { cafeId, kind, id: ids && { in: ids },
       ...(kind === 'transfer' && warehouseId ? { OR: [{ warehouseId }, { destinationWarehouseId: warehouseId }] } : { warehouseId }),
       ...(text ? { AND: [{ OR: [
         { note: { contains: text, mode: 'insensitive' } },
@@ -80,6 +91,7 @@ export class WarehouseDocumentsService {
           ? Prisma.sql`AND (d.warehouse_id = ${warehouseId} OR d.destination_warehouse_id = ${warehouseId})`
           : Prisma.sql`AND d.warehouse_id = ${warehouseId}`}
         ${kind === undefined ? Prisma.empty : Prisma.sql`AND d.kind = ${kind}::"WarehouseDocumentKind"`}
+        ${ids ? Prisma.sql`AND d.id IN (${Prisma.join(ids)})` : Prisma.empty}
         GROUP BY d.id
       `,
     ], { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
@@ -105,8 +117,30 @@ export class WarehouseDocumentsService {
         : document.items.map(({ ingredientId }) => ingredientCategories.get(ingredientId));
       return { ...this.summary(document, sources?.lines.length ?? summary?.itemsCount ?? 0, summary?.varianceValue ?? null),
         categories: [...new Set(categories.filter((category): category is string => !!category))].sort((a, b) => a.localeCompare(b, 'ru')),
-        productNames: sources ? sources.lines.slice(0, 3).map((line) => line.name) : document.items.slice(0, 3).map((item) => item.name) };
+        productNames: (ids ? (sources?.lines ?? document.items) : (sources?.lines ?? document.items).slice(0, 3)).map(({ name }) => name) };
     });
+  }
+
+  async transferRegister(dto: WarehouseRegisterExportDto, showCosts: boolean) {
+    const columns = warehouseRegisterColumns<keyof typeof transferRegisterColumns>(dto.columns, transferRegisterColumns, showCosts ? undefined : 'amount');
+    const rows = warehouseRegisterRows(dto.ids, await this.list(undefined, 'transfer', undefined, dto.ids));
+    const warehouseIds = [...new Set(rows.flatMap(({ warehouseId, destinationWarehouseId }) =>
+      destinationWarehouseId ? [warehouseId, destinationWarehouseId] : [warehouseId]))];
+    const locations = columns.includes('warehouses') ? await this.prisma.warehouse.findMany({
+      where: { cafeId: this.cafeId(), id: { in: warehouseIds } }, select: { id: true, name: true },
+    }) : [];
+    const names = new Map(locations.map(({ id, name }) => [id, name]));
+    return writeWarehouseRegister('Перемещения', columns.map((key) => transferRegisterColumns[key]), rows.map((row) => {
+      const cells = {
+        date: row.effectiveAt ?? row.postedAt ?? row.createdAt,
+        products: row.productNames.join(', '),
+        note: row.note,
+        amount: row.varianceValue == null ? null : Math.abs(row.varianceValue),
+        employee: row.postedByName ?? row.createdByName,
+        warehouses: [row.warehouseId, row.destinationWarehouseId].map((id) => id ? names.get(id) ?? 'Склад' : null).filter(Boolean).join(' → '),
+      };
+      return columns.map((key) => cells[key]);
+    }));
   }
 
   async writeoffOptions() {
@@ -115,10 +149,13 @@ export class WarehouseDocumentsService {
       this.prisma.ingredient.findMany({ where: { cafeId, isActive: true }, orderBy: { name: 'asc' },
         select: { id: true, name: true, category: true, displayUnit: true, kind: true, preparationMode: true } }),
       this.prisma.dish.findMany({ where: { cafeId, isActive: true, isSet: false, catalogKind: { not: 'goods' } }, orderBy: { name: 'asc' },
-        select: { id: true, name: true, isWeighted: true, category: { select: { name: true } }, variants: { select: { id: true, name: true } } } }),
+        select: { id: true, name: true, isWeighted: true, weightedMeasure: true,
+          category: { select: { name: true } }, variants: { select: { id: true, name: true } } } }),
     ]);
     return { ingredients: ingredients.map(({ displayUnit, ...item }) => ({ ...item, unit: unitLabel(normalizeUnit(displayUnit)), unitCode: displayUnit })),
-      dishes: dishes.map(({ category, ...dish }) => ({ ...dish, category: category.name, unitCode: dish.isWeighted ? 'g' : 'pcs' })) };
+      dishes: dishes.map(({ category, weightedMeasure, ...dish }) => ({
+        ...dish, category: category.name, unitCode: writeoffDishUnit({ ...dish, weightedMeasure }),
+      })) };
   }
 
   async writeoffPreview(dto: WriteoffPreviewDto) {

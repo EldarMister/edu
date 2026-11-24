@@ -39,6 +39,32 @@ export class WarehouseLocationsService {
     return { locations, stationRoutes };
   }
 
+  async valuation(cafeId: string | null) {
+    if (!cafeId) return [];
+    const rows = await this.prisma.$queryRaw<{ warehouseId: string; stockValue: Prisma.Decimal; unknownCount: number }[]>`
+      WITH balances AS (
+        SELECT w.id AS warehouse_id, i.stock, i.avg_cost, i.valuation_known
+        FROM warehouses w JOIN ingredients i ON i.cafe_id = w.cafe_id
+        WHERE w.cafe_id = ${cafeId} AND w.is_default AND i.is_active
+          AND NOT (i.is_prepared AND i.preparation_mode = 'virtual') AND i.stock <> 0
+        UNION ALL
+        SELECT s.warehouse_id, s.stock, s.avg_cost, s.valuation_known
+        FROM warehouse_stock s
+        JOIN warehouses w ON w.id = s.warehouse_id AND w.cafe_id = s.cafe_id
+        JOIN ingredients i ON i.id = s.ingredient_id AND i.cafe_id = s.cafe_id
+        WHERE s.cafe_id = ${cafeId} AND NOT w.is_default AND i.is_active
+          AND NOT (i.is_prepared AND i.preparation_mode = 'virtual') AND s.stock <> 0
+      )
+      SELECT w.id AS "warehouseId",
+        COALESCE(SUM(ROUND(b.stock * b.avg_cost, 2)) FILTER (WHERE b.valuation_known), 0) AS "stockValue",
+        COUNT(*) FILTER (WHERE b.valuation_known = false)::int AS "unknownCount"
+      FROM warehouses w LEFT JOIN balances b ON b.warehouse_id = w.id
+      WHERE w.cafe_id = ${cafeId}
+      GROUP BY w.id
+    `;
+    return rows.map((row) => ({ ...row, stockValue: Number(row.stockValue) }));
+  }
+
   async save(cafeId: string | null, value: string, id?: string, address?: string | null) {
     if (!cafeId) throw new BadRequestException('Заведение не назначено');
     const name = value.trim();

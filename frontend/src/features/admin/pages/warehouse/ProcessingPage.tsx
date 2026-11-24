@@ -10,10 +10,13 @@ import { StockOperationDateField } from './StockOperationDateField';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
-import { exportCsv } from '@/lib/report-output';
+import { useColumnPreference } from '@/hooks/useColumnPreference';
+import { visibleWarehouseColumns, WarehouseColumnSettings } from './WarehouseColumnSettings';
 import { qty, useIngredients, type WarehouseLocation } from './api';
 import { ALL_UNITS, unitLabel, unitsForType, type UnitCode } from './units';
 import {
+  downloadProcessingAct,
+  downloadProcessingRegister,
   useProcessing,
   useProcessingDocument,
   useProcessingMutations,
@@ -25,7 +28,8 @@ import { useListPeriod } from './ListPeriodFilter';
 import { balanceMoney, balanceQuantity } from './balance-format';
 import { inventoryTimeDisplay, inventoryTimingFor, inventoryTimingValue } from './inventory-time';
 
-const processingColumns = ['Дата', 'Исходные продукты', 'Полученные продукты', 'Комментарий'];
+const processingColumns = { date: 'Дата', inputs: 'Исходные продукты', outputs: 'Полученные продукты', note: 'Комментарий' };
+const defaultColumns = Object.keys(processingColumns) as Array<keyof typeof processingColumns>;
 
 function productSummary(rows: ProcessingRow[]) {
   return rows.map((row) => `${row.ingredientName ?? row.name ?? 'Продукт'} · ${qty(row.quantity, unitLabel(row.unit))}`).join(', ');
@@ -50,31 +54,52 @@ export function ProcessingPage({
   const canProduce = can('actions.warehouseProduce');
   const q = useProcessing({ warehouseId, search, from: period.range.dateFrom, to: period.range.dateTo });
   const documents = q.data ?? [];
+  const [columnPreference, saveColumns] = useColumnPreference('warehouse-processing');
+  const [editingColumns, setEditingColumns] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const notify = useNotifications((state) => state.push);
+  const columns = visibleWarehouseColumns(columnPreference, defaultColumns);
+  async function exportRegister() {
+    setExporting(true);
+    try {
+      await downloadProcessingRegister(documents.map(({ id }) => id), columns);
+    } catch (error) {
+      notify({ message: apiError(error), at: new Date().toISOString() });
+    } finally {
+      setExporting(false);
+    }
+  }
   return (
     <div className="poster-register-surface min-w-0">
       <div className="poster-toolbar">
         <WorkspaceSearch label="Поиск переработок" value={search} onChange={setSearch} />
         {period.filter}
         {filters}
-        {can('actions.exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!documents.length}
-          onClick={() => exportCsv('Переработки', processingColumns, documents.map((document) => [
-            inventoryTimeDisplay(document.date), productSummary(document.inputs), productSummary(document.outputs), document.note ?? '',
-          ]))}>Экспорт CSV</button>}
+        <button type="button" className="btn-secondary btn-md" onClick={() => setEditingColumns(true)}>Столбцы</button>
+        {can('actions.exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!documents.length || exporting}
+          onClick={exportRegister}>Экспорт Excel</button>}
         {canProduce && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
       </div>
+      {editingColumns && <WarehouseColumnSettings columns={columns} defaults={defaultColumns}
+        label={(key) => processingColumns[key]} onClose={() => setEditingColumns(false)}
+        onApply={(selection) => {
+          const joined = selection.join(',');
+          saveColumns(joined === defaultColumns.join(',') ? '' : joined);
+          setEditingColumns(false);
+        }} />}
       <QueryState pending={q.isPending} error={q.error}>
         <div className="overflow-x-auto">
           <table className="poster-table poster-register-table w-full min-w-[800px] text-left text-sm">
             <thead>
               <tr>
-                {processingColumns.map((column) => <th key={column} scope="col">{column}</th>)}
+                {columns.map((column) => <th key={column} scope="col">{processingColumns[column]}</th>)}
                 <th />
               </tr>
             </thead>
             <tbody>
               {!documents.length && (
                 <tr>
-                  <td colSpan={5}>
+                  <td colSpan={columns.length + 1}>
                     <div className="poster-list-empty">
                       <svg aria-hidden viewBox="0 0 40 40" fill="none">
                         <path d="M11 11h18l6 16v6H5v-6l6-16Z" stroke="currentColor" strokeWidth="2.5" />
@@ -92,7 +117,7 @@ export function ProcessingPage({
               )}
               {documents.map((d) => (
                 <tr key={d.id}>
-                  <td className="whitespace-nowrap">
+                  {columns.map((column) => column === 'date' ? <td key={column} className="whitespace-nowrap">
                     <button
                       className="text-primary"
                       onClick={() => onOpen(d.id)}
@@ -107,10 +132,9 @@ export function ProcessingPage({
                         </span>
                       </div>
                     )}
-                  </td>
-                  <td>{productSummary(d.inputs)}</td>
-                  <td>{productSummary(d.outputs)}</td>
-                  <td className="whitespace-pre-wrap">{d.note || '—'}</td>
+                  </td> : column === 'note'
+                    ? <td key={column} className="whitespace-pre-wrap">{d.note || '—'}</td>
+                    : <td key={column}>{productSummary(d[column])}</td>)}
                   <td>
                     <div className="poster-row-actions">
                       <button type="button" onClick={() => onOpen(d.id)}>
@@ -212,6 +236,7 @@ function ProcessingForm({
   const [outputs, setOutputs] = useState(() => initialRows(true));
   const [newIngredient, setNewIngredient] = useState<{ rowKey: string; output: boolean; name: string }>();
   const [error, setError] = useState('');
+  const [exportingAct, setExportingAct] = useState(false);
   const [rowsChanged, setRowsChanged] = useState(!!copyFrom);
   const editable = (!document || document.status === 'draft') && can('actions.warehouseProduce');
   const effectiveAt = inventoryTimingValue(timing, document?.effectiveAt);
@@ -302,17 +327,15 @@ function ProcessingForm({
       setError(apiError(e));
     }
   }
-  function exportDocument(saved: ProcessingDocument) {
-    const values = (lines: ProcessingRow[], group: string) => lines.map((line) => [
-      group, line.ingredientName ?? line.name ?? '', line.warehouseName ?? locations.find(({ id }) => id === line.warehouseId)?.name ?? '',
-      qty(line.quantity, unitLabel(line.unit)), `${line.costSharePercent ?? 0}%`,
-      ...(canSeeCosts ? [line.unitCost == null ? '—' : balanceMoney(line.unitCost), line.lineCost == null ? '—' : balanceMoney(line.lineCost)] : []),
-    ]);
-    exportCsv('Акт переработки', ['Дата', 'Комментарий', 'Операция', 'Продукт', 'Склад', 'Количество', 'Доля себестоимости',
-      ...(canSeeCosts ? ['Себестоимость за единицу', 'Итого'] : []),
-    ], [...values(saved.inputs, 'Исходные продукты'), ...values(saved.outputs, 'Полученные продукты')].map((row) => [
-      inventoryTimeDisplay(saved.date), saved.note ?? '', ...row,
-    ]));
+  async function exportDocument(id: string) {
+    setExportingAct(true);
+    try {
+      await downloadProcessingAct(id);
+    } catch (error) {
+      push({ message: apiError(error), at: new Date().toISOString() });
+    } finally {
+      setExportingAct(false);
+    }
   }
   const renderRows = (rows: DraftRow[], setRows: (rows: DraftRow[]) => void, output: boolean) => (
     <section className="poster-document-panel poster-document-products space-y-3">
@@ -565,7 +588,8 @@ function ProcessingForm({
       {document?.reversalBlockedReason && <p role="status" className="rounded-lg bg-background p-3 text-sm text-text-secondary">{document.reversalBlockedReason}</p>}
       <DocumentFooter
         total={
-          editable && rowsChanged
+          !canSeeCosts ? undefined
+            : editable && rowsChanged
             ? 'Итого будет рассчитано после сохранения'
             : document
             ? document.totalCost != null
@@ -575,7 +599,7 @@ function ProcessingForm({
         }
       >
         {document && !editable && can('actions.exportReports') && <button type="button" className="btn-secondary btn-md"
-          onClick={() => exportDocument(document)}>Экспорт акта</button>}
+          disabled={exportingAct} onClick={() => exportDocument(document.id)}>Скачать акт Excel</button>}
         {editable ? (
           <>
             <button className="btn-primary btn-md" disabled={busy || !dateValid} onClick={() => void save(true)}>

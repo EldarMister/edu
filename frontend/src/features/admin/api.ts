@@ -276,6 +276,7 @@ export interface OrdersFilter {
   dateTo?: string;
   dateField?: 'closed';
   paymentMethod?: string;
+  comments?: 'with' | 'without';
   waiterId?: string;
 }
 
@@ -291,6 +292,7 @@ function ordersQueryString(params: Partial<OrdersFilter>) {
   if (params.dateTo) q.set('dateTo', params.dateTo);
   if (params.dateField) q.set('dateField', params.dateField);
   if (params.paymentMethod) q.set('paymentMethod', params.paymentMethod);
+  if (params.comments) q.set('comments', params.comments);
   if (params.waiterId) q.set('waiterId', params.waiterId);
   return q;
 }

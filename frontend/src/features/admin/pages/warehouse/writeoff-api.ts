@@ -32,7 +32,7 @@ export interface WriteoffSourceLine extends Omit<WriteoffSourceInput, 'unit'> {
 
 export interface WriteoffOptions {
   ingredients: { id: string; name: string; category: string | null; unit: string; unitCode: UnitCode; kind: ItemKind; preparationMode: 'stocked' | 'virtual' }[];
-  dishes: { id: string; name: string; category: string | null; isWeighted: boolean; unitCode: 'pcs' | 'g'; variants: { id: string; name: string }[] }[];
+  dishes: { id: string; name: string; category: string | null; isWeighted: boolean; unitCode: 'pcs' | 'g' | 'ml'; variants: { id: string; name: string }[] }[];
 }
 
 export interface WriteoffPreview { sourceLines: WriteoffSourceLine[]; total: number | null }

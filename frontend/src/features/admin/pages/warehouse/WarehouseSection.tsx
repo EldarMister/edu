@@ -10,6 +10,7 @@ import { PurchaseModal } from './PurchasesTab';
 import type { StockDocumentKind } from './stock-documents-api';
 import { WarehouseReportsTab } from './WarehouseReportsTab';
 import { WarehouseMovementSummary } from './WarehouseMovementSummary';
+import { WarehouseMultiFilter, warehouseMultiFilterValues } from './WarehouseMultiFilter';
 import { ReportPeriodFilter, REPORT_PERIODS } from './ReportPeriodFilter';
 import { calendarDate, warehouseDay, warehousePeriodRange } from './warehouse-period';
 import { PreparationModal, ProductionBatchModal } from './PreparationTab';
@@ -50,6 +51,7 @@ export function WarehouseSection({
     movementDocuments: '',
     movementClosedGroups: '',
     movementWarehouses: '',
+    balanceWarehouses: '',
     supplyPage: '1', supplyExpanded: '', transferPage: '1', writeoffPage: '1', inventoryPage: '1', productionPage: '1', balancePage: '1', balanceExpanded: '',
   });
   const {
@@ -98,18 +100,29 @@ export function WarehouseSection({
   const movementLocations = locations
     .filter(({ id }) => movementWarehouseSelection.includes(id))
     .sort((left, right) => left.id.localeCompare(right.id));
+  const balanceSelection = conditions.balanceWarehouses
+    ? conditions.balanceWarehouses.split(',')
+    : warehouseId ? [warehouseId] : [];
+  const balanceLocations = locations.filter(({ id }) => balanceSelection.includes(id));
+  const balanceWarehouseIds = balanceLocations.map(({ id }) => id).sort().join(',');
+  const balanceScope = balanceLocations.length === 1 ? { warehouseId: balanceLocations[0].id }
+    : { warehouseIds: balanceWarehouseIds || undefined };
   const movementHistory = view === 'movement' && active?.type === 'history';
+  const balanceHistory = view === 'balances' && active?.type === 'history' && !active.warehouseId;
   const historyWarehouseIds = movementHistory && movementLocations.length > 1
-    ? movementLocations.map(({ id }) => id).join(',')
-    : undefined;
+    ? movementLocations.map(({ id }) => id).join(',') : balanceHistory ? balanceScope.warehouseIds : undefined;
   const historyWarehouseId = movementHistory
     ? (movementLocations.length === 1 ? movementLocations[0].id : undefined)
-    : active?.warehouseId;
+    : balanceHistory ? balanceScope.warehouseId : active?.warehouseId;
+  const balanceWarehouseFilter = <WarehouseMultiFilter label="Склад" value={JSON.stringify(balanceLocations.map(({ id }) => id))}
+    options={locations.map(({ id, name }) => ({ value: id, label: name }))}
+    onChange={(value) => updateConditions({ balanceWarehouses: warehouseMultiFilterValues(value).join(','), warehouse: '',
+      balancePage: '1', balanceExpanded: '' })} />;
   const warehouseFilter = <Select ariaLabel="Склад" className="poster-filter h-9 min-w-44"
     value={aggregate ? warehouseId : (warehouse?.id ?? '')} onChange={setWarehouseId}
     options={[...(aggregate ? [{ value: '', label: view === 'balances' || view === 'movement' ? 'Склад' : 'Все склады' }] : []), ...locations.map((location) => ({ value: location.id, label: location.name }))]} />;
   function history(itemId?: string, sourceWarehouseId?: string) {
-    setActive({ type: 'history', itemId, warehouseId: sourceWarehouseId ?? scopedWarehouse });
+    setActive({ type: 'history', itemId, warehouseId: sourceWarehouseId ?? (view === 'balances' ? undefined : scopedWarehouse) });
   }
   function openSource(type: string, id: string) {
     if (type === 'order') setActive({ type: 'order', id });
@@ -142,9 +155,9 @@ export function WarehouseSection({
                 <>
                   {view === 'balances' && (
                     <IngredientsTab
-                      filters={warehouseFilter}
-                      warehouseId={scopedWarehouse}
-                      warehouseName={warehouseId ? warehouse.name : undefined}
+                      filters={balanceWarehouseFilter}
+                      {...balanceScope}
+                      warehouseName={balanceLocations.map(({ name }) => name).join(', ') || undefined}
                       filter={stockFilter as StockFilter}
                       onFilter={setStockFilter}
                       onOpen={(item) => setActive({ type: 'item', id: item.id })}
@@ -173,7 +186,7 @@ export function WarehouseSection({
                   )}
                   {['transfers', 'writeoffs', 'inventory'].includes(view) && (
                     <DocumentList
-                      filters={view === 'transfers' ? undefined : warehouseFilter}
+                      filters={view === 'inventory' ? warehouseFilter : undefined}
                       kind={
                         view === 'transfers' ? 'transfer' : view === 'writeoffs' ? 'writeoff' : 'inventory'
                       }

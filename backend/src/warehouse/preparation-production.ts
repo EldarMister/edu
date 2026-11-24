@@ -118,10 +118,13 @@ export class PreparationProductionService {
         const stages = readProcessingStages(item.processingStages);
         const cost = itemCosts.get(item.ingredientId);
         const measuredNetWeightGrams = item.measuredNetWeightGrams == null ? null : Number(item.measuredNetWeightGrams);
+        const pieceWeight = item.ingredient.unitType === 'count' ? item.ingredient.pieceWeightGrams : null;
+        const netAmount = item.netAmount ?? item.amount.mul(new Prisma.Decimal(100).sub(item.lossPercent)).div(100);
+        const netWeightGrams = measuredNetWeightGrams ?? (pieceWeight ? Number(pieceWeight.mul(netAmount).toDecimalPlaces(3)) : null);
         return { ingredientId: item.ingredientId, name: item.ingredient.name, lineCost: cost?.known ? Number(cost.cost.toDecimalPlaces(2)) : null,
           costKnown: cost?.known ?? false, quantity: fromBase(Number(item.amount), unit),
           netAmount: item.netAmount == null ? null : fromBase(Number(item.netAmount), unit), lossPercent: Number(item.lossPercent),
-          measuredNetWeightGrams, netWeightGrams: measuredNetWeightGrams,
+          measuredNetWeightGrams, netWeightGrams,
           processingMethod: item.processingMethod, processingStages: stages, processingBasis: item.processingBasis,
           processingStageResults: processingStageResults(stages, item.amount, unit), unit: item.unit };
       }) ?? [] };

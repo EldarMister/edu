@@ -49,6 +49,12 @@ export class WarehouseLocationsController {
     return this.locations.list(user.cafeId);
   }
 
+  @Get('valuation')
+  @RequirePermission('actions.warehouseCosts')
+  valuation(@CurrentUser() user: AuthUser) {
+    return this.locations.valuation(user.cafeId);
+  }
+
   @Post()
   @Roles(Role.OWNER, Role.ADMIN)
   @RequirePermission('actions.warehouseSettings')

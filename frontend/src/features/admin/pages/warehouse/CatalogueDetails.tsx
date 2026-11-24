@@ -7,6 +7,7 @@ import type { AdminDish } from '../../api';
 import { useIngredient, usePreparationRecipe, useRecipe, type IngredientDetails, type IngredientUsage, type Recipe } from './api';
 import { recipeProcessingLabel } from './RecipeProcessingFields';
 import { RecipeHistoryDrawer } from './RecipeHistoryDrawer';
+import { PreparationPrintButton } from './PreparationPrintButton';
 import { normalizeUnitLabel, unitLabel } from './units';
 import { recipeQuantity } from './recipe-draft-values';
 import { QueryState } from './WarehouseUi';
@@ -49,13 +50,19 @@ const uses: Record<IngredientUsage['kind'], string> = {
   recipe: 'Техкарта', stock: 'Прямая продажа', variant: 'Вариант', preparation: 'Рецептура выпуска', modifier: 'Модификатор',
 };
 
-function MenuUsageLink({ id, kind, children }: { id: string; kind: 'recipe' | 'goods' | 'set' | 'preparation'; children: ReactNode }) {
+function MenuUsageLink({ id, kind, variantId, children }: {
+  id: string; kind: 'recipe' | 'goods' | 'set' | 'preparation'; variantId?: string | null; children: ReactNode;
+}) {
   const { canSection } = usePermissions();
   const location = useLocation();
   if (!canSection('menu')) return children;
   const view = kind === 'preparation' ? 'preparations' : kind === 'goods' ? 'goods' : 'recipes';
   const editor = kind === 'set' || kind === 'preparation' ? kind : 'entry';
   const search = new URLSearchParams({ section: 'menu', view, editor, id });
+  if (variantId) {
+    search.set('itemId', variantId);
+    if (kind === 'recipe') search.set('action', 'recipe');
+  }
   return <Link className="text-primary hover:underline" to={{ pathname: location.pathname, search: search.toString() }}
     state={{ editorFrom: location.pathname + location.search }}>{children}</Link>;
 }
@@ -74,7 +81,8 @@ export function IngredientUsageTable({ item }: { item: IngredientDetails }) {
     {rows?.length ? <div className="overflow-x-auto"><table className="poster-table poster-catalogue-detail-table w-full min-w-[440px]">
       <thead><tr><th scope="col">Позиция</th><th scope="col">Использование</th><th scope="col" className="text-right">Количество</th></tr></thead>
       <tbody>{rows.map((row) => <tr key={`${row.kind}:${row.sourceId}`}>
-        <td><MenuUsageLink id={row.targetId} kind={row.kind === 'preparation' ? 'preparation' : row.isSet ? 'set' : row.catalogKind === 'goods' ? 'goods' : 'recipe'}>
+        <td><MenuUsageLink id={row.targetId} variantId={row.variantId}
+          kind={row.kind === 'preparation' ? 'preparation' : row.isSet ? 'set' : row.catalogKind === 'goods' ? 'goods' : 'recipe'}>
           {row.name}</MenuUsageLink>{!row.active && <span className="ml-2 text-xs text-text-muted">Неактивно</span>}</td>
         <td>{uses[row.kind]}{row.label && <span className="block text-xs text-text-muted">{row.label}</span>}</td>
         <td className="whitespace-nowrap text-right tabular-nums">{row.quantity == null || !row.unit ? '—' : recipeQuantity(row.quantity, row.unit)}</td>
@@ -96,7 +104,7 @@ export function DishComposition({ dish }: { dish: AdminDish }) {
         <h3 className="font-medium">Состав</h3>
         {dish.variants.length > 0 && <Select ariaLabel="Вариант техкарты" className="w-56"
           value={variantId} onChange={setVariantId}
-          options={dish.variants.map((variant) => ({ value: variant.id, label: variant.name }))} />}
+          options={[{ value: '', label: 'Общий состав' }, ...dish.variants.map((variant) => ({ value: variant.id, label: variant.name }))]} />}
         {canReadHistory && <button type="button" className="btn-secondary btn-md ml-auto" onClick={() => setHistoryOpen(true)}>История состава</button>}
       </div>
       <CatalogueState pending={query.isPending} error={query.error} onRetry={() => void query.refetch()}>
@@ -128,7 +136,7 @@ function DishRecipeDetails({ recipe, costs }: { recipe: Recipe; costs: boolean }
         <thead><tr><th scope="col">Блюдо в сете</th><th scope="col" className="text-right">Количество</th>
           {costs && <th scope="col" className="text-right">Себестоимость строки</th>}</tr></thead>
         <tbody>{components.map((item, index) => <tr key={`${item.dishId}:${item.variantId ?? ''}:${index}`}>
-          <td><MenuUsageLink id={item.dishId} kind="recipe">{item.dishName}</MenuUsageLink>
+          <td><MenuUsageLink id={item.dishId} kind="recipe" variantId={item.variantId}>{item.dishName}</MenuUsageLink>
             {item.variantName && <span className="ml-2 text-xs text-text-muted">{item.variantName}</span>}
             {!item.accountingConfigured && <span className="ml-2 text-xs text-text-muted">Складской учёт не настроен</span>}</td>
           <td className="text-right tabular-nums">{item.quantity}</td>
@@ -171,7 +179,10 @@ export function PreparationComposition({ id, warehouseId }: { id: string; wareho
     <CatalogueState pending={query.isPending} error={query.error} onRetry={() => void query.refetch()}>
       {query.data && (
         <>
-          <h3 className="mb-3 font-medium">Состав</h3>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <h3 className="font-medium">Состав</h3>
+            <PreparationPrintButton recipe={query.data} />
+          </div>
           <div className="overflow-x-auto">
             <table className="poster-table poster-catalogue-detail-table w-full min-w-[620px]">
               <thead><tr><th>Продукты</th><th>Метод приготовления</th><th className="text-right">Брутто</th><th className="text-right">Нетто</th>{costs && <th className="text-right">Себестоимость</th>}</tr></thead>

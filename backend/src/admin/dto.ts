@@ -465,6 +465,9 @@ export class OrderQueryDto {
   @IsOptional() @IsString()
   paymentMethod?: string;
 
+  @IsOptional() @IsIn(['with', 'without'])
+  comments?: 'with' | 'without';
+
   // Фильтр по официанту.
   @IsOptional() @IsString()
   waiterId?: string;

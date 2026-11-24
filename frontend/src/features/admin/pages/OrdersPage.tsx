@@ -9,13 +9,13 @@ import { useT } from '@/lib/i18n';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { normalizeOrderPaymentMethod, OrdersFilters, type OrderSort } from '../components/OrdersFilters';
-import { defaultOrderColumns, orderColumnLabel, orderTableWidth, OrdersTable } from '../components/OrdersTable';
+import { availableOrderColumns, defaultOrderColumns, orderColumnLabel, orderTableWidth, OrdersTable } from '../components/OrdersTable';
 import { OrdersExportButton } from '../components/OrdersExportButton';
 import { IconTables } from '../components/icons';
 import { CancelOrderModal } from '../components/CancelOrderModal';
 import { OrderDetailsModal } from '../components/OrderDetailsModal';
 import { useCanManageOrderRefunds } from '@/features/refunds/api';
-import { useAdminOrderDetails, useAdminOrdersInfinite, useOrdersSummary, useCancelOrder, useOrderWaiters, useUpdateOrderStatus } from '../api';
+import { useAdminOrderDetails, useAdminOrdersInfinite, useOrdersSummary, useCancelOrder, useOrderWaiters, useUpdateOrderStatus, type OrderListFilters } from '../api';
 import { WorkspaceHeaderActions } from './WorkspaceHeader';
 import { useListPeriod } from './warehouse/ListPeriodFilter';
 import { visibleWarehouseColumns, WarehouseColumnSettings } from './warehouse/WarehouseColumnSettings';
@@ -41,11 +41,12 @@ function sortRequest(sort: OrderSort): { sort: 'default' | 'date' | 'amount'; so
 
 export function OrdersPage() {
   const tr = useT();
-  const [{ ordersTab: tab, ordersPaymentMethod }, updateView] = usePageFilters({
-    ordersTab: 'all', ordersPaymentMethod: '',
+  const [{ ordersTab: tab, ordersPaymentMethod, ordersComments }, updateView] = usePageFilters({
+    ordersTab: 'all', ordersPaymentMethod: '', ordersComments: '',
   });
   const byClose = tab === 'paid';
   const paymentMethod = normalizeOrderPaymentMethod(ordersPaymentMethod);
+  const comments = ordersComments === 'with' || ordersComments === 'without' ? ordersComments : undefined;
   const showTenderRevenue = paymentMethod !== '' && paymentMethod !== 'mixed';
   const [waiterId, setWaiterId] = useState('');
   const period = useListPeriod('orders', 'all', tr(byClose ? 'Дата закрытия' : 'Период'));
@@ -53,7 +54,7 @@ export function OrdersPage() {
   const [sort, setSort] = useState<OrderSort>('default');
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [savedColumns, saveColumns] = useColumnPreference('admin-orders');
-  const columns = visibleWarehouseColumns(savedColumns, defaultOrderColumns);
+  const columns = visibleWarehouseColumns(savedColumns, defaultOrderColumns, availableOrderColumns);
 
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [detailsOrder, setDetailsOrder] = useState<Order | null>(null);
@@ -75,7 +76,7 @@ export function OrdersPage() {
     ...(waiters.data ?? []).map((w) => ({ value: w.id, label: w.name })),
   ];
 
-  const filters = { tab, search, paymentMethod, waiterId, ...period.range, ...(byClose && { dateField: 'closed' as const }) };
+  const filters: OrderListFilters = { tab, search, paymentMethod, waiterId, comments, ...period.range, ...(byClose && { dateField: 'closed' }) };
   const listFilters = { ...filters, ...sortRequest(sort) };
   const ordersQ = useAdminOrdersInfinite(listFilters);
   const summaryQ = useOrdersSummary(filters);
@@ -165,12 +166,14 @@ export function OrdersPage() {
           tab={tab}
           paymentMethod={paymentMethod}
           waiterId={waiterId}
+          comments={comments ?? ''}
           waiterOptions={waiterOptions}
           sort={sort}
           search={search}
           onTabChange={(ordersTab) => updateView({ ordersTab })}
           onPaymentMethodChange={(ordersPaymentMethod) => updateView({ ordersPaymentMethod })}
           onWaiterChange={setWaiterId}
+          onCommentsChange={(ordersComments) => updateView({ ordersComments })}
           onSortChange={setSort}
           onSearchChange={setSearch}
         />
@@ -189,7 +192,7 @@ export function OrdersPage() {
         onEdit={openStatusEditor}
         onCancel={setCancelTarget}
       />
-      {columnsOpen && <WarehouseColumnSettings columns={columns} defaults={defaultOrderColumns}
+      {columnsOpen && <WarehouseColumnSettings columns={columns} defaults={availableOrderColumns} resetColumns={defaultOrderColumns}
         label={(key) => tr(orderColumnLabel(key))} onClose={() => setColumnsOpen(false)}
         onApply={(selected) => {
           const value = selected.join(',');

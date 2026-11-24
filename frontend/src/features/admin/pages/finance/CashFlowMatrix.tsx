@@ -31,6 +31,7 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
   const [detail, setDetail] = useState<Detail | null>(null);
   const [printError, setPrintError] = useState(false);
   const [savedColumns, saveColumns] = useColumnPreference('finance-cash-flow');
+  const [savedPeriods, savePeriods] = useColumnPreference('finance-cash-flow-periods');
   const extraColumns = savedColumns.split(',').filter(Boolean);
   const showAmounts = extraColumns.includes('amounts');
   const showPercent = extraColumns.includes('percent');
@@ -44,8 +45,14 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
     () => buildCashFlowTable(flow, includedAccounts, categories, entries, from, to),
     [flow, includedAccounts, categories, entries, from, to],
   );
+  const savedPeriodKeys = savedPeriods.split(',').filter(Boolean);
+  const monthsByKey = new Map(periods.filter(({ key }) => key !== 'total').map((month) => [month.key, month]));
+  const monthKeys = [...new Set([...savedPeriodKeys, ...monthsByKey.keys()])].filter((key) => monthsByKey.has(key));
+  const orderedMonths = monthKeys.map((key) => monthsByKey.get(key)!);
+  const totalPeriod = periods.find(({ key }) => key === 'total');
+  const orderedPeriods = totalPeriod ? [...orderedMonths, totalPeriod] : orderedMonths;
   const scopeLabel = scope.size ? includedAccounts.map(({ name }) => name).join(', ') : 'Все счета';
-  const columns = periods.flatMap((bucket): FlowColumn[] => [
+  const columns = orderedPeriods.flatMap((bucket): FlowColumn[] => [
     { id: bucket.key, label: showAmounts || showPercent ? bucket.shortLabel + ', всего' : bucket.label, period: bucket },
     ...(showAmounts ? types.map(({ label, type }) =>
       ({ id: bucket.key + ':' + type, label: bucket.shortLabel + ', ' + label, period: bucket, type })) : []),
@@ -54,6 +61,13 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
   ]);
   const totalColumn = columns.find(({ id }) => id === 'total');
   const netLine = lines.find(({ measure }) => measure === 'net');
+
+  function moveMonth(index: number, offset: number) {
+    const keys = [...monthKeys];
+    const [key] = keys.splice(index, 1);
+    keys.splice(index + offset, 0, key);
+    savePeriods([...keys, ...savedPeriodKeys.filter((key) => !monthsByKey.has(key))].join(','));
+  }
 
   function toggle(id: string) {
     setExpanded((list) => list.includes(id) ? list.filter((key) => key !== id) : [...list, id]);
@@ -140,11 +154,28 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
           {period}
         </div>
         <div className="cash-flow-tools">
-          {flow.accountOpening && <details className="cash-flow-column-menu">
+          {(flow.accountOpening || orderedMonths.length > 1) && <details className="cash-flow-column-menu">
             <summary className="btn-secondary btn-md"><IconTables className="h-4 w-4" /> Столбцы <span aria-hidden="true">▾</span></summary>
             <div>
-              <label><input type="checkbox" checked={showAmounts} onChange={(event) => toggleColumn('amounts', event.target.checked)} /> Карта и наличные, деньги</label>
-              <label><input type="checkbox" checked={showPercent} onChange={(event) => toggleColumn('percent', event.target.checked)} /> Карта и наличные, %</label>
+              {flow.accountOpening && <>
+                <label><input type="checkbox" checked={showAmounts} onChange={(event) => toggleColumn('amounts', event.target.checked)} /> Карта и наличные, деньги</label>
+                <label><input type="checkbox" checked={showPercent} onChange={(event) => toggleColumn('percent', event.target.checked)} /> Карта и наличные, %</label>
+              </>}
+              {orderedMonths.length > 1 && <div className="border-t border-border px-2 py-2">
+                <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
+                  <span className="font-medium">Порядок месяцев</span>
+                  {savedPeriods && <button type="button" className="text-primary" onClick={() => savePeriods('')}>Сбросить</button>}
+                </div>
+                <ul className="max-h-52 overflow-y-auto divide-y divide-border">
+                  {orderedMonths.map(({ key, label }, index) => <li key={key} className="flex items-center gap-1 py-1 text-sm">
+                    <span className="min-w-0 flex-1">{label}</span>
+                    <button type="button" className="h-7 w-7 rounded border border-border disabled:opacity-30"
+                      aria-label={`Сдвинуть «${label}» влево`} disabled={index === 0} onClick={() => moveMonth(index, -1)}>↑</button>
+                    <button type="button" className="h-7 w-7 rounded border border-border disabled:opacity-30"
+                      aria-label={`Сдвинуть «${label}» вправо`} disabled={index === orderedMonths.length - 1} onClick={() => moveMonth(index, 1)}>↓</button>
+                  </li>)}
+                </ul>
+              </div>}
             </div>
           </details>}
           {canAction('exportReports') && <button type="button" className="btn-secondary btn-md" onClick={() => outputReport('csv')}>Экспорт CSV</button>}

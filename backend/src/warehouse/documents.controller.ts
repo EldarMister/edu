@@ -13,6 +13,7 @@ import {
 } from './documents.dto';
 import { WarehouseDocumentsService } from './documents.service';
 import { assertWarehousePermission } from './warehouse-permissions';
+import { WarehouseRegisterExportDto, sendWarehouseWorkbook } from './warehouse-register-xlsx';
 
 @Controller('admin/warehouse/documents')
 @Roles(Role.OWNER, Role.ADMIN)
@@ -46,6 +47,13 @@ export class WarehouseDocumentsController {
     if (inventoryIngredientId && (typeof inventoryIngredientId !== 'string' || inventoryIngredientId.length > 160))
       throw new BadRequestException('Некорректный идентификатор складской позиции');
     return this.documents.get(id, includeInventoryContext === 'true', inventoryIngredientId);
+  }
+
+  @Post('transfer-register.xlsx')
+  @RequirePermission('actions.exportReports')
+  async exportTransfers(@CurrentUser() user: AuthUser, @Body() dto: WarehouseRegisterExportDto, @Res() response: Response) {
+    const showCosts = hasPermission(resolvePermissions(user.role as Role, user.permissions), 'actions.warehouseCosts');
+    sendWarehouseWorkbook(response, await this.documents.transferRegister(dto, showCosts), 'transfers.xlsx');
   }
 
   @Get(':id/transfer-act.xlsx')

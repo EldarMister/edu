@@ -146,6 +146,28 @@ test(
           );
           assert.equal((await service.getRecipe(card.id)).name, 'Тесто пельменное');
         });
+        await t.test('saved preparation exposes calculated and measured piece weights for preview and export', async () => {
+          const bread = await ingredients.create({ name: 'Булочка', unit: 'pcs', pieceWeightGrams: 200 });
+          const cheese = await ingredients.create({ name: 'Сыр', unit: 'pcs', pieceWeightGrams: 300 });
+          const saved = await service.saveCard({
+            ...payload,
+            name: 'Булочка с сыром',
+            unit: 'g',
+            outputQuantity: 85,
+            outputUnit: 'g',
+            requestKey: randomUUID(),
+            items: [
+              { ingredientId: bread.id, quantity: 0.25, unit: 'pcs' },
+              { ingredientId: cheese.id, quantity: 0.2, unit: 'pcs', measuredNetWeightGrams: 35 },
+            ],
+          });
+          const rows = new Map(saved.items.map((row) => [row.ingredientId, row]));
+          assert.equal(rows.get(bread.id).netWeightGrams, 50);
+          assert.equal(rows.get(bread.id).measuredNetWeightGrams, null);
+          assert.equal(rows.get(cheese.id).netWeightGrams, 35);
+          assert.equal(rows.get(cheese.id).measuredNetWeightGrams, 35);
+          assert.equal(saved.outputQuantity, 85);
+        });
         await t.test(
           'virtual catalogue costs come from recipe leaves, including nested units and unknown prices',
           async () => {

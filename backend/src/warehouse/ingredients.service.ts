@@ -10,7 +10,10 @@ import { purchaseUnitsFor, validatePurchaseUnits } from './purchase-units';
 import { postStockMovement } from './stock-posting';
 import { PurchasesService } from './purchases.service';
 import { lockIngredients, lockWarehouseCatalog } from './stock-lock';
-import { getWarehouseBalance, resolveWarehouse, setWarehouseBalance, warehouseBalances, warehouseDocumentFilter } from './warehouse-location';
+import {
+  getWarehouseBalance, resolveWarehouse, resolveWarehouseSelection, selectedWarehouseDocumentFilter,
+  selectedWarehousePurchaseSql, setWarehouseBalance, warehouseBalances, type WarehouseLocation,
+} from './warehouse-location';
 import { getCafeId } from '../tenant/tenant-context';
 import { balanceExportColumns, filteredBalances, writeBalanceWorkbook, type BalanceExportQuery, type BalanceListQuery } from './balance-xlsx';
 import {
@@ -87,14 +90,15 @@ export class IngredientsService {
     };
   }
 
-  async findAll(params: { search?: string; includeInactive?: boolean; warehouseId?: string;
+  async findAll(params: { search?: string; includeInactive?: boolean; warehouseId?: string; warehouseIds?: string;
     lastPurchasePrice?: boolean; retailValue?: boolean }) {
     return this.prisma.$transaction(async (db) => {
       const where: Prisma.IngredientWhereInput = {
         ...(params.includeInactive ? {} : { isActive: true }),
         ...(params.search ? { OR: ['name', 'category'].map((field) => ({ [field]: { contains: params.search, mode: 'insensitive' as const } })) } : {}),
       };
-      const warehouse = params.warehouseId === undefined ? null : await resolveWarehouse(db, params.warehouseId);
+      const warehouses = await resolveWarehouseSelection(db, params);
+      const warehouse = warehouses.length === 1 ? warehouses[0] : null;
       const items = await db.ingredient.findMany({ where, include: { supplierRecord: { select: { name: true } } }, orderBy: { name: 'asc' } });
       // Recipe costing is separate from stock valuation. Expand preparations with the
       // same resolver used for sales, then load all leaf balances in one batch.
@@ -121,8 +125,8 @@ export class IngredientsService {
       }
       const ids = items.map(({ id }) => id);
       const [balances, receiptPrices, retailPrices] = await Promise.all([
-        warehouseBalances(db, warehouse, [...costingItems.values()]),
-        params.lastPurchasePrice ? this.lastPurchasePrices(db, ids, warehouse) : undefined,
+        warehouseBalances(db, warehouses, [...costingItems.values()]),
+        params.lastPurchasePrice ? this.lastPurchasePrices(db, ids, warehouses) : undefined,
         params.retailValue ? this.retailPrices(db, ids) : undefined,
       ]);
       return items.map((item) => {
@@ -138,7 +142,9 @@ export class IngredientsService {
         const balance = balances.get(item.id)!;
         const receiptPrice = receiptPrices?.get(item.id);
         const retailPrice = retailPrices?.get(item.id);
+        const knownStockValue = balance.knownStockValue.toNumber();
         return { ...this.serialize({ ...item, ...balance }), recipeUnitCost, recipeTotalCost,
+          stockValue: balance.stockValueKnown ? knownStockValue : null, knownStockValue,
           lastPurchasePrice: receiptPrice == null ? null : Number(receiptPrice.mul(toBase(1, normalizeUnit(item.displayUnit))).toDecimalPlaces(8)),
           retailValue: retailPrice == null || (item.isPrepared && item.preparationMode === 'virtual')
             ? null : Number(retailPrice.mul(balance.stock).toDecimalPlaces(2)),
@@ -155,29 +161,28 @@ export class IngredientsService {
     const page = Math.min(query.page ?? 1, Math.max(1, Math.ceil(rows.length / pageSize)));
     return { rows: rows.slice((page - 1) * pageSize, page * pageSize), page, pageSize, totalRows: rows.length,
       categories: [...new Set(items.flatMap(({ category }) => category ? [category] : []))].sort((a, b) => a.localeCompare(b, 'ru')),
-      stockValue: valued.reduce((sum, item) => sum.add(item.stockValue ?? 0), new Prisma.Decimal(0)).toNumber(),
+      stockValue: valued.reduce((sum, item) => sum.add(item.knownStockValue), new Prisma.Decimal(0)).toNumber(),
       incompleteStockValue: valued.some((item) => item.stockValue == null) };
   }
 
   async exportXlsx(query: BalanceExportQuery) {
     const columns = balanceExportColumns(query.columns);
-    const items = await this.balanceItems(query);
-    const warehouse = query.warehouseId ? await resolveWarehouse(this.prisma, query.warehouseId) : null;
-    return writeBalanceWorkbook(filteredBalances(items, query), warehouse?.name ?? 'Все склады', columns);
+    const [items, warehouses] = await Promise.all([
+      this.balanceItems(query), resolveWarehouseSelection(this.prisma, query),
+    ]);
+    return writeBalanceWorkbook(filteredBalances(items, query), warehouses.map(({ name }) => name).join(', ') || 'Все склады', columns);
   }
 
   private balanceItems(query: BalanceExportQuery) {
     const columns = balanceExportColumns(query.columns);
-    return this.findAll({ warehouseId: query.warehouseId,
+    return this.findAll({ warehouseId: query.warehouseId, warehouseIds: query.warehouseIds,
       lastPurchasePrice: columns.includes('lastPurchasePrice'), retailValue: columns.includes('retailValue') });
   }
 
-  private async lastPurchasePrices(db: Prisma.TransactionClient, ids: string[], warehouse: Awaited<ReturnType<typeof resolveWarehouse>>) {
+  private async lastPurchasePrices(db: Prisma.TransactionClient, ids: string[], warehouses: WarehouseLocation[]) {
     if (!ids.length) return new Map<string, Prisma.Decimal | null>();
     const cafeId = getCafeId();
-    const warehouseSql = !warehouse ? Prisma.empty : warehouse.isDefault
-      ? Prisma.sql`AND (p.warehouse_id = ${warehouse.id} OR p.warehouse_id IS NULL)`
-      : Prisma.sql`AND p.warehouse_id = ${warehouse.id}`;
+    const warehouseSql = selectedWarehousePurchaseSql(warehouses);
     const prices = await db.$queryRaw<{ ingredientId: string; unitPriceBase: Prisma.Decimal | null }[]>`
       SELECT DISTINCT ON (pi.ingredient_id) pi.ingredient_id AS "ingredientId",
         SUM(pi.total) / NULLIF(SUM(pi.quantity_base), 0) AS "unitPriceBase"
@@ -185,7 +190,7 @@ export class IngredientsService {
       WHERE pi.ingredient_id IN (${Prisma.join(ids)}) AND pi.cafe_id IS NOT DISTINCT FROM ${cafeId}
         AND p.cafe_id IS NOT DISTINCT FROM ${cafeId} AND p.status = 'completed' ${warehouseSql}
       GROUP BY pi.ingredient_id, p.id
-      ORDER BY pi.ingredient_id, COALESCE(p.effective_at, p.date) DESC, p.created_at DESC, p.id DESC
+      ORDER BY pi.ingredient_id, COALESCE(p.effective_at, p.stock_posted_at, p.date) DESC, p.created_at DESC, p.id DESC
     `;
     return new Map(prices.map(({ ingredientId, unitPriceBase }) => [ingredientId, unitPriceBase]));
   }
@@ -230,7 +235,7 @@ export class IngredientsService {
       const dishFields = { id: true, name: true, catalogKind: true, isActive: true, isSet: true } as const;
       const [recipes, direct, variants, preparations, modifiers, latest, aggregateBalances] = await Promise.all([
         db.recipeItem.findMany({ where: { ingredientId: id, cafeId, dish: { cafeId } }, select: { id: true,
-          amount: true, amountUnit: true, dish: { select: dishFields }, variant: { select: { name: true } } } }),
+          amount: true, amountUnit: true, dish: { select: dishFields }, variant: { select: { id: true, name: true } } } }),
         db.dish.findMany({ where: { stockIngredientId: id, cafeId }, select: { ...dishFields, stockAmount: true } }),
         db.dishVariant.findMany({ where: { stockIngredientId: id, cafeId, dish: { cafeId } }, select: { id: true, name: true,
           stockAmount: true, dish: { select: dishFields } } }),
@@ -244,7 +249,7 @@ export class IngredientsService {
           WHERE pi.ingredient_id = ${id} AND pi.cafe_id IS NOT DISTINCT FROM ${ingredient.cafeId}
             AND p.cafe_id IS NOT DISTINCT FROM ${ingredient.cafeId} AND p.status = 'completed'
           GROUP BY p.id
-          ORDER BY COALESCE(p.effective_at, p.date) DESC, p.created_at DESC, p.id DESC
+          ORDER BY COALESCE(p.effective_at, p.stock_posted_at, p.date) DESC, p.created_at DESC, p.id DESC
           LIMIT 1
         `,
         warehouseBalances(db, null, [ingredient]),
@@ -260,9 +265,15 @@ export class IngredientsService {
         ...displayQuantity(amount, unit),
       });
       const usage = [
-        ...recipes.map((row) => menuUsage(row.id, row.dish, 'recipe', row.amount, row.amountUnit, row.variant?.name)),
+        ...recipes.map((row) => ({
+          ...menuUsage(row.id, row.dish, 'recipe', row.amount, row.amountUnit, row.variant?.name),
+          ...(row.variant && { variantId: row.variant.id }),
+        })),
         ...direct.map((dish) => menuUsage(dish.id, dish, 'stock', dish.stockAmount, unit)),
-        ...variants.map((variant) => menuUsage(variant.id, variant.dish, 'variant', variant.stockAmount, unit, variant.name)),
+        ...variants.map((variant) => ({
+          ...menuUsage(variant.id, variant.dish, 'variant', variant.stockAmount, unit, variant.name),
+          variantId: variant.id,
+        })),
         ...preparations.map(({ recipe: { ingredient: product }, amount, unit }) => ({
           sourceId: product.id, targetId: product.id, name: product.name, kind: 'preparation' as const, label: null, active: product.isActive,
           catalogKind: null, isSet: false, ...displayQuantity(amount, unit),
@@ -277,23 +288,21 @@ export class IngredientsService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
-  async supplies(id: string, params: { warehouseId?: string; page?: number; pageSize?: number }) {
+  async supplies(id: string, params: { warehouseId?: string; warehouseIds?: string; page?: number; pageSize?: number }) {
     const page = params.page ?? 1;
     const pageSize = params.pageSize ?? 20;
     return this.prisma.$transaction(async (db) => {
       const ingredient = await this.ensure(id, db);
-      const warehouse = params.warehouseId === undefined ? null : await resolveWarehouse(db, params.warehouseId);
+      const warehouses = await resolveWarehouseSelection(db, params);
       const defaultWarehouse = await db.warehouse.findFirst({ where: { isDefault: true } });
       const cafeId = getCafeId();
       const where: Prisma.PurchaseWhereInput = {
         cafeId,
         status: 'completed',
-        ...warehouseDocumentFilter(warehouse),
+        ...selectedWarehouseDocumentFilter(warehouses),
         items: { some: { ingredientId: id, cafeId } },
       };
-      const warehouseSql = !warehouse ? Prisma.empty : warehouse.isDefault
-        ? Prisma.sql`AND (p.warehouse_id = ${warehouse.id} OR p.warehouse_id IS NULL)`
-        : Prisma.sql`AND p.warehouse_id = ${warehouse.id}`;
+      const warehouseSql = selectedWarehousePurchaseSql(warehouses);
       const [total, pageIds] = await Promise.all([
         db.purchase.count({ where }),
         db.$queryRaw<Array<{ id: string }>>`
@@ -301,14 +310,14 @@ export class IngredientsService {
           WHERE p.cafe_id = ${cafeId} AND p.status = 'completed' ${warehouseSql}
             AND EXISTS (SELECT 1 FROM purchase_items pi
               WHERE pi.purchase_id = p.id AND pi.ingredient_id = ${id} AND pi.cafe_id = ${cafeId})
-          ORDER BY COALESCE(p.effective_at, p.date) DESC, p.id DESC
+          ORDER BY COALESCE(p.effective_at, p.stock_posted_at, p.date) DESC, p.number DESC, p.id DESC
           OFFSET ${(page - 1) * pageSize} LIMIT ${pageSize}
         `,
       ]);
       const purchases = await db.purchase.findMany({
         where: { ...where, id: { in: pageIds.map((entry) => entry.id) } },
         select: {
-          id: true, number: true, date: true, effectiveAt: true, supplier: true,
+          id: true, number: true, date: true, effectiveAt: true, stockPostedAt: true, supplier: true,
           warehouse: { select: { id: true, name: true } },
           items: {
             where: { ingredientId: id, cafeId },
@@ -328,7 +337,7 @@ export class IngredientsService {
         const value = purchase.items.reduce((sum, item) => sum.add(item.total), new Prisma.Decimal(0));
         const location = purchase.warehouse ?? defaultWarehouse;
         return [{
-          purchaseId: purchase.id, number: purchase.number, date: purchase.effectiveAt ?? purchase.date,
+          purchaseId: purchase.id, number: purchase.number, date: purchase.effectiveAt ?? purchase.stockPostedAt ?? purchase.date,
           warehouseId: location?.id ?? null, warehouseName: location?.name ?? 'Основной склад',
           supplier: purchase.supplier, quantity: Number(quantity),
           unitCode: unit, unit: unitLabel(unit),

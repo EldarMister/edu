@@ -10,7 +10,7 @@ export const receiptExportItems = {
 } satisfies Prisma.Order$itemsArgs;
 
 export const receiptExportSelect = {
-  id: true, orderNumber: true, createdAt: true, closedAt: true, status: true, source: true,
+  id: true, orderNumber: true, createdAt: true, closedAt: true, status: true, source: true, comment: true,
   paymentMethod: true, finalAmount: true, refundedAmount: true, discountAmount: true, serviceChargeAmount: true,
   waiter: { select: { name: true } },
   table: { select: { name: true, number: true, hall: { select: { name: true } } } },
@@ -40,7 +40,7 @@ const receiptColumns = [
   text('№ чека', 14), date('Открыт (Бишкек)'), date('Закрыт (Бишкек)'), text('Официант', 27), text('Зал'), text('Стол'),
   text('Источник'), text('Статус'), text('Способ оплаты'), amount('Сумма чека'), amount('Скидка'), amount('Обслуживание'),
   amount('Возвраты'), amount('Выручка после возвратов'), amount('Наличные после возвратов'), amount('Карта после возвратов'),
-  amount('QR после возвратов'), text('ID чека', 40),
+  amount('QR после возвратов'), text('ID чека', 40), text('Комментарий', 45),
 ];
 const itemColumns = [
   text('№ чека', 14), date('Открыт (Бишкек)'), text('Позиция', 35), text('Вариант', 27), text('Количество'),
@@ -87,7 +87,7 @@ export function writeReceiptWorkbook(orders: ExportReceipt[], includeDetails: bo
     order.source === 'delivery' ? null : order.table.name || `Стол ${order.table.number}`,
     sourceLabels[order.source] ?? order.source, statusLabels[order.status], order.paymentMethod ? paymentLabels[order.paymentMethod] : null,
     Number(order.finalAmount), Number(order.discountAmount), Number(order.serviceChargeAmount), Number(order.refundedAmount),
-    order.status === OrderStatus.paid ? netOrderAmount(order).toNumber() : null, ...tenderAmounts(order), order.id,
+    order.status === OrderStatus.paid ? netOrderAmount(order).toNumber() : null, ...tenderAmounts(order), order.id, order.comment,
   ]));
   if (includeDetails) {
     appendSheet(book, 'Позиции', itemColumns, orders.flatMap((order) => (order.items ?? []).map((item) => [

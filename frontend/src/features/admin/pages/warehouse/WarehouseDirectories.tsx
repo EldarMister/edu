@@ -7,7 +7,7 @@ import { WorkspaceSearch } from '../WorkspaceSearch';
 import { Select } from '@/components/Select';
 import { apiError } from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
-import { useSuppliers, useSupplierMutations, useSupplierSettlements, type Supplier } from './settings-api';
+import { useSuppliers, useSupplierMutations, useSupplierSettlements, useWarehouseLocationValuation, type Supplier } from './settings-api';
 import { useWarehouseLocationMutations, type WarehouseLocations, type WarehouseLocation } from './api';
 import { usePackages, usePackageMutations, type PackageUnit } from './extended-api';
 import { UNIT_OPTIONS, unitLabel, type UnitCode } from './units';
@@ -168,6 +168,15 @@ export function SuppliersPage() {
   }
   const supplier = editor?.type === 'supplier' && editor.id ? q.data?.find((item) => item.id === editor.id) : undefined;
   const totals = new Map(settlement.data?.map((row) => [row.supplierId, row]));
+  const footer = rows.reduce((sum, supplier) => {
+    const amounts = totals.get(supplier.id);
+    return {
+      purchaseCount: sum.purchaseCount + (supplier.purchaseCount ?? 0),
+      purchaseTotal: sum.purchaseTotal + (amounts?.purchaseTotal ?? 0),
+      knownDebt: sum.knownDebt + (amounts?.knownDebt ?? 0),
+      missingSettlementCount: sum.missingSettlementCount + (amounts?.missingSettlementCount ?? 0),
+    };
+  }, { purchaseCount: 0, purchaseTotal: 0, knownDebt: 0, missingSettlementCount: 0 });
   return (
     <div className="poster-directory-surface">
       <div className="poster-toolbar">
@@ -182,13 +191,14 @@ export function SuppliersPage() {
       {canReadCosts && settlement.isError && <p role="alert" className="py-3 text-danger">Не удалось загрузить взаиморасчёты. <button type="button" className="text-primary" onClick={() => void settlement.refetch()}>Повторить</button></p>}
       <QueryState pending={q.isPending} error={q.error}>
         <div className="overflow-x-auto">
-          <table className={`poster-table poster-directory-table poster-directory-table--suppliers w-full ${canReadCosts ? 'min-w-[920px]' : 'min-w-[760px]'}`}>
+          <table className={`poster-table poster-directory-table poster-directory-table--suppliers w-full ${canReadCosts ? 'min-w-[1030px]' : 'min-w-[870px]'}`}>
             <thead>
               <tr>
                 <DirectoryNameHeader ascending={sort !== 'desc'} onToggle={() => setSort(sort === 'desc' ? 'asc' : 'desc')}>Имя</DirectoryNameHeader>
                 <th>Телефон</th>
                 <th>Адрес</th>
                 <th>Комментарий</th>
+                <th className="text-right">Количество поставок</th>
                 {canReadCosts && <><th className="text-right">Сумма поставок</th><th className="text-right">Задолженность</th></>}
                 <th><span className="sr-only">Действия</span></th>
               </tr>
@@ -211,6 +221,7 @@ export function SuppliersPage() {
                   <td><span className="block truncate" title={supplier.phone || undefined}>{supplier.phone || '—'}</span></td>
                   <td><span className="block truncate" title={supplier.address || undefined}>{supplier.address || '—'}</span></td>
                   <td><span className="block truncate" title={supplier.note || undefined}>{supplier.note || '—'}</span></td>
+                  <td className="text-right tabular-nums">{supplier.purchaseCount ?? '—'}</td>
                   {canReadCosts && <>
                     <td className="text-right tabular-nums">{result ? balanceMoney(result.purchaseTotal) : '—'}</td>
                     <td className="text-right tabular-nums">
@@ -231,12 +242,24 @@ export function SuppliersPage() {
               })}
               {!rows.length && (
                 <tr>
-                  <td colSpan={canReadCosts ? 7 : 5} className="poster-directory-empty text-center text-text-muted">
+                  <td colSpan={canReadCosts ? 8 : 6} className="poster-directory-empty text-center text-text-muted">
                     {search ? 'Поставщики не найдены' : 'Здесь будут ваши поставщики'}
                   </td>
                 </tr>
               )}
             </tbody>
+            {!!rows.length && <tfoot><tr>
+              <td colSpan={4} className="font-medium">Итого</td>
+              <td className="text-right tabular-nums">{rows.every((supplier) => supplier.purchaseCount != null) ? footer.purchaseCount : '—'}</td>
+              {canReadCosts && <>
+                <td className="text-right tabular-nums">{settlement.data ? balanceMoney(footer.purchaseTotal) : '—'}</td>
+                <td className="text-right tabular-nums">
+                  {settlement.data ? balanceMoney(footer.knownDebt) : '—'}
+                  {!!footer.missingSettlementCount && <span className="block text-xs text-text-muted">По сверенным. Требуют сверки: {footer.missingSettlementCount}</span>}
+                </td>
+              </>}
+              <td />
+            </tr></tfoot>}
           </table>
         </div>
       </QueryState>
@@ -351,6 +374,8 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
 export function LocationsPage({ data }: { data: WarehouseLocations }) {
   const permissions = usePermissions();
   const editable = permissions.canEditSection('warehouse') && permissions.canAction('warehouseSettings');
+  const canReadCosts = permissions.canAction('warehouseCosts');
+  const valuation = useWarehouseLocationValuation(canReadCosts);
   const { editor, openEditor, closeEditor } = useEditorRoute();
   const [search, setSearch] = usePageFilter('search');
   const [sort, setSort] = usePageFilter('sort', 'asc');
@@ -359,6 +384,13 @@ export function LocationsPage({ data }: { data: WarehouseLocations }) {
   const rows = data.locations.filter((item) =>
     `${item.name} ${item.address ?? ''}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
   ).sort((a, b) => a.name.localeCompare(b.name, 'ru') * (sort === 'desc' ? -1 : 1));
+  const valuationByWarehouse = new Map(valuation.data?.map((row) => [row.warehouseId, row]));
+  const visibleValuations = rows.flatMap(({ id }) => {
+    const row = valuationByWarehouse.get(id);
+    return row ? [row] : [];
+  });
+  const stockValue = visibleValuations.reduce((value, row) => value + row.stockValue, 0);
+  const unknownCount = visibleValuations.reduce((count, row) => count + row.unknownCount, 0);
   async function assign(stationId: string, warehouseId: string) {
     try {
       await setRoute.mutateAsync({ stationId, warehouseId: warehouseId || null });
@@ -373,19 +405,24 @@ export function LocationsPage({ data }: { data: WarehouseLocations }) {
         <WorkspaceSearch label="Поиск склада" value={search} onChange={setSearch} placeholder="Поиск..." />
         {editable && <button type="button" className="btn-primary btn-md ml-auto" onClick={() => openEditor({ type: 'location' })}>Добавить</button>}
       </div>
+      {canReadCosts && valuation.isError && <p role="alert" className="px-4 py-3 text-danger">Не удалось загрузить стоимость остатков. <button type="button" className="text-primary" onClick={() => void valuation.refetch()}>Повторить</button></p>}
       <div className="overflow-x-auto">
-      <table className="poster-table poster-directory-table poster-directory-table--locations w-full min-w-[580px]">
-        <colgroup><col style={{ width: 68 }} /><col style={{ width: '42%' }} /><col /><col style={{ width: 96 }} /></colgroup>
+      <table className={`poster-table poster-directory-table poster-directory-table--locations w-full ${canReadCosts ? 'min-w-[740px]' : 'min-w-[580px]'}`}>
+        <colgroup><col style={{ width: 68 }} /><col style={{ width: '34%' }} /><col />
+          {canReadCosts && <col style={{ width: 180 }} />}<col style={{ width: 96 }} /></colgroup>
         <thead>
           <tr>
             <th className="w-16">№</th>
             <DirectoryNameHeader ascending={sort !== 'desc'} onToggle={() => setSort(sort === 'desc' ? 'asc' : 'desc')} />
             <th>Адрес</th>
+            {canReadCosts && <th className="text-right">Сумма остатков</th>}
             <th><span className="sr-only">Действия</span></th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((location) => (
+          {rows.map((location) => {
+            const value = valuationByWarehouse.get(location.id);
+            return (
             <tr key={location.id}>
               <td>{data.locations.findIndex((item) => item.id === location.id) + 1}</td>
               <td>
@@ -400,6 +437,10 @@ export function LocationsPage({ data }: { data: WarehouseLocations }) {
                 {location.isDefault && <span className="ml-2 text-xs text-text-muted">По умолчанию</span>}
               </td>
               <td><span className="block truncate" title={location.address || undefined}>{location.address || '—'}</span></td>
+              {canReadCosts && <td className="text-right tabular-nums">
+                {value ? balanceMoney(value.stockValue) : '—'}
+                {!!value?.unknownCount && <span className="block text-xs text-text-muted">Без оценки: {value.unknownCount}</span>}
+              </td>}
               <td>
                 <DirectoryActions
                   label={location.name}
@@ -407,15 +448,24 @@ export function LocationsPage({ data }: { data: WarehouseLocations }) {
                 />
               </td>
             </tr>
-          ))}
+            );
+          })}
           {!rows.length && (
             <tr>
-              <td colSpan={4} className="poster-directory-empty text-center text-text-muted">
+              <td colSpan={canReadCosts ? 5 : 4} className="poster-directory-empty text-center text-text-muted">
                 Склады не найдены
               </td>
             </tr>
           )}
         </tbody>
+        {canReadCosts && !!rows.length && <tfoot><tr>
+          <td colSpan={3} className="font-medium">{unknownCount ? 'Известная стоимость' : 'Итого'}</td>
+          <td className="text-right tabular-nums">
+            {visibleValuations.length === rows.length ? balanceMoney(stockValue) : '—'}
+            {!!unknownCount && <span className="block text-xs text-text-muted">Без оценки: {unknownCount}</span>}
+          </td>
+          <td />
+        </tr></tfoot>}
       </table>
       </div>
       <details className="poster-advanced mt-6">

@@ -87,6 +87,7 @@ export class AdminOrdersService {
 
   private buildWhere(query: OrderQueryDto): Prisma.OrderWhereInput {
     const where: Prisma.OrderWhereInput = {};
+    const filters: Prisma.OrderWhereInput[] = [];
 
     if (query.tab === 'active') where.status = { in: ACTIVE_STATUSES };
     else if (query.tab === 'paid') where.status = OrderStatus.paid;
@@ -94,14 +95,17 @@ export class AdminOrdersService {
 
     const tender = getTender(query.paymentMethod);
     if (tender) {
-      where.AND = [{ OR: [
+      filters.push({ OR: [
         { payments: { some: { method: tender, status: { in: [PaymentStatus.paid, PaymentStatus.refunded] } } } },
         legacyTender(tender),
-      ] }];
+      ] });
     } else if (query.paymentMethod === PaymentMethod.mixed) {
       where.paymentMethod = PaymentMethod.mixed;
     }
     if (query.waiterId) where.waiterId = query.waiterId;
+    if (query.comments === 'with') filters.push({ comment: { not: '' } });
+    if (query.comments === 'without') filters.push({ OR: [{ comment: null }, { comment: '' }] });
+    if (filters.length) where.AND = filters;
 
     const search = query.search?.trim();
     if (search) {
@@ -112,6 +116,7 @@ export class AdminOrdersService {
         { externalOrderId: contains },
         { deliveryCustomerName: contains },
         { deliveryCustomerPhone: contains },
+        { comment: contains },
         { items: { some: {
           status: { notIn: [OrderItemStatus.cancelled, OrderItemStatus.rejected] },
           OR: [{ dishNameSnapshot: contains }, { dishVariantNameSnapshot: contains }],

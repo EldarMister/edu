@@ -9,8 +9,19 @@ export interface Supplier {
   isActive: boolean;
   address?: string | null;
   taxId?: string | null;
+  purchaseCount?: number;
 }
 const KEY = ['admin', 'warehouse'] as const;
+export function useWarehouseLocationValuation(enabled: boolean) {
+  return useQuery({
+    enabled,
+    queryKey: [...KEY, 'locations', 'valuation'],
+    queryFn: async () => (await api.get<{
+      warehouseId: string; stockValue: number; unknownCount: number;
+    }[]>('/admin/warehouse/locations/valuation')).data,
+  });
+}
+
 export function useSuppliers(enabled = true) {
   return useQuery({
     enabled,

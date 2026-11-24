@@ -39,6 +39,50 @@ export function warehouseDocumentFilter(warehouse: WarehouseLocation | null) {
     : { warehouseId: warehouse.id };
 }
 
+type WarehouseSelection = { warehouseId?: string; warehouseIds?: string };
+
+export function warehouseSelectionIds({ warehouseId, warehouseIds }: WarehouseSelection) {
+  if (warehouseId !== undefined && warehouseIds !== undefined) {
+    throw new BadRequestException('Укажите один способ выбора складов');
+  }
+  const requested = warehouseIds?.split(',') ?? (warehouseId === undefined ? undefined : [warehouseId]);
+  if (!requested) return undefined;
+  const ids = new Set(requested.map((id) => id.trim()));
+  if (ids.has('') || ids.size > 100 || [...ids].some((id) => id.length > 160)) {
+    throw new BadRequestException('Проверьте список складов');
+  }
+  return ids;
+}
+
+export async function resolveWarehouseSelection(db: Prisma.TransactionClient, { warehouseId, warehouseIds }: WarehouseSelection): Promise<WarehouseLocation[]> {
+  if (warehouseIds === undefined) {
+    const warehouse = warehouseId === undefined ? null : await resolveWarehouse(db, warehouseId);
+    return warehouse ? [warehouse] : [];
+  }
+  const ids = warehouseSelectionIds({ warehouseId, warehouseIds })!;
+  const cafeId = getCafeId();
+  if (!cafeId) throw new NotFoundException('Склад не найден');
+  const warehouses = await db.warehouse.findMany({ where: { cafeId, id: { in: [...ids] } }, select: locationSelect });
+  if (warehouses.length !== ids.size) throw new NotFoundException('Склад не найден');
+  return warehouses.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+}
+
+export function selectedWarehouseDocumentFilter(warehouses: WarehouseLocation[]): Prisma.PurchaseWhereInput {
+  if (warehouses.length === 0) return {};
+  const selection = { warehouseId: { in: warehouses.map(({ id }) => id) } };
+  return warehouses.some(({ isDefault }) => isDefault)
+    ? { OR: [selection, { warehouseId: null }] }
+    : selection;
+}
+
+export function selectedWarehousePurchaseSql(warehouses: WarehouseLocation[]) {
+  if (warehouses.length === 0) return Prisma.empty;
+  const ids = Prisma.join(warehouses.map(({ id }) => id));
+  return warehouses.some(({ isDefault }) => isDefault)
+    ? Prisma.sql`AND (p.warehouse_id IN (${ids}) OR p.warehouse_id IS NULL)`
+    : Prisma.sql`AND p.warehouse_id IN (${ids})`;
+}
+
 export async function getWarehouseBalance(
   db: Prisma.TransactionClient,
   warehouse: WarehouseLocation | null,
@@ -71,13 +115,17 @@ export async function setWarehouseBalance(
 
 export async function warehouseBalances(
   db: Prisma.TransactionClient,
-  warehouse: WarehouseLocation | null,
+  warehouse: WarehouseLocation | WarehouseLocation[] | null,
   ingredients: IngredientWithBalance[],
 ) {
   const cafeId = getCafeId();
-  const rows = cafeId && ingredients.length && !warehouse?.isDefault
+  const locations = Array.isArray(warehouse) ? warehouse : warehouse ? [warehouse] : [];
+  const warehouseIds = locations.filter(({ isDefault }) => !isDefault).map(({ id }) => id);
+  const includeDefault = !locations.length || locations.some(({ isDefault }) => isDefault);
+  const rows = cafeId && ingredients.length && (!locations.length || warehouseIds.length)
     ? await db.warehouseStock.findMany({
-        where: { cafeId, warehouseId: warehouse?.id, ingredientId: { in: ingredients.map(({ id }) => id) } },
+        where: { cafeId, ...(locations.length ? { warehouseId: { in: warehouseIds } } : { warehouse: { isDefault: false } }),
+          ingredientId: { in: ingredients.map(({ id }) => id) } },
         select: { ingredientId: true, stock: true, avgCost: true, valuationKnown: true },
       })
     : [];
@@ -90,15 +138,17 @@ export async function warehouseBalances(
 
   return new Map(ingredients.map((ingredient) => {
     const other = byIngredient.get(ingredient.id) ?? [];
-    const balances = warehouse && !warehouse.isDefault ? other : [ingredient, ...other];
+    const balances = includeDefault ? [ingredient, ...other] : other;
     let stock = zero;
     let stockValue = zero;
+    let knownStockValue = zero;
     let positiveStock = zero;
     let positiveValue = zero;
     for (const balance of balances) {
       const value = balance.stock.mul(balance.avgCost);
       stock = stock.add(balance.stock);
       stockValue = stockValue.add(value);
+      if (balance.valuationKnown) knownStockValue = knownStockValue.add(value.toDecimalPlaces(2));
       if (balance.stock.gt(0)) {
         positiveStock = positiveStock.add(balance.stock);
         positiveValue = positiveValue.add(value);
@@ -107,7 +157,8 @@ export async function warehouseBalances(
     const avgCost = balances.length === 1 ? balances[0].avgCost
       : positiveStock.gt(0) ? positiveValue.div(positiveStock)
       : balances[0]?.avgCost ?? zero;
-    const valuationKnown = balances.length > 0 && balances.every((balance) => balance.stock.isZero() || balance.valuationKnown === true) && balances.some((balance) => balance.stock.gt(0));
-    return [ingredient.id, { stock, avgCost, stockValue, valuationKnown }];
+    const stockValueKnown = balances.every((balance) => balance.stock.isZero() || balance.valuationKnown === true);
+    const valuationKnown = stockValueKnown && positiveStock.gt(0);
+    return [ingredient.id, { stock, avgCost, stockValue, knownStockValue, stockValueKnown, valuationKnown }];
   }));
 }

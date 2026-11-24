@@ -31,6 +31,9 @@ export class BalanceExportQuery {
   @IsOptional() @IsString() @MaxLength(160)
   warehouseId?: string;
 
+  @IsOptional() @IsString() @MaxLength(8192)
+  warehouseIds?: string;
+
   @IsOptional() @Transform(repeated) @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) @MaxLength(40, { each: true })
   kinds?: string[];
 
@@ -116,7 +119,7 @@ export function writeBalanceWorkbook(rows: BalanceItem[], warehouse: string, sel
     const stocked = rows.filter((item) => !isVirtual(item));
     const unknown = stocked.some((item) => item.stockValue == null);
     XLSX.utils.sheet_add_aoa(sheet, [selected.map((key, index) => key === 'total'
-      ? stocked.reduce((sum, item) => sum + Math.round((item.stockValue ?? 0) * 100), 0) / 100
+      ? stocked.reduce((sum, item) => sum + Math.round(item.knownStockValue * 100), 0) / 100
       : index === 0 ? unknown ? 'Известная стоимость' : 'Всего' : null)], { origin: { r: rows.length + 1, c: 0 } });
     sheet[XLSX.utils.encode_cell({ r: rows.length + 1, c: selected.indexOf('total') })].z = '#,##0.00 "с"';
   }

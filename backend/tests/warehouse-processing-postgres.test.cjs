@@ -1,6 +1,7 @@
 require('ts-node/register/transpile-only');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const XLSX = require('xlsx');
 const { randomUUID } = require('node:crypto');
 const { PrismaClient, Prisma } = require('@prisma/client');
 const { runWithTenant, tenantPrismaMiddleware } = require('../src/tenant/tenant-context.ts');
@@ -111,6 +112,25 @@ test('PostgreSQL: shared packages and multi-output processing preserve quantitie
         assert.equal((await processing.create(actor, dto)).id, a.id);
         await assert.rejects(processing.create(actor, { ...dto, note: 'Другая операция' }), /уже использован/);
         await assert.rejects(processing.update(actor, a.id, { ...dto, revision: posted.revision }), /неизменяема/);
+      });
+      await t.test('Excel register preserves selected columns and acts retain historical quantity and cost by permission', async () => {
+        const register = XLSX.read(await processing.registerWorkbook({
+          ids: ['unavailable', posted.id], columns: ['date', 'note', 'outputs'],
+        }));
+        const rows = XLSX.utils.sheet_to_json(register.Sheets['Переработки'], { header: 1 });
+        assert.deepEqual(rows[0], ['Дата', 'Комментарий', 'Полученные продукты']);
+        assert.match(rows[1][2], /Хлеб.*4.*Крошка.*0,5/);
+        assert.equal(rows.length, 2);
+        const act = XLSX.read(await processing.actWorkbook(posted.id, true));
+        const lines = XLSX.utils.sheet_to_json(act.Sheets['Полученные продукты'], { header: 1 });
+        assert.deepEqual(lines[1].slice(0, 3), ['Хлеб', main.name, 4]);
+        assert.deepEqual(lines[1].slice(4), [22, 0.8, 88]);
+        const withoutCosts = XLSX.read(await processing.actWorkbook(posted.id, false));
+        const allowed = XLSX.utils.sheet_to_json(withoutCosts.Sheets['Полученные продукты'], { header: 1 });
+        assert.deepEqual(allowed[0], ['Продукт', 'Склад', 'Количество', 'Ед. изм.']);
+        assert.equal(allowed[1].length, 4);
+        await runWithTenant({ cafeId: foreign.id }, () => assert.rejects(processing.actWorkbook(posted.id, true), { status: 404 }));
+        assert.equal(await db.stockMovement.count({ where: { sourceId: posted.id } }), 4);
       });
       await t.test('failed reversal when output consumed rolls back every effect; repeated successful reversal is safe', async () => {
         const documents = new WarehouseDocumentsService(db);

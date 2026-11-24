@@ -20,6 +20,12 @@ const PAYMENT_OPTIONS = [
   { value: 'card', label: 'Карта' },
 ];
 
+const COMMENT_OPTIONS = [
+  { value: '', label: 'Комментарии' },
+  { value: 'with', label: 'С комментарием' },
+  { value: 'without', label: 'Без комментария' },
+];
+
 export function normalizeOrderPaymentMethod(value: string) {
   return PAYMENT_OPTIONS.some((option) => option.value === value) ? value : '';
 }
@@ -36,12 +42,14 @@ type Props = {
   tab: string;
   paymentMethod: string;
   waiterId: string;
+  comments: string;
   waiterOptions: SelectOption[];
   sort: OrderSort;
   search: string;
   onTabChange: (value: string) => void;
   onPaymentMethodChange: (value: string) => void;
   onWaiterChange: (value: string) => void;
+  onCommentsChange: (value: string) => void;
   onSortChange: (value: OrderSort) => void;
   onSearchChange: (value: string) => void;
 };
@@ -54,6 +62,7 @@ export function OrdersFilters(props: Props) {
       <Select className={`${ctrl} orders-status-select`} ariaLabel={tr('Статус заказа')} value={props.tab} onChange={props.onTabChange} options={STATUS_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />
       <Select className={`${ctrl} orders-payment-select`} ariaLabel={tr('Способ оплаты')} value={props.paymentMethod} onChange={props.onPaymentMethodChange} options={PAYMENT_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />
       <Select className={`${ctrl} orders-waiter-select`} ariaLabel={tr('Официант')} value={props.waiterId} onChange={props.onWaiterChange} options={props.waiterOptions} />
+      <Select className={`${ctrl} orders-comment-select`} ariaLabel={tr('Комментарии к чекам')} value={props.comments} onChange={props.onCommentsChange} options={COMMENT_OPTIONS.map((option) => ({ ...option, label: tr(option.label) }))} />
       <Select className={`${ctrl} orders-sort-select`} value={props.sort} onChange={(value) => props.onSortChange(value as OrderSort)} options={SORT_OPTIONS.map((option) => ({ ...option, label: tr(option.label) }))} />
       <OrdersSearchField value={props.search} onChange={props.onSearchChange} />
     </div>

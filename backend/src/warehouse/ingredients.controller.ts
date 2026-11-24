@@ -22,6 +22,9 @@ class IngredientSuppliesQuery {
   @IsOptional() @IsString() @MaxLength(160)
   warehouseId?: string;
 
+  @IsOptional() @IsString() @MaxLength(8192)
+  warehouseIds?: string;
+
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(1000000)
   page?: number;
 

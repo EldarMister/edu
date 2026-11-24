@@ -106,10 +106,19 @@ export async function downloadStockDocument(id: string, kind: ExportableStockDoc
   const transfer = kind === 'transfer';
   const filename = transfer ? 'transfer-act.xlsx' : 'inventory.xlsx';
   const response = await api.get<Blob>(`${BASE_URL}/${encodeURIComponent(id)}/${filename}`, { responseType: 'blob' });
-  const url = URL.createObjectURL(response.data);
+  downloadWarehouseWorkbook(response.data, `${transfer ? 'Акт перемещения' : 'Инвентаризация'} ${id.slice(0, 8)}.xlsx`);
+}
+
+export async function downloadTransferRegister(ids: string[], columns: string[]) {
+  const response = await api.post<Blob>(`${BASE_URL}/transfer-register.xlsx`, { ids, columns }, { responseType: 'blob' });
+  downloadWarehouseWorkbook(response.data, 'Перемещения.xlsx');
+}
+
+export function downloadWarehouseWorkbook(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `${transfer ? 'Акт перемещения' : 'Инвентаризация'} ${id.slice(0, 8)}.xlsx`;
+  link.download = filename;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

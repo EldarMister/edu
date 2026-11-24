@@ -23,11 +23,13 @@ const orderColumns = {
   amount: { label: 'Сумма', width: 104, className: 'text-right font-medium text-text-primary' },
   status: { label: 'Статус заказа', width: 198, className: 'order-status-cell pl-4' },
   payment: { label: 'Способ оплаты', width: 164 },
+  comment: { label: 'Комментарий', width: 220 },
   actions: { label: 'Действия', width: 100, className: 'px-1 text-center' },
 } satisfies Record<string, { label: string; width: number; className?: string }>;
 
 type OrderColumn = keyof typeof orderColumns;
-export const defaultOrderColumns = Object.keys(orderColumns) as OrderColumn[];
+export const availableOrderColumns = Object.keys(orderColumns) as OrderColumn[];
+export const defaultOrderColumns: OrderColumn[] = availableOrderColumns.filter((key) => key !== 'comment');
 export function orderColumnLabel(column: OrderColumn) {
   return orderColumns[column].label;
 }
@@ -69,6 +71,7 @@ export function OrdersTable({ items, byClose = false, isLoading, error, columns,
       amount: money(order.finalAmount),
       status: <OrderStatusBadges order={order} size="sm" className="flex flex-wrap items-center gap-1" />,
       payment: paymentCell(order, tr),
+      comment: order.comment ? <span className="block truncate" title={order.comment}>{order.comment}</span> : '—',
       actions: <div className="flex items-center justify-center gap-1">
         {editable && order.status !== 'paid' && <OrderRowAction label={tr('Изменить статус')} onClick={() => onEdit(order)}><IconEdit className="h-4 w-4" /></OrderRowAction>}
         {editable && canOwnerOperation('cancelOrders') && CANCELLABLE.has(order.status) && <OrderRowAction label={tr('Отменить')} danger onClick={() => onCancel(order)}><IconX className="h-4 w-4" /></OrderRowAction>}

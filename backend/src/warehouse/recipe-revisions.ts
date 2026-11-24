@@ -82,9 +82,16 @@ function composition(snapshot: Prisma.JsonObject, labels: Map<string, ItemLabel>
     const item = ingredient(id);
     return { ...item, amount: quantity(row.stockAmount, item.unit) };
   };
+  const recipeMetadata = (value: Prisma.JsonValue | undefined) => {
+    const metadata = object(value);
+    const amount = number(metadata.outputQuantity);
+    return { instructions: string(metadata.instructions),
+      output: amount == null ? null : { amount, unit: string(metadata.outputUnit) } };
+  };
   const variants = records(snapshot.variants).flatMap((variant) => {
     const id = string(variant.id);
-    return id ? [{ id, name: string(variant.name), stockItem: binding(variant) }] : [];
+    return id ? [{ id, name: string(variant.name), stockItem: binding(variant),
+      ...(variant.recipeMetadata != null && { ownRecipe: recipeMetadata(variant.recipeMetadata) }) }] : [];
   });
   const variantNames = new Map(variants.map(({ id, name }) => [id, name]));
   const items = records(snapshot.items).flatMap((item) => {
@@ -124,10 +131,7 @@ function composition(snapshot: Prisma.JsonObject, labels: Map<string, ItemLabel>
     });
     return [{ id, name, options }];
   });
-  const metadata = object(snapshot.metadata);
-  const outputAmount = number(metadata.outputQuantity);
-  return { items, variants, stockItem: binding(snapshot), components, modifierGroups, instructions: string(metadata.instructions),
-    output: outputAmount == null ? null : { amount: outputAmount, unit: string(metadata.outputUnit) } };
+  return { items, variants, stockItem: binding(snapshot), components, modifierGroups, ...recipeMetadata(snapshot.metadata) };
 }
 
 export async function readCompositionRevisions(tx: Prisma.TransactionClient, dishId: string) {

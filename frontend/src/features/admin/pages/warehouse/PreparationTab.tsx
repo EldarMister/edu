@@ -33,6 +33,8 @@ import { displayedProcessingStages, lossFromAmounts, pieceNetWeight, preparation
   processingRetention, recipeQuantity, supportsProcessing, validRecipeRows } from './recipe-draft-values';
 import { RecipeProcessingFields, recipeProcessingLabel } from './RecipeProcessingFields';
 import { VolumeNetFields } from './RecipeQuantityInput';
+import { WorkspaceHeaderActions } from '../WorkspaceHeader';
+import { PreparationPrintButton } from './PreparationPrintButton';
 
 type PreparationAction = {
   kind: 'recipe' | 'produce';
@@ -91,7 +93,7 @@ export function PreparationCardPage({
   };
   return (
     <EditorPage title="Добавление полуфабриката" onClose={onClose}>
-      <RecipeForm recipe={empty} onClose={onClose} />
+      <RecipeForm recipe={empty} warehouseId={warehouseId} onClose={onClose} />
     </EditorPage>
   );
 }
@@ -106,10 +108,18 @@ function ExistingPreparation({
   onClose: () => void;
 }) {
   const query = usePreparationRecipe(id, warehouseId);
+  const editable = usePermissions().can('actions.warehouseRecipes');
+  const readyDish = query.data?.kind === 'prepared_dish';
+  const title = editable
+    ? readyDish ? 'Редактирование готового блюда' : 'Редактирование полуфабриката'
+    : readyDish ? 'Готовое блюдо' : 'Полуфабрикат';
   return (
-    <EditorPage title="Редактирование полуфабриката" onClose={onClose}>
+    <EditorPage title={title} onClose={onClose}>
+      {query.data && <WorkspaceHeaderActions>
+        <PreparationPrintButton recipe={query.data} />
+      </WorkspaceHeaderActions>}
       <QueryState pending={query.isPending} error={query.error}>
-        {query.data && <RecipeForm key={id} recipe={query.data} onClose={onClose} />}
+        {query.data && <RecipeForm key={id} recipe={query.data} warehouseId={warehouseId} onClose={onClose} />}
       </QueryState>
     </EditorPage>
   );
@@ -165,11 +175,11 @@ const blankRow = (): RecipeDraft => ({
 const unitFactor = (unit: UnitCode) => (unit === 'kg' || unit === 'l' ? 1000 : 1);
 const recipeWeight = (amount: number) => String(Number(amount.toFixed(6)));
 
-function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () => void }) {
+function RecipeForm({ recipe, warehouseId, onClose }: { recipe: PreparationCard; warehouseId?: string; onClose: () => void }) {
   const formId = useId();
   const focusNewRow = useRef<string | null>(null);
   const submitting = useRef(false);
-  const ingredients = useIngredients('');
+  const ingredients = useIngredients('', warehouseId);
   const save = useSavePreparationCard();
   const { can } = usePermissions();
   const editable = can('actions.warehouseRecipes');

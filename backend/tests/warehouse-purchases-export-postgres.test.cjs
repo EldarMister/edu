@@ -9,6 +9,7 @@ const { validate } = require('class-validator');
 const { runWithTenant, tenantPrismaMiddleware } = require('../src/tenant/tenant-context.ts');
 const { IngredientsService } = require('../src/warehouse/ingredients.service.ts');
 const { WarehouseLocationsService } = require('../src/warehouse/locations.service.ts');
+const { WarehouseSuppliersService } = require('../src/warehouse/suppliers.ts');
 const { PurchasesService } = require('../src/warehouse/purchases.service.ts');
 const { PurchaseExportQuery, purchaseDateRange } = require('../src/warehouse/purchases-query.dto.ts');
 const { purchaseExportColumns } = require('../src/warehouse/purchases-xlsx.ts');
@@ -60,6 +61,63 @@ test('purchase query: Bishkek calendar bounds and explicit ISO instants are inde
     assert.throws(() => purchaseDateRange(...args));
   }
 });
+
+test('PostgreSQL: balances, latest prices, supply details and XLSX share the warehouse selection', { skip: !url }, async () => fixture(async ({ db, cafe, foreign, ingredients, purchases, locations }) => {
+  const [main] = (await locations.list(cafe.id)).locations;
+  const bar = await locations.save(cafe.id, 'Кухня');
+  const store = await locations.save(cafe.id, 'Терраса');
+  const otherCafe = await runWithTenant({ cafeId: foreign.id }, () => locations.save(foreign.id, 'Чужой склад'));
+  const item = await ingredients.create({ name: 'Какао', unit: 'kg' });
+  const suppliers = new WarehouseSuppliersService(db);
+  const supplier = await suppliers.save({ name: 'Поставщик какао' });
+  const receipt = (warehouse, quantity, purchasePrice, date, complete = true) => purchases.create({
+    warehouseId: warehouse.id, supplierId: supplier.id, complete, date, effectiveAt: date,
+    items: [{ ingredientId: item.id, unit: 'kg', quantity, purchasePrice }],
+  });
+  const first = await receipt(main, 2, 10, '2026-11-04T08:00:00Z');
+  const second = await receipt(bar, 3, 20, '2026-11-05T08:00:00Z');
+  await receipt(store, 20, 70, '2026-11-06T08:00:00Z');
+  await receipt(store, 4, 5, '2026-11-07T08:00:00Z', false);
+  await db.purchase.update({ where: { id: first.id }, data: { warehouseId: null, supplierId: null } });
+  await db.purchase.update({ where: { id: second.id }, data: {
+    effectiveAt: null, date: new Date('2026-10-30T08:00:00Z'), stockPostedAt: new Date('2026-11-05T08:00:00Z'),
+  } });
+  assert.deepEqual((await suppliers.list()).map(({ id, purchaseCount }) => [id, purchaseCount]), [[supplier.id, 3]]);
+
+  const query = { warehouseIds: `${main.id},${bar.id}`, columns: 'name,warehouse,stock,lastPurchasePrice,total' };
+  const result = await ingredients.balances(query);
+  assert.deepEqual(result.rows.map(({ stock, avgCost, lastPurchasePrice, stockValue }) => [stock, avgCost, lastPurchasePrice, stockValue]),
+    [[5, 16, 20, 80]]);
+  assert.equal(result.stockValue, 80);
+  assert.equal((await ingredients.balances({})).rows[0].stock, 25);
+  const supplyRows = await ingredients.supplies(item.id, query);
+  assert.deepEqual(supplyRows.rows.map(({ purchaseId }) => purchaseId), [second.id, first.id]);
+  assert.equal(supplyRows.rows[0].date.toISOString(), '2026-11-05T08:00:00.000Z');
+  const workbook = XLSX.read(await ingredients.exportXlsx(query), { type: 'buffer' });
+  const [, exported] = XLSX.utils.sheet_to_json(workbook.Sheets['Остатки'], { header: 1 });
+  assert.deepEqual(exported, ['Какао', [main.name, bar.name].sort((a, b) => a.localeCompare(b, 'ru')).join(', '), 5, 20, 80]);
+
+  await db.ingredient.update({ where: { id: item.id }, data: { stock: -3000 } });
+  const offsetting = await ingredients.balances(query);
+  assert.deepEqual(offsetting.rows.map(({ stock, stockValue }) => [stock, stockValue]), [[0, 30]],
+    'warehouse balances can offset in quantity while their ledger values still differ');
+  const unvalued = await ingredients.create({ name: 'Неоценённый товар', unit: 'kg', stock: 1 });
+  await db.ingredient.update({ where: { id: unvalued.id }, data: { valuationKnown: false } });
+  await db.warehouseStock.create({ data: { cafeId: cafe.id, warehouseId: bar.id, ingredientId: unvalued.id,
+    stock: 1000, avgCost: '0.007', valuationKnown: true } });
+  const partial = await ingredients.balances(query);
+  assert.equal(partial.rows.find(({ id }) => id === unvalued.id).stockValue, null);
+  assert.equal(partial.stockValue, 37);
+  assert.equal(partial.incompleteStockValue, true);
+  const partialWorkbook = XLSX.read(await ingredients.exportXlsx(query), { type: 'buffer' });
+  const subtotal = XLSX.utils.sheet_to_json(partialWorkbook.Sheets['Остатки'], { header: 1, blankrows: false }).at(-1);
+  assert.deepEqual([subtotal[0], subtotal[4]], ['Известная стоимость', 37]);
+  const valuation = await locations.valuation(cafe.id);
+  assert.deepEqual(valuation.map(({ warehouseId, stockValue, unknownCount }) => [warehouseId, stockValue, unknownCount]).sort(),
+    [[main.id, -30, 1], [bar.id, 67, 0], [store.id, 1400, 0]].sort());
+  await assert.rejects(ingredients.balances({ warehouseIds: `${bar.id},${otherCafe.id}` }), /Склад не найден/);
+  await assert.rejects(ingredients.balances({ ...query, warehouseId: bar.id }), /Укажите один способ выбора/);
+}));
 
 test('PostgreSQL: opening ingredient stock is one editable supply and rolls back on invalid input', { skip: !url }, async () => fixture(async ({ db, cafe, ingredients, purchases, locations }) => {
   const warehouse = await locations.save(cafe.id, 'Склад начальной поставки');

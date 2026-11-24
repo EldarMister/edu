@@ -83,6 +83,7 @@
 .orders-status-select { width: 158px; }
 .orders-payment-select { width: 220px; }
 .orders-waiter-select { width: 188px; }
+.orders-comment-select { width: 176px; }
 .orders-sort-select { width: 177px; }
 
 .orders-search-input::placeholder { color: light-dark(#93a3be, rgb(var(--edu-text-light))); font-weight: 400; }

@@ -1,8 +1,10 @@
-import { BadRequestException, Body, ConflictException, Controller, Get, Injectable, Module, NotFoundException, Param, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Get, Injectable, Module, NotFoundException, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { Prisma, Role } from '@prisma/client';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
+import { hasPermission, resolvePermissions } from '../common/permissions';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { PrismaService } from '../prisma/prisma.service';
@@ -16,6 +18,8 @@ import { inventoryReversalBlockedReason } from './closed-inventory-period';
 import { purchaseDateRange } from './purchases-query.dto';
 import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, unitLabel } from './units';
 import { getWarehouseBalance, resolveWarehouse } from './warehouse-location';
+import { warehouseDateColumn, warehouseMoneyFormat, warehouseRegisterColumns, warehouseRegisterRows,
+  sendWarehouseWorkbook, WarehouseRegisterExportDto, writeWarehouseRegister, writeWarehouseWorkbook } from './warehouse-register-xlsx';
 
 type Actor = Pick<AuthUser, 'id' | 'name' | 'role' | 'cafeId'> & Partial<Pick<AuthUser, 'permissions'>>;
 const include = { lines: { orderBy: { sortOrder: 'asc' as const } } };
@@ -24,6 +28,17 @@ type Line = Omit<Prisma.ProcessingLineUncheckedCreateInput, 'id' | 'cafeId' | 'd
   quantity: Prisma.Decimal; unitCost: Prisma.Decimal; lineCost: Prisma.Decimal; costSharePercent: Prisma.Decimal;
 };
 const zero = () => new Prisma.Decimal(0);
+const processingRegisterColumns = {
+  date: warehouseDateColumn,
+  inputs: { label: 'Исходные продукты', width: 52 },
+  outputs: { label: 'Полученные продукты', width: 52 },
+  note: { label: 'Комментарий', width: 42 },
+};
+const quantityText = new Intl.NumberFormat('ru', { useGrouping: false, maximumFractionDigits: 6 });
+
+function processingProductSummary(lines: { name: string; quantity: number; unitLabel: string }[]) {
+  return lines.map((line) => `${line.name} · ${quantityText.format(line.quantity)} ${line.unitLabel}`).join(', ');
+}
 function tenant(actor?: Actor) {
   const cafeId = getCafeId();
   if (!cafeId || (actor && actor.cafeId !== cafeId)) throw new BadRequestException('Заведение не назначено');
@@ -60,15 +75,68 @@ export class ProcessingService {
   constructor(private readonly prisma: PrismaService) {}
 
   async list(query: { from?: string; to?: string; warehouseId?: string; search?: string } = {}) {
+    return this.listDocuments(query);
+  }
+
+  private async listDocuments(query: { from?: string; to?: string; warehouseId?: string; search?: string; ids?: string[] }) {
     const cafeId = tenant();
     const period = purchaseDateRange(query.from, query.to);
     const search = query.search?.trim();
-    const rows = await this.prisma.processingDocument.findMany({ where: { cafeId,
+    const rows = await this.prisma.processingDocument.findMany({ where: { cafeId, id: query.ids && { in: query.ids },
       date: period,
       lines: query.warehouseId ? { some: { warehouseId: query.warehouseId } } : undefined,
       OR: search ? [{ note: { contains: search, mode: 'insensitive' } }, { lines: { some: { name: { contains: search, mode: 'insensitive' } } } }] : undefined,
     }, include, orderBy: [{ date: 'desc' }, { id: 'desc' }] });
     return rows.map((row) => this.serialize(row));
+  }
+
+  async registerWorkbook(dto: WarehouseRegisterExportDto) {
+    const columns = warehouseRegisterColumns(dto.columns, processingRegisterColumns);
+    const rows = warehouseRegisterRows(dto.ids, await this.listDocuments({ ids: dto.ids }));
+    return writeWarehouseRegister('Переработки', columns.map((key) => processingRegisterColumns[key]), rows.map((row) => {
+      const cells = {
+        date: row.date,
+        inputs: processingProductSummary(row.inputs),
+        outputs: processingProductSummary(row.outputs),
+        note: row.note,
+      };
+      return columns.map((key) => cells[key]);
+    }));
+  }
+
+  async actWorkbook(id: string, showCosts: boolean) {
+    const document = this.serialize(await this.load(this.prisma, id));
+    const columns = [
+      { label: 'Продукт', width: 40 },
+      { label: 'Склад', width: 26 },
+      { label: 'Количество', width: 16, format: '#,##0.######' },
+      { label: 'Ед. изм.', width: 12 },
+      ...(showCosts ? [
+        { label: 'Себестоимость за единицу', width: 27, format: warehouseMoneyFormat },
+        { label: 'Распределение себестоимости', width: 30, format: '0.####%' },
+        { label: 'Всего', width: 20, format: warehouseMoneyFormat },
+      ] : []),
+    ];
+    const sections = [
+      { name: 'Исходные продукты', lines: document.inputs },
+      { name: 'Полученные продукты', lines: document.outputs },
+    ];
+    return writeWarehouseWorkbook([
+      {
+        name: 'Акт переработки',
+        columns: [{ label: 'Документ', width: 42 }, warehouseDateColumn,
+          { label: 'Комментарий', width: 42 }, ...(showCosts ? [{ label: 'Всего', width: 20, format: warehouseMoneyFormat }] : [])],
+        rows: [[document.id, document.date, document.note, ...(showCosts ? [document.totalCost] : [])]],
+      },
+      ...sections.map(({ name, lines }) => ({
+        name,
+        columns,
+        rows: lines.map((line) => [
+          line.name, line.warehouseName, line.quantity, line.unitLabel,
+          ...(showCosts ? [line.unitCost, line.costSharePercent / 100, line.lineCost] : []),
+        ]),
+      })),
+    ]);
   }
 
   async findOne(id: string) {
@@ -308,6 +376,17 @@ class ProcessingController {
   constructor(private readonly processing: ProcessingService) {}
   @Get() list(@Query() query: { from?: string; to?: string; warehouseId?: string; search?: string }) { return this.processing.list(query); }
   @Get(':id') one(@Param('id') id: string) { return this.processing.findOne(id); }
+  @Post('register.xlsx')
+  @RequirePermission('actions.exportReports')
+  async exportRegister(@Body() dto: WarehouseRegisterExportDto, @Res() response: Response) {
+    sendWarehouseWorkbook(response, await this.processing.registerWorkbook(dto), 'processing-register.xlsx');
+  }
+  @Get(':id/act.xlsx')
+  @RequirePermission('actions.exportReports')
+  async exportAct(@CurrentUser() user: AuthUser, @Param('id') id: string, @Res() response: Response) {
+    const showCosts = hasPermission(resolvePermissions(user.role as Role, user.permissions), 'actions.warehouseCosts');
+    sendWarehouseWorkbook(response, await this.processing.actWorkbook(id, showCosts), 'processing-act.xlsx');
+  }
   @Post() @RequirePermission('actions.warehouseProduce') create(@CurrentUser() actor: AuthUser, @Body() dto: ProcessingSaveDto) { return this.processing.create(actor, dto); }
   @Patch(':id') @RequirePermission('actions.warehouseProduce') update(@CurrentUser() actor: AuthUser, @Param('id') id: string, @Body() dto: ProcessingSaveDto) { return this.processing.update(actor, id, dto); }
   @Post(':id/post') @RequirePermission('actions.warehouseProduce') post(@CurrentUser() actor: AuthUser, @Param('id') id: string, @Body() dto: RevisionDto) { return this.processing.post(actor, id, dto.revision); }

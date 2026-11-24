@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { UnitCode } from './units';
+import { downloadWarehouseWorkbook } from './stock-documents-api';
 const KEY = ['admin', 'warehouse'] as const;
 export interface PackageUnit {
   id: string;
@@ -67,6 +68,16 @@ export interface ProcessingBody {
   inputs: ProcessingRow[];
   outputs: ProcessingRow[];
 }
+export async function downloadProcessingRegister(ids: string[], columns: string[]) {
+  const response = await api.post<Blob>('/admin/warehouse/processing/register.xlsx', { ids, columns }, { responseType: 'blob' });
+  downloadWarehouseWorkbook(response.data, 'Переработки.xlsx');
+}
+
+export async function downloadProcessingAct(id: string) {
+  const response = await api.get<Blob>(`/admin/warehouse/processing/${encodeURIComponent(id)}/act.xlsx`, { responseType: 'blob' });
+  downloadWarehouseWorkbook(response.data, `Акт переработки ${id.slice(0, 8)}.xlsx`);
+}
+
 export function useProcessing(params: { warehouseId?: string; search?: string; from?: string; to?: string }) {
   return useQuery({
     queryKey: [...KEY, 'processing', params],

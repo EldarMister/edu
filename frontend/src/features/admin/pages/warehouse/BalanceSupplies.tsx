@@ -35,10 +35,12 @@ const supplyDate = (date: string) => new Date(date).toLocaleString('ru-RU', {
 export function BalanceSupplies({
   ingredientId,
   warehouseId,
+  warehouseIds,
   unitType,
 }: {
   ingredientId: string;
   warehouseId?: string;
+  warehouseIds?: string;
   unitType: UnitType;
 }) {
   const [page, setPage] = useState(1);
@@ -48,10 +50,10 @@ export function BalanceSupplies({
     <time dateTime={row.date}>{supplyDate(row.date)}</time>{row.number > 0 && <span className="ml-2 text-xs">№ {row.number}</span>}
   </button>;
   const query = useQuery({
-    queryKey: ['admin', 'warehouse', 'ingredient-supplies', ingredientId, warehouseId, page],
+    queryKey: ['admin', 'warehouse', 'ingredient-supplies', ingredientId, warehouseId, warehouseIds, page],
     queryFn: async () =>
       (await api.get<SuppliesPage>(`/admin/warehouse/ingredients/${encodeURIComponent(ingredientId)}/supplies`, {
-        params: { warehouseId, page, pageSize: 20 },
+        params: { warehouseId, warehouseIds, page, pageSize: 20 },
       })).data,
   });
 

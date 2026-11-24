@@ -416,6 +416,7 @@ export interface IngredientDetails extends Ingredient {
 export type IngredientUsage = {
   sourceId: string;
   targetId: string;
+  variantId?: string;
   name: string;
   kind: 'recipe' | 'stock' | 'variant' | 'preparation' | 'modifier';
   label: string | null;

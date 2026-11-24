@@ -2,18 +2,12 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { getCafeId } from '../tenant/tenant-context';
 import type { WarehouseReportQuery } from './reports.dto';
+import { warehouseSelectionIds } from './warehouse-location';
 
 export async function reportWarehouses(db: Prisma.TransactionClient, query: WarehouseReportQuery) {
   const cafeId = getCafeId();
   if (!cafeId) throw new BadRequestException('Заведение не назначено');
-  if (query.warehouseId !== undefined && query.warehouseIds !== undefined) {
-    throw new BadRequestException('Укажите один способ выбора складов');
-  }
-  const requested = query.warehouseIds?.split(',') ?? (query.warehouseId === undefined ? undefined : [query.warehouseId]);
-  const ids = requested && new Set(requested.map((id) => id.trim()));
-  if (ids && (ids.has('') || ids.size > 100 || [...ids].some((id) => id.length > 160))) {
-    throw new BadRequestException('Проверьте список складов');
-  }
+  const ids = warehouseSelectionIds(query);
 
   const locations = await db.warehouse.findMany({
     where: { cafeId }, orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],

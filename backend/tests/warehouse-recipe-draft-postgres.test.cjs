@@ -341,6 +341,27 @@ test(
           assert.deepEqual(setVersion.components.map(({ name, variantName, quantity }) => [name, variantName, quantity]),
             [[target.name, 'Большая', 2]]);
         });
+        await t.test('history and ingredient usage identify an independent variant and preserve its saved output', async () => {
+          const ingredient = await db.ingredient.create({
+            data: { name: 'Состав своего варианта', unitType: 'mass', displayUnit: 'g' },
+          });
+          const dish = await db.dish.create({ data: { name: 'Варианты для истории', categoryId: category.id, price: 150 } });
+          const variant = await db.dishVariant.create({
+            data: { dishId: dish.id, name: 'Большая порция', price: 200,
+              recipeMetadata: { instructions: 'Обжарить отдельно', outputQuantity: 125, outputUnit: 'g' } },
+          });
+          await db.recipeItem.create({ data: { dishId: dish.id, variantId: variant.id, ingredientId: ingredient.id,
+            amount: 150, amountUnit: 'g' } });
+          const usage = (await new IngredientsService(db).findOne(ingredient.id)).usage[0];
+          assert.deepEqual([usage.targetId, usage.variantId, usage.label], [dish.id, variant.id, 'Большая порция']);
+
+          await service.saveDraft(dish.id, { expectedVersion: 1, items: [] });
+          await db.dishVariant.update({ where: { id: variant.id }, data: { name: 'Новый вариант', recipeMetadata: { outputQuantity: 160, outputUnit: 'g' } } });
+          const [previous] = await service.compositionRevisions(dish.id);
+          assert.deepEqual(previous.variants, [{ id: variant.id, name: 'Большая порция', stockItem: null,
+            ownRecipe: { instructions: 'Обжарить отдельно', output: { amount: 125, unit: 'g' } } }]);
+          assert.deepEqual(previous.items.map(({ variantId, amount }) => [variantId, amount]), [[variant.id, 150]]);
+        });
         await t.test('set composition changes archive only the replaced components with the editor', async () => {
           const set = await db.dish.create({ data: { name: 'Сет для сверки', categoryId: category.id, price: 300, isSet: true,
             setComponents: { create: { dishId: dish.id, dishVariantId: dish.variants[0].id, quantity: 2 } } } });

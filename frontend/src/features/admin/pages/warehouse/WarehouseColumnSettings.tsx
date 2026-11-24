@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Modal } from '@/components/Modal';
 
-export function visibleWarehouseColumns<Key extends string>(value: string, defaults: Key[]) {
+export function visibleWarehouseColumns<Key extends string>(value: string, defaults: Key[], available = defaults) {
   if (!value) return defaults;
   const requested = new Set(value.split(','));
   const [required] = defaults;
-  return [required, ...[...requested].filter((key): key is Key => key !== required && defaults.includes(key as Key))];
+  return [required, ...[...requested].filter((key): key is Key => key !== required && available.includes(key as Key))];
 }
 
 export function WarehouseColumnSettings<Key extends string>({ columns, defaults, resetColumns = defaults, label, onClose, onApply }: {

@@ -44,8 +44,12 @@ test('PostgreSQL: ingredient supplies report posted receipts in display units wi
         ],
       });
       const legacy = await create({ date: '2026-11-11T10:00:00Z' });
-      await db.purchase.update({ where: { id: legacy.id }, data: { warehouseId: null } });
       const barReceipt = await create({ date: '2026-11-13T10:00:00Z', warehouseId: bar.id });
+      await Promise.all([
+        db.purchase.update({ where: { id: legacy.id }, data: { warehouseId: null, stockPostedAt: new Date('2026-11-11T10:00:00Z') } }),
+        db.purchase.update({ where: { id: receipt.id }, data: { stockPostedAt: new Date('2026-11-12T10:00:00Z') } }),
+        db.purchase.update({ where: { id: barReceipt.id }, data: { stockPostedAt: new Date('2026-11-13T10:00:00Z') } }),
+      ]);
       await create({ complete: false });
       const cancelled = await create({ complete: false });
       await purchases.cancel(cancelled.id);

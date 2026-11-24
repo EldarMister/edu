@@ -1,14 +1,16 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
-import { exportCsv } from '@/lib/report-output';
+import { useColumnPreference } from '@/hooks/useColumnPreference';
+import { useNotifications } from '@/store/notifications';
+import { apiError } from '@/lib/api';
 import {
   qty,
   useProductionJournal,
   type ProductionBatch,
   type WarehouseLocation,
 } from './api';
-import { useStockDocuments, type StockDocument, type StockDocumentKind } from './stock-documents-api';
+import { downloadTransferRegister, useStockDocuments, type StockDocument, type StockDocumentKind } from './stock-documents-api';
 import { documentDisplayStatus, documentStatus, formatDocumentDate, formatVariance, WRITEOFF_REASONS, type StockDocumentDisplayStatus } from './stock-document-format';
 import { useListPeriod } from './ListPeriodFilter';
 import { balanceMoney } from './balance-format';
@@ -20,10 +22,25 @@ import { WorkspaceSearch } from '../WorkspaceSearch';
 import { warehouseDay } from './warehouse-period';
 import { WarehouseMultiFilter, warehouseMultiFilterValues } from './WarehouseMultiFilter';
 
+import { visibleWarehouseColumns, WarehouseColumnSettings } from './WarehouseColumnSettings';
+
+const registerColumnLabels = {
+  date: 'Дата', products: 'Товары', note: 'Комментарий', amount: 'Сумма', employee: 'Сотрудник',
+  warehouses: 'Склад', categories: 'Категории', reason: 'Причина',
+};
+type RegisterColumn = keyof typeof registerColumnLabels;
+const transferColumns: RegisterColumn[] = ['date', 'products', 'note', 'amount', 'employee', 'warehouses'];
+const writeoffColumns: RegisterColumn[] = ['date', 'warehouses', 'products', 'amount', 'employee', 'reason', 'categories', 'note'];
+
+function parseDocumentAmount(value: string) {
+  const parsed = Number(value.trim().replace(',', '.'));
+  return value.trim() && Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
 export function DocumentList({
   kind, warehouseId, filters, locations, onOpen, onCreate, onCopy,
 }: {
-  kind: StockDocumentKind;
+  kind: Exclude<StockDocumentKind, 'supplier_return'>;
   warehouseId?: string;
   locations: WarehouseLocation[];
   filters?: ReactNode;
@@ -33,7 +50,7 @@ export function DocumentList({
 }) {
   const [conditions, updateConditions] = usePageFilters({
     [kind + 'Search']: '', [kind + 'Status']: '', [kind + 'Reason']: '', [kind + 'Category']: '', [kind + 'Employee']: '',
-    transferWarehouses: '',
+    [kind + 'Warehouses']: '', [kind + 'Comment']: '', [kind + 'MinAmount']: '', [kind + 'MaxAmount']: '',
     [kind + 'Page']: '1', [kind + 'Sort']: 'desc', warehouse: '',
     [kind + 'Period']: kind === 'transfer' ? 'month' : 'all', [kind + 'From']: '', [kind + 'To']: '',
   });
@@ -42,30 +59,50 @@ export function DocumentList({
   const reason = conditions[kind + 'Reason'];
   const employeeFilter = conditions[kind + 'Employee'];
   const transfer = kind === 'transfer';
-  const warehouseSelection = conditions.transferWarehouses || (transfer ? warehouseId ?? '' : '');
-  const selectedWarehouses = transfer ? warehouseMultiFilterValues(warehouseSelection) : [];
-  const categories = kind === 'writeoff' ? warehouseMultiFilterValues(conditions[kind + 'Category']) : [];
+  const inventory = kind === 'inventory';
+  const warehouseSelection = conditions[kind + 'Warehouses'] || warehouseId || '';
+  const selectedWarehouses = inventory ? [] : warehouseMultiFilterValues(warehouseSelection);
+  const categories = kind === 'writeoff' ? warehouseMultiFilterValues(conditions.writeoffCategory) : [];
   const ascending = conditions[kind + 'Sort'] === 'asc';
-  const changeFilter = (name: 'Search' | 'Status' | 'Reason' | 'Employee', value: string) => updateConditions({ [kind + name]: value, [kind + 'Page']: '1' });
-  const period = useListPeriod(kind, kind === 'transfer' ? 'month' : 'all');
-  const query = useStockDocuments(transfer ? undefined : warehouseId, kind, search);
+  const changeFilter = (name: 'Search' | 'Status' | 'Reason' | 'Employee' | 'Comment' | 'MinAmount' | 'MaxAmount', value: string) =>
+    updateConditions({ [kind + name]: value, [kind + 'Page']: '1' });
+  const period = useListPeriod(kind, transfer ? 'month' : 'all');
+  const query = useStockDocuments(inventory ? warehouseId : undefined, kind, search);
   const categoryOptions = [...new Set([...categories, ...(query.data ?? []).flatMap((document) => document.categories ?? [])])]
     .sort((a, b) => a.localeCompare(b, 'ru'));
   const { can } = usePermissions();
   const costs = can('actions.warehouseCosts');
+  const [columnPreference, saveColumns] = useColumnPreference(transfer ? 'warehouse-transfers' : 'warehouse-writeoffs');
+  const [editingColumns, setEditingColumns] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const notify = useNotifications((state) => state.push);
+  const availableColumns = (transfer ? transferColumns : writeoffColumns).filter((key) => costs || key !== 'amount');
+  const defaultColumns = transfer ? availableColumns : availableColumns.filter((key) => key !== 'categories' && key !== 'note');
+  const selectedColumns = visibleWarehouseColumns(columnPreference, defaultColumns, availableColumns);
+  function columnLabel(key: RegisterColumn) {
+    if (transfer && key === 'products') return 'Наименование';
+    if (transfer && key === 'warehouses') return 'Склады';
+    return registerColumnLabels[key];
+  }
+  const comment = inventory ? '' : conditions[kind + 'Comment'].trim().toLocaleLowerCase('ru');
+  const minAmount = !inventory && costs ? parseDocumentAmount(conditions[kind + 'MinAmount']) : null;
+  const maxAmount = !inventory && costs ? parseDocumentAmount(conditions[kind + 'MaxAmount']) : null;
+  const extraFilterCount = Number(!!status) + Number(!!employeeFilter) + Number(!!comment) + Number(minAmount != null || maxAmount != null);
   const canCreate = can(`actions.${kind === 'inventory' ? 'warehouseCount' : kind === 'writeoff' ? 'warehouseWriteoff' : 'warehouseTransfer'}`);
-  const inventory = kind === 'inventory';
   const statuses: StockDocumentDisplayStatus[] = inventory
     ? ['draft', 'submitted', 'posted', 'reopened', 'reversed'] : ['draft', 'submitted', 'posted', 'reversed'];
   const operationDate = (document: StockDocument) => document.countedAt ?? document.effectiveAt ?? document.postedAt ?? document.createdAt;
   const documentEmployee = (document: StockDocument) => document.postedByName ?? document.createdByName;
-  const employees = transfer ? [...new Set((query.data ?? []).map(documentEmployee).filter((name): name is string => !!name))]
+  const employees = !inventory ? [...new Set((query.data ?? []).map(documentEmployee).filter((name): name is string => !!name))]
     .sort((a, b) => a.localeCompare(b, 'ru')) : [];
   const names = new Map(locations.map((location) => [location.id, location.name]));
   const rows = (query.data ?? []).filter((document) =>
     (!status || documentDisplayStatus(document) === status) &&
     (!reason || document.reason === reason) &&
-    (!transfer || !employeeFilter || documentEmployee(document) === employeeFilter) &&
+    (inventory || !employeeFilter || documentEmployee(document) === employeeFilter) &&
+    (!comment || document.note?.toLocaleLowerCase('ru').includes(comment)) &&
+    (minAmount == null || (document.varianceValue != null && Math.abs(document.varianceValue) >= minAmount)) &&
+    (maxAmount == null || (document.varianceValue != null && Math.abs(document.varianceValue) <= maxAmount)) &&
     (!selectedWarehouses.length || selectedWarehouses.includes(document.warehouseId) ||
       selectedWarehouses.includes(document.destinationWarehouseId ?? '')) &&
     (!categories.length || document.categories?.some((category) => categories.includes(category))) &&
@@ -77,12 +114,11 @@ export function DocumentList({
   const visibleRows = inventory ? rows : rows.slice((page - 1) * pageSize, page * pageSize);
   const columns = inventory
     ? ['Склад', 'Проверка остатков на', 'Дата и время проведения', 'Тип', ...(costs ? ['Результат'] : []), 'Статус', '']
-    : transfer
-      ? ['Дата', 'Наименование', ...(costs ? ['Сумма'] : []), 'Сотрудник', 'Склады', '']
-      : ['Дата', 'Склад', 'Товары', ...(costs ? ['Сумма'] : []), 'Сотрудник', 'Причина', ''];
-  const filtered = !!(search || status || reason || employeeFilter || categories.length || period.active || warehouseId || selectedWarehouses.length);
+    : [...selectedColumns.map(columnLabel), ''];
+  const filtered = !!(search || reason || extraFilterCount || categories.length || period.active || warehouseId || selectedWarehouses.length);
   const resetFilters = () => updateConditions({ [kind + 'Search']: '', [kind + 'Status']: '', [kind + 'Reason']: '',
-    [kind + 'Page']: '1', [kind + 'Period']: 'all', [kind + 'From']: '', [kind + 'To']: '', [kind + 'Category']: '', [kind + 'Employee']: '', warehouse: '', transferWarehouses: '' });
+    [kind + 'Page']: '1', [kind + 'Period']: 'all', [kind + 'From']: '', [kind + 'To']: '', [kind + 'Category']: '',
+    [kind + 'Employee']: '', [kind + 'Warehouses']: '', [kind + 'Comment']: '', [kind + 'MinAmount']: '', [kind + 'MaxAmount']: '', warehouse: '' });
   const products = (document: StockDocument) => document.productNames?.length
     ? document.productNames.join(', ') + (document.itemsCount > document.productNames.length ? '…' : '')
     : document.itemsCount ? document.itemsCount + ' позиций' : 'Без продуктов';
@@ -98,15 +134,40 @@ export function DocumentList({
     : <span className="text-text-muted">—</span>;
   const dateColumn = inventory ? 1 : 0;
   const countTime = (document: StockDocument) => document.countedAt ?? document.postedAt;
-  function exportTransfers() {
-    exportCsv('Перемещения', columns.filter(Boolean), rows.map((document) => [
-      formatDocumentDate(operationDate(document)), products(document), ...(costs ? [amount(document)] : []), employee(document), warehouses(document),
-    ]));
+  async function exportTransfers() {
+    setExporting(true);
+    try {
+      await downloadTransferRegister(rows.map(({ id }) => id), selectedColumns);
+    } catch (error) {
+      notify({ message: apiError(error), at: new Date().toISOString() });
+    } finally {
+      setExporting(false);
+    }
   }
   const statusCell = (document: StockDocument) => {
     const state = documentDisplayStatus(document);
     return <span className="document-status" data-status={state}>{documentStatus(state)}</span>;
   };
+  const registerDate = (document: StockDocument) => <>
+    <button className="block max-w-full whitespace-normal text-left text-primary" onClick={() => onOpen(document.id)}>{dateCell(operationDate(document))}</button>
+    {document.status !== 'posted' && <div className="mt-1 whitespace-normal">{statusCell(document)}</div>}
+  </>;
+  function registerCell(key: RegisterColumn, document: StockDocument) {
+    if (key === 'date') return <td key={key}>{registerDate(document)}</td>;
+    if (key === 'products') return <td key={key} title={products(document)}>
+      <button className="line-clamp-2 w-full break-words text-left" onClick={() => onOpen(document.id)}>{products(document)}</button>
+    </td>;
+    if (key === 'amount') return <td key={key} className="whitespace-nowrap text-right tabular-nums" title={amount(document)}>{amount(document)}</td>;
+    const values = {
+      note: document.note || '—',
+      employee: employee(document),
+      warehouses: warehouses(document),
+      categories: document.categories?.join(', ') || '—',
+      reason: writeoffReason(document),
+    };
+    const value = values[key];
+    return <td key={key} title={value}><span className="line-clamp-2 break-words">{value}</span></td>;
+  }
   const empty = <div className="poster-list-empty">
     <svg aria-hidden viewBox="0 0 40 40" fill="none"><path d="M11 11h18l6 16v6H5v-6l6-16Z" stroke="currentColor" strokeWidth="2.5"/><path d="M6 26h8l3 5h6l3-5h8" stroke="currentColor" strokeWidth="2.5"/></svg>
     <h3>{filtered ? 'Ничего не найдено' : inventory ? 'Здесь будут инвентаризации' : transfer ? 'Здесь будут перемещения' : 'Здесь будут списания'}</h3>
@@ -121,47 +182,58 @@ export function DocumentList({
         <WorkspaceSearch label="Поиск документов" placeholder={inventory ? 'Быстрый поиск' : 'Поиск...'} value={search} onChange={(value) => changeFilter('Search', value)} />
         {!inventory && period.filter}
         {filters}
-        {transfer && <WarehouseMultiFilter label="Склады" value={warehouseSelection}
+        {!inventory && <WarehouseMultiFilter label={transfer ? 'Склады' : 'Склад'} value={warehouseSelection}
           options={locations.map(({ id, name }) => ({ value: id, label: name }))}
-          onChange={(value) => updateConditions({ transferWarehouses: value, warehouse: '', transferPage: '1' })} />}
+          onChange={(value) => updateConditions({ [kind + 'Warehouses']: value, warehouse: '', [kind + 'Page']: '1' })} />}
         {kind === 'writeoff' && <WarehouseMultiFilter label="Категории" value={conditions[kind + 'Category']}
           options={categoryOptions.map((category) => ({ value: category, label: category }))}
           onChange={(value) => updateConditions({ [kind + 'Category']: value, [kind + 'Page']: '1' })} />}
         {kind === 'writeoff' && <Select ariaLabel="Причина списания" value={reason} onChange={(value) => changeFilter('Reason', value)}
           options={[{ value: '', label: 'Причина' }, ...WRITEOFF_REASONS]} />}
         <details className="poster-list-filter">
-          <summary>+ Фильтр{status || employeeFilter ? ' · ' + (Number(!!status) + Number(!!employeeFilter)) : ''}</summary>
+          <summary>+ Фильтр{extraFilterCount ? ' · ' + extraFilterCount : ''}</summary>
           <div className="poster-list-filter-content">
             <Select ariaLabel="Статус документа" value={status} onChange={(value) => changeFilter('Status', value)} className="w-48"
               options={[{ value: '', label: 'Все статусы' }, ...statuses.map((value) => ({
                 value, label: documentStatus(value),
               }))]} />
-            {transfer && <Select ariaLabel="Сотрудник" value={employeeFilter} className="mt-2 w-48"
+            {!inventory && <Select ariaLabel="Сотрудник" value={employeeFilter} className="mt-2 w-48"
               onChange={(value) => changeFilter('Employee', value)} options={[
                 { value: '', label: 'Все сотрудники' }, ...employees.map((name) => ({ value: name, label: name })),
               ]} />}
+            {!inventory && <input aria-label="Комментарий" placeholder="Комментарий" className="input mt-2 w-48"
+              value={conditions[kind + 'Comment']}
+              onChange={(event) => changeFilter('Comment', event.target.value)} />}
+            {!inventory && costs && <fieldset className="mt-2 w-48">
+              <legend className="text-xs text-text-muted">Сумма, с</legend>
+              <div className="flex gap-2">
+                <input aria-label="Сумма от" placeholder="От" className="input min-w-0 w-1/2" type="number" min="0" step="any"
+                  value={conditions[kind + 'MinAmount']}
+                  onChange={(event) => changeFilter('MinAmount', event.target.value)} />
+                <input aria-label="Сумма до" placeholder="До" className="input min-w-0 w-1/2" type="number" min="0" step="any"
+                  value={conditions[kind + 'MaxAmount']}
+                  onChange={(event) => changeFilter('MaxAmount', event.target.value)} />
+              </div>
+            </fieldset>}
           </div>
         </details>
         {filtered && <button type="button" className="text-sm text-text-muted" onClick={resetFilters}>Сбросить всё</button>}
-        {transfer && can('actions.exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!rows.length}
-          onClick={exportTransfers}>Экспорт CSV</button>}
+        {!inventory && <button type="button" className="btn-secondary btn-md" onClick={() => setEditingColumns(true)}>Столбцы</button>}
+        {transfer && can('actions.exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!rows.length || exporting}
+          onClick={exportTransfers}>Экспорт Excel</button>}
         {canCreate && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
       </div>
+      {!inventory && editingColumns && <WarehouseColumnSettings columns={selectedColumns} defaults={availableColumns} resetColumns={defaultColumns}
+        label={columnLabel} onClose={() => setEditingColumns(false)}
+        onApply={(selection) => {
+          const joined = selection.join(',');
+          saveColumns(joined === defaultColumns.join(',') ? '' : joined);
+          setEditingColumns(false);
+        }} />}
       <QueryState pending={query.isPending} error={query.error}>
         <div className="hidden overflow-x-auto md:block">
-          <table className={`poster-table poster-register-table w-full min-w-[780px] text-left text-sm ${inventory ? '' : 'table-fixed'}`}>
-            {!inventory && (
-              <colgroup>
-                <col style={{ width: transfer ? '14%' : '13%' }} />
-                {!transfer && <col style={{ width: '14%' }} />}
-                <col style={{ width: transfer ? (costs ? '34%' : '44%') : (costs ? '29%' : '39%') }} />
-                {costs && <col style={{ width: '10%' }} />}
-                <col style={{ width: transfer ? '16%' : '14%' }} />
-                <col />
-                <col style={{ width: transfer && canCreate && onCopy ? 164 : 88 }} />
-              </colgroup>
-            )}
-            <thead><tr>{columns.map((heading, index) => <th key={index} className={['Сумма', 'Результат'].includes(heading) ? 'text-right' : ''}
+          <table className="poster-table poster-register-table w-full min-w-[780px] text-left text-sm">
+            <thead><tr>{columns.map((heading, index) => <th key={index} scope="col" className={['Сумма', 'Результат'].includes(heading) ? 'text-right' : ''}
               aria-sort={index === dateColumn ? ascending ? 'ascending' : 'descending' : undefined}>
               {index === dateColumn ? <button type="button" className="flex items-center gap-2" onClick={() => updateConditions({ [kind + 'Sort']: ascending ? 'desc' : 'asc', [kind + 'Page']: '1' })}>
                 {heading} <span aria-hidden="true">{ascending ? '↑' : '↓'}</span>
@@ -177,25 +249,7 @@ export function DocumentList({
                   <td>{document.mode === 'full' ? 'Полная' : 'Частичная'}</td>
                   {costs && <td className="whitespace-nowrap text-right tabular-nums">{amount(document)}</td>}
                   <td>{statusCell(document)}</td>
-                </> : <>
-                  <td className="whitespace-normal">
-                    <button className="block max-w-full whitespace-normal text-left text-primary" onClick={() => onOpen(document.id)}>{dateCell(operationDate(document))}</button>
-                    {document.status !== 'posted' && <div className="mt-1 whitespace-normal">{statusCell(document)}</div>}
-                  </td>
-                  {!transfer && <td title={warehouses(document)}><span className="line-clamp-2 break-words">{warehouses(document)}</span></td>}
-                  <td title={products(document)}>
-                    <button className="line-clamp-2 w-full break-words text-left" onClick={() => onOpen(document.id)}>{products(document)}</button>
-                  </td>
-                  {costs && <td className="whitespace-nowrap text-right tabular-nums" title={amount(document)}><span className="block truncate">{amount(document)}</span></td>}
-                  <td title={employee(document)}>
-                    <span className="line-clamp-2 break-words">{employee(document)}</span>
-                  </td>
-                  <td title={transfer ? warehouses(document) : undefined}>
-                    <span className="line-clamp-2 break-words">
-                      {transfer ? warehouses(document) : writeoffReason(document)}
-                    </span>
-                  </td>
-                </>}
+                </> : selectedColumns.map((key) => registerCell(key, document))}
                 <td><div className="poster-row-actions">
                   <button type="button" onClick={() => onOpen(document.id)}>{document.status === 'draft' ? 'Ред.' : inventory ? 'Посмотреть' : 'Открыть'}</button>
                   {transfer && canCreate && onCopy && <button type="button" onClick={() => onCopy(document.id)}>Копировать</button>}
@@ -207,9 +261,10 @@ export function DocumentList({
         <div className="divide-y divide-border md:hidden">
           {!rows.length && empty}
           {visibleRows.map((document) => <button key={document.id} className="block w-full space-y-2 p-4 text-left" onClick={() => onOpen(document.id)}>
-            <span className="flex justify-between gap-2"><span className="font-medium text-primary">{inventory ? warehouses(document) : products(document)}</span>{costs && <span className="whitespace-nowrap">{amount(document)}</span>}</span>
+            <span className="flex justify-between gap-2"><span className="font-medium text-primary">{inventory ? warehouses(document) : products(document)}</span>{costs && (inventory || selectedColumns.includes('amount')) && <span className="whitespace-nowrap">{amount(document)}</span>}</span>
             <span className="block text-xs text-text-muted">{inventory && !countTime(document) ? 'При проведении' : formatDocumentListDate(operationDate(document))} · {inventory ? document.mode === 'full' ? 'Полная' : 'Частичная' : warehouses(document)}</span>
-            {kind === 'writeoff' && <span className="block text-xs text-text-secondary">Причина: {writeoffReason(document)}</span>}
+            {!inventory && selectedColumns.includes('note') && document.note && <span className="block text-xs text-text-secondary">{document.note}</span>}
+            {kind === 'writeoff' && selectedColumns.includes('reason') && <span className="block text-xs text-text-secondary">Причина: {writeoffReason(document)}</span>}
             <span className="flex items-center justify-between gap-2 text-xs">{statusCell(document)}<span>{inventory && document.postedAt && !document.reopenedAt ? 'Проведена ' + formatDocumentDate(document.postedAt) : inventory ? document.createdByName : employee(document)}</span></span>
           </button>)}
         </div>

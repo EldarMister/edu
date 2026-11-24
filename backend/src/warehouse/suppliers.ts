@@ -61,8 +61,21 @@ export class WarehouseSuppliersService {
   constructor(private readonly prisma: PrismaService) {}
 
   list(includeInactive = false) {
-    return this.prisma.warehouseSupplier.findMany({ where: { cafeId: cafeId(), ...(includeInactive ? {} : { isActive: true }) },
-      orderBy: [{ isActive: 'desc' }, { name: 'asc' }] });
+    const tenant = cafeId();
+    return this.prisma.$transaction(async (db) => {
+      const [suppliers, purchases] = await Promise.all([
+        db.warehouseSupplier.findMany({ where: { cafeId: tenant, ...(includeInactive ? {} : { isActive: true }) },
+          orderBy: [{ isActive: 'desc' }, { name: 'asc' }] }),
+        db.purchase.groupBy({ where: { cafeId: tenant, status: 'completed' }, by: ['supplierId', 'supplier'], _count: { _all: true } }),
+      ]);
+      const idsByName = new Map(suppliers.map(({ id, name }) => [name.trim().toLocaleLowerCase('ru'), id]));
+      const counts = new Map<string, number>();
+      for (const purchase of purchases) {
+        const id = purchase.supplierId ?? idsByName.get(purchase.supplier.trim().toLocaleLowerCase('ru'));
+        if (id) counts.set(id, (counts.get(id) ?? 0) + purchase._count._all);
+      }
+      return suppliers.map((supplier) => ({ ...supplier, purchaseCount: counts.get(supplier.id) ?? 0 }));
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
   async settlements() {

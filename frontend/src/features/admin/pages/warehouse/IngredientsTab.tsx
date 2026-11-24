@@ -56,6 +56,7 @@ function ingredientColumnSpec(key: IngredientColumn): { label: string; width: nu
 export type StockFilter = '' | 'low' | 'empty';
 export function IngredientsTab({
   warehouseId,
+  warehouseIds,
   warehouseName,
   filter,
   onFilter,
@@ -67,6 +68,7 @@ export function IngredientsTab({
   filters,
 }: {
   warehouseId?: string;
+  warehouseIds?: string;
   warehouseName?: string;
   filter: StockFilter;
   onFilter: (value: StockFilter) => void;
@@ -106,7 +108,7 @@ export function IngredientsTab({
   const ingredientDataColumns = selectedIngredientColumns.slice(1);
   const catalogueColumnCount = preparedCatalogue ? (costs ? 4 : 3) : selectedIngredientColumns.length + 1;
   const [balanceFilters, updateBalanceFilters] = usePageFilters({ search: '', kind: '', category: '', unit: '', stockFilter: '',
-    warehouse: '', balancePage: '1', balanceExpanded: '', balanceSort: 'asc' });
+    warehouse: '', balanceWarehouses: '', balancePage: '1', balanceExpanded: '', balanceSort: 'asc' });
   const { search, kind, category, unit, balanceExpanded: expanded, balanceSort: sort } = balanceFilters;
   function setBalanceFilter(patch: Partial<typeof balanceFilters>) {
     updateBalanceFilters({ ...patch, balancePage: '1', balanceExpanded: '' });
@@ -127,6 +129,7 @@ export function IngredientsTab({
   const searchText = search.trim().toLocaleLowerCase();
   const params = new URLSearchParams({ columns: columns.join(','), sort: sort === 'desc' ? 'desc' : 'asc' });
   if (warehouseId) params.set('warehouseId', warehouseId);
+  if (warehouseIds) params.set('warehouseIds', warehouseIds);
   if (searchText) params.set('search', search.trim().slice(0, 160));
   if (unit) params.set('unit', unit);
   if (filter === 'low' || filter === 'empty') params.set('stockFilter', filter);
@@ -230,9 +233,10 @@ export function IngredientsTab({
         <>
           <div className="poster-balance-detail-heading"><h3>Поставки</h3>{actions(item)}</div>
           <BalanceSupplies
-            key={`${warehouseId ?? 'all'}:${item.id}`}
+            key={`${warehouseId ?? warehouseIds ?? 'all'}:${item.id}`}
             ingredientId={item.id}
             warehouseId={warehouseId}
+            warehouseIds={warehouseIds}
             unitType={item.unitType}
           />
         </>
@@ -470,8 +474,8 @@ export function IngredientsTab({
             onClick={() => setIngredientColumnsOpen(true)}>Столбцы</button>
           {canCreate && <button type="button" className="btn-primary btn-md" onClick={onCreate}>Добавить</button>}
         </div>}
-        {!catalogue && (filtered || warehouseId) && <button type="button" className="poster-balance-reset"
-          onClick={() => setBalanceFilter({ search: '', kind: '', category: '', unit: '', stockFilter: '', warehouse: '' })}>
+        {!catalogue && (filtered || warehouseId || warehouseIds) && <button type="button" className="poster-balance-reset"
+          onClick={() => setBalanceFilter({ search: '', kind: '', category: '', unit: '', stockFilter: '', warehouse: '', balanceWarehouses: '' })}>
           Сбросить всё
         </button>}
         {!catalogue && <button type="button" className="supply-header-action ml-auto shrink-0 print:hidden"

@@ -310,7 +310,7 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
           phone: `+996${randomInt(100_000_000, 1_000_000_000)}`, passwordHash: await bcrypt.hash('workspace-test-password', 4) } });
         const defaults = { tableId: table.id, waiterId: fixture.mixed.id, createdAt: opened, closedAt: closed };
         await db.order.create({ data: { ...defaults, orderNumber: 'TENDER-XLSX-1', status: 'paid', paymentStatus: 'paid', paymentMethod: 'mixed',
-          finalAmount: 100, refundedAmount: 5, payments: { create: [
+          finalAmount: 100, refundedAmount: 5, comment: 'Подарочный заказ', payments: { create: [
             { method: 'cash', amount: 60, cashierId: fixture.owner.id },
             { method: 'card', amount: 40, refundedAmount: 5, cashierId: fixture.owner.id },
           ] }, items: { create: [
@@ -319,7 +319,7 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
           ] },
         } });
         await db.order.create({ data: { ...defaults, orderNumber: 'TENDER-XLSX-2', status: 'paid', paymentStatus: 'paid', paymentMethod: 'card',
-          finalAmount: 24, refundedAmount: 4,
+          finalAmount: 24, refundedAmount: 4, comment: '',
         } });
         await db.order.create({ data: { ...defaults, orderNumber: 'TENDER-XLSX-3', status: 'cancelled', paymentMethod: 'card', finalAmount: 10 } });
         return user;
@@ -337,8 +337,8 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
       assert.deepEqual(summary, { total: 2, paid: 2, unpaid: 0, cancelled: 0, revenue: 115, tenderRevenue: 55 });
       await request(`/admin/orders/export.xlsx?${query}`, { ...readOnly, status: 403 });
 
-      async function workbook(details) {
-        const response = await fetch(`${base}/admin/orders/export.xlsx?${query}&includeDetails=${details}`, {
+      async function workbook(details, filters = query) {
+        const response = await fetch(`${base}/admin/orders/export.xlsx?${filters}&includeDetails=${details}`, {
           headers: { Authorization: `Bearer ${sessions.owner}`, 'X-EDU-Workspace': 'admin' },
         });
         assert.equal(response.status, 200);
@@ -352,11 +352,25 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
       assert.deepEqual(receipts.map((row) => [row['№ чека'], row['Выручка после возвратов'], row['Карта после возвратов']]),
         [['TENDER-XLSX-2', 20, 20], ['TENDER-XLSX-1', 95, 35]]);
       assert.equal(receipts[1]['Наличные после возвратов'], 60);
+      assert.equal(receipts[1]['Комментарий'], 'Подарочный заказ');
       assert.match(book.Sheets['Чеки'].B2.w, /^02\.07\.2026 23:58$/);
       assert.match(book.Sheets['Чеки'].C2.w, /^03\.07\.2026 00:02$/);
       const items = XLSX.utils.sheet_to_json(book.Sheets['Позиции']);
       assert.deepEqual(items.map((row) => [row['Позиция'], row['Вариант'], row['Возвращённое количество']]), [['Чай', 'Большой', 1]]);
       assert.equal(items[0]['ID чека'], receipts[1]['ID чека']);
+
+      const withComments = new URLSearchParams(query);
+      withComments.set('comments', 'with');
+      assert.deepEqual((await request(`/admin/orders?${withComments}`, readOnly)).items.map((order) => order.orderNumber), ['TENDER-XLSX-1']);
+      assert.deepEqual(await request(`/admin/orders/summary?${withComments}`, readOnly),
+        { total: 1, paid: 1, unpaid: 0, cancelled: 0, revenue: 95, tenderRevenue: 35 });
+      const filteredBook = await workbook(true, withComments);
+      assert.deepEqual(XLSX.utils.sheet_to_json(filteredBook.Sheets['Чеки']).map((row) => row['№ чека']), ['TENDER-XLSX-1']);
+      const withoutComments = new URLSearchParams(query);
+      withoutComments.set('comments', 'without');
+      assert.deepEqual((await request(`/admin/orders?${withoutComments}`, readOnly)).items.map((order) => order.orderNumber), ['TENDER-XLSX-2']);
+      withComments.set('search', 'Подарочный');
+      assert.equal((await request(`/admin/orders?${withComments}`, readOnly)).total, 1);
     });
     await t.test('mixed cashier works independently of disabled admin orders and read-only staff', async () => {
       const token = sessions.mixed;

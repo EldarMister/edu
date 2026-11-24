@@ -241,11 +241,48 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
     assert.equal((await request(readerToken, '/admin/warehouse/preparation/batches')).status, 200, 'reading production does not require posting permission');
     assert.equal((await request(outsiderToken, '/admin/warehouse/preparation/batches')).status, 403);
 
+    const transferResponse = await request(ownerToken, '/admin/warehouse/documents', 'POST', {
+      warehouseId: main.id, destinationWarehouseId: emptyWarehouse.id, kind: 'transfer', finalize: 'post',
+      note: 'Проверка XLSX', items: [{ ingredientId: atomicIngredient.id, quantity: 1 }],
+    });
+    assert.equal(transferResponse.status, 201);
+    const transfer = await transferResponse.json();
+    const transferExport = '/admin/warehouse/documents/transfer-register.xlsx';
+    const transferQuery = { ids: [transfer.id], columns: ['date', 'note', 'amount'] };
+    const asWorkbook = async (response) => {
+      assert.equal(response.ok, true);
+      assert.match(response.headers.get('content-type') ?? '', /spreadsheetml/);
+      return XLSX.read(new Uint8Array(await response.arrayBuffer()));
+    };
+    const transferFull = await asWorkbook(await request(ownerToken, transferExport, 'POST', transferQuery));
+    assert.equal(transferFull.Sheets['Перемещения'].C2.v, 7);
+    const transferHidden = await asWorkbook(await request(counterToken, transferExport, 'POST', transferQuery));
+    assert.equal(transferHidden.Sheets['Перемещения'].C1, undefined);
+    assert.equal((await request(reportReaderToken, transferExport, 'POST', transferQuery)).status, 403);
+
+    const processingBase = '/admin/warehouse/processing';
+    const processingResponse = await request(ownerToken, processingBase, 'POST', {
+      complete: true, note: 'Переработка XLSX',
+      inputs: [{ ingredientId: atomicIngredient.id, warehouseId: main.id, quantity: 1, unit: 'pcs' }],
+      outputs: [{ ingredientId: output.id, warehouseId: emptyWarehouse.id, quantity: 1, unit: 'pcs', costSharePercent: 100 }],
+    });
+    assert.equal(processingResponse.status, 201);
+    const processing = await processingResponse.json();
+    const processingRegister = await asWorkbook(await request(counterToken, processingBase + '/register.xlsx', 'POST', {
+      ids: [processing.id], columns: ['date', 'note'],
+    }));
+    assert.equal(processingRegister.Sheets['Переработки'].B2.v, 'Переработка XLSX');
+    const actPath = `${processingBase}/${processing.id}/act.xlsx`;
+    const actHidden = await asWorkbook(await request(counterToken, actPath));
+    assert.equal(actHidden.Sheets['Полученные продукты'].E1, undefined);
+    assert.equal(actHidden.Sheets['Полученные продукты'].C2.v, 1);
+    assert.equal((await request(reportReaderToken, actPath)).status, 403);
     await checkReadonlyWarehouse({ db, request, actor: reportReader, token: reportReaderToken, ingredient });
     await checkPurchaseExport({ db, request, ownerToken, actor: reportReader, actorToken: reportReaderToken, outsiderToken });
   } finally {
     await db.stockMovement.deleteMany({ where: { cafeId: { in: [cafe.id, foreign.id] } } });
     await db.preparationBatch.deleteMany({ where: { cafeId: { in: [cafe.id, foreign.id] } } });
+    await db.processingDocument.deleteMany({ where: { cafeId: cafe.id } });
     await db.warehouseDocument.deleteMany({ where: { cafeId: { in: [cafe.id, foreign.id] } } });
     await db.preparationRecipe.deleteMany({ where: { cafeId: { in: [cafe.id, foreign.id] } } });
     await db.purchase.deleteMany({ where: { cafeId: cafe.id } });
@@ -319,7 +356,7 @@ async function checkReadonlyWarehouse({ db, request, actor, token, ingredient })
   } };
   await db.user.update({ where: { id: actor.id }, data: { permissions } });
   for (const path of ['purchases', 'purchases/overview', `purchases/last-prices?ingredientIds=${ingredient.id}`, 'documents', 'documents/writeoff-options',
-    'preparation/batches', 'processing', 'suppliers', 'packages', 'locations']) {
+    'preparation/batches', 'processing', 'suppliers', 'packages', 'locations', 'locations/valuation']) {
     assert.equal((await request(token, `/admin/warehouse/${path}`)).status, 200, `read-only warehouse can read ${path}`);
   }
   const draft = await db.warehouseDocument.findFirstOrThrow({ where: { cafeId: actor.cafeId } });
@@ -336,6 +373,8 @@ async function checkReadonlyWarehouse({ db, request, actor, token, ingredient })
     permissions: { ...permissions, actions: { ...permissions.actions, warehouseCosts: false } },
   } });
   assert.equal((await request(token, '/admin/warehouse/purchases')).status, 403, 'view-only does not grant cost access');
+  assert.equal((await request(token, '/admin/warehouse/locations/valuation')).status, 403);
   const stock = await (await request(token, '/admin/warehouse/ingredients')).json();
   assert.equal(stock.find((row) => row.id === ingredient.id).avgCost, null);
+  assert.equal(stock.find((row) => row.id === ingredient.id).knownStockValue, null);
 }

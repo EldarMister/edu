@@ -17,6 +17,11 @@ export type WriteoffSourceLine = {
 export type WriteoffSnapshot = { version: 1; lines: WriteoffSourceLine[] };
 const zero = new Prisma.Decimal(0);
 
+export function writeoffDishUnit(dish: { isWeighted: boolean; weightedMeasure: string }): 'pcs' | 'g' | 'ml' {
+  if (!dish.isWeighted) return 'pcs';
+  return dish.weightedMeasure === 'volume' ? 'ml' : 'g';
+}
+
 export function readWriteoffSnapshot(value: Prisma.JsonValue | null): WriteoffSnapshot | null {
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.version !== 1 || !Array.isArray(value.lines)) return null;
   return value as unknown as WriteoffSnapshot;
@@ -65,9 +70,11 @@ export async function resolveWriteoffSources(tx: Prisma.TransactionClient, wareh
       const variant = input.variantId ? dish.variants.find((entry) => entry.id === input.variantId) : undefined;
       if (input.variantId && !variant) throw new BadRequestException('Вариант не относится к блюду');
       if (dish.variants.length && !variant) throw new BadRequestException('Выберите вариант блюда');
-      unit = normalizeUnit(input.unit ?? (dish.isWeighted ? 'g' : 'pcs'));
-      assertUnitMatchesType(unit, dish.isWeighted ? 'mass' : 'count');
-      if (pack) assertUnitMatchesType(pack.packageUnit, dish.isWeighted ? 'mass' : 'count');
+      const defaultUnit = writeoffDishUnit(dish);
+      const type = defaultUnit === 'ml' ? 'volume' : defaultUnit === 'g' ? 'mass' : 'count';
+      unit = normalizeUnit(input.unit ?? defaultUnit);
+      assertUnitMatchesType(unit, type);
+      if (pack) assertUnitMatchesType(pack.packageUnit, type);
       const amountBase = new Prisma.Decimal(input.quantity).mul(pack?.packageFactor ?? toBase(1, unit));
       const multiplier = dish.isWeighted
         ? amountBase.div(dish.weightedPriceBase)

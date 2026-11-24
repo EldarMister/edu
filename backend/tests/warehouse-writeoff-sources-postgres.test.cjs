@@ -165,6 +165,27 @@ test('PostgreSQL: recipe writeoffs retain source lines and immutable ingredient 
         assert.equal(weightedPreview.sourceLines[0].parts[0].quantity, 1);
         await assert.rejects(docs.writeoffPreview({ warehouseId: main.id, sourceLines: [{ ...portions[0], packageId: mass.id }] }), /единиц|единица|Единица/);
       });
+      await t.test('volume-priced dishes use ml and litre packages in writeoffs', async () => {
+        const drink = await db.dish.create({ data: {
+          name: 'Volume drink', price: 65, categoryId: category.id, isWeighted: true,
+          weightedMeasure: 'volume', weightedPriceBase: 100,
+          recipeItems: { create: [{ ingredientId: water.id, amount: 100, amountUnit: 'ml' }] },
+        } });
+        const bottle = await db.warehousePackage.create({ data: {
+          cafeId: cafe.id, name: 'Half litre', unit: 'l', unitType: 'volume', quantity: 0.5, quantityBase: 500,
+        } });
+        assert.equal((await docs.writeoffOptions()).dishes.find(({ id }) => id === drink.id).unitCode, 'ml');
+        const { sourceLines: [defaultUnit] } = await docs.writeoffPreview({ warehouseId: main.id,
+          sourceLines: [source('dish', drink.id, 250)] });
+        assert.equal(defaultUnit.unitCode, 'ml');
+        assert.equal(defaultUnit.parts[0].quantity, 0.25);
+        const { sourceLines: [packed] } = await docs.writeoffPreview({ warehouseId: main.id,
+          sourceLines: [{ ...source('dish', drink.id, 2, 'l'), packageId: bottle.id }] });
+        assert.equal(packed.physicalQuantity, 1);
+        assert.equal(packed.parts[0].quantity, 1);
+        await assert.rejects(docs.writeoffPreview({ warehouseId: main.id,
+          sourceLines: [source('dish', drink.id, 1, 'kg')] }), /единиц|Единица/);
+      });
       await t.test('changed unsaved package or forged snapshot references cannot silently change posted quantities', async () => {
         const pack = await db.warehousePackage.create({ data: { cafeId: cafe.id, name: 'Preview bag', unit: 'kg', unitType: 'mass', quantity: 0.25, quantityBase: 250 } });
         const input = [{ ...source('ingredient', flour.id, 2, 'kg'), packageId: pack.id }];
