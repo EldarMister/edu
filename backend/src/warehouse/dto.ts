@@ -199,7 +199,7 @@ export class CreatePurchaseDto extends PurchaseMetadataDto {
   @IsOptional() @IsString()
   date?: string;
 
-  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  @IsOptional() @IsString() @MaxLength(160)
   supplier?: string;
 
   @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true })

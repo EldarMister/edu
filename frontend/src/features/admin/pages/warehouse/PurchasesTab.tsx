@@ -157,7 +157,9 @@ function PurchaseForm({
   const [requestKey] = useState(() => crypto.randomUUID());
   const [location, setLocation] = useState(purchase?.warehouseId ?? warehouseId);
   const suppliers = useSuppliers();
-  const [supplier, setSupplier] = useState(purchase?.supplier ?? '');
+  const [supplier, setSupplier] = useState(
+    purchase && (purchase.supplierId || purchase.supplier !== 'Без поставщика') ? purchase.supplier : '',
+  );
   const [initialOperationAt] = useState(() => purchase?.effectiveAt ?? purchase?.postedAt ?? new Date().toISOString());
   const [date, setDate] = useState(() => inventoryLocalTime(purchase?.date ?? initialOperationAt));
   const [separateInvoiceDate, setSeparateInvoiceDate] = useState(() => !!purchase && inventoryLocalTime(purchase.date) !== inventoryLocalTime(initialOperationAt));
@@ -225,7 +227,6 @@ function PurchaseForm({
     : purchaseTaxTotal(rows.map(row => ({ amount: purchaseRowTotal(row), rate: rateFor(row) })), discountAmount);
   const total = !stockEditable && purchase ? purchase.totalAmount : roundPurchaseMoney(subtotal - discountAmount + taxTotal);
   const enteredRows = rows.filter((row) => row.ingredientId || row.quantity || row.price || row.total || row.sourceName);
-  const supplierError = supplier.trim() ? '' : 'Укажите поставщика.';
   const locationError = location ? '' : 'Выберите склад.';
   const discountError = !Number.isFinite(discountInput) || discountInput < 0 || discountAmount > subtotal
     ? 'Скидка должна быть от 0 до суммы товаров.' : '';
@@ -309,7 +310,7 @@ function PurchaseForm({
     setError('');
     setValidationAttempt((attempt) => attempt + 1);
     if (discountError) setDiscountVisible(true);
-    if (supplierError || (stockEditable && (locationError || discountError || rowErrors.size))) return;
+    if (stockEditable && (locationError || discountError || rowErrors.size)) return;
     if (stockEditable && !enteredRows.length) {
       setError('Добавьте хотя бы один продукт.');
       return;
@@ -405,19 +406,18 @@ function PurchaseForm({
             <>
               <DocumentProductPicker
                 label="Поставщик"
-                placeholder="Выберите поставщика или введите название"
+                placeholder="Без поставщика"
                 allowCustomValue
                 value={supplier}
                 options={(suppliers.data ?? []).map((entry) => ({ id: entry.name, name: entry.name }))}
                 onChange={setSupplier}
-                error={validationAttempt ? supplierError || undefined : undefined}
                 disabled={busy}
               />
               {suppliers.isPending && <p role="status" className="mt-1 text-xs text-text-muted">Загрузка поставщиков. Можно ввести название вручную.</p>}
               {suppliers.isError && <p role="alert" className="mt-1 text-xs text-text-muted">Список поставщиков не загрузился. Введите название или <button type="button" className="text-primary" onClick={() => void suppliers.refetch()}>повторите загрузку</button>.</p>}
             </>
           ) : (
-            <span className="poster-readonly">{supplier || '—'}</span>
+            <span className="poster-readonly">{supplier || 'Без поставщика'}</span>
           )}
         </DocumentField>
         <DocumentField label="Склад">
@@ -459,7 +459,7 @@ function PurchaseForm({
           <PurchaseInvoiceImport initialOpen={importInvoice} disabled={busy || !catalogReady || taxOptions.isPending} onBusy={setReadingInvoice} onRead={addInvoice} />
           {imported && <div role="status" className="mt-2 rounded-lg border border-border p-3 text-sm">
             <p>Проверьте позиции из файла «{imported.filename}» перед сохранением. Распознано строк — {imported.preview.lines.length}.</p>
-            {imported.preview.supplier && <p>Поставщик в накладной — {imported.preview.supplier}{!supplier.trim() ? '. Выберите поставщика в форме.' : ''}</p>}
+            {imported.preview.supplier && <p>Поставщик в накладной — {imported.preview.supplier}{!supplier.trim() ? '. Его можно указать в форме.' : ''}</p>}
             {imported.preview.total != null && <p>Итого в накладной — {balanceMoney(imported.preview.total)}</p>}
             {imported.entireInvoice && imported.preview.total != null && Math.abs(total - imported.preview.total) >= 0.009 &&
               <p className="text-warning">Разница с итогом поставки — {balanceMoney(Math.abs(total - imported.preview.total))}. Проверьте строки, скидку и налог.</p>}

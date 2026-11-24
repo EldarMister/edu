@@ -20,7 +20,7 @@ async function lockName(tx: Prisma.TransactionClient, tenant: string, name: stri
 /** Resolve once at document creation. The text remains an immutable supplier
  * snapshot even when the shared supplier card is renamed later. */
 export async function resolveWarehouseSupplier(tx: Prisma.TransactionClient, input: {
-  supplier?: string | null; supplierId?: string | null; required?: boolean;
+  supplier?: string | null; supplierId?: string | null;
 }) {
   const tenant = cafeId();
   if (input.supplierId) {
@@ -29,10 +29,7 @@ export async function resolveWarehouseSupplier(tx: Prisma.TransactionClient, inp
     return { supplierId: record.id, supplier: record.name };
   }
   const name = input.supplier?.trim();
-  if (!name) {
-    if (input.required) throw new BadRequestException('Укажите поставщика');
-    return { supplierId: null, supplier: null };
-  }
+  if (!name) return { supplierId: null, supplier: null };
   await lockName(tx, tenant, name);
   const candidates = await tx.warehouseSupplier.findMany({ where: { cafeId: tenant }, orderBy: { isActive: 'desc' }, select: { id: true, name: true, isActive: true } });
   const existing = candidates.find((entry) => entry.name.trim().toLowerCase() === name.toLowerCase());

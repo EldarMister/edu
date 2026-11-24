@@ -427,7 +427,7 @@ export class IngredientsService {
         await this.purchases.createInTransaction(tx, { requestKey, complete: true, warehouseId: opening.warehouseId,
           supplier: dto.supplier?.trim() || undefined, supplierId: dto.supplierId,
           items: [{ ingredientId: previousIngredient.id, unit, quantity: opening.quantity, purchasePrice: opening.unitPrice }],
-        }, actor, { allowMissingSupplier: true });
+        }, actor);
         return this.serialize({ ...previousIngredient, ...await getWarehouseBalance(tx, warehouse, previousIngredient) });
       }
       const supplier = await resolveWarehouseSupplier(tx, dto);
@@ -446,7 +446,7 @@ export class IngredientsService {
         await this.purchases.createInTransaction(tx, { requestKey, complete: true, warehouseId: opening.warehouseId,
           supplier: supplier.supplier ?? undefined, supplierId: supplier.supplierId, note: 'Начальный остаток',
           items: [{ ingredientId: created.id, unit, quantity: opening.quantity, purchasePrice: opening.unitPrice }],
-        }, actor, { allowMissingSupplier: true });
+        }, actor);
         const received = await this.ensure(created.id, tx);
         return this.serialize({ ...received, ...await getWarehouseBalance(tx, warehouse, received) });
       }

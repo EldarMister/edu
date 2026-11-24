@@ -24,6 +24,20 @@ import { receiptMovementValue, replayHistoricalStock } from './historical-stock-
 import { lockPurchaseRow, purchaseFundingAccounts, purchaseSettlement, purchaseSettlementHistory, purchaseSettlementTotals } from './purchase-settlement';
 
 const postingTransaction = { timeout: 30_000 };
+const noSupplier = 'Без поставщика';
+type PurchaseSupplier = Pick<CreatePurchaseDto, 'supplier' | 'supplierId'>;
+
+async function resolvePurchaseSupplier(tx: Prisma.TransactionClient, dto: PurchaseSupplier) {
+  const { supplier, supplierId } = await resolveWarehouseSupplier(tx, dto);
+  return { supplier: supplier ?? noSupplier, supplierId };
+}
+
+function matchesPurchaseSupplier(saved: { supplier: string; supplierId: string | null }, input: PurchaseSupplier) {
+  if (input.supplierId) return saved.supplierId === input.supplierId;
+  const name = input.supplier?.trim();
+  if (!name) return saved.supplierId === null && saved.supplier === noSupplier;
+  return saved.supplier.trim().toLocaleLowerCase() === name.toLocaleLowerCase();
+}
 
 // Нормализованная позиция закупки: введённые (display) + базовые значения.
 type NormalizedItem = {
@@ -287,8 +301,7 @@ export class PurchasesService {
     return this.findOne(purchaseId);
   }
 
-  async createInTransaction(tx: Prisma.TransactionClient, dto: CreatePurchaseDto, actor?: Pick<AuthUser, 'id' | 'name' | 'role'>,
-    { allowMissingSupplier = false } = {}) {
+  async createInTransaction(tx: Prisma.TransactionClient, dto: CreatePurchaseDto, actor?: Pick<AuthUser, 'id' | 'name' | 'role'>) {
     const discount = new Prisma.Decimal(dto.discount ?? 0).toDecimalPlaces(2);
     this.validateDate(dto.date, dto.complete === true);
     this.validateAttachments(dto.attachments);
@@ -304,7 +317,7 @@ export class PurchasesService {
           JSON.stringify([item.ingredientId, item.quantityBase, item.grossTotal, item.taxId ?? null]);
         if (previous.warehouseId !== (warehouse?.id ?? null) || !previous.discount.eq(discount)
           || previous.effectiveAt?.getTime() !== effectiveAt?.getTime()
-          || (dto.supplierId ? previous.supplierId !== dto.supplierId : previous.supplier.trim().toLocaleLowerCase() !== (dto.supplier?.trim() || (allowMissingSupplier ? 'Без поставщика' : '')).toLocaleLowerCase())
+          || !matchesPurchaseSupplier(previous, dto)
           || JSON.stringify(previous.items.map(lineKey).sort()) !== JSON.stringify(this.retryItems(dto.items, previous.items).map(lineKey).sort())) {
           throw new ConflictException('Ключ повторного запроса уже использован для другого прихода');
         }
@@ -313,13 +326,13 @@ export class PurchasesService {
     }
     const items = this.discountItems(await this.normalizeItems(dto.items, tx), discount);
     const total = items.reduce((acc, item) => acc.add(item.total).add(item.taxAmount), new Prisma.Decimal(0));
-    const supplier = await resolveWarehouseSupplier(tx, { ...dto, required: !allowMissingSupplier });
+    const supplier = await resolvePurchaseSupplier(tx, dto);
     if (dto.complete) await lockIngredients(tx, items.map((item) => item.ingredientId));
     const purchase = await tx.purchase.create({
       data: {
         date: dto.date ? new Date(dto.date) : new Date(),
         effectiveAt,
-        supplier: supplier.supplier ?? 'Без поставщика', supplierId: supplier.supplierId, requestKey: dto.requestKey, note: dto.note?.trim() || null, attachments: dto.attachments ?? [], discount,
+        ...supplier, requestKey: dto.requestKey, note: dto.note?.trim() || null, attachments: dto.attachments ?? [], discount,
         warehouseId: warehouse?.id ?? null,
         totalAmount: new Prisma.Decimal(total),
         items: { create: items.map((item) => this.itemCreateData(item)) },
@@ -368,7 +381,7 @@ export class PurchasesService {
       }
       const rawItems = dto.items ? await this.normalizeItems(dto.items, tx, purchase.items) : undefined;
       if (dto.discount !== undefined && !rawItems) throw new BadRequestException('Для изменения скидки передайте позиции прихода');
-      const supplier = dto.supplier !== undefined || dto.supplierId !== undefined ? await resolveWarehouseSupplier(tx, { ...dto, required: true }) : undefined;
+      const supplier = dto.supplier !== undefined || dto.supplierId !== undefined ? await resolvePurchaseSupplier(tx, dto) : undefined;
       const discount = new Prisma.Decimal(dto.discount ?? purchase.discount).toDecimalPlaces(2);
       const items = rawItems ? this.discountItems(rawItems, discount) : undefined;
       const total = items?.reduce((sum, item) => sum.add(item.total).add(item.taxAmount), new Prisma.Decimal(0));
@@ -383,7 +396,7 @@ export class PurchasesService {
         data: {
           date: dto.date !== undefined ? new Date(dto.date) : undefined,
           effectiveAt,
-          supplier: supplier?.supplier ?? undefined, supplierId: supplier?.supplierId, note: dto.note === undefined ? undefined : dto.note?.trim() || null,
+          ...supplier, note: dto.note === undefined ? undefined : dto.note?.trim() || null,
           attachments: dto.attachments, discount,
           warehouseId: warehouse !== undefined ? warehouse?.id ?? null : undefined,
           totalAmount: total !== undefined ? new Prisma.Decimal(total) : undefined,
@@ -409,10 +422,9 @@ export class PurchasesService {
     if (dto.discount !== undefined && !normalized) throw new BadRequestException('Для изменения скидки передайте позиции прихода');
     const discount = new Prisma.Decimal(dto.discount ?? purchase.discount).toDecimalPlaces(2);
     const items = normalized ? this.discountItems(normalized, discount) : undefined;
-    const changeSupplier = dto.supplierId ? dto.supplierId !== purchase.supplierId
-      : dto.supplier !== undefined && dto.supplier.trim() !== purchase.supplier;
+    const changeSupplier = (dto.supplier !== undefined || dto.supplierId !== undefined) && !matchesPurchaseSupplier(purchase, dto);
     const supplier = changeSupplier
-      ? await resolveWarehouseSupplier(tx, { ...dto, required: true }) : undefined;
+      ? await resolvePurchaseSupplier(tx, dto) : undefined;
     // Keep settlements attributed to the supplier who actually received them.
     if (supplier && (purchase.supplierId ? supplier.supplierId !== purchase.supplierId : supplier.supplier !== purchase.supplier)) {
       const settlements = await tx.financeEntry.aggregate({ where: { purchaseId: purchase.id }, _sum: { amount: true } });
@@ -469,7 +481,7 @@ export class PurchasesService {
     }
     const updated = await tx.purchase.update({ where: { id: purchase.id }, data: {
       date: dto.date === undefined ? undefined : new Date(dto.date),
-      supplier: supplier?.supplier ?? undefined, supplierId: supplier?.supplierId,
+      ...supplier,
       note: dto.note === undefined ? undefined : dto.note?.trim() || null, attachments: dto.attachments,
       discount, warehouseId: nextWarehouse?.id ?? null,
       totalAmount: items?.reduce((sum, item) => sum.add(item.total).add(item.taxAmount), new Prisma.Decimal(0)),

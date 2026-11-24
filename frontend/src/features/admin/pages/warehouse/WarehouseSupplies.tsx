@@ -85,7 +85,6 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');
-  const [statusFilterOpen, setStatusFilterOpen] = useState(false);
   const params = { warehouseId, search, status, paymentStatus, suppliers: selectedSuppliers, categories: selectedCategories,
     from: period.range.dateFrom, to: period.range.dateTo, dateSort } as const;
   const query = usePurchases(params);
@@ -206,16 +205,11 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
           onChange={(value) => filter({ supplyCategories: value })} />
         <Select ariaLabel="Оплата поставки" value={paymentStatus} options={paymentStates}
           onChange={(value) => filter({ supplyPayment: value })} />
-        {statusFilterOpen || status ? <div className="flex items-center gap-2">
+        {status && <div className="flex items-center gap-2">
           <Select ariaLabel="Статус поставки" value={status} options={states} onChange={(value) => filter({ supplyStatus: value })} />
-          <button type="button" className="text-text-muted" aria-label="Убрать фильтр статуса" onClick={() => {
-            setStatusFilterOpen(false);
-            filter({ supplyStatus: '' });
-          }}>×</button>
-        </div> : <Select ariaLabel="Добавить фильтр поставки" value="" placeholder="+ Фильтр"
-          options={[{ value: 'status', label: 'Статус' }]} onChange={() => setStatusFilterOpen(true)} />}
+          <button type="button" className="text-text-muted" aria-label="Убрать фильтр статуса" onClick={() => filter({ supplyStatus: '' })}>×</button>
+        </div>}
         {hasFilters && <button type="button" className="text-sm text-primary" onClick={() => {
-          setStatusFilterOpen(false);
           filter({ supplySearch: '', supplyStatus: '', supplyPayment: '', supplySupplier: '', supplyCategories: '', warehouse: '',
             supplyPeriod: 'all', supplyFrom: '', supplyTo: '' });
         }}>Сбросить всё</button>}
