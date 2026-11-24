@@ -1,4 +1,5 @@
 import { Fragment, useState, type ReactNode } from 'react';
+import { ColumnButton } from '../../components/ColumnControl';
 import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
@@ -178,7 +179,7 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
     <section className="warehouse-supplies" aria-label="Реестр поставок">
       <WorkspaceHeaderCount count={query.data ? rows.length : undefined} />
       <WorkspaceHeaderActions>
-        <button type="button" className="supply-header-action" onClick={() => setSettingsOpen(true)}>Столбцы</button>
+        <ColumnButton onClick={() => setSettingsOpen(true)} />
         {canExport && <button type="button" className="supply-header-action" disabled={exporting}
           onClick={() => void exportWorkbook()}>{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
         {period.filter}

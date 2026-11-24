@@ -42,7 +42,7 @@ export function WarehouseColumnSettings<Key extends string>({ columns, defaults,
   }
 
   return (
-    <Modal open title="Столбцы" onClose={onClose} footer={
+    <Modal open manageFocus title="Столбцы" onClose={onClose} footer={
       <div className="flex flex-wrap justify-between gap-2">
         <button type="button" className="btn-secondary btn-md" onClick={() => {
           setOrder([...resetColumns, ...defaults.filter((key) => !resetColumns.includes(key))]);

@@ -11,7 +11,7 @@ import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { normalizeOrderPaymentMethod, OrdersFilters, type OrderSort } from '../components/OrdersFilters';
 import { availableOrderColumns, defaultOrderColumns, orderColumnLabel, orderTableWidth, OrdersTable } from '../components/OrdersTable';
 import { OrdersExportButton } from '../components/OrdersExportButton';
-import { IconTables } from '../components/icons';
+import { ColumnButton } from '../components/ColumnControl';
 import { CancelOrderModal } from '../components/CancelOrderModal';
 import { OrderDetailsModal } from '../components/OrderDetailsModal';
 import { useCanManageOrderRefunds } from '@/features/refunds/api';
@@ -139,9 +139,7 @@ export function OrdersPage() {
       ? { width: `max(100%, calc(${orderTableWidth(columns)}px + 2 * var(--orders-gutter)))` }
       : undefined}>
       <WorkspaceHeaderActions>
-        <button type="button" className="btn-secondary btn-md" onClick={() => setColumnsOpen(true)}>
-          <IconTables className="h-4 w-4" /> {tr('Столбцы')}
-        </button>
+        <ColumnButton label={tr('Столбцы')} onClick={() => setColumnsOpen(true)} />
         {canAction('exportReports') && <OrdersExportButton filters={listFilters} disabled={!items.length || !!ordersError} />}
         {period.filter}
       </WorkspaceHeaderActions>

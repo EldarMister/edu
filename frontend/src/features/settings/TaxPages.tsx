@@ -1,4 +1,5 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
+import { ColumnButton } from '@/features/admin/components/ColumnControl';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
@@ -103,7 +104,7 @@ function TaxDirectory({ onEdit }: { onEdit: (id?: string) => void }) {
   return <div className="space-y-3">
     <WorkspaceHeaderCount count={list.isSuccess ? visible.length : undefined} />
     <WorkspaceHeaderActions>
-      <button type="button" className="supply-header-action" aria-haspopup="dialog" onClick={() => setColumnsOpen(true)}>Столбцы</button>
+      <ColumnButton onClick={() => setColumnsOpen(true)} />
       <TaxTableActions endpoint={TAX_DIRECTORY_ENDPOINT} params={{ ...queryParams, columns: columns.join(',') }}
         table={table} canExport={canAction('exportReports')} />
       {editable && <button type="button" className="btn-primary btn-md" onClick={() => onEdit()}>Добавить</button>}

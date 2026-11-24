@@ -20,7 +20,8 @@ import { RecipeExportButton } from './RecipeExportButton';
 import { printReport, exportCsv } from '@/lib/report-output';
 import { IngredientImportButton } from './IngredientImportButton';
 import { PreparationCost } from './PreparationCost';
-import { IconColumns, IconExport, IconPrinter } from '../../components/icons';
+import { IconExport, IconPrinter } from '../../components/icons';
+import { ColumnButton } from '../../components/ColumnControl';
 
 const balanceColumns = {
   name: { label: 'Название', width: 210 },
@@ -287,7 +288,7 @@ export function IngredientsTab({
   const [hiddenGuide, setHiddenGuide] = useState(() => {
     try { return localStorage.getItem(guideKey) === 'hidden' ? guideKey : ''; } catch { return ''; }
   });
-  const showGuide = preparedCatalogue && catalogueQuery.isSuccess && catalogueRows.length <= 1 && hiddenGuide !== guideKey;
+  const showGuide = preparedCatalogue && catalogueQuery.isSuccess && catalogueRows.length === 0 && hiddenGuide !== guideKey;
   function hideGuide() {
     setHiddenGuide(guideKey);
     try { localStorage.setItem(guideKey, 'hidden'); } catch { /* Keep hidden in this session. */ }
@@ -396,8 +397,7 @@ export function IngredientsTab({
       {catalogue && <WorkspaceHeaderCount count={query.data ? catalogueRows.length : undefined} />}
       {catalogue && <WorkspaceHeaderActions>
         <div className="catalogue-header-actions">
-          <button type="button" className="supply-header-action" title="Столбцы" aria-haspopup="dialog" data-catalogue-disclosure
-            onClick={() => setIngredientColumnsOpen(true)}><IconColumns /><span className="catalogue-action-label">Столбцы</span></button>
+          <ColumnButton onClick={() => setIngredientColumnsOpen(true)} />
           {canExportPreparations && <RecipeExportButton kind="preparations" ids={rows.map(({ id }) => id)} pending={!catalogueQuery.isSuccess} />}
           {!preparedCatalogue && can('actions.exportReports') && <button type="button" className="supply-header-action" disabled={!query.isSuccess}
             title="Экспорт CSV" onClick={() => reportCatalogue(false)}><IconExport /><span className="catalogue-action-label">Экспорт</span></button>}
@@ -412,8 +412,6 @@ export function IngredientsTab({
         <div>
           <h2>{canCreate ? <button type="button" onClick={onCreate}>Добавьте полуфабрикат</button> : 'Полуфабрикаты'}</h2>
           <p>Объедините ингредиенты в заготовку и добавляйте её в состав блюд. Например, один раз укажите состав теста и используйте его в техкартах булочек и круассанов.</p>
-          <a href="https://www.youtube.com/watch?v=Aad7Eyu1Cug&t=257s" target="_blank" rel="noopener noreferrer" title="Смотреть видео о полуфабрикатах в Poster">
-            <span aria-hidden="true">▶</span> Смотреть видео</a>
         </div>
         <button type="button" className="preparation-guide-close" aria-label="Скрыть подсказку о полуфабрикатах" title="Скрыть подсказку"
           onClick={hideGuide}>×</button>
@@ -533,8 +531,7 @@ export function IngredientsTab({
           onClick={() => setBalanceFilter({ search: '', kind: '', category: '', unit: '', stockFilter: '', warehouse: '', balanceWarehouses: '' })}>
           Сбросить всё
         </button>}
-        {!catalogue && <button type="button" className="supply-header-action ml-auto shrink-0 print:hidden"
-          onClick={() => setColumnsOpen(true)}>Столбцы</button>}
+        {!catalogue && <ColumnButton className="ml-auto shrink-0" onClick={() => setColumnsOpen(true)} />}
       </div>
       <QueryState pending={query.isPending} error={query.error}>
         <div className="hidden overflow-x-auto md:block">

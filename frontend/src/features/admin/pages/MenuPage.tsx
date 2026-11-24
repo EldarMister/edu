@@ -8,6 +8,7 @@ import { captureDeletionEffect } from '../components/deletion-effect';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { WorkspacePending } from '../components/WorkspacePending';
+import { ColumnButton } from '../components/ColumnControl';
 import { minDishUnitPrice, taxRateLabel, variantNamesLine } from '@/lib/format';
 import { resolveApiImage } from '@/lib/image';
 import { useT } from '@/lib/i18n';
@@ -15,6 +16,7 @@ import { WorkspaceHeaderCount } from './WorkspaceHeader';
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { apiError } from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { useNotifications } from '@/store/notifications';
 import {
   routingOptions,
@@ -31,6 +33,7 @@ import { normalizeUnitLabel } from './warehouse/units';
 import { EditorPage } from './warehouse/EditorPage';
 import { useEditorRoute, usePageFilter, usePageFilters } from './warehouse/workspace-route';
 import { WarehouseMultiFilter, warehouseMultiFilterValues } from './warehouse/WarehouseMultiFilter';
+import { visibleWarehouseColumns, WarehouseColumnSettings } from './warehouse/WarehouseColumnSettings';
 import { filterMenuGoods, MenuAdditionalFilters, MenuGoodsActions, menuGoodsColumns, menuListFilters,
   useMenuGoodsColumns, type MenuGoodsColumn } from './MenuGoodsControls';
 import { MenuEntryPage } from './MenuEntryPage';
@@ -74,6 +77,13 @@ export function MenuPage({ view }: { view: Exclude<MenuView, 'categories' | 'ing
   return <MenuDishList key={view} view={view} />;
 }
 const recipePageSize = 24;
+const recipeColumnLabels = {
+  name: 'Название', category: 'Категория', tax: 'Налог', output: 'Выход',
+  foodCost: 'Себестоимость', price: 'Цена', markupPercent: 'Наценка', foodCostPercent: 'Фудкост',
+};
+type RecipeColumn = keyof typeof recipeColumnLabels;
+const recipeColumnOrder = Object.keys(recipeColumnLabels) as RecipeColumn[];
+const recipeCostColumns = new Set<RecipeColumn>(['foodCost', 'markupPercent', 'foodCostPercent']);
 
 function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
   const t = useT();
@@ -83,6 +93,8 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
   const { category: categoryId, search, availability, station: stationId, nameSort } = filters;
   const taxSort = filters.taxSort === 'asc' || filters.taxSort === 'desc' ? filters.taxSort : '';
   const [compositionId, setCompositionId] = useState<string | null>(null);
+  const [recipeColumnsOpen, setRecipeColumnsOpen] = useState(false);
+  const [recipeColumnPreference, saveRecipeColumnPreference] = useColumnPreference('menu-recipes');
   const location = useLocation();
   const { editor, openEditor, closeEditor } = useEditorRoute();
   const compositionPanelId = useId();
@@ -107,6 +119,10 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
   const editable = can('actions.editMenu');
   const canExportRecipes = !isGoods && can('sections.warehouse') && can('actions.exportReports');
   const showRecipeCosts = !isGoods && can('sections.warehouse') && can('actions.warehouseCosts');
+  const recipeDefaults = recipeColumnOrder.filter((column) =>
+    (column !== 'tax' || displayTax) && (showRecipeCosts || !recipeCostColumns.has(column)));
+  const recipeColumns = visibleWarehouseColumns(recipeColumnPreference, recipeDefaults);
+  const recipeDataColumns = recipeColumns.slice(1);
   const filtered = Object.entries(filters).some(([key, value]) => !['nameSort', 'taxSort', 'recipePage'].includes(key) && value);
   function clearFilters() {
     updateFilters({ ...menuListFilters, nameSort, taxSort });
@@ -164,6 +180,18 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
       case 'tax': return taxCell(dish);
     }
   };
+  const recipeCell = (dish: AdminDish, column: RecipeColumn) => {
+    const costs = costsByDish.get(dish.id);
+    switch (column) {
+      case 'category': return categoryLabels.get(dish.categoryId) ?? dish.category.name;
+      case 'tax': return taxCell(dish);
+      case 'output': return dishOutput(dish, costs);
+      case 'price': return priceCell(dish, dish.variants.length ? `от ${balanceMoney(minDishUnitPrice(dish))}` : balanceMoney(Number(dish.price)));
+      case 'foodCost': return recipeMetric(costs, column, balanceMoney);
+      case 'markupPercent':
+      case 'foodCostPercent': return recipeMetric(costs, column, costPercent);
+    }
+  };
   async function onDelete(dish: AdminDish) {
     if (remove.isPending || !confirm(`Удалить «${dish.name}» из меню?`)) return;
     const playEffect = captureDeletionEffect(`menu-entry-${dish.id}`);
@@ -217,10 +245,11 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
           options={stationOptions} />
         <MenuAdditionalFilters filters={filters} update={updateFilters} goods={isGoods} units={unitOptions}
           taxes={isGoods || displayTax ? taxFilters : []} />
-        {!editor && (isGoods || editable || canExportRecipes) && (
+        {!editor && (
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             {isGoods && <MenuGoodsActions filters={filters} columns={columns} saveColumns={saveColumns}
               ready={goodsQ.isSuccess} canExport={can('actions.exportReports')} />}
+            {!isGoods && <ColumnButton onClick={() => setRecipeColumnsOpen(true)} />}
             {canExportRecipes && <RecipeExportButton kind="recipes" ids={rows.map(({ id }) => id)} pending={!dishesQ.isSuccess} />}
             {!isGoods && editable && <button type="button" className="btn-ghost flex items-center gap-2 text-primary"
               onClick={() => openEditor({ type: 'recipeTrash' })}><IconTrash aria-hidden="true" /> Корзина</button>}
@@ -237,6 +266,12 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
           </div>
         )}
       </div>
+      {!isGoods && recipeColumnsOpen && <WarehouseColumnSettings columns={recipeColumns} defaults={recipeDefaults}
+        label={(column) => recipeColumnLabels[column]} onClose={() => setRecipeColumnsOpen(false)}
+        onApply={(selected, reset) => {
+          saveRecipeColumnPreference(reset && selected.join(',') === recipeDefaults.join(',') ? '' : selected.join(','));
+          setRecipeColumnsOpen(false);
+        }} />}
       {categoriesQ.isError && (
         <ListLoadError
           error={categoriesQ.error}
@@ -255,12 +290,12 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
           pending={listQ.isFetching}
         />
       ) : (
-        <div className="min-w-0 overflow-x-auto">
+        <div className="relative min-w-0 overflow-x-auto">
           <table className="poster-table poster-menu-table poster-catalogue-table w-full min-w-[720px] text-sm"
-            style={isGoods ? { minWidth: Math.max(560, 310 + dataColumns.length * 125) } : undefined}>
+            style={{ minWidth: isGoods ? Math.max(560, 310 + dataColumns.length * 125) : Math.max(520, 300 + recipeDataColumns.length * 70) }}>
             <thead>
               <tr className="border-b border-border text-left text-xs text-text-muted">
-                <th className="py-3 pr-4 font-normal" aria-sort={taxSort ? undefined : nameSort === 'desc' ? 'descending' : 'ascending'}>
+                <th scope="col" className="py-3 pr-4 font-normal" aria-sort={taxSort ? undefined : nameSort === 'desc' ? 'descending' : 'ascending'}>
                   <button type="button" className="flex items-center gap-2"
                     onClick={() => updateFilters({ nameSort: !taxSort && nameSort === 'asc' ? 'desc' : 'asc', taxSort: '' })}>
                     Название {!taxSort && <span aria-hidden>{nameSort === 'desc' ? '↓' : '↑'}</span>}
@@ -268,18 +303,11 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
                 </th>
                 {isGoods ? dataColumns.map((column) => <th key={column} scope="col" aria-sort={column === 'tax' ? taxAriaSort : undefined}
                   className={`px-4 py-3 font-normal ${column === 'price' ? 'text-right' : ''}`}>{column === 'tax' ? taxHeader : menuGoodsColumns[column]}</th>)
-                  : <>
-                    <th className="px-4 py-3 font-normal">Категория</th>
-                    {displayTax && <th scope="col" className="px-4 py-3 font-normal" aria-sort={taxAriaSort}>{taxHeader}</th>}
-                    <th className="px-4 py-3 text-right font-normal">Выход</th>
-                    {showRecipeCosts && <th className="px-4 py-3 text-right font-normal">Себестоимость</th>}
-                    <th className="px-4 py-3 text-right font-normal">Цена</th>
-                    {showRecipeCosts && <>
-                      <th className="px-4 py-3 text-right font-normal">Наценка</th>
-                      <th className="px-4 py-3 text-right font-normal">Фудкост</th>
-                    </>}
-                  </>}
-                <th>
+                  : recipeDataColumns.map((column) => <th key={column} scope="col" aria-sort={column === 'tax' ? taxAriaSort : undefined}
+                    className={`px-4 py-3 font-normal ${column === 'category' || column === 'tax' ? '' : 'text-right'}`}>
+                    {column === 'tax' ? taxHeader : recipeColumnLabels[column]}
+                  </th>)}
+                <th scope="col">
                   <span className="sr-only">Действия</span>
                 </th>
               </tr>
@@ -318,23 +346,12 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
                     </button>
                   </td>
                   {isGoods ? dataColumns.map((column) => <td key={column}
-                    className={`px-4 py-3 ${column === 'price' ? 'whitespace-nowrap text-right' : 'text-text-secondary'}`}>
+                    className={`px-4 py-3 ${column === 'price' ? 'whitespace-nowrap text-right tabular-nums text-text-primary' : 'text-text-secondary'}`}>
                     {goodsCell(dish as AdminGood, column)}
-                  </td>) : <>
-                    <td className="px-4 py-3 text-text-secondary">{categoryLabels.get(dish.categoryId) ?? dish.category.name}</td>
-                    {displayTax && <td className="px-4 py-3 text-text-secondary">{taxCell(dish)}</td>}
-                    <td className="whitespace-nowrap px-4 py-3 text-right text-text-secondary">{dishOutput(dish, costsByDish.get(dish.id))}</td>
-                    {showRecipeCosts && <td className="min-w-28 px-4 py-3 text-right tabular-nums">
-                      {recipeMetric(costsByDish.get(dish.id), 'foodCost', balanceMoney)}
-                    </td>}
-                    <td className="whitespace-nowrap px-4 py-3 text-right">
-                      {priceCell(dish, dish.variants.length ? `от ${balanceMoney(minDishUnitPrice(dish))}` : balanceMoney(Number(dish.price)))}
-                    </td>
-                    {showRecipeCosts && <>
-                      <td className="px-4 py-3 text-right tabular-nums">{recipeMetric(costsByDish.get(dish.id), 'markupPercent', costPercent)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{recipeMetric(costsByDish.get(dish.id), 'foodCostPercent', costPercent)}</td>
-                    </>}
-                  </>}
+                  </td>) : recipeDataColumns.map((column) => <td key={column}
+                    className={`px-4 py-3 ${column === 'category' || column === 'tax' ? 'text-text-secondary' : 'whitespace-nowrap text-right tabular-nums text-text-primary'}`}>
+                    {recipeCell(dish, column)}
+                  </td>)}
                   <td className="w-px px-3 py-3 text-right">
                     <div className="poster-row-actions">
                       {!isGoods && can('sections.warehouse') && (
@@ -377,7 +394,7 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
                   </td>
                 </tr>
                 {compositionId === dish.id && (
-                  <tr className="poster-catalogue-detail-row"><td colSpan={5 + Number(displayTax) + (showRecipeCosts ? 3 : 0)}>
+                  <tr className="poster-catalogue-detail-row"><td colSpan={recipeColumns.length + 1}>
                     <div id={`${compositionPanelId}-${dish.id}`} className="poster-catalogue-detail" aria-label={`Состав: ${dish.name}`}><DishComposition dish={dish} /></div>
                   </td></tr>
                 )}

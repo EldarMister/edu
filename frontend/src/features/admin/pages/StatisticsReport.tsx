@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { ColumnSummary } from '../components/ColumnControl';
 import { Link, useLocation } from 'react-router-dom';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { Select } from '@/components/Select';
@@ -157,7 +158,7 @@ export function StatisticsReport({ report, data, periodControl }: { report: Repo
     <WorkspaceHeaderCount count={rows.length} />
     <WorkspaceHeaderActions>
       {report !== 'payments' && <details className="relative">
-        <summary className="btn-secondary btn-md cursor-pointer list-none">{t('Столбцы')}</summary>
+        <ColumnSummary label={t('Столбцы')} />
         <div className="absolute right-0 z-20 mt-1 grid min-w-44 gap-2 rounded-xl border border-border bg-card p-3 shadow-card">
           {report === 'products' && <div className="grid gap-2 border-b border-border pb-2">
             <label className="flex items-center gap-2 whitespace-nowrap text-sm">

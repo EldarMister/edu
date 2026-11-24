@@ -1,4 +1,5 @@
 import { Fragment, useRef, useState, type ReactNode } from 'react';
+import { ColumnButton } from '../../components/ColumnControl';
 import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { usePageFilter, usePageFilters } from './workspace-route';
@@ -243,13 +244,10 @@ export function WarehouseMovementSummary({ warehouseId, range, onOpen, onHistory
           });
         }}>Сбросить всё</button>}
         <WorkspaceHeaderActions>
-          <Select ariaLabel="Действия отчёта" className="report-actions-trigger" placeholder={exporting ? '…' : '⋮'} value="" disabled={exporting}
-            options={[{ value: 'columns', label: 'Столбцы' },
-              ...(canExport ? [{ value: 'export', label: 'Экспорт в Excel' }] : [])]}
-            onChange={(action) => {
-              if (action === 'columns') setEditingColumns(true);
-              else void download();
-            }} />
+          <ColumnButton onClick={() => setEditingColumns(true)} />
+          {canExport && <button type="button" className="supply-header-action" disabled={exporting} onClick={() => void download()}>
+            {exporting ? 'Выгрузка…' : 'Экспорт в Excel'}
+          </button>}
         </WorkspaceHeaderActions>
       </div>
       {editingColumns && <WarehouseColumnSettings columns={columns} defaults={defaultColumns}

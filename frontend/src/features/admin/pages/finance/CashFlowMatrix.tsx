@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { usePermissions } from '@/hooks/usePermissions';
 import { printReport } from '@/lib/report-output';
-import { IconPrinter, IconTables } from '../../components/icons';
+import { IconPrinter } from '../../components/icons';
+import { ColumnSummary } from '../../components/ColumnControl';
 import type { CashFlow, FinanceAccount, FinanceCategory, FinanceEntry } from './api';
 import { buildCashFlowTable, flowCell, type FlowColumn, type FlowLine, type FlowMovement } from './cash-flow-table';
 import { downloadRegister } from './FinanceRegister';
@@ -155,7 +156,7 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
         </div>
         <div className="cash-flow-tools">
           {(flow.accountOpening || orderedMonths.length > 1) && <details className="cash-flow-column-menu">
-            <summary className="btn-secondary btn-md"><IconTables className="h-4 w-4" /> Столбцы <span aria-hidden="true">▾</span></summary>
+            <ColumnSummary />
             <div>
               {flow.accountOpening && <>
                 <label><input type="checkbox" checked={showAmounts} onChange={(event) => toggleColumn('amounts', event.target.checked)} /> Карта и наличные, деньги</label>

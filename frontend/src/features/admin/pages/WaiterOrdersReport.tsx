@@ -3,7 +3,8 @@ import { Select } from '@/components/Select';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { usePermissions } from '@/hooks/usePermissions';
 import { WorkspacePending } from '../components/WorkspacePending';
-import { IconPrinter, IconTables } from '../components/icons';
+import { IconPrinter } from '../components/icons';
+import { ColumnButton } from '../components/ColumnControl';
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { ReportPeriodFilter, type PeriodPreset } from './warehouse/ReportPeriodFilter';
 import { calendarDate, warehouseDay, warehousePeriodRange } from './warehouse/warehouse-period';
@@ -213,9 +214,7 @@ export function WaiterOrdersReport({ staff, staffLoading }: {
             {view === 'orders' && <>
               <WorkspaceSearch value={search} onChange={setSearch} label="Поиск по заказам" placeholder="Блюдо или № заказа"
               className="max-sm:w-full [&_.input]:pl-8 [&_.input]:pr-8" />
-              <button type="button" onClick={() => setColumnsOpen(true)} className="btn-secondary btn-md">
-                <IconTables className="h-4 w-4" /> Столбцы
-              </button>
+              <ColumnButton onClick={() => setColumnsOpen(true)} />
             </>}
             {canAction('exportReports') && <button type="button" onClick={() => outputReport('csv')} className="btn-secondary btn-md" disabled={!hasOutput}>
               Экспорт CSV

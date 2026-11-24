@@ -59,7 +59,7 @@ export function InlineMenuPrice({ name, price, display, onSave }: {
   }
 
   if (draft == null) return <button ref={trigger} type="button" aria-label={`Изменить цену: ${name}, ${display}`}
-    className="rounded px-1 font-medium tabular-nums text-primary hover:underline" onClick={() => setDraft(String(price))}>
+    className="rounded px-1 font-medium tabular-nums text-text-primary underline-offset-4 hover:underline" onClick={() => setDraft(String(price))}>
     {display}
   </button>;
 

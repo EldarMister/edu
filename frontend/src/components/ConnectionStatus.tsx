@@ -1,16 +1,12 @@
 import { useConnectionStatus } from '@/lib/socket';
 
-/** Индикатор соединения. compact — только точка (для шапки кухни). */
-export function ConnectionStatus({ compact = false }: { compact?: boolean }) {
+export function ConnectionStatus() {
   const online = useConnectionStatus();
+  const status = online ? 'Онлайн' : 'Нет соединения';
   return (
-    <span className="inline-flex items-center gap-2 text-sm">
-      <span className={`h-2 w-2 rounded-full ${online ? 'bg-success' : 'bg-danger'}`} />
-      {!compact && (
-        <span className={online ? 'text-text-secondary' : 'text-danger'}>
-          {online ? 'Онлайн' : 'Нет соединения'}
-        </span>
-      )}
+    <span role="status" title={status} className="inline-flex shrink-0 items-center">
+      <span aria-hidden="true" className={`h-2 w-2 rounded-full ${online ? 'bg-success' : 'bg-danger'}`} />
+      <span className="sr-only">{status}</span>
     </span>
   );
 }

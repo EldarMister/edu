@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { ColumnButton } from '../../components/ColumnControl';
 import { EditorPage, useEditorDirty } from './EditorPage';
 import { DocumentProductPicker } from './DocumentProductPicker';
 import { ItemCard } from './ItemCard';
@@ -75,7 +76,7 @@ export function ProcessingPage({
         <WorkspaceSearch label="Поиск переработок" value={search} onChange={setSearch} />
         {period.filter}
         {filters}
-        <button type="button" className="btn-secondary btn-md" onClick={() => setEditingColumns(true)}>Столбцы</button>
+        <ColumnButton onClick={() => setEditingColumns(true)} />
         {can('actions.exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!documents.length || exporting}
           onClick={exportRegister}>Экспорт Excel</button>}
         {canProduce && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}

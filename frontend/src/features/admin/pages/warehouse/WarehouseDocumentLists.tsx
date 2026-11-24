@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { ColumnButton } from '../../components/ColumnControl';
 import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
@@ -218,7 +219,7 @@ export function DocumentList({
           </div>
         </details>
         {filtered && <button type="button" className="text-sm text-text-muted" onClick={resetFilters}>Сбросить всё</button>}
-        {!inventory && <button type="button" className="btn-secondary btn-md" onClick={() => setEditingColumns(true)}>Столбцы</button>}
+        {!inventory && <ColumnButton onClick={() => setEditingColumns(true)} />}
         {transfer && can('actions.exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!rows.length || exporting}
           onClick={exportTransfers}>Экспорт Excel</button>}
         {canCreate && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}

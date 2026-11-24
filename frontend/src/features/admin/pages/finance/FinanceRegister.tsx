@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from 'react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
-import { IconPrinter, IconTables } from '../../components/icons';
+import { IconPrinter } from '../../components/icons';
+import { ColumnButton } from '../../components/ColumnControl';
 import { WarehouseColumnSettings } from '../warehouse/WarehouseColumnSettings';
 import './finance-register.css';
 
@@ -110,9 +111,7 @@ export function FinanceRegister({
     <div className="finance-register-toolbar print:hidden">
       <div className="finance-register-filters">{filters}</div>
       <div className="finance-register-tools">
-        {defaultColumns && <button type="button" className="finance-tool" onClick={() => setShowColumns(true)}>
-          <IconTables aria-hidden="true" /> Столбцы
-        </button>}
+        {defaultColumns && <ColumnButton onClick={() => setShowColumns(true)} />}
         {reportActions && rows.length > 0 && <>
           {canAction('exportReports') && <button type="button" className="finance-tool" onClick={() => downloadRegister(title, output())}>
             <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7">

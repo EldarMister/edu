@@ -5,6 +5,7 @@ import { visibleWarehouseColumns, WarehouseColumnSettings } from './warehouse/Wa
 import { warehouseMultiFilterValues } from './warehouse/WarehouseMultiFilter';
 import type { AdminGood } from '../api';
 import { effectiveMenuTaxId } from '../../settings/MenuTaxSelect';
+import { ColumnButton } from '../components/ColumnControl';
 
 export const menuGoodsColumns = {
   name: 'Название', category: 'Категория', price: 'Цена', station: 'Цех',
@@ -95,7 +96,7 @@ export function MenuGoodsActions({ filters, columns, saveColumns, ready, canExpo
   }
   return <>
     <div className="flex flex-wrap items-center gap-1">
-      <button type="button" className="supply-header-action" onClick={() => setColumnsOpen(true)}>Столбцы</button>
+      <ColumnButton onClick={() => setColumnsOpen(true)} />
       {canExport && <button type="button" className="supply-header-action" disabled={!ready || exporting}
         onClick={() => void exportGoods()}>{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
       {error && <p className="basis-full text-sm text-danger" role="alert">{error}</p>}
