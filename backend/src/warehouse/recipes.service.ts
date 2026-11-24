@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RecipeCostsQuery, RecipeDraftDto, RecipeItemInputDto, RecipeItemUpdateDto, RecipePreviewDto, RecipeSettingsDto } from './recipes.dto';
 import { MenuModifiersService } from './menu-modifiers';
 import { lockRecipeGraph } from './recipe-resolution';
+import { nonMassProcessing } from './recipe-processing';
 import { addRecipeValue, RecipeCalculator, recipeMetrics, recipeOutput, type RecipeCostRow } from './recipe-calculation';
 import { assertUnitMatchesType, normalizeUnit, toBase, type UnitCode } from './units';
 
@@ -345,6 +346,8 @@ export class RecipesService {
       if (entries.some(([id, value]) => !ids.has(id) || typeof value !== 'number' || !Number.isFinite(value) || value < 0)) throw new BadRequestException('Укажите допустимые нормы существующих вариантов блюда');
       variantAmounts = Object.fromEntries(entries.map(([id, value]) => [id, this.quantity(value, unit).toString()]));
     }
+    if (unitType !== 'mass') return { ...nonMassProcessing(amount, unit, dto, previous), amount, amountUnit: unit,
+      fromCommonWarehouse: dto.fromCommonWarehouse, warehouseId, variantAmounts };
     const processingMethod = dto.processingMethod === undefined ? previous?.processingMethod ?? null : dto.processingMethod;
     const defaults = (processingLosses ?? {}) as Record<string, number>;
     const lossPercent = dto.lossPercent ?? (processingMethod && dto.processingMethod !== undefined ? Number(defaults[processingMethod] ?? 0) : Number(previous?.lossPercent ?? 0));

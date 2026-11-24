@@ -31,6 +31,7 @@ export interface Ingredient {
   recipeUnitCost?: number | null; // cost per display unit for virtual preparations
   valuationKnown?: boolean;
   processingLosses?: Partial<Record<ProcessingMethod, number>>;
+  pieceWeightGrams?: number | null;
   kind?: ItemKind;
   category?: string | null;
   supplier?: string | null;
@@ -72,6 +73,8 @@ export interface RecipeItem {
   warehouseName?: string;
   baseAmount?: number;
   netAmount?: number;
+  pieceWeightGrams?: number | null;
+  netWeightGrams?: number | null;
   lossPercent?: number;
   variantAmounts?: Record<string, number>;
   id: string;
@@ -102,6 +105,7 @@ export interface Recipe {
   costKnown?: boolean;
   version?: number;
   metadata?: RecipeMetadata | null;
+  output?: { amount: number; unit: string } | null;
   stockIngredientId?: string | null;
   stockAmount?: number;
   stockItem?: { id: string; name: string; amount: number; unit: UnitCode | string; warehouseName?: string; kind?: ItemKind } | null;
@@ -421,6 +425,7 @@ export function useIngredient(id: string | null) {
 }
 export interface IngredientInput {
   processingLosses?: Partial<Record<ProcessingMethod, number>>;
+  pieceWeightGrams?: number | null;
   kind?: ItemKind;
   category?: string | null;
   supplier?: string | null;

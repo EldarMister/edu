@@ -10,6 +10,8 @@ const { WarehouseLocationsService } = require('../src/warehouse/locations.servic
 const { WarehousePackagesService } = require('../src/warehouse/packages.ts');
 const { ProcessingService } = require('../src/warehouse/processing.ts');
 const { WarehouseDocumentsService } = require('../src/warehouse/documents.service.ts');
+const { RecipesService } = require('../src/warehouse/recipes.service.ts');
+const { PreparationProductionService } = require('../src/warehouse/preparation-production.ts');
 const url = process.env.ORDER_FEATURE_TEST_DATABASE_URL;
 if (url && (!['localhost', '127.0.0.1'].includes(new URL(url).hostname) || !new URL(url).pathname.includes('test'))) throw new Error('Only a dedicated local test database is allowed');
 
@@ -48,6 +50,47 @@ test('PostgreSQL: shared packages and multi-output processing preserve quantitie
         await assert.rejects(purchases.create({ supplier: 'Ошибка', items: [{ ingredientId: flour.id, packageId: bag.id, quantity: 1, purchasePrice: 10 }] }), /архиве/);
         assert.equal((await ingredients.findOne(flour.id)).processingLosses.cleaning, 2.5);
         await assert.rejects(ingredients.update(flour.id, { processingLosses: { boiling: 100 } }), /Потери/);
+      });
+      await t.test('automatic losses are mass-only and older volume/count processing survives existing recipe edits', async () => {
+        const recipes = new RecipesService(db);
+        const preparations = new PreparationProductionService(db);
+        const movementCount = await db.stockMovement.count();
+        const cup = await ingredients.create({ name: 'Стакан для проверки обработки', unit: 'pcs', processingLosses: { cleaning: 0 } });
+        const category = await db.category.create({ data: { name: 'Проверка обработки' } });
+        const dish = await db.dish.create({ data: { name: 'Обработка ингредиентов', categoryId: category.id, price: 100 } });
+        for (const unit of ['l', 'ml', 'pcs']) {
+          await assert.rejects(ingredients.create({ name: 'Несовместимая единица', unit, processingLosses: { cleaning: 5 } }), /весовых/);
+        }
+        await assert.rejects(ingredients.update(cup.id, { processingLosses: { cleaning: 5 } }), /весовых/);
+        const legacyDefaults = { boiling: 20 };
+        await db.ingredient.update({ where: { id: water.id }, data: { processingLosses: legacyDefaults } });
+        assert.equal((await ingredients.findOne(water.id)).processingLosses, null);
+        await ingredients.update(water.id, { processingLosses: legacyDefaults });
+        assert.deepEqual((await db.ingredient.findUniqueOrThrow({ where: { id: water.id } })).processingLosses, legacyDefaults);
+
+        await assert.rejects(recipes.addItem(dish.id, { ingredientId: water.id, amount: 100, unit: 'ml', processingMethod: 'boiling' }), /весовых/);
+        await assert.rejects(recipes.addItem(dish.id, { ingredientId: cup.id, amount: 1, lossPercent: 5 }), /Нетто|нетто/);
+        const card = await recipes.addItem(dish.id, { ingredientId: water.id, amount: 100, unit: 'ml', netAmount: 80 });
+        assert.deepEqual([card.items[0].netAmount, card.items[0].lossPercent, card.items[0].processingMethod], [80, 20, null]);
+        await db.recipeItem.update({ where: { id: card.items[0].id }, data: { processingMethod: 'boiling' } });
+        const scaled = await recipes.updateItem(card.items[0].id, { amount: 0.2, unit: 'l' });
+        assert.deepEqual([scaled.items[0].netAmount, scaled.items[0].lossPercent, scaled.items[0].processingMethod], [0.16, 20, 'boiling']);
+        const explicit = await recipes.updateItem(card.items[0].id, { amount: 0.2, netAmount: 0.18, unit: 'l' });
+        assert.deepEqual([explicit.items[0].netAmount, explicit.items[0].lossPercent, explicit.items[0].processingMethod], [0.18, 10, 'boiling']);
+
+        const prep = await preparations.create({ name: 'Смесь для проверки', unit: 'l' });
+        const prepDto = { outputQuantity: 1, outputUnit: 'l', items: [{ ingredientId: cup.id, quantity: 2, unit: 'pcs', netAmount: 1 }] };
+        await assert.rejects(preparations.saveRecipe(prep.id, { ...prepDto, items: [{ ...prepDto.items[0], processingMethod: 'cleaning' }] }), /весовых/);
+        const prepRecipe = await preparations.saveRecipe(prep.id, prepDto);
+        assert.deepEqual([prepRecipe.items[0].netAmount, prepRecipe.items[0].lossPercent, prepRecipe.items[0].processingMethod], [1, 50, null]);
+        await db.preparationRecipeItem.updateMany({ where: { recipeId: prep.id }, data: { processingMethod: 'cleaning' } });
+        await ingredients.remove(cup.id);
+        const archived = await preparations.saveRecipe(prep.id, { ...prepDto, items: [{ ingredientId: cup.id, quantity: 4, unit: 'pcs' }] });
+        assert.deepEqual([archived.items[0].netAmount, archived.items[0].lossPercent, archived.items[0].processingMethod], [2, 50, 'cleaning']);
+        assert.equal(await db.stockMovement.count(), movementCount);
+        await db.preparationRecipe.delete({ where: { ingredientId: prep.id } });
+        await db.dish.delete({ where: { id: dish.id } });
+        await db.category.delete({ where: { id: category.id } });
       });
       const dto = { requestKey: randomUUID(), note: 'Выпечка и крошка',
         inputs: [{ ingredientId: flour.id, warehouseId: main.id, quantity: 2, unit: 'kg' }, { ingredientId: water.id, warehouseId: bar.id, quantity: 1, unit: 'l' }],

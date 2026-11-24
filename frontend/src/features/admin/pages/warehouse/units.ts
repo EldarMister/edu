@@ -30,6 +30,10 @@ export function unitTypeOf(code: UnitCode): UnitType {
   return UNITS[code]?.type ?? 'count';
 }
 
+export function unitConversionFactor(from: UnitCode, to: UnitCode): number | null {
+  return UNITS[from].type === UNITS[to].type ? UNITS[from].factor / UNITS[to].factor : null;
+}
+
 /** Единицы того же типа — для селекта в строке техкарты/закупки. */
 export function unitsForType(type: UnitType): Array<{ value: UnitCode; label: string }> {
   return ALL_UNITS.filter((u) => u.type === type).map((u) => ({ value: u.code, label: u.label }));

@@ -6,6 +6,7 @@ import { Select } from '@/components/Select';
 import type { AdminDish } from '../../api';
 import { PROCESSING_METHODS, useIngredient, usePreparationRecipe, useRecipe, type IngredientDetails, type IngredientUsage, type Recipe } from './api';
 import { normalizeUnitLabel, unitLabel } from './units';
+import { recipeQuantity } from './recipe-draft-values';
 import { QueryState } from './WarehouseUi';
 
 export function CatalogueUsage({ id, prepared }: { id: string; prepared: boolean }) {
@@ -80,10 +81,6 @@ export function IngredientUsageTable({ item }: { item: IngredientDetails }) {
   </>;
 }
 
-function recipeQuantity(amount: number, unit: string) {
-  return `${amount.toLocaleString('ru-RU', { maximumFractionDigits: 6 })} ${unit}`.trim();
-}
-
 export function DishComposition({ dish }: { dish: AdminDish }) {
   const [variantId, setVariantId] = useState(dish.variants[0]?.id ?? '');
   const query = useRecipe(dish.id, variantId || undefined);
@@ -97,14 +94,17 @@ export function DishComposition({ dish }: { dish: AdminDish }) {
           options={dish.variants.map((variant) => ({ value: variant.id, label: variant.name }))} />}
       </div>
       <CatalogueState pending={query.isPending} error={query.error} onRetry={() => void query.refetch()}>
-        {query.data && <DishRecipeDetails recipe={query.data} variantSelected={!!variantId} costs={costs} />}
+        {query.data && <DishRecipeDetails recipe={query.data} costs={costs} />}
       </CatalogueState>
     </>
   );
 }
 
-function DishRecipeDetails({ recipe, variantSelected, costs }: { recipe: Recipe; variantSelected: boolean; costs: boolean }) {
+function DishRecipeDetails({ recipe, costs }: { recipe: Recipe; costs: boolean }) {
   const { items, stockItem, components, metadata, foodCost } = recipe;
+  const output = recipe.output === undefined && metadata?.outputQuantity != null
+    ? { amount: metadata.outputQuantity, unit: metadata.outputUnit ?? '' }
+    : recipe.output;
   const hasDetails = !!stockItem || !!components?.length || !!items.length;
   const knownCost = (cost: number | null) => cost == null ? 'Не рассчитана' : money(cost);
   return <>
@@ -119,7 +119,7 @@ function DishRecipeDetails({ recipe, variantSelected, costs }: { recipe: Recipe;
     </dl> : components?.length ? <div className="overflow-x-auto">
       <table className="poster-table poster-catalogue-detail-table w-full min-w-[400px]">
         <thead><tr><th scope="col">Блюдо в сете</th><th scope="col" className="text-right">Количество</th>
-          {costs && <th scope="col" className="text-right">Себестоимость за единицу</th>}</tr></thead>
+          {costs && <th scope="col" className="text-right">Себестоимость строки</th>}</tr></thead>
         <tbody>{components.map((item, index) => <tr key={`${item.dishId}:${item.variantId ?? ''}:${index}`}>
           <td><MenuUsageLink id={item.dishId} kind="recipe">{item.dishName}</MenuUsageLink>
             {item.variantName && <span className="ml-2 text-xs text-text-muted">{item.variantName}</span>}
@@ -135,18 +135,20 @@ function DishRecipeDetails({ recipe, variantSelected, costs }: { recipe: Recipe;
           <th scope="col" className="text-right">Брутто</th><th scope="col" className="text-right">Нетто</th>
           {costs && <th scope="col" className="text-right">Себестоимость</th>}</tr></thead>
         <tbody>{items.map((item) => {
-          const useSavedNet = item.netAmount != null && (!variantSelected || item.baseAmount === item.amount);
-          const net = useSavedNet ? item.netAmount! : item.amount * (1 - (item.lossPercent ?? 0) / 100);
+          const net = item.netAmount ?? item.amount * (1 - (item.lossPercent ?? 0) / 100);
           return <tr key={item.id}>
             <td>{item.name}</td><td>{item.warehouseName ?? (item.fromCommonWarehouse ? 'Основной склад' : 'По маршруту блюда')}</td>
             <td>{PROCESSING_METHODS.find((method) => method.value === item.processingMethod)?.label ?? '—'}</td>
             <td className="whitespace-nowrap text-right">{recipeQuantity(item.amount, item.unit)}</td>
-            <td className="whitespace-nowrap text-right">{recipeQuantity(net, item.unit)}</td>
+            <td className="whitespace-nowrap text-right">{item.netWeightGrams == null ? recipeQuantity(net, item.unit) : <>
+              {recipeQuantity(item.netWeightGrams, 'г')}
+              <span className="block text-xs text-text-muted">{recipeQuantity(net, item.unit)}</span>
+            </>}</td>
             {costs && <td className="whitespace-nowrap text-right">{knownCost(item.lineCost)}</td>}
           </tr>;
         })}</tbody>
-        {(costs || metadata?.outputQuantity != null) && <tfoot><tr><td colSpan={5}>
-          {metadata?.outputQuantity != null ? `Выход ${recipeQuantity(metadata.outputQuantity, metadata.outputUnit ? normalizeUnitLabel(metadata.outputUnit) : '')}` : 'Итого'}
+        {(costs || output) && <tfoot><tr><td colSpan={5}>
+          {output ? `Выход ${recipeQuantity(output.amount, output.unit ? normalizeUnitLabel(output.unit) : '')}` : 'Итого'}
         </td>{costs && <td className="whitespace-nowrap text-right">{knownCost(foodCost)}</td>}</tr></tfoot>}
       </table>
     </div> : <p className="text-sm text-text-muted">Состав пока не задан.</p>}

@@ -27,6 +27,7 @@ import {
 import { DocumentField, DocumentFooter, QueryState } from './WarehouseUi';
 import { UNIT_OPTIONS, unitLabel, unitTypeOf, unitsForType, type UnitCode } from './units';
 import { inventoryTimeDisplay, inventoryTimeIso } from './inventory-time';
+import { grossFromLoss, lossFromAmounts, netFromLoss, pieceNetWeight, preparationYieldBase, supportsProcessing } from './recipe-draft-values';
 
 type PreparationAction = {
   kind: 'recipe' | 'produce';
@@ -198,10 +199,15 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
   const byId = new Map(options.map((item) => [item.id, item]));
   const savedItems = new Map(recipe.items.map((item) => [item.ingredientId, item]));
   const selected = new Set(rows.map((row) => row.ingredientId));
-  const netGrams = rows.reduce((total, row) =>
-    row.unit && unitTypeOf(row.unit) === 'mass' ? total + Number(row.netAmount) * unitFactor(row.unit) : total, 0);
-  const outputQuantity = enteredOutput ?? (recipe.unitType === 'mass' && netGrams > 0
-    ? recipeWeight(netGrams / unitFactor(outputUnit)) : '');
+  const yieldRows = rows.filter((row) => byId.get(row.ingredientId)?.kind !== 'consumable');
+  const netBase = preparationYieldBase(unitTypeOf(outputUnit), yieldRows.map((row) => ({
+    unitType: row.unit ? unitTypeOf(row.unit) : null,
+    unitFactor: row.unit ? unitFactor(row.unit) : 1,
+    netAmount: row.netAmount === '' ? null : Number(row.netAmount),
+    pieceWeightGrams: byId.get(row.ingredientId)?.pieceWeightGrams,
+  })));
+  const requiresMeasuredYield = netBase === null && yieldRows.every(({ unit, netAmount }) => !!unit && netAmount !== '');
+  const outputQuantity = enteredOutput ?? (netBase != null && netBase > 0 ? recipeWeight(netBase / unitFactor(outputUnit)) : '');
   const canSave =
     name.trim() &&
     isPositive(outputQuantity) &&
@@ -213,7 +219,7 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
         isPositive(row.quantity) &&
         Number.isFinite(Number(row.netAmount)) &&
         Number(row.netAmount) >= 0 &&
-        Number(row.netAmount) <= Number(row.quantity),
+        Number(row.netAmount) <= Number(row.quantity) && Number(row.lossPercent) >= 0 && Number(row.lossPercent) <= 100,
     );
   function rowCost(row: RecipeDraft) {
     const ingredient = byId.get(row.ingredientId);
@@ -261,16 +267,15 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
         outputUnit,
         mode,
         instructions,
-        items: rows.map(
-          ({ ingredientId, quantity, unit: rowUnit, netAmount, lossPercent, processingMethod }) => ({
-            ingredientId,
-            quantity: Number(quantity),
-            unit: rowUnit as UnitCode,
-            netAmount: Number(netAmount),
-            lossPercent: Number(lossPercent),
-            processingMethod: processingMethod || null,
-          }),
-        ),
+        items: rows.map(({ ingredientId, quantity, unit: rowUnit, netAmount, lossPercent, processingMethod }) => {
+          const unit = rowUnit as UnitCode;
+          const prior = savedItems.get(ingredientId);
+          const pieces = unitTypeOf(unit) === 'count';
+          const preserveSavedNet = pieces && (!prior || prior.netAmount == null || Number(quantity) !== prior.quantity);
+          return { ingredientId, quantity: Number(quantity), unit,
+            netAmount: preserveSavedNet ? undefined : Number(netAmount),
+            lossPercent: Number(lossPercent), processingMethod: processingMethod || null };
+        }),
       });
       push({ message: kind === 'prepared_dish' ? 'Готовое блюдо сохранено' : 'Полуфабрикат сохранён', at: new Date().toISOString() });
       onClose();
@@ -324,6 +329,12 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
               <tbody>
                 {rows.map((row, index) => {
                   const ingredient = byId.get(row.ingredientId);
+                  const unitType = ingredient?.unitType ?? (row.unit ? unitTypeOf(row.unit) : null);
+                  const processing = unitType != null && supportsProcessing(unitType);
+                  const pieces = unitType === 'count';
+                  const pieceNet = pieces && row.netAmount !== '' ? Number(row.netAmount) : null;
+                  const netGrams = pieceNetWeight(pieceNet, ingredient?.pieceWeightGrams);
+                  const saved = savedItems.get(row.ingredientId);
                   const choices = options.filter(({ id }) => id === row.ingredientId || !selected.has(id));
                   return (
                     <tr key={row.key} ref={(element) => {
@@ -363,21 +374,21 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
                         />}
                       </td>
                       <td>
-                        <Select
+                        {processing ? <Select
                           ariaLabel={`Обработка ${index + 1}`}
                           className="poster-processing-select h-9 w-full"
                           value={row.processingMethod}
                           disabled={!row.ingredientId}
-                          options={[{ value: '', label: '—' }, ...PROCESSING_METHODS]}
+                          options={[{ value: '', label: 'Без обработки' }, ...PROCESSING_METHODS]}
                           onChange={(v) => {
                             const loss = v ? (ingredient?.processingLosses?.[v as ProcessingMethod] ?? 0) : 0;
                             update(row.key, {
                               processingMethod: v as ProcessingMethod | '',
                               lossPercent: String(loss),
-                              quantity: row.netAmount ? recipeWeight(Number(row.netAmount) / (1 - loss / 100)) : '',
+                              quantity: row.netAmount ? recipeWeight(grossFromLoss(Number(row.netAmount), loss, Number(row.quantity))) : '',
                             });
                           }}
-                        />
+                        /> : <span className="text-text-muted">{PROCESSING_METHODS.find(({ value }) => value === row.processingMethod)?.label ?? '—'}</span>}
                       </td>
                       <td>
                         <div className="flex items-center gap-1.5">
@@ -390,14 +401,16 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
                             value={row.quantity}
                             disabled={!row.ingredientId}
                             required
-                            onChange={(e) =>
-                              update(row.key, {
-                                quantity: e.target.value,
-                                netAmount: String(
-                                  Number(e.target.value) * (1 - Number(row.lossPercent) / 100),
-                                ),
-                              })
-                            }
+                            onChange={(e) => {
+                              const quantity = e.target.value;
+                              let netAmount = quantity;
+                              if (quantity && processing) netAmount = recipeWeight(netFromLoss(Number(quantity), Number(row.lossPercent)));
+                              if (quantity && pieces && saved?.netAmount != null && saved.quantity > 0) {
+                                netAmount = recipeWeight(Number(quantity) * saved.netAmount / saved.quantity);
+                              }
+                              if (unitType === 'volume' && row.netAmount !== row.quantity && row.netAmount !== '') netAmount = row.netAmount;
+                              update(row.key, { quantity, netAmount });
+                            }}
                           />
                           <select
                             aria-label={`Единица ${index + 1}`}
@@ -424,28 +437,32 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
                       </td>
                       <td>
                         <div className="flex items-center gap-1.5">
-                          <input
+                          {pieces ? <output aria-label={`Нетто ${index + 1}`} className="py-2 text-text-secondary tabular-nums">
+                            {netGrams == null ? (pieceNet == null ? '—' : qty(pieceNet, unitLabel(row.unit || 'pcs'))) : <>
+                              <span className="whitespace-nowrap">{qty(netGrams, 'г')}</span>
+                              {pieceNet != null && <span className="block whitespace-nowrap text-xs text-text-muted">{qty(pieceNet, unitLabel(row.unit || 'pcs'))}</span>}
+                            </>}
+                          </output> : <input
                             aria-label={`Нетто ${index + 1}`}
                             className="input h-9 w-[88px]"
                             type="number"
                             min="0"
-                            max={row.processingMethod ? undefined : row.quantity || undefined}
+                            max={processing && row.processingMethod && Number(row.lossPercent) < 100 ? undefined : row.quantity || undefined}
                             step="any"
                             value={row.netAmount}
                             disabled={!row.ingredientId}
                             required
                             onChange={(e) => {
                               const netAmount = e.target.value;
-                              if (row.processingMethod && Number(row.lossPercent) < 100) {
-                                const quantity = netAmount ? recipeWeight(Number(netAmount) / (1 - Number(row.lossPercent) / 100)) : '';
+                              if (processing && row.processingMethod && Number(row.lossPercent) < 100) {
+                                const quantity = netAmount ? recipeWeight(grossFromLoss(Number(netAmount), Number(row.lossPercent), Number(row.quantity))) : '';
                                 update(row.key, { netAmount, quantity });
                               } else {
-                                update(row.key, { netAmount, lossPercent: String(Number(row.quantity) > 0
-                                  ? (1 - Number(netAmount) / Number(row.quantity)) * 100 : 0) });
+                                update(row.key, { netAmount, lossPercent: String(lossFromAmounts(Number(row.quantity), Number(netAmount))) });
                               }
                             }}
-                          />
-                          <span className="text-xs">{row.unit ? unitLabel(row.unit) : ''}</span>
+                          />}
+                          {!pieces && <span className="text-xs">{row.unit ? unitLabel(row.unit) : ''}</span>}
                         </div>
                       </td>
                       {costs && (
@@ -499,6 +516,8 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
                         min="0.000001"
                         step="any"
                         value={outputQuantity}
+                        placeholder={requiresMeasuredYield ? 'Факт' : undefined}
+                        title={requiresMeasuredYield ? 'Укажите измеренный выход при разных единицах состава' : undefined}
                         onChange={(e) => setEnteredOutput(e.target.value || null)}
                         required
                       />

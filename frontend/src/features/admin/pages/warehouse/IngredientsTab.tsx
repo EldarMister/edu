@@ -483,10 +483,7 @@ export function IngredientsTab({
                       <td>{item.unit}</td>
                       {catalogue === 'ingredients' && (
                         <td>
-                          {item.unitType === 'mass' ||
-                          PROCESSING_METHODS.some(
-                            (method) => Number(item.processingLosses?.[method.value]) > 0,
-                          ) ? (
+                          {item.unitType === 'mass' ? (
                             <div className="flex justify-between gap-3 text-xs">
                               {PROCESSING_METHODS.map((method) => (
                                 <span

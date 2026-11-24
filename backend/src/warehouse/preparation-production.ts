@@ -13,6 +13,7 @@ import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, u
 import { getWarehouseBalance, resolveWarehouse, warehouseBalances } from './warehouse-location';
 import { IngredientsService } from './ingredients.service';
 import { lockRecipeGraph, RecipeResolver, warehouseKey } from './recipe-resolution';
+import { nonMassProcessing } from './recipe-processing';
 import { postStockMovement } from './stock-posting';
 import { inventoryReversalBlockedReason } from './closed-inventory-period';
 import { warehouseDateRange } from './report-range';
@@ -169,10 +170,12 @@ export class PreparationProductionService {
     for (const input of dto.items) {
       const saved = recipe?.items.find((item) => item.ingredientId === input.ingredientId);
       const gross = amount(input.quantity, input.unit);
+      const legacy = saved && saved.ingredient.unitType !== 'mass' ? nonMassProcessing(gross, normalizeUnit(input.unit), input, saved) : null;
       const loss = input.lossPercent ?? Number((saved?.ingredient.processingLosses as Record<string, number> | null)?.[input.processingMethod ?? ''] ?? 0);
-      const net = input.netAmount === undefined ? gross.mul(100 - loss).div(100).toDecimalPlaces(3) : amount(input.netAmount, input.unit);
+      const net = legacy ? legacy.netAmount : input.netAmount === undefined ? gross.mul(100 - loss).div(100).toDecimalPlaces(3) : amount(input.netAmount, input.unit);
+      const method = legacy ? legacy.processingMethod : input.processingMethod ?? null;
       matches = matches && !!saved && saved.unit === normalizeUnit(input.unit) && saved.amount.eq(gross) &&
-        !!saved.netAmount?.eq(net) && (saved.processingMethod ?? null) === (input.processingMethod ?? null);
+        (net == null ? saved.netAmount == null : saved.netAmount?.eq(net) === true) && saved.processingMethod === method;
     }
     if (!matches) throw new BadRequestException('Ключ создания уже использован с другим названием или составом полуфабриката');
   }
@@ -192,12 +195,18 @@ export class PreparationProductionService {
       if (!output.stock.isZero() || balances.some((balance) => !balance.stock.isZero())) throw new BadRequestException('Сначала израсходуйте или спишите остаток заготовки перед переходом в режим без остатка');
       if (await tx.dish.count({ where: { stockIngredientId: id } }) || await tx.dishVariant.count({ where: { stockIngredientId: id } })) throw new BadRequestException('Сначала отключите прямую продажу этой заготовки');
     }
-    const ingredients = await tx.ingredient.findMany({ where: { cafeId, isActive: true, id: { in: ids } } });
+    const [ingredients, previousRows] = await Promise.all([
+      tx.ingredient.findMany({ where: { cafeId, id: { in: ids } } }),
+      tx.preparationRecipeItem.findMany({ where: { cafeId, recipeId: id } }),
+    ]);
     const byId = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient]));
+    const previous = new Map(previousRows.map((row) => [row.ingredientId, row]));
     const items = dto.items.map((item) => {
       const ingredient = byId.get(item.ingredientId);
-      if (!ingredient) throw new NotFoundException('Ингредиент техкарты не найден');
+      if (!ingredient || !ingredient.isActive && !previous.has(item.ingredientId)) throw new NotFoundException('Ингредиент техкарты не найден');
       const gross = this.amount(item.quantity, item.unit, ingredient.unitType);
+      if (ingredient.unitType !== 'mass') return { cafeId, recipeId: id, ingredientId: item.ingredientId, ...gross,
+        ...nonMassProcessing(gross.amount, gross.unit, item, previous.get(item.ingredientId)) };
       const lossPercent = item.lossPercent ?? Number((ingredient.processingLosses as Record<string, number> | null)?.[item.processingMethod ?? ''] ?? 0);
       if (!Number.isFinite(lossPercent) || lossPercent < 0 || lossPercent > 100) throw new BadRequestException('Проверьте процент потерь');
       const netAmount = item.netAmount === undefined ? gross.amount.mul(100 - lossPercent).div(100).toDecimalPlaces(3) : new Prisma.Decimal(item.netAmount).mul(toBase(1, gross.unit)).toDecimalPlaces(3);

@@ -2,11 +2,11 @@ import { useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Select } from '@/components/Select';
 import { apiError } from '@/lib/api';
-import { money } from '@/lib/format';
+import { money, taxRateLabel } from '@/lib/format';
 import { ItemCard } from './ItemCard';
 import { PROCESSING_METHODS, qty, useIngredients, useWarehouseLocations, type Ingredient } from './api';
 import type { useRecipePreview } from './recipe-preview-api';
-import { grossFromLoss, netFromLoss, type RecipeDraftRow } from './recipe-draft-values';
+import { grossFromLoss, lossFromAmounts, netFromLoss, pieceNetWeight, recipeQuantity, supportsProcessing, type RecipeDraftRow } from './recipe-draft-values';
 import { ALL_UNITS, unitLabel, unitsForType, type UnitCode } from './units';
 
 function unitFactor(unit: UnitCode) {
@@ -72,7 +72,7 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
 
   const calculatedOutput = preview.data?.output;
   const missingCosts = preview.data?.compositionMissingCosts ?? [];
-  const output = calculatedOutput ? qty(calculatedOutput.amount, unitLabel(calculatedOutput.unit)) : null;
+  const output = calculatedOutput ? recipeQuantity(calculatedOutput.amount, unitLabel(calculatedOutput.unit)) : null;
 
   return <section className="w-full min-w-0 space-y-4 border-t border-border pt-6">
     <h3 className="text-lg font-semibold">Состав техкарты</h3>
@@ -96,9 +96,16 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
             const warehouseChoice = row.warehouseId ?? (row.fromCommonWarehouse ? 'common' : 'auto');
             const explicitWarehouseRemoved = row.warehouseId && !locations.some((location) => location.id === row.warehouseId);
             const invalidGross = row.amount <= 0;
+            const processing = supportsProcessing(row.unitType);
             const loss = row.lossPercent ?? 0;
-            const netAmount = row.netAmount ?? netFromLoss(row.amount, loss);
-            const fromNet = netBasis[row.ingredientId] ?? false;
+            const legacyProcessing = !processing && !!row.processingMethod;
+            const calculatedBaseNet = previewVariant ? null : calculated?.netAmount;
+            const netAmount = row.netAmount ?? (processing ? netFromLoss(row.amount, loss) : calculatedBaseNet ?? row.amount);
+            const pieceNet = row.netAmount === undefined ? calculatedBaseNet : row.netAmount;
+            const pieceGrams = ingredient ? ingredient.pieceWeightGrams : calculated?.pieceWeightGrams;
+            const netGrams = row.unitType === 'count' ?
+              (!previewVariant ? calculated?.netWeightGrams : null) ?? pieceNetWeight(pieceNet, pieceGrams) : null;
+            const fromNet = processing && (netBasis[row.ingredientId] ?? false);
             const invalidNet = netAmount < 0 || netAmount > row.amount || (loss === 100 && netAmount > 0);
             function withLoss(percent: number) {
               return fromNet ? { lossPercent: percent, netAmount, amount: grossFromLoss(netAmount, percent, row.amount) }
@@ -110,7 +117,10 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
                 {ingredient?.isActive === false && <p className="text-xs text-warning">Архивная складская позиция</p>}
                 {previewVariant && calculated && <p className="mt-1 text-xs text-text-muted">
                   Вариант: {qty(calculated.amount, unitLabel(calculated.amountUnit))} брутто
-                  {calculated.netAmount != null && ` · ${qty(calculated.netAmount, unitLabel(calculated.amountUnit))} нетто`}
+                  {calculated.netWeightGrams != null && ` · ${recipeQuantity(calculated.netWeightGrams, 'г')} нетто`}
+                  {calculated.netAmount != null && (calculated.netWeightGrams == null
+                    ? ` · ${qty(calculated.netAmount, unitLabel(calculated.amountUnit))} нетто`
+                    : ` (${qty(calculated.netAmount, unitLabel(calculated.amountUnit))})`)}
                 </p>}
                 {namedVariants.length > 0 && <details className="mt-2 text-xs">
                   <summary className="cursor-pointer text-text-muted">Нормы по вариантам</summary>
@@ -143,7 +153,8 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
                 </select>
                 {calculated?.warehouseName && <div className="mt-1 text-xs text-text-muted">{calculated.warehouseName}</div>}
               </DraftCell>
-              <DraftCell label="Обработка">
+              <DraftCell label="Обработка" className={!processing && !legacyProcessing ? 'max-xl:hidden' : undefined}>
+                {processing ? <>
                 <select aria-label={`Обработка: ${row.name}`} className="input h-10 w-full min-w-0 px-2 xl:min-w-32"
                   value={row.processingMethod ?? ''} onChange={(event) => {
                     const method = event.target.value as RecipeDraftRow['processingMethod'];
@@ -161,27 +172,43 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
                   <option value="gross">Расчёт от брутто</option>
                   <option value="net">Расчёт от нетто</option>
                 </select>
+                </> : <span className="block text-sm text-text-muted xl:pt-2">
+                  {PROCESSING_METHODS.find(({ value }) => value === row.processingMethod)?.label ?? '—'}
+                </span>}
               </DraftCell>
               <DraftCell label="Брутто">
                 <QuantityInput label={`Брутто ${row.name}`} value={row.amount || null} invalid={invalidGross} onChange={(value) => {
                   const amount = value ?? 0;
-                  patch(index, { amount, netAmount: netFromLoss(amount, loss) });
+                  const netAmount = processing ? netFromLoss(amount, loss) : row.unitType === 'count' || row.netAmount === row.amount
+                    ? undefined : row.netAmount;
+                  patch(index, { amount, netAmount, ...(row.unitType === 'volume' && netAmount != null && {
+                    lossPercent: lossFromAmounts(amount, netAmount),
+                  }) });
                 }} />
               </DraftCell>
               <DraftCell label="Нетто">
-                <QuantityInput label={`Нетто ${row.name}`} value={netAmount} invalid={invalidNet} onChange={(value) => {
-                  if (value == null) patch(index, { netAmount: undefined });
+                {row.unitType === 'count' ? <output aria-label={`Нетто ${row.name}`} className="block py-2 tabular-nums text-text-secondary">
+                  {netGrams == null ? (pieceNet == null ? '—' : qty(pieceNet, unitLabel(row.unit))) : <>
+                    <span className="whitespace-nowrap">{recipeQuantity(netGrams, 'г')}</span>
+                    {pieceNet != null && <span className="block whitespace-nowrap text-xs text-text-muted">{qty(pieceNet, unitLabel(row.unit))}</span>}
+                  </>}
+                </output> : <QuantityInput label={`Нетто ${row.name}`} value={netAmount} invalid={invalidNet} onChange={(value) => {
+                  if (!processing) {
+                    const amount = row.amount || value || 0;
+                    const netAmount = value ?? amount;
+                    patch(index, { amount, netAmount, lossPercent: lossFromAmounts(amount, netAmount) });
+                  } else if (value == null) patch(index, { netAmount: undefined });
                   else if (fromNet || row.amount === 0) patch(index, {
                     netAmount: value, amount: grossFromLoss(value, loss, row.amount),
                   });
-                  else patch(index, { netAmount: value, lossPercent: Number(Math.max(0, (1 - value / row.amount) * 100).toFixed(2)) });
-                }} />
+                  else patch(index, { netAmount: value, lossPercent: lossFromAmounts(row.amount, value) });
+                }} />}
               </DraftCell>
-              <DraftCell label="Потери, %">
-                <QuantityInput label={`Потери ${row.name}, %`} value={loss} precision={2} invalid={loss > 100} onChange={(value) => {
+              <DraftCell label="Потери, %" className={!processing && !legacyProcessing ? 'max-xl:hidden' : undefined}>
+                {processing ? <QuantityInput label={`Потери ${row.name}, %`} value={loss} precision={2} invalid={loss > 100} onChange={(value) => {
                   const percent = value ?? 0;
                   patch(index, withLoss(percent));
-                }} />
+                }} /> : <span className="block text-sm tabular-nums text-text-muted xl:pt-2">{legacyProcessing ? taxRateLabel(loss) : '—'}</span>}
               </DraftCell>
               <DraftCell label="Единица">
                 <select aria-label={`Единица ${row.name}`} className="input h-10 w-full px-2" value={row.unit} onChange={(event) => {

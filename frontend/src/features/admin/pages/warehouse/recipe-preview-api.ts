@@ -24,6 +24,8 @@ export interface RecipePreview {
     warehouseName: string | null;
     amount: number;
     netAmount: number | null;
+    pieceWeightGrams?: number | null;
+    netWeightGrams?: number | null;
     amountUnit: UnitCode;
     avgCost: number | null;
     lineCost: number | null;

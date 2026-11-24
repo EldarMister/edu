@@ -116,6 +116,9 @@ export class RecipeCalculator {
   async composition(rows: readonly RecipeCostRow[], station: string, variantId?: string) {
     const value = emptyCalculation();
     const totalsByUnit = new Map<UnitCode, Prisma.Decimal>();
+    let totalGrams = zero;
+    let hasWeightedPiece = false;
+    let allUsableInGrams = true;
     const items = [];
     for (const row of rows) {
       const ingredient = row.ingredient;
@@ -141,7 +144,16 @@ export class RecipeCalculator {
         ? amount.mul(row.netAmount).div(row.amount).toDecimalPlaces(3)
         : row.netAmount == null && amount.eq(row.amount) ? null : amount.mul(hundred.sub(row.lossPercent)).div(hundred).toDecimalPlaces(3);
       const yieldAmount = net ?? amount.mul(hundred.sub(row.lossPercent)).div(hundred).toDecimalPlaces(3);
-      if (yieldAmount.gt(0) && ingredient.kind !== 'consumable') totalsByUnit.set(baseUnit, (totalsByUnit.get(baseUnit) ?? zero).add(yieldAmount));
+      const pieceWeight = ingredient.unitType === 'count' ? ingredient.pieceWeightGrams : null;
+      const pieceNetWeight = pieceWeight?.mul(yieldAmount) ?? null;
+      if (yieldAmount.gt(0) && ingredient.kind !== 'consumable') {
+        totalsByUnit.set(baseUnit, (totalsByUnit.get(baseUnit) ?? zero).add(yieldAmount));
+        if (baseUnit === 'g') totalGrams = totalGrams.add(yieldAmount);
+        else if (pieceNetWeight != null) {
+          totalGrams = totalGrams.add(pieceNetWeight);
+          hasWeightedPiece = true;
+        } else allUsableInGrams = false;
+      }
       const rowValue = invalidVariant || (amount.gt(0) && (invalidUnit || row.warehouseId && !warehouse))
         ? { ...emptyCalculation(), missing: new Set([ingredient.name]) }
         : await this.value(ingredient, amount, warehouse ?? null);
@@ -154,6 +166,7 @@ export class RecipeCalculator {
         isPrepared: ingredient.isPrepared, preparationMode: ingredient.preparationMode, name: ingredient.name, unit: unitLabel(unit),
         amountUnit: unit, unitType: ingredient.unitType, ingredientDisplayUnit: ingredient.displayUnit, amount: quantity(amount, unit),
         baseAmount: quantity(row.amount, unit), netAmount: net == null ? null : quantity(net, unit), lossPercent: Number(row.lossPercent),
+        pieceWeightGrams: pieceWeight == null ? null : Number(pieceWeight), netWeightGrams: pieceNetWeight == null ? null : quantity(pieceNetWeight, 'g'),
         processingMethod: row.processingMethod, variantAmounts: Object.fromEntries(
           Object.entries((row.variantAmounts ?? {}) as Record<string, unknown>).flatMap(([id, amount]) => {
             if (!(typeof amount === 'number' || typeof amount === 'string' && amount.trim()) || !Number.isFinite(Number(amount)) || Number(amount) < 0) return [];
@@ -164,7 +177,8 @@ export class RecipeCalculator {
         stock: balance ? quantity(balance.stock, unit) : null, isLow: !!balance && balance.stock.lte(ingredient.lowStockThreshold), isActive: ingredient.isActive });
     }
     const [one] = totalsByUnit;
-    const output = totalsByUnit.size === 1 ? { amount: Number(one[1]), unit: one[0] } : null;
+    const output = hasWeightedPiece && allUsableInGrams ? { amount: quantity(totalGrams, 'g'), unit: 'g' as const }
+      : totalsByUnit.size === 1 ? { amount: Number(one[1]), unit: one[0] } : null;
     return { items, value, output };
   }
 

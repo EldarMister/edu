@@ -65,7 +65,8 @@ export class IngredientsService {
       purchaseUnits: purchaseUnitsFor(i),
       purchaseUnit: i.purchaseUnit, purchaseFactor: i.purchaseFactor == null ? null : Number(i.purchaseFactor),
       preparationMode: i.preparationMode,
-      processingLosses: i.processingLosses,
+      processingLosses: i.unitType === 'mass' ? i.processingLosses : null,
+      pieceWeightGrams: i.pieceWeightGrams == null ? null : Number(i.pieceWeightGrams),
       unitType: i.unitType,
       baseUnit: baseUnitForType(i.unitType as 'mass' | 'volume' | 'count'),
       displayUnit: display,
@@ -520,15 +521,33 @@ export class IngredientsService {
       units = units.map((entry) => ({ ...entry, factor: Number(new Prisma.Decimal(entry.factor).mul(multiplier)) }));
     }
     units = validatePurchaseUnits(units, dto.unit ?? current?.displayUnit ?? 'pcs');
+    const type = current?.unitType ?? unitTypeOf(normalizeUnit(dto.unit));
+    let pieceWeightGrams: Prisma.Decimal | null | undefined;
+    if (dto.pieceWeightGrams === null) pieceWeightGrams = null;
+    else if (dto.pieceWeightGrams !== undefined) {
+      if (type !== 'count') throw new BadRequestException('Вес штуки задаётся только для штучных ингредиентов');
+      if (!Number.isFinite(dto.pieceWeightGrams) || dto.pieceWeightGrams <= 0) throw new BadRequestException('Укажите вес штуки больше нуля');
+      pieceWeightGrams = new Prisma.Decimal(dto.pieceWeightGrams);
+      if (pieceWeightGrams.decimalPlaces() > 3 || pieceWeightGrams.gte('100000000000')) throw new BadRequestException('Недопустимый вес штуки');
+    }
+    let processingLosses: typeof dto.processingLosses;
     if (dto.processingLosses !== undefined) {
       if (!dto.processingLosses || Array.isArray(dto.processingLosses) || Object.entries(dto.processingLosses).some(([method, percent]) =>
         !['cleaning', 'boiling', 'frying', 'stewing', 'baking'].includes(method) || typeof percent !== 'number' || !Number.isFinite(percent) || percent < 0 || percent >= 100)) {
         throw new BadRequestException('Потери обработки должны быть от 0 до 99,99% для выбранного способа');
       }
+      if (type === 'mass') processingLosses = dto.processingLosses;
+      else {
+        const stored = current?.processingLosses as Record<string, unknown> | null | undefined;
+        // Old clients can resend stored losses on an unrelated edit without reactivating the setting.
+        if (Object.entries(dto.processingLosses).some(([method, percent]) => percent > 0 && stored?.[method] !== percent)) {
+          throw new BadRequestException('Потери обработки настраиваются только для весовых ингредиентов');
+        }
+      }
     }
     return {
       kind, isPrepared: prepared, preparationMode: mode,
-      processingLosses: dto.processingLosses,
+      processingLosses, pieceWeightGrams,
       category: dto.category === undefined ? undefined : dto.category?.trim() || null,
       supplier: dto.supplier === undefined ? undefined : dto.supplier?.trim() || null,
       purchaseUnits: units.map(({ name, factor }) => ({ name, factor })), purchaseUnit: units[0]?.name ?? null,

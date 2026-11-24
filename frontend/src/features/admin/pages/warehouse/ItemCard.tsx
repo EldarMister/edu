@@ -12,6 +12,7 @@ import {
   type ProcessingMethod,
   qty,
   useIngredient,
+  useIngredients,
   useIngredientMutations,
   useWarehouseLocations,
   type Ingredient,
@@ -20,8 +21,9 @@ import {
 } from './api';
 import { useSuppliers } from './settings-api';
 import { DocumentField, DocumentFooter } from './WarehouseUi';
-import { UNIT_OPTIONS, unitLabel, type UnitCode } from './units';
+import { UNIT_OPTIONS, unitConversionFactor, unitLabel, unitTypeOf, unitsForType, type UnitCode } from './units';
 import { IngredientUsageTable } from './CatalogueDetails';
+import { parsePieceWeightGrams } from './recipe-draft-values';
 
 export function ItemCard({
   id,
@@ -112,10 +114,16 @@ function ItemForm({
   const { can } = usePermissions();
   const editable = can(item ? 'actions.warehouseSettings' : 'actions.warehouseReceive');
   const costs = can('actions.warehouseCosts');
+  const categoriesId = useId();
   const [name, setName] = useState(item?.name ?? initialName ?? '');
   const kind: ItemKind = item?.kind ?? defaultKind ?? 'raw';
   const [unit, setUnit] = useState<UnitCode>(item?.displayUnit ?? (defaultKind === 'goods' ? 'pcs' : 'kg'));
   const [category, setCategory] = useState(item?.category ?? '');
+  const catalogue = useIngredients('');
+  const categories = [...new Set((catalogue.data ?? [])
+    .filter(({ kind }) => kind === 'raw' || kind === 'consumable')
+    .flatMap(({ category }) => category ? [category] : []))]
+    .sort((a, b) => a.localeCompare(b, 'ru'));
   const [supplier, setSupplier] = useState(item?.supplier ?? '');
   const [threshold, setThreshold] = useState(String(item?.lowStockThreshold ?? 0));
   const suppliers = useSuppliers(editable);
@@ -123,6 +131,7 @@ function ItemForm({
   const [losses, setLosses] = useState<Partial<Record<ProcessingMethod, number>>>(
     item?.processingLosses ?? {},
   );
+  const [pieceWeight, setPieceWeight] = useState(item?.pieceWeightGrams == null ? '' : String(item.pieceWeightGrams));
   const [error, setError] = useState('');
   const prepared = kind === 'preparation' || kind === 'prepared_dish';
   const showOpening = !item && !compact && !prepared && editable && costs && can('actions.warehouseApprove');
@@ -132,13 +141,43 @@ function ItemForm({
   const openingWarehouse = warehouseId || (warehouses.find((location) => location.isDefault) ?? warehouses[0])?.id || '';
   const [openingQuantity, setOpeningQuantity] = useState('');
   const [openingPrice, setOpeningPrice] = useState('');
+  const [openingNotice, setOpeningNotice] = useState('');
   const [openingRequestKey] = useState(() => crypto.randomUUID());
+  const mass = unitTypeOf(unit) === 'mass';
+  const pieces = unitTypeOf(unit) === 'count';
+  const pieceWeightGrams = parsePieceWeightGrams(pieceWeight);
+  const unitOptions = item ? unitsForType(item.unitType) : UNIT_OPTIONS;
+
+  function changeUnit(next: UnitCode) {
+    if (next === unit) return;
+    const factor = unitConversionFactor(unit, next);
+    const quantity = Number(openingQuantity) * (factor ?? 0);
+    const format = (value: number) => String(Number(value.toPrecision(15)));
+    setUnit(next);
+    setOpeningNotice('');
+    if (factor == null) setThreshold('0');
+    else if (threshold.trim()) setThreshold(format(Number(threshold) * factor));
+    if (!openingQuantity && !openingPrice) return;
+    const preciseQuantity = Math.round(quantity * 1000) / 1000;
+    if (factor == null || (openingQuantity && (quantity < 0.001 || format(quantity) !== format(preciseQuantity)))) {
+      setOpeningQuantity('');
+      setOpeningPrice('');
+      setOpeningNotice('Единица изменилась. Укажите количество и цену для начальной поставки.');
+      return;
+    }
+    if (openingQuantity) setOpeningQuantity(String(preciseQuantity));
+    if (openingPrice) setOpeningPrice(format(Number(openingPrice) / factor));
+  }
   async function save(event: React.FormEvent) {
     event.preventDefault();
     event.stopPropagation();
     if (pending || !editable) return;
     if (!name.trim() || !Number.isFinite(Number(threshold)) || Number(threshold) < 0) {
       setError('Проверьте название и минимальный остаток.');
+      return;
+    }
+    if (pieces && pieceWeightGrams === undefined) {
+      setError('Укажите положительный вес в граммах с точностью до трёх знаков после запятой.');
       return;
     }
     const hasOpening = showOpening && (openingQuantity !== '' || openingPrice !== '');
@@ -163,7 +202,8 @@ function ItemForm({
             : (suppliers.data?.find((s) => s.name === supplier.trim())?.id ?? null),
         lowStockThreshold: Number(threshold),
         preparationMode: mode,
-        processingLosses: losses,
+        ...(mass ? { processingLosses: losses } : {}),
+        ...(pieces ? { pieceWeightGrams } : {}),
       };
       const saved = item
         ? await mutations.update.mutateAsync({ ...body, id: item.id })
@@ -199,25 +239,38 @@ function ItemForm({
           />
         </DocumentField>
         <DocumentField label="Ед. измерения">
-          {item ? (
-            <div>
-              <span className="block py-2.5 text-sm">{unitLabel(unit)}</span>
-              <p className="text-xs text-text-muted">Единица измерения задана при создании ингредиента.</p>
-            </div>
-          ) : (
+          {unitOptions.length > 1 ? (
             <Select
               ariaLabel="Единица измерения"
               className="h-10 w-[136px]"
               value={unit}
-              onChange={(v) => setUnit(v as UnitCode)}
-              options={UNIT_OPTIONS}
+              onChange={(v) => changeUnit(v as UnitCode)}
+              options={unitOptions}
             />
-          )}
+          ) : <span className="block py-2.5 text-sm">{unitLabel(unit)}</span>}
+        </DocumentField>
+        {pieces && <DocumentField label="Вес одной штуки">
+          <div className="poster-number-unit w-[136px]">
+            <input aria-label="Вес одной штуки, г" aria-invalid={pieceWeightGrams === undefined || undefined}
+              className="input min-w-0 w-full" inputMode="decimal" maxLength={15} placeholder="—"
+              value={pieceWeight} onChange={(event) => setPieceWeight(event.target.value)} />
+            <span>г</span>
+          </div>
+        </DocumentField>}
+        <DocumentField label="Категория">
+          <input
+            aria-label="Категория ингредиента"
+            className="input w-full"
+            list={categoriesId}
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+          />
+          <datalist id={categoriesId}>{categories.map((entry) => <option key={entry} value={entry} />)}</datalist>
         </DocumentField>
         <details className="poster-advanced">
           <summary>Дополнительно</summary>
           <div className="space-y-4 pt-5">
-            {PROCESSING_METHODS.map((method) => (
+            {mass && PROCESSING_METHODS.map((method) => (
               <DocumentField key={method.value} label={lossLabels[method.value]}>
                 <div className="poster-number-unit w-[136px]">
                   <input
@@ -234,14 +287,6 @@ function ItemForm({
                 </div>
               </DocumentField>
             ))}
-            <DocumentField label="Категория">
-              <input
-                aria-label="Категория ингредиента"
-                className="input w-full"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-              />
-            </DocumentField>
             <DocumentField label="Минимальный остаток">
               <div className="poster-number-unit w-[220px]">
                 <input
@@ -292,6 +337,7 @@ function ItemForm({
           <p className="max-w-3xl text-sm text-text-secondary">
             Если ингредиент уже есть в наличии, укажите количество, цену и склад. При сохранении будет проведена поставка.
           </p>
+          {openingNotice && <p role="status" className="text-sm text-text-secondary">{openingNotice}</p>}
           <DocumentField label="Количество в наличии">
             <div className="poster-number-unit w-52 max-w-full">
               <input aria-label="Количество в наличии" className="input" type="number" inputMode="decimal"

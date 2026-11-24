@@ -60,6 +60,41 @@ test('PostgreSQL: unified stock covers direct sales, recipes, production, stages
         assert.equal((await recipes.getByDish(menu.id)).foodCost, 40);
       });
 
+      await t.test('weight per piece derives recipe yield and preserves fractional piece supply, cost and debit', async () => {
+        const request = { name: 'Яйцо для расчёта выхода', unit: 'pcs', pieceWeightGrams: 54.3,
+          initialSupply: { warehouseId: main.id, quantity: 2.5, unitPrice: 20, requestKey: randomUUID() } };
+        const egg = await ingredients.create(request, owner);
+        assert.equal((await ingredients.create(request, owner)).id, egg.id);
+        assert.deepEqual([egg.unitType, egg.pieceWeightGrams, await balance(egg.id)], ['count', 54.3, 2.5]);
+        await assert.rejects(ingredients.create({ name: 'Вес штуки для литра', unit: 'l', pieceWeightGrams: 50 }), /штучных/);
+        await assert.rejects(ingredients.update(egg.id, { pieceWeightGrams: 0 }), /больше нуля/);
+        const flour = await ingredients.create({ name: 'Мука для расчёта выхода', unit: 'g', stock: 1000, avgCost: 0.1 });
+        const unweighed = await ingredients.create({ name: 'Штучное без веса', unit: 'pcs' });
+        const menu = await dish('Выпечка с половинкой яйца');
+        const items = [{ ingredientId: egg.id, amount: 0.5, unit: 'pcs' }, { ingredientId: flour.id, amount: 100, netAmount: 75, unit: 'g' }];
+        const [piece] = (await recipes.preview({ dishId: menu.id, items })).items;
+        assert.deepEqual([piece.amount, piece.netAmount, piece.pieceWeightGrams, piece.netWeightGrams, piece.lineCost], [0.5, 0.5, 54.3, 27.15, 10]);
+        const saved = await recipes.saveDraft(menu.id, { expectedVersion: 1, items });
+        assert.deepEqual(saved.recipe.output, { amount: 102.15, unit: 'g' });
+        assert.equal(saved.recipe.foodCost, 20);
+        assert.deepEqual((await recipes.costSummary({ dishIds: menu.id })).rows[0].output, saved.recipe.output);
+        assert.equal((await recipes.preview({ dishId: menu.id, items: [...items, { ingredientId: unweighed.id, amount: 1 }] })).output, null);
+        assert.deepEqual((await recipes.preview({ dishId: menu.id, items: [items[0], { ingredientId: unweighed.id, amount: 1 }] })).output,
+          { amount: 1.5, unit: 'pcs' });
+        assert.deepEqual((await recipes.preview({ dishId: menu.id, items, metadata: { outputQuantity: 95, outputUnit: 'г' } })).output,
+          { amount: 95, unit: 'g' });
+
+        const ticket = await order([{ dishId: menu.id, quantity: 1 }]);
+        const debit = await db.stockMovement.findFirstOrThrow({ where: { sourceId: ticket.id, ingredientId: egg.id, type: 'sale' } });
+        assert.equal(Number(debit.change), -0.5);
+        assert.equal(await balance(egg.id), 2);
+        await ingredients.update(egg.id, { pieceWeightGrams: null });
+        assert.equal((await recipes.getByDish(menu.id)).output, null);
+        await orders.cancelOrder(ticket.id, owner, 'Проверка возврата половинки');
+        assert.equal(await balance(egg.id), 2.5);
+        assert.equal(Number((await db.stockMovement.findUniqueOrThrow({ where: { id: debit.id } })).change), -0.5);
+      });
+
       await t.test('three 200 ml drinks consume 600 ml at the bar and three cups from main', async () => {
         const liquid = await ingredients.create({ name: 'Лимонад', unit: 'l', kind: 'beverage', stock: 2, avgCost: 60, warehouseId: bar.id });
         const cup = await ingredients.create({ name: 'Стакан', unit: 'pcs', kind: 'consumable', stock: 20, avgCost: 3 });

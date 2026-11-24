@@ -31,7 +31,7 @@ test('PostgreSQL: recipe preview, saved card, and costing list use the same ware
       const vat = await db.menuTax.create({ data: { name: 'НДС', rate: 20, type: 'vat' } });
       const category = await db.category.create({ data: { name: 'Напитки', prepStation: 'bar', taxId: vat.id } });
       const milk = await db.ingredient.create({ data: { name: 'Молоко', unitType: 'volume', displayUnit: 'l', stock: 1000,
-        avgCost: 0.1, valuationKnown: true, processingLosses: { boiling: 5 } } });
+        avgCost: 0.1, valuationKnown: true } });
       await db.warehouseStock.create({ data: { warehouseId: bar.id, ingredientId: milk.id, stock: 1000, avgCost: 0.2, valuationKnown: true } });
       const cup = await db.ingredient.create({ data: { name: 'Стакан', kind: 'consumable', stock: 10, avgCost: 5, valuationKnown: true } });
       const dish = await db.dish.create({ data: { name: 'Латте', price: 120, categoryId: category.id, variants: { create: [
@@ -39,7 +39,7 @@ test('PostgreSQL: recipe preview, saved card, and costing list use the same ware
       ] } }, include: { variants: true } });
       const large = dish.variants.find(({ name }) => name === 'Большой');
       const empty = dish.variants.find(({ name }) => name === 'Пустой');
-      const items = [{ ingredientId: milk.id, amount: 0.2, unit: 'l', processingMethod: 'boiling',
+      const items = [{ ingredientId: milk.id, amount: 0.2, unit: 'l', netAmount: 0.19,
         variantAmounts: { [large.id]: 0.3, [empty.id]: 0 } },
       { ingredientId: cup.id, amount: 1, unit: 'pcs', fromCommonWarehouse: true, variantAmounts: { [empty.id]: 0 } }];
 

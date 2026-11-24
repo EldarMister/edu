@@ -10,6 +10,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
   ValidateNested,
@@ -28,6 +29,8 @@ export class PurchaseUnitDto {
 export class IngredientMetadataDto {
   @IsOptional() @IsObject()
   processingLosses?: Record<string, number>;
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) @Max(99999999999.999)
+  pieceWeightGrams?: number | null;
   @IsOptional() @IsString() @MaxLength(160)
   supplierId?: string | null;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PurchaseUnitDto)
