@@ -1,3 +1,4 @@
+import { IconExport, IconImport } from '@/features/admin/components/icons';
 import { Fragment, useState, type ReactNode } from 'react';
 import { ColumnButton } from '../../components/ColumnControl';
 import { RowIconButton } from '../../components/RowIconButton';
@@ -182,9 +183,9 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
       <WorkspaceHeaderActions>
         <ColumnButton onClick={() => setSettingsOpen(true)} />
         {canExport && <button type="button" className="supply-header-action" disabled={exporting}
-          onClick={() => void exportWorkbook()}>{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
+          onClick={() => void exportWorkbook()}><IconExport />{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
         {period.filter}
-        {canEdit && <button type="button" className="supply-header-action" onClick={() => onCreate(true)}>Импорт с ИИ</button>}
+        {canEdit && <button type="button" className="supply-header-action" onClick={() => onCreate(true)}><IconImport />Импорт с ИИ</button>}
         {canEdit && <button type="button" className="btn-primary btn-md" onClick={() => onCreate()}>Добавить</button>}
       </WorkspaceHeaderActions>
       {settingsOpen && <WarehouseColumnSettings columns={columns} defaults={allowedColumns} resetColumns={resetColumns}

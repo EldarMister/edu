@@ -23,7 +23,7 @@ import { useAuth } from '@/store/auth';
 import { usePreparationStations, usePreparationStationUpdates } from '@/features/kitchen/stations';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
-import { IconPlus, IconEdit, IconTrash, IconEye, IconEyeOff } from '../components/icons';
+import { IconPlus, IconEdit, IconTrash, IconEye, IconEyeOff, IconExport } from '../components/icons';
 import { WaiterOrdersReport } from './WaiterOrdersReport';
 import { WorkspaceHeaderCount } from './WorkspaceHeader';
 import { WorkspaceSearch } from './WorkspaceSearch';
@@ -323,9 +323,9 @@ export function StaffPage({ initialTab = 'employees' }: { initialTab?: StaffTab 
               <button
                 onClick={exportCsv}
                 disabled={!reportQ.data || !rows.length}
-                className="h-9 rounded-lg border border-border bg-white px-3 text-sm text-text-secondary transition-colors hover:bg-background disabled:opacity-50"
+                className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-3 text-sm text-text-secondary transition-colors hover:bg-background disabled:opacity-50"
               >
-                {tr('Экспорт')}
+                <IconExport />{tr('Экспорт')}
               </button>
             </>
           )}
@@ -615,9 +615,9 @@ function HistoryFilters({
       </button>
       <button
         onClick={onExport}
-        className="h-10 rounded-lg border border-border bg-white px-3 text-sm text-text-secondary transition-colors hover:bg-background"
+        className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-3 text-sm text-text-secondary transition-colors hover:bg-background"
       >
-        Экспорт
+        <IconExport />Экспорт
       </button>
     </div>
   );

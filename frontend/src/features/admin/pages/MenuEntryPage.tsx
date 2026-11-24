@@ -463,7 +463,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
       {!isGoods && canRecipe && <WorkspaceHeaderActions>
         <button type="button" className="btn-secondary btn-md inline-flex items-center gap-2" onClick={printRecipe}
           disabled={busy || preview.pending || !preview.data?.items.length}>
-          <IconPrinter className="h-4 w-4" aria-hidden="true" /> Распечатать
+          <IconPrinter />Распечатать
         </button>
       </WorkspaceHeaderActions>}
       <form id={formId} className={'min-w-0 space-y-5 pt-1 sm:space-y-6 sm:pt-2' + (isGoods ? ' max-w-6xl' : '')} noValidate

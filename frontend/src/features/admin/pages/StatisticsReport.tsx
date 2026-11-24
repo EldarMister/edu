@@ -1,3 +1,4 @@
+import { IconExport, IconPrinter } from '@/features/admin/components/icons';
 import { useState, type ReactNode } from 'react';
 import { ColumnSummary } from '../components/ColumnControl';
 import { Link, useLocation } from 'react-router-dom';
@@ -178,9 +179,9 @@ export function StatisticsReport({ report, data, periodControl }: { report: Repo
         </div>
       </details>}
       {canAction('exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!rows.length}
-        onClick={() => exportCsv(title, headings, outputRows())}>{t('Экспорт CSV')}</button>}
+        onClick={() => exportCsv(title, headings, outputRows())}><IconExport />{t('Экспорт CSV')}</button>}
       <button type="button" className="btn-secondary btn-md" disabled={!rows.length}
-        onClick={() => setPrintBlocked(!printReport(title, caption, headings, outputRows()))}>{t('Печать')}</button>
+        onClick={() => setPrintBlocked(!printReport(title, caption, headings, outputRows()))}><IconPrinter />{t('Печать')}</button>
       {periodControl}
     </WorkspaceHeaderActions>
     {printBlocked && <p role="alert" className="text-sm text-danger">{t('Разрешите всплывающие окна и повторите печать.')}</p>}

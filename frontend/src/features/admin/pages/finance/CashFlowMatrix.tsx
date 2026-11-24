@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { usePermissions } from '@/hooks/usePermissions';
 import { printReport } from '@/lib/report-output';
-import { IconPrinter } from '../../components/icons';
+import { IconPrinter, IconExport } from '../../components/icons';
 import { ColumnSummary } from '../../components/ColumnControl';
 import type { CashFlow, FinanceAccount, FinanceCategory, FinanceEntry } from './api';
 import { buildCashFlowTable, flowCell, type FlowColumn, type FlowLine, type FlowMovement } from './cash-flow-table';
@@ -179,9 +179,9 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
               </div>}
             </div>
           </details>}
-          {canAction('exportReports') && <button type="button" className="btn-secondary btn-md" onClick={() => outputReport('csv')}>Экспорт CSV</button>}
+          {canAction('exportReports') && <button type="button" className="btn-secondary btn-md" onClick={() => outputReport('csv')}><IconExport />Экспорт CSV</button>}
           <button type="button" className="btn-secondary btn-md" onClick={() => outputReport('print')}>
-            <IconPrinter className="h-4 w-4" /> Печать
+            <IconPrinter />Печать
           </button>
         </div>
       </div>

@@ -1,3 +1,4 @@
+import { IconPrinter } from '@/features/admin/components/icons';
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { Modal } from '@/components/Modal';
@@ -97,7 +98,7 @@ export function TableQrModal({
             Скачать
           </button>
           <button className="btn-primary btn-md" disabled={!dataUrl} onClick={print}>
-            Печать
+            <IconPrinter />Печать
           </button>
         </div>
         <p className="mt-3 text-center text-xs text-text-muted">

@@ -3,7 +3,7 @@ import { Select } from '@/components/Select';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { usePermissions } from '@/hooks/usePermissions';
 import { WorkspacePending } from '../components/WorkspacePending';
-import { IconPrinter } from '../components/icons';
+import { IconPrinter, IconExport } from '../components/icons';
 import { ColumnButton } from '../components/ColumnControl';
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { ReportPeriodFilter, type PeriodPreset } from './warehouse/ReportPeriodFilter';
@@ -217,10 +217,10 @@ export function WaiterOrdersReport({ staff, staffLoading }: {
               <ColumnButton onClick={() => setColumnsOpen(true)} />
             </>}
             {canAction('exportReports') && <button type="button" onClick={() => outputReport('csv')} className="btn-secondary btn-md" disabled={!hasOutput}>
-              Экспорт CSV
+              <IconExport />Экспорт CSV
             </button>}
             <button type="button" onClick={() => outputReport('print')} className="btn-secondary btn-md" disabled={!hasOutput}>
-              <IconPrinter className="h-4 w-4" /> Печать
+              <IconPrinter />Печать
             </button>
           </div>
         </div>

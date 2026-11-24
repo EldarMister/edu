@@ -431,7 +431,7 @@ export function IngredientsTab({
       {!catalogue && <>
         {canExport && <WorkspaceHeaderActions>
           <button type="button" className="supply-header-action" disabled={exporting || !query.isSuccess}
-            onClick={() => void exportBalances()}>{exporting ? 'Выгрузка…' : 'Экспорт'}</button>
+            onClick={() => void exportBalances()}><IconExport />{exporting ? 'Выгрузка…' : 'Экспорт'}</button>
         </WorkspaceHeaderActions>}
         {columnsOpen && <WarehouseColumnSettings columns={columns} defaults={columnOptions} resetColumns={defaultColumns}
           label={(key) => columnSpec(key).label} onClose={() => setColumnsOpen(false)}

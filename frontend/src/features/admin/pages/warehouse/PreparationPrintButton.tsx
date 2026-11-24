@@ -31,6 +31,6 @@ export function PreparationPrintButton({ recipe }: { recipe: PreparationRecipe }
   }
   return <button type="button" className="btn-secondary btn-md inline-flex items-center gap-2"
     title="Печать сохранённой рецептуры" disabled={!recipe.items.length} onClick={print}>
-    <IconPrinter className="h-4 w-4" aria-hidden="true" /> Распечатать
+    <IconPrinter />Распечатать
   </button>;
 }

@@ -1,3 +1,4 @@
+import { IconExport } from '@/features/admin/components/icons';
 import { Fragment, useRef, useState, type ReactNode } from 'react';
 import { ColumnButton } from '../../components/ColumnControl';
 import { WorkspaceHeaderActions } from '../WorkspaceHeader';
@@ -246,7 +247,7 @@ export function WarehouseMovementSummary({ warehouseId, range, onOpen, onHistory
         <WorkspaceHeaderActions>
           <ColumnButton onClick={() => setEditingColumns(true)} />
           {canExport && <button type="button" className="supply-header-action" disabled={exporting} onClick={() => void download()}>
-            {exporting ? 'Выгрузка…' : 'Экспорт в Excel'}
+            <IconExport />{exporting ? 'Выгрузка…' : 'Экспорт в Excel'}
           </button>}
         </WorkspaceHeaderActions>
       </div>

@@ -132,7 +132,7 @@ export const IconSettings = (p: P) => (
   </S>
 );
 export const IconPrinter = (p: P) => (
-  <S {...p}>
+  <S aria-hidden="true" {...p}>
     <path d="M6 9V2h12v7" />
     <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
     <rect x="6" y="14" width="12" height="8" rx="1" />
@@ -142,10 +142,10 @@ export const IconColumns = (p: P) => (
   <S {...p}><rect x="2" y="4" width="20" height="16" rx="1.5" /><path d="M2 9h20M9 4v16M16 4v16" /></S>
 );
 export const IconExport = (p: P) => (
-  <S {...p}><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7M12 15V3m-4 4 4-4 4 4" /></S>
+  <S aria-hidden="true" {...p}><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7M12 15V3m-4 4 4-4 4 4" /></S>
 );
 export const IconImport = (p: P) => (
-  <S {...p}><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7M12 3v12m-4-4 4 4 4-4" /></S>
+  <S aria-hidden="true" {...p}><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7M12 3v12m-4-4 4 4 4-4" /></S>
 );
 export const IconGlobe = (p: P) => (
   <S {...p}>

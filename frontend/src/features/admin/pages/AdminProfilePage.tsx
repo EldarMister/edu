@@ -81,7 +81,7 @@ function PrinterSettings() {
         {t('Принтер чеков')}
       </h3>
       <p className="text-sm text-text-muted">{t('Выберите принтер в системном окне печати.')}</p>
-      <button type="button" className="btn-secondary btn-md" onClick={testPrint}>{t('Пробная печать')}</button>
+      <button type="button" className="btn-secondary btn-md" onClick={testPrint}><IconPrinter />{t('Пробная печать')}</button>
       {printError && <p role="alert" className="text-sm text-danger">{t('Разрешите всплывающие окна и повторите печать.')}</p>}
     </section>
   );

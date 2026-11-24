@@ -1,3 +1,4 @@
+import { IconExport } from '@/features/admin/components/icons';
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { Modal } from '@/components/Modal';
 import { apiError } from '@/lib/api';
@@ -39,11 +40,11 @@ export function OrdersExportButton({ filters, disabled }: { filters: OrderListFi
       setDetails(false);
       setError('');
       setOpen(true);
-    }}>{t('Экспорт')}</button>
+    }}><IconExport />{t('Экспорт')}</button>
     {open && <Modal open manageFocus title={t('Экспорт чеков')} onClose={close} footer={<div className="flex justify-end gap-2">
       <button type="button" className="btn-secondary btn-md" onClick={close} disabled={pending}>{t('Отмена')}</button>
       <button form={formId} type="submit" className="btn-primary btn-md" disabled={pending || disabled}>
-        {t(pending ? 'Выгрузка…' : 'Выгрузить XLSX')}
+        <IconExport />{t(pending ? 'Выгрузка…' : 'Выгрузить XLSX')}
       </button>
     </div>}>
       <form id={formId} onSubmit={(event) => void download(event)} className="space-y-3">

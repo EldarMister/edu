@@ -1,3 +1,4 @@
+import { IconExport, IconPrinter } from '@/features/admin/components/icons';
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -161,10 +162,10 @@ export function WarehouseReportsTab({
             onClick={() => void download()}
             disabled={exporting}
           >
-            Экспорт CSV
+            <IconExport />Экспорт CSV
           </button>}
           <button type="button" className="btn-secondary btn-md" disabled={!query.isSuccess} onClick={() => window.print()}>
-            Печать
+            <IconPrinter />Печать
           </button>
         </div>
         <div className="flex flex-wrap gap-2">

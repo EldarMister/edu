@@ -1,3 +1,4 @@
+import { IconExport } from '@/features/admin/components/icons';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, apiError } from '@/lib/api';
@@ -34,7 +35,7 @@ export function ProfitLossPage() {
   return <section aria-label="Отчёт о прибылях и убытках">
     <WorkspaceHeaderActions>
       {canAction('exportReports') && <button className="supply-header-action" type="button" disabled={busy || !query.data}
-        onClick={() => void download()}>Экспорт в Excel</button>}
+        onClick={() => void download()}><IconExport />Экспорт в Excel</button>}
       <FinancePeriod from={pnlFrom} to={pnlTo} onApply={({ from, to }) => update({ pnlFrom: from, pnlTo: to })} />
     </WorkspaceHeaderActions>
     {error && <p role="alert" className="text-danger">{error}</p>}

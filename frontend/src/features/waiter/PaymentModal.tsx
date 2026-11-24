@@ -1,3 +1,4 @@
+import { IconPrinter } from '@/features/admin/components/icons';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Order, PaymentMethod, Receipt } from '@/types';
@@ -287,7 +288,7 @@ export function PaymentModal({
               disabled={createPrintRequest.isPending || printing}
               onClick={requestPrint}
             >
-              {createPrintRequest.isPending || printing ? <Spinner /> : t('Печать чека')}
+              {createPrintRequest.isPending || printing ? <Spinner /> : <><IconPrinter />{t('Печать чека')}</>}
             </button>}
           </div>
         }

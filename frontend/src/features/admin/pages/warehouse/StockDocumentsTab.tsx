@@ -1,3 +1,4 @@
+import { IconExport } from '@/features/admin/components/icons';
 import { useEffect, useId, useRef, useState } from 'react';
 import { EditorPage, useEditorDirty } from './EditorPage';
 import { WorkspaceHeaderActions } from '../WorkspaceHeader';
@@ -279,7 +280,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
         {kind === 'writeoff' && <>
           {can('actions.exportReports') && <WorkspaceHeaderActions>
             <button type="button" className="btn-secondary btn-md" disabled={!writeoffLines.enteredCount || busy}
-              onClick={() => exportWriteoffLines(writeoffLines.rows)}>Экспорт CSV</button>
+              onClick={() => exportWriteoffLines(writeoffLines.rows)}><IconExport />Экспорт CSV</button>
           </WorkspaceHeaderActions>}
           <WriteoffFileImport disabled={busy || !writeoffLines.options.isSuccess} onBusy={setFileReading} onRead={writeoffLines.importRows} />
         </>}

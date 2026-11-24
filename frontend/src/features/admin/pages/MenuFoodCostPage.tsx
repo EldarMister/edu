@@ -1,3 +1,4 @@
+import { IconExport } from '@/features/admin/components/icons';
 import { useDeferredValue, useState } from 'react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { apiError } from '@/lib/api';
@@ -156,9 +157,9 @@ function FoodCostControl({ onOpen }: { onOpen: (row: MenuLink) => void }) {
               value={filters.foodReportSearch} onChange={(foodReportSearch) => setFilters({ foodReportSearch })} />
             {canExport && <>
               <button type="button" className="btn-secondary btn-md" disabled={!(tab === 'positions' ? positions : ingredients).length}
-                onClick={exportTable}>CSV</button>
+                onClick={exportTable}><IconExport />CSV</button>
               <button type="button" className="btn-secondary btn-md" disabled={exporting || !(tab === 'positions' ? positions : ingredients).length}
-                onClick={() => void exportExcel()}>Excel</button>
+                onClick={() => void exportExcel()}><IconExport />Excel</button>
             </>}
           </div>
         </div>

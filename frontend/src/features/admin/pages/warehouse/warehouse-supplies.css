@@ -1,6 +1,7 @@
 .warehouse-supplies { min-width: 0; }
 .warehouse-supplies .poster-toolbar { gap: 8px; }
 .supply-header-action { min-height: 36px; padding: 0 9px; color: rgb(var(--edu-link)); font-size: 14px; }
+.supply-header-action:has(> svg) { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .supply-header-action:hover:not(:disabled) { border-radius: 4px; background: light-dark(#f2f6ff, var(--edu-selected)); }
 .supply-header-action:disabled { opacity: .56; }
 .supply-register-table th { white-space: nowrap; }

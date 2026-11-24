@@ -10,7 +10,7 @@ import { apiError } from '@/lib/api';
 import { taxRateLabel } from '@/lib/format';
 import { printReport } from '@/lib/report-output';
 import type { MenuTax, MenuTaxType } from '@/types';
-import { IconTrash } from '../admin/components/icons';
+import { IconTrash, IconExport, IconPrinter } from '../admin/components/icons';
 import { WorkspaceHeaderActions, WorkspaceHeaderCount } from '../admin/pages/WorkspaceHeader';
 import { WorkspaceSearch } from '../admin/pages/WorkspaceSearch';
 import { balanceMoney } from '../admin/pages/warehouse/balance-format';
@@ -50,13 +50,13 @@ function TaxTableActions({ endpoint, params, table, canExport }: {
   }
   return <>
     {canExport && <button type="button" className="supply-header-action" disabled={exporting || !table.rows.length}
-      onClick={() => void exportTable()}>{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
+      onClick={() => void exportTable()}><IconExport />{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
     <button type="button" className="supply-header-action" disabled={!table.rows.length} onClick={() => {
       setError('');
       if (!printReport(table.title, '', table.headers, table.rows)) {
         setError('Разрешите всплывающие окна для печати.');
       }
-    }}>Печать</button>
+    }}><IconPrinter />Печать</button>
     {error && <span role="alert" className="text-xs text-danger">{error}</span>}
   </>;
 }

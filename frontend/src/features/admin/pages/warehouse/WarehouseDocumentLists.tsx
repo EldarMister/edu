@@ -1,3 +1,4 @@
+import { IconExport } from '@/features/admin/components/icons';
 import { Fragment, useState, type ReactNode } from 'react';
 import { ColumnButton } from '../../components/ColumnControl';
 import { RowIconButton } from '../../components/RowIconButton';
@@ -200,7 +201,7 @@ export function DocumentList({
       {inventory && <WorkspaceHeaderActions>{period.filter}</WorkspaceHeaderActions>}
       {writeoff && <WorkspaceHeaderActions>
         {can('actions.exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!rows.length}
-          onClick={exportWriteoffs}>Экспорт CSV</button>}
+          onClick={exportWriteoffs}><IconExport />Экспорт CSV</button>}
         {canCreate && <button type="button" className="btn-primary btn-md" onClick={onCreate}>Добавить</button>}
       </WorkspaceHeaderActions>}
       <div className="poster-toolbar">
@@ -246,7 +247,7 @@ export function DocumentList({
         {filtered && <button type="button" className="text-sm text-text-muted" onClick={resetFilters}>Сбросить всё</button>}
         {!inventory && <ColumnButton onClick={() => setEditingColumns(true)} />}
         {transfer && can('actions.exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!rows.length || exporting}
-          onClick={exportTransfers}>Экспорт Excel</button>}
+          onClick={exportTransfers}><IconExport />Экспорт Excel</button>}
         {!writeoff && canCreate && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
       </div>
       {!inventory && editingColumns && <WarehouseColumnSettings columns={selectedColumns} defaults={availableColumns} resetColumns={defaultColumns}

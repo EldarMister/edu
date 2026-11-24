@@ -1,3 +1,4 @@
+import { IconPrinter } from '@/features/admin/components/icons';
 import { usePublicSettings } from '@/features/settings/api';
 import { waiterItemPermission, waiterOrderPermission } from '@/lib/order-permissions';
 import { useEffect, useState } from 'react';
@@ -374,7 +375,7 @@ export function OrderPanel({
               disabled={preliminaryPending}
               onClick={onPreliminaryReceipt}
             >
-              {preliminaryPending ? <Spinner /> : t('Счёт')}
+              {preliminaryPending ? <Spinner /> : <><IconPrinter />{t('Счёт')}</>}
             </button>
           )}
           <div className="min-w-0 flex-1">
@@ -719,7 +720,7 @@ function ActionButton({
             disabled={preliminaryPending}
             onClick={onPreliminaryReceipt}
           >
-            {preliminaryPending ? <Spinner /> : t('Счёт')}
+            {preliminaryPending ? <Spinner /> : <><IconPrinter />{t('Счёт')}</>}
           </button>}
           {onToPayment && <button
             className="btn-primary btn-lg flex-1 font-semibold"

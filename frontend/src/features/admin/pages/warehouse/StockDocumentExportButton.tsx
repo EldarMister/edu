@@ -1,3 +1,4 @@
+import { IconExport } from '@/features/admin/components/icons';
 import { useRef, useState } from 'react';
 import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
@@ -27,6 +28,6 @@ export function StockDocumentExportButton({ id, kind, disabled = false }: {
   const label = kind === 'transfer' ? 'Скачать акт XLSX' : 'Скачать XLSX';
   return <button type="button" className="btn-ghost btn-md print:hidden text-primary" disabled={disabled || pending}
     title={disabled ? 'Сначала сохраните изменения' : undefined} onClick={() => void download()}>
-    {pending ? 'Выгрузка…' : label}
+    <IconExport />{pending ? 'Выгрузка…' : label}
   </button>;
 }

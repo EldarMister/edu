@@ -102,7 +102,7 @@ export function CashShiftsPage() {
                 [...columns.slice(0, 4), 'Книжный остаток при открытии', 'Разница при открытии', ...columns.slice(4)], ...rows.map((shift) => [
                 String(shift.number), financeDateTime(shift.openedAt), shift.closedAt ? financeDateTime(shift.closedAt) : 'Не закрыта',
                 shift.openingAmount, shift.openingExpectedAmount, shift.openingDifference, shift.collectionAmount, shift.actualAmount, shift.difference,
-              ])]))}><IconPrinter className="h-4 w-4" aria-hidden="true" />Распечатать</button>
+              ])]))}><IconPrinter />Распечатать</button>
             {period}
           </div>
         </div>

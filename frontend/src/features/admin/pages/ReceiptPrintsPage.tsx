@@ -1,3 +1,4 @@
+import { IconCheck, IconPrinter } from '@/features/admin/components/icons';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { WorkspacePending } from '../components/WorkspacePending';
@@ -136,9 +137,7 @@ export function ReceiptPrintsPage({ terminal = false }: { terminal?: boolean }) 
                 }}
                 className="flex h-9 w-9 items-center justify-center rounded-lg border border-success/40 text-success transition-colors hover:bg-success/10 disabled:opacity-50"
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M20 6 9 17l-5-5" />
-                </svg>
+                {isRequest && !approved ? <IconCheck aria-hidden="true" /> : <IconPrinter />}
               </button>
               {isRequest && !approved && (
                 <button

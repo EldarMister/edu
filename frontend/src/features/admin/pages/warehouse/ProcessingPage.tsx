@@ -1,3 +1,4 @@
+import { IconExport } from '@/features/admin/components/icons';
 import { useState, type ReactNode } from 'react';
 import { ColumnButton } from '../../components/ColumnControl';
 import { RowIconButton } from '../../components/RowIconButton';
@@ -79,7 +80,7 @@ export function ProcessingPage({
         {filters}
         <ColumnButton onClick={() => setEditingColumns(true)} />
         {can('actions.exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!documents.length || exporting}
-          onClick={exportRegister}>Экспорт Excel</button>}
+          onClick={exportRegister}><IconExport />Экспорт Excel</button>}
         {canProduce && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
       </div>
       {editingColumns && <WarehouseColumnSettings columns={columns} defaults={defaultColumns}
@@ -600,7 +601,7 @@ function ProcessingForm({
         }
       >
         {document && !editable && can('actions.exportReports') && <button type="button" className="btn-secondary btn-md"
-          disabled={exportingAct} onClick={() => exportDocument(document.id)}>Скачать акт Excel</button>}
+          disabled={exportingAct} onClick={() => exportDocument(document.id)}><IconExport />Скачать акт Excel</button>}
         {editable ? (
           <>
             <button className="btn-primary btn-md" disabled={busy || !dateValid} onClick={() => void save(true)}>

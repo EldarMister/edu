@@ -1,3 +1,4 @@
+import { IconExport, IconPrinter } from '@/features/admin/components/icons';
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { EditorPage, useEditorDirty } from './EditorPage';
 import { WorkspaceHeaderActions } from '../WorkspaceHeader';
@@ -382,13 +383,13 @@ function StockDocumentDraft({
         <WorkspaceHeaderActions>
           {can('actions.exportReports') && <StockDocumentExportButton id={document.id} kind="inventory"
             disabled={hasUnsavedValues || !timingReady || pending || stale} />}
-          <button type="button" className="btn-ghost btn-md text-primary" disabled={previewNeedsSave || !timingReady} onClick={() => window.print()}>Печать списка</button>
+          <button type="button" className="btn-ghost btn-md text-primary" disabled={previewNeedsSave || !timingReady} onClick={() => window.print()}><IconPrinter />Печать списка</button>
         </WorkspaceHeaderActions>
       </>}
       {document.kind === 'writeoff' && <>
         {can('actions.exportReports') && <WorkspaceHeaderActions>
           <button type="button" className="btn-secondary btn-md" disabled={!writeoffLines.enteredCount || pending || fileReading}
-            onClick={() => exportWriteoffLines(writeoffLines.rows)}>Экспорт CSV</button>
+            onClick={() => exportWriteoffLines(writeoffLines.rows)}><IconExport />Экспорт CSV</button>
         </WorkspaceHeaderActions>}
         <WriteoffFileImport disabled={pending || stale || fileReading || !writeoffLines.options.isSuccess}
           onBusy={setFileReading} onRead={writeoffLines.importRows} />
@@ -613,7 +614,7 @@ function StockDocumentReview({
       {document.kind === 'inventory' && <InventoryCountSheet document={document} warehouseName={warehouse.name} rows={document.items} />}
       {document.kind === 'writeoff' && document.itemsCount > 0 && can('actions.exportReports') && <WorkspaceHeaderActions>
         <button type="button" className="btn-secondary btn-md"
-          onClick={() => exportWriteoffLines(writeoffDraftLines(document.sourceLines, document.items))}>Экспорт CSV</button>
+          onClick={() => exportWriteoffLines(writeoffDraftLines(document.sourceLines, document.items))}><IconExport />Экспорт CSV</button>
       </WorkspaceHeaderActions>}
       <div className="poster-document-panel poster-document-fields space-y-3">
         <DocumentHeader document={document} warehouse={warehouse} />
@@ -656,7 +657,7 @@ function StockDocumentReview({
           className="btn-ghost btn-md print:hidden text-primary"
           onClick={() => window.print()}
         >
-          Печать
+          <IconPrinter />Печать
         </button>
       </WorkspaceHeaderActions>
       {((needsApproval && canApprove) || canReverse || canReopenPosted) && (

@@ -1,3 +1,4 @@
+import { IconPrinter } from '@/features/admin/components/icons';
 import { ModifierPicker } from './ModifierPicker';
 import type { CartModifiers } from './cart';
 import { usePublicSettings } from '@/features/settings/api';
@@ -1077,7 +1078,7 @@ export function WaiterApp() {
         <DesktopNav current={desktopView} onChange={(next) => changeTab(next)} />
         <div className="flex items-center gap-3">
           {canHandlePrintQueue && <button type="button" className="btn-secondary btn-md" disabled={!canWork}
-            onClick={() => setPrintQueueOpen(true)}>{t('Печать чека')}</button>}
+            onClick={() => setPrintQueueOpen(true)}><IconPrinter />{t('Печать чека')}</button>}
           <ConnectionStatus />
           <span className="hidden text-sm text-text-secondary sm:inline">{user?.name}</span>
         </div>

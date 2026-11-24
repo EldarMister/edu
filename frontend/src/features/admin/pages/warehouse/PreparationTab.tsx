@@ -1,3 +1,4 @@
+import { IconPrinter } from '@/features/admin/components/icons';
 import { useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { EditorPage, useEditorDirty } from './EditorPage';
 import { ItemCard } from './ItemCard';
@@ -1019,7 +1020,7 @@ export function ProductionBatchModal({ id, onClose }: { id: string; onClose: () 
             </div>
           ))}
           <button type="button" className="btn-secondary btn-md" onClick={() => window.print()}>
-            Печать
+            <IconPrinter />Печать
           </button>
         </div>
       )}

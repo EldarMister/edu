@@ -55,7 +55,7 @@ export function RecipeExportButton({ kind, ids, pending }: {
       footer={<div className="flex justify-end gap-2">
         <button type="button" className="btn-secondary btn-md" onClick={close} disabled={exporting}>Отмена</button>
         <button form={formId} type="submit" className="btn-primary btn-md" disabled={exporting || !ids.length}>
-          {exporting ? 'Выгрузка…' : 'Выгрузить'}
+          <IconExport />{exporting ? 'Выгрузка…' : 'Выгрузить'}
         </button>
       </div>}>
       <form id={formId} onSubmit={(event) => void download(event)} className="space-y-3">
