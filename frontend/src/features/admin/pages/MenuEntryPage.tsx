@@ -415,33 +415,35 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
         }}>
         <fieldset ref={startRef} disabled={!canEdit || busy} aria-label="Основные параметры"
           className="grid min-w-0 max-w-3xl scroll-mt-4 gap-3">
-          <FormRow label="Название" htmlFor={formId + '-name'}>
-            <input id={formId + '-name'} ref={nameRef} className="input" value={form.name} maxLength={120}
-              onChange={(event) => patch({ name: event.target.value })}
-              placeholder={isGoods ? 'Например, лимонад 0,5 л' : 'Например, капучино'} required />
-          </FormRow>
-          <FormRow label="Категория">
-            <Select searchable ariaLabel="Категория" placeholder="Выберите категорию" className="h-11 w-full"
-              value={form.categoryId} disabled={!canEdit || busy} onChange={(value) => patch({ categoryId: value })}
-              options={categories.map(({ id, name }) => ({ value: id, label: name }))} />
-          </FormRow>
-          <FormRow label="Цех приготовления">
-            <Select ariaLabel="Цех приготовления" className="h-11 w-full" value={form.prepStation} disabled={!canEdit || busy}
-              onChange={(value) => patch({ prepStation: value })}
-              options={[{ value: '', label: 'По категории' }, ...routingOptions(stations, form.prepStation)]} />
-          </FormRow>
-          <FormRow label="Налог">
-            <MenuTaxSelect value={tax} onChange={setTax} inherit disabled={!canEdit || busy}
-              categoryTaxId={categories.find((category) => category.id === form.categoryId)?.taxId} />
-          </FormRow>
+          <div className={isGoods ? 'grid min-w-0 gap-3' : 'grid min-w-0 gap-3 sm:grid-cols-2 sm:gap-x-5'}>
+            <FormRow label="Название" htmlFor={formId + '-name'} stacked={!isGoods}>
+              <input id={formId + '-name'} ref={nameRef} className="input" value={form.name} maxLength={120}
+                onChange={(event) => patch({ name: event.target.value })}
+                placeholder={isGoods ? 'Например, лимонад 0,5 л' : 'Например, капучино'} required />
+            </FormRow>
+            <FormRow label="Категория" stacked={!isGoods}>
+              <Select searchable ariaLabel="Категория" placeholder="Выберите категорию" className="h-11 w-full"
+                value={form.categoryId} disabled={!canEdit || busy} onChange={(value) => patch({ categoryId: value })}
+                options={categories.map(({ id, name }) => ({ value: id, label: name }))} />
+            </FormRow>
+            <FormRow label="Цех приготовления" stacked={!isGoods}>
+              <Select ariaLabel="Цех приготовления" className="h-11 w-full" value={form.prepStation} disabled={!canEdit || busy}
+                onChange={(value) => patch({ prepStation: value })}
+                options={[{ value: '', label: 'По категории' }, ...routingOptions(stations, form.prepStation)]} />
+            </FormRow>
+            <FormRow label="Налог" stacked={!isGoods}>
+              <MenuTaxSelect value={tax} onChange={setTax} inherit disabled={!canEdit || busy}
+                categoryTaxId={categories.find((category) => category.id === form.categoryId)?.taxId} />
+            </FormRow>
+          </div>
           <FormRow label="Обложка">
             <MenuEntryPhoto name={form.name} imageUrl={form.imageUrl} loading={photoBusy} onBusy={setPhotoBusy}
               onImage={(imageUrl) => patch({ imageUrl })}>
               <div className="grid min-w-0 gap-2">
-                <label className="flex items-center justify-between gap-3 text-sm">
+                {(isGoods || dish || copy) && <label className="flex items-center justify-between gap-3 text-sm">
                   Доступно для заказа
                   <Toggle ariaLabel="Доступно для заказа" checked={form.isAvailable} onChange={(isAvailable) => patch({ isAvailable })} />
-                </label>
+                </label>}
                 <label className="flex items-center justify-between gap-3 text-sm">
                   {isGoods ? 'Весовой товар' : 'Весовое блюдо'}
                   <Toggle ariaLabel={isGoods ? 'Весовой товар' : 'Весовое блюдо'} checked={form.isWeighted} onChange={(isWeighted) => patch({ isWeighted })}
@@ -729,9 +731,9 @@ function ProducedStockField({ items, value, onChange, savedStockId, canProduce }
   </div>;
 }
 
-function FormRow({ label, htmlFor, children }: { label: string; htmlFor?: string; children: ReactNode }) {
-  const labelClass = 'text-sm font-medium text-text-secondary sm:pt-2.5';
-  return <div className="grid min-w-0 gap-1.5 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-x-5">
+function FormRow({ label, htmlFor, children, stacked = false }: { label: string; htmlFor?: string; children: ReactNode; stacked?: boolean }) {
+  const labelClass = 'text-sm font-medium text-text-secondary' + (stacked ? '' : ' sm:pt-2.5');
+  return <div className={'grid min-w-0 gap-1.5' + (stacked ? '' : ' sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-x-5')}>
     {htmlFor ? <label htmlFor={htmlFor} className={labelClass}>{label}</label> : <div className={labelClass}>{label}</div>}
     <div className="min-w-0">{children}</div>
   </div>;
