@@ -229,7 +229,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
       price: previewPrice ?? 0,
       ...(!isGoods && producedStockId !== savedStockId ? { producedStockIngredientId: producedStockId || null } : {}),
       weightedPriceBase: form.isWeighted ? form.weightedPriceBase : undefined,
-      ...(!isGoods && { inputPortions: previewPortions, ownRecipe: !!ownRecipe,
+      ...(!isGoods && { inputPortions: previewPortions, ...(previewPortions > 1 && !costVariant && { batchPortions: previewPortions }), ownRecipe: !!ownRecipe,
         metadata: { outputQuantity: hasVariantNorms ? undefined : previewMetadata.outputQuantity, outputUnit: previewMetadata.outputUnit } }),
       items: !isGoods && !dish?.isSet && validPreviewRows
         ? recipePreviewItems(previewRows, ownRecipe ? [] : activeVariants.flatMap(({ id }) => id ? [id] : []),
@@ -670,7 +670,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
         </fieldset>
       </form>
       {batchOpen && createPortal(<Modal open manageFocus title="Расчёт партии" onClose={() => setBatchOpen(false)} panelClassName="max-w-xl">
-        <RecipeBatchPanel preview={preview.data} pending={preview.pending} showCosts={canCosts} />
+        <RecipeBatchPanel preview={preview.data} pending={preview.pending} input={preview.input} showCosts={canCosts} />
       </Modal>, document.body)}
       {basisOpen && <RecipeBasisDialog initial={recipePortions} onClose={() => setBasisOpen(false)}
         onApply={(portions) => {

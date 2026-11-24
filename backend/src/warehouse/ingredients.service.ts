@@ -76,6 +76,7 @@ export class IngredientsService {
       preparationMode: i.preparationMode,
       processingLosses: i.unitType === 'mass' ? i.processingLosses : null,
       pieceWeightGrams: i.pieceWeightGrams == null ? null : Number(i.pieceWeightGrams),
+      roundPieceWriteoff: i.roundPieceWriteoff,
       unitType: i.unitType,
       baseUnit: baseUnitForType(i.unitType as 'mass' | 'volume' | 'count'),
       displayUnit: display,
@@ -118,9 +119,8 @@ export class IngredientsService {
         try {
           const recipe = recipesById.get(item.id);
           if (!recipe?.items.length || recipe.outputAmount.lte(0)) { expanded.set(item.id, null); continue; }
-          const factor = new Prisma.Decimal(toBase(1, normalizeUnit(item.displayUnit))).div(recipe.outputAmount);
           const parts: ResolvedRecipePart[] = [];
-          for (const row of recipe.items) parts.push(...await resolver.expand(row.ingredientId, row.amount.mul(factor), warehouse, [item.id]));
+          for (const row of recipe.items) parts.push(...await resolver.expand(row.ingredientId, row.amount, warehouse, { path: [item.id] }));
           expanded.set(item.id, parts);
           for (const part of parts) costingItems.set(part.ingredient.id, part.ingredient);
         } catch (error) {
@@ -146,9 +146,9 @@ export class IngredientsService {
             const balance = balances.get(part.ingredient.id);
             return balance?.valuationKnown ? sum.add(part.amount.mul(balance.avgCost)) : sum;
           }, new Prisma.Decimal(0));
-          knownRecipeTotalCost = Number(cost.mul(recipe.outputAmount).div(toBase(1, normalizeUnit(item.displayUnit))).toDecimalPlaces(2));
+          knownRecipeTotalCost = Number(cost.toDecimalPlaces(2));
           if (parts.every((part) => balances.get(part.ingredient.id)?.valuationKnown)) {
-            recipeUnitCost = Number(cost.toDecimalPlaces(8));
+            recipeUnitCost = Number(cost.mul(toBase(1, normalizeUnit(item.displayUnit))).div(recipe.outputAmount).toDecimalPlaces(8));
             recipeTotalCost = knownRecipeTotalCost;
           }
         }
@@ -462,7 +462,7 @@ export class IngredientsService {
   async update(id: string, dto: UpdateIngredientDto) {
     const warehouse = await resolveWarehouse(this.prisma, dto.warehouseId);
     return this.prisma.$transaction(async (tx) => {
-      if (dto.kind !== undefined || dto.preparationMode !== undefined) await lockRecipeGraph(tx);
+      if (dto.kind !== undefined || dto.preparationMode !== undefined || dto.roundPieceWriteoff !== undefined) await lockRecipeGraph(tx);
       await lockIngredients(tx, [id]);
       const current = await this.ensure(id, tx);
       if (dto.preparationMode === 'virtual' && current.preparationMode !== 'virtual') {
@@ -500,7 +500,8 @@ export class IngredientsService {
         throw new BadRequestException('Остаток и себестоимость изменяются документом прихода или инвентаризации');
       }
       if ((data.isPrepared !== undefined && data.isPrepared !== current.isPrepared) ||
-          (data.preparationMode !== undefined && data.preparationMode !== current.preparationMode)) await archivePreparation(tx, current);
+          (data.preparationMode !== undefined && data.preparationMode !== current.preparationMode) ||
+          (data.roundPieceWriteoff !== undefined && data.roundPieceWriteoff !== current.roundPieceWriteoff)) await archivePreparation(tx, current);
       const updated = await tx.ingredient.update({ where: { id }, data });
       await syncIngredientPackages(tx, updated);
       return this.serialize({ ...updated, ...after });
@@ -557,6 +558,10 @@ export class IngredientsService {
     }
     units = validatePurchaseUnits(units, dto.unit ?? current?.displayUnit ?? 'pcs');
     const type = current?.unitType ?? unitTypeOf(normalizeUnit(dto.unit));
+    const canRoundPieces = type === 'count' && (kind === 'raw' || kind === 'consumable');
+    if (dto.roundPieceWriteoff != null && (typeof dto.roundPieceWriteoff !== 'boolean' || (dto.roundPieceWriteoff && !canRoundPieces))) {
+      throw new BadRequestException('Округление списания доступно только для штучных ингредиентов');
+    }
     let pieceWeightGrams: Prisma.Decimal | null | undefined;
     if (dto.pieceWeightGrams === null) pieceWeightGrams = null;
     else if (dto.pieceWeightGrams !== undefined) {
@@ -583,6 +588,7 @@ export class IngredientsService {
     return {
       kind, isPrepared: prepared, preparationMode: mode,
       processingLosses, pieceWeightGrams,
+      roundPieceWriteoff: canRoundPieces ? dto.roundPieceWriteoff ?? undefined : false,
       category: dto.category === undefined ? undefined : dto.category?.trim() || null,
       supplier: dto.supplier === undefined ? undefined : dto.supplier?.trim() || null,
       purchaseUnits: units.map(({ name, factor }) => ({ name, factor })), purchaseUnit: units[0]?.name ?? null,

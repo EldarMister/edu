@@ -2,7 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { calculateSaleTaxes } from '../settings/order-taxes';
 import { getCafeId } from '../tenant/tenant-context';
-import { recipeAmount, RecipeResolver } from './recipe-resolution';
+import { recipeAmount, RecipeResolver, recipeStockAmount } from './recipe-resolution';
 import { measuredNetWeightForGross, processingStageResults, readProcessingStages, stagedNetAmount } from './recipe-processing';
 import { assertUnitMatchesType, baseUnitForType, costUnitLabel, normalizeUnit, toBase, unitLabel, type UnitCode } from './units';
 import { getWarehouseBalance, type WarehouseLocation } from './warehouse-location';
@@ -98,11 +98,11 @@ export class RecipeCalculator {
     return value;
   }
 
-  private async value(ingredient: RecipeIngredient, amount: Prisma.Decimal, warehouse: WarehouseLocation | null) {
+  private async value(ingredient: RecipeIngredient, amount: Prisma.Decimal, warehouse: WarehouseLocation | null, exactStockQuantity = false) {
     const result = emptyCalculation();
     if (!amount.gt(0)) return result;
     try {
-      for (const part of await this.resolver.expand(ingredient.id, amount, warehouse)) {
+      for (const part of await this.resolver.expand(ingredient.id, amount, warehouse, { exactStockQuantity })) {
         const balance = await this.balance(part.ingredient, part.warehouse);
         if (!balance.valuationKnown) result.missing.add(part.ingredient.name);
         if (!part.ingredient.isActive) result.inactive.add(part.ingredient.name);
@@ -117,7 +117,7 @@ export class RecipeCalculator {
     return result;
   }
 
-  async composition(rows: readonly RecipeCostRow[], station: string, variantId?: string) {
+  async composition(rows: readonly RecipeCostRow[], station: string, variantId?: string, portions = 1) {
     const value = emptyCalculation();
     const totalsByUnit = new Map<UnitCode, Prisma.Decimal>();
     let hasMeasuredWeight = false;
@@ -139,7 +139,7 @@ export class RecipeCalculator {
       }
       let amount = row.amount;
       let invalidVariant = false;
-      try { amount = recipeAmount(row, variantId); } catch (error) {
+      try { amount = recipeAmount(row, variantId).mul(portions); } catch (error) {
         if (!(error instanceof BadRequestException)) throw error;
         invalidVariant = true;
       }
@@ -171,13 +171,15 @@ export class RecipeCalculator {
       addRecipeValue(value, rowValue);
       const balance = row.warehouseId && !warehouse ? null : await this.balance(ingredient, warehouse ?? null);
       const costKnown = rowValue.missing.size === 0;
-      const unitCost = !costKnown ? null : amount.gt(0) ? rowValue.cost.div(amount) : balance?.valuationKnown ? balance.avgCost : null;
+      const stockAmount = recipeStockAmount(amount, ingredient.roundPieceWriteoff);
+      const unitCost = !costKnown ? null : stockAmount.gt(0) ? rowValue.cost.div(stockAmount) : balance?.valuationKnown ? balance.avgCost : null;
       items.push({ id: row.id, ingredientId: row.ingredientId, fromCommonWarehouse: row.fromCommonWarehouse,
         warehouseId: row.warehouseId, warehouseName: row.warehouseId && !warehouse ? null : warehouse?.name ?? this.defaultName,
         isPrepared: ingredient.isPrepared, preparationMode: ingredient.preparationMode, name: ingredient.name, unit: unitLabel(unit),
         amountUnit: unit, unitType: ingredient.unitType, ingredientDisplayUnit: ingredient.displayUnit, amount: quantity(amount, unit),
         baseAmount: quantity(row.amount, unit), netAmount: net == null ? null : quantity(net, unit), lossPercent: Number(row.lossPercent),
         pieceWeightGrams: pieceWeight == null ? null : Number(pieceWeight),
+        roundPieceWriteoff: ingredient.roundPieceWriteoff, stockWriteoffAmount: quantity(stockAmount, unit),
         measuredNetWeightGrams: manualWeight == null ? null : quantity(manualWeight, 'g'),
         netWeightGrams: netWeight == null ? null : quantity(netWeight, 'g'),
         processingMethod: row.processingMethod, processingStages: stages, processingBasis: row.processingBasis ?? null,
@@ -187,7 +189,7 @@ export class RecipeCalculator {
             return [[id, quantity(new Prisma.Decimal(amount), unit)]];
           })),
         costKnown, avgCost: unitCost == null ? null : Number(unitCost.mul(toBase(1, unit)).toDecimalPlaces(8)),
-        costUnitLabel: costUnitLabel(unit), lineCost: costKnown ? money(rowValue.cost) : null,
+        costUnitLabel: costUnitLabel(unit), lineCost: costKnown ? money(rowValue.cost) : null, knownLineCost: money(rowValue.cost),
         lineCostForScaling: costKnown ? Number(rowValue.cost) : null,
         stock: balance ? quantity(balance.stock, unit) : null, isLow: !!balance && balance.stock.lte(ingredient.lowStockThreshold), isActive: ingredient.isActive });
     }
@@ -208,7 +210,7 @@ export class RecipeCalculator {
     const ingredient = await record;
     if (!ingredient) return { value: { ...emptyCalculation(), missing: new Set(['Складская позиция недоступна']) }, stockItem: null };
     const unit = normalizeUnit(ingredient.displayUnit);
-    return { value: await this.value(ingredient, amount, warehouse), stockItem: { id: ingredient.id, name: ingredient.name,
+    return { value: await this.value(ingredient, amount, warehouse, true), stockItem: { id: ingredient.id, name: ingredient.name,
       unit, amount: quantity(amount, unit), warehouseName: warehouse?.name ?? this.defaultName, kind: ingredient.kind } };
   }
 }

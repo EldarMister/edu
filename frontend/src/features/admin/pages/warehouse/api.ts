@@ -39,6 +39,7 @@ export interface Ingredient {
   valuationKnown?: boolean;
   processingLosses?: Partial<Record<ProcessingMethod, number>>;
   pieceWeightGrams?: number | null;
+  roundPieceWriteoff?: boolean;
   kind?: ItemKind;
   category?: string | null;
   supplier?: string | null;
@@ -82,6 +83,8 @@ export interface RecipeItem extends RecipeProcessing {
   netAmount?: number | null;
   measuredNetWeightGrams?: number | null;
   pieceWeightGrams?: number | null;
+  roundPieceWriteoff?: boolean;
+  stockWriteoffAmount?: number;
   netWeightGrams?: number | null;
   lossPercent?: number;
   variantAmounts?: Record<string, number>;
@@ -443,6 +446,7 @@ export function useIngredient(id: string | null) {
   });
 }
 export interface IngredientInput {
+  roundPieceWriteoff?: boolean;
   processingLosses?: Partial<Record<ProcessingMethod, number>>;
   pieceWeightGrams?: number | null;
   kind?: ItemKind;
@@ -578,6 +582,7 @@ export interface PreparationRecipe extends Omit<PreparationRecipeInput, 'items'>
   displayUnit: UnitCode;
   unitType: UnitType;
   items: (PreparationRecipeInput['items'][number] & {
+    roundPieceWriteoff?: boolean; stockWriteoffAmount?: number;
     name: string; lineCost?: number | null; knownLineCost?: number | null; costKnown?: boolean; netWeightGrams?: number | null;
   })[];
 }

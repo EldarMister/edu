@@ -99,7 +99,8 @@ export async function resolveWriteoffSources(tx: Prisma.TransactionClient, wareh
         variantId: variant?.id ?? null, weightedPriceBase: Number(dish.weightedPriceBase) };
     } else throw new BadRequestException('Неизвестный тип продукта списания');
     const parts = [];
-    for (const root of roots) parts.push(...await resolver.expand(root.ingredientId, root.amount, warehouse));
+    for (const root of roots) parts.push(...await resolver.expand(root.ingredientId, root.amount, warehouse,
+      { exactStockQuantity: input.kind === 'ingredient' || recipe.kind === 'direct' }));
     const aggregate = new Map<string, { part: typeof parts[number]; amount: Prisma.Decimal }>();
     for (const part of parts) {
       const previous = aggregate.get(part.ingredient.id);

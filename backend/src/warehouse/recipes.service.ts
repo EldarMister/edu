@@ -130,6 +130,8 @@ export class RecipesService {
       const calculator = await RecipeCalculator.create(tx);
       const compositionVariantId = ownRecipe ? undefined : dto.variantId;
       const recipe = await calculator.composition(composition, station, compositionVariantId);
+      const batch = dto.batchPortions == null ? null : dto.batchPortions === 1 ? recipe
+        : await calculator.composition(composition, station, compositionVariantId, dto.batchPortions);
       const savedBinding = variant?.stockIngredientId ?? dish?.stockIngredientId ?? null;
       const directId = dto.producedStockIngredientId === undefined ? savedBinding : dto.producedStockIngredientId;
       let stockAmount = variant?.stockIngredientId ? variant.stockAmount : dish?.stockAmount ?? new Prisma.Decimal(1);
@@ -153,6 +155,8 @@ export class RecipesService {
       const metrics = recipeMetrics(price, direct?.value ?? setCalculation?.value ?? recipe.value,
         !!directId || recipe.items.length > 0 || setCalculation?.response.accountingConfigured === true, tax);
       return { ...metrics, items: recipe.items, stockItem: direct?.stockItem ?? null,
+        ...(batch && { batch: { compositionCost: recipeMetrics(null, batch.value, batch.items.length > 0).foodCost,
+          items: batch.items.map(({ ingredientId, stockWriteoffAmount, lineCost, lineCostForScaling }) => ({ ingredientId, stockWriteoffAmount, lineCost, lineCostForScaling })) } }),
         output: recipeOutput(dto.metadata ?? (ownRecipe ? variant?.recipeMetadata : dish?.recipeMetadata),
           recipe.output, composition, compositionVariantId),
         compositionOutput: recipe.output,
@@ -239,7 +243,7 @@ export class RecipesService {
     return dish;
   }
 
-  private async calculateSaved(dish: RecipeDish, calculator: RecipeCalculator, variantId?: string, path: string[] = []) {
+  private async calculateSaved(dish: RecipeDish, calculator: RecipeCalculator, variantId?: string, path: string[] = [], portions = 1) {
     if (path.includes(dish.id) || path.length >= 32) throw new BadRequestException('Циклический состав сетов');
     const variant = dish.variants.find((value) => value.id === variantId);
     if (variantId && !variant) throw new BadRequestException('Вариант не относится к блюду');
@@ -247,10 +251,10 @@ export class RecipesService {
     const recipeRows = recipeRowsForVariant(dish.recipeItems, variant);
     const metadata = variant?.recipeMetadata ?? dish.recipeMetadata;
     const compositionVariantId = variant?.recipeMetadata != null ? undefined : variantId;
-    const composition = await calculator.composition(recipeRows, station, compositionVariantId);
+    const composition = await calculator.composition(recipeRows, station, compositionVariantId, portions);
     const directId = variant?.stockIngredientId ?? dish.stockIngredientId;
     const directAmount = variant?.stockIngredientId ? variant.stockAmount : dish.stockAmount;
-    const direct = directId ? await calculator.direct(directId, directAmount, station) : null;
+    const direct = directId ? await calculator.direct(directId, directAmount.mul(portions), station) : null;
     const value = direct?.value ?? composition.value;
     const components: { dishId: string; dishName: string; variantId: string | null; variantName: string | null; quantity: number; foodCost: number | null; accountingConfigured: boolean }[] = [];
     if (!direct && !recipeRows.length && dish.isSet) {
@@ -259,10 +263,10 @@ export class RecipesService {
         let accountingConfigured = false;
         let foodCost: number | null = null;
         try {
-          const result = await this.calculateSaved(child, calculator, component.dishVariantId ?? undefined, [...path, dish.id]);
+          const result = await this.calculateSaved(child, calculator, component.dishVariantId ?? undefined, [...path, dish.id], portions * component.quantity);
           accountingConfigured = result.response.accountingConfigured;
-          addRecipeValue(value, result.value, component.quantity);
-          foodCost = result.response.costKnown ? Number(result.value.cost.mul(component.quantity).toDecimalPlaces(2)) : null;
+          addRecipeValue(value, result.value);
+          foodCost = result.response.costKnown ? Number(result.value.cost.toDecimalPlaces(2)) : null;
         } catch (error) {
           if (!(error instanceof BadRequestException)) throw error;
         }

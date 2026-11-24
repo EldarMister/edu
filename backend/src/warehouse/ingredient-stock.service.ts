@@ -22,16 +22,40 @@ type Movement = {
   quantity: number; cycle: number; sourceLineId?: string; change: Prisma.Decimal;
   cost?: Prisma.Decimal; costKnown?: boolean; comment: string; snapshot?: Prisma.InputJsonValue;
 };
-type SalePart = { kind?: string; amount?: string | number; componentId?: string | null };
-type SaleSnapshot = SalePart & { parts?: SalePart[]; restockedDirectGoods?: boolean };
+type SalePart = { kind?: string; amount?: string | number; componentId?: string | null;
+  pieceRounding?: { rawAmount: string; portions: number; offset: number } };
+type PieceReturn = { portions: number; componentId: string | null; parts: SalePart[] };
+type SaleSnapshot = SalePart & { parts?: SalePart[]; restockedDirectGoods?: boolean; pieceReturn?: PieceReturn };
+
+// Each split owns a contiguous range of the original portions. Differences of
+// cumulative rounded requirements telescope to the original debit, even after reopening.
+function pieceReturnSlice(parts: SalePart[], salePortions: number, previousCancellations: number, requested: number, componentId?: string): PieceReturn | null {
+  const selected = parts.filter((part) => !componentId || part.componentId === componentId);
+  if (!selected.length || !parts.some((part) => part.pieceRounding)) return null;
+  const before = Math.max(0, salePortions - previousCancellations);
+  const after = Math.max(0, before - requested);
+  const slice = selected.map((part) => {
+    const rounding = part.pieceRounding;
+    if (rounding) {
+      const raw = new Prisma.Decimal(rounding.rawAmount);
+      const at = (portions: number) => raw.mul(rounding.offset + portions).div(rounding.portions).ceil();
+      return { ...part, amount: at(before).sub(at(after)).toString(), pieceRounding: { ...rounding, offset: rounding.offset + after } };
+    }
+    const amount = new Prisma.Decimal(part.amount ?? 0);
+    const at = (portions: number) => amount.mul(portions).div(salePortions).toDecimalPlaces(3);
+    return { ...part, amount: at(before).sub(at(after)).toString() };
+  });
+  return { portions: before - after, componentId: componentId ?? null, parts: slice };
+}
 
 function mixedSaleAllocation(snapshot: SaleSnapshot | null, sold: Prisma.Decimal) {
   const parts = snapshot?.parts;
   if (!Array.isArray(parts) || !parts.some((part) => part?.kind === 'direct') || parts.every((part) => part?.kind === 'direct')) return null;
+  const containsRounding = parts.some((part) => part?.pieceRounding);
   const quantities = [];
   for (const part of parts) {
     if (!part || (typeof part.amount !== 'number' && (typeof part.amount !== 'string' || !part.amount.trim()))
-      || !Number.isFinite(Number(part.amount)) || Number(part.amount) <= 0) return null;
+      || !Number.isFinite(Number(part.amount)) || Number(part.amount) < 0 || (!containsRounding && Number(part.amount) === 0)) return null;
     quantities.push({ part, recorded: new Prisma.Decimal(part.amount) });
   }
   const postedTotal = quantities.reduce((sum, { recorded }) => sum.add(recorded.toDecimalPlaces(3)), new Prisma.Decimal(0));
@@ -105,7 +129,19 @@ export class IngredientStockService {
           OR: [{ orderItemId: originalId }, { saleLineId: originalId }],
         } });
         for (const sale of sales.filter((row) => row.saleCycle === cycle)) {
-          const amount = returned.filter((row) => row.ingredientId === sale.ingredientId && row.warehouseKey === sale.warehouseKey && (!split || row.orderItemId === line.id))
+          const matching = returned.filter((row) => row.ingredientId === sale.ingredientId && row.warehouseKey === sale.warehouseKey);
+          const roundedReturns = matching.filter((row) => (row.recipeSnapshot as SaleSnapshot | null)?.pieceReturn);
+          if (roundedReturns.length) {
+            const lineReturns = roundedReturns.filter((row) => row.orderItemId === line.id || row.orderItemId?.startsWith(line.id + ':'));
+            if (!lineReturns.length) continue;
+            const parts = lineReturns.flatMap((row) => (row.recipeSnapshot as SaleSnapshot).pieceReturn!.parts);
+            const amount = lineReturns.reduce((sum, row) => sum.add(row.change), new Prisma.Decimal(0));
+            plan.push({ ingredient: sale.ingredient, warehouse: sale.warehouse, lineId: line.id!, quantity: line.quantity!, cycle: cycle + 1,
+              change: amount.negated(), comment: 'Повторное открытие: восстановление исторического расхода',
+              snapshot: (parts.length === 1 ? parts[0] : { parts }) as Prisma.InputJsonValue });
+            continue;
+          }
+          const amount = matching.filter((row) => !split || row.orderItemId === line.id)
             .reduce((sum, row) => sum.add(row.change), new Prisma.Decimal(0));
           if (amount.lte(0)) continue;
           plan.push({ ingredient: sale.ingredient, warehouse: sale.warehouse, lineId: line.id!, quantity: line.quantity!, cycle: cycle + 1,
@@ -164,7 +200,7 @@ export class IngredientStockService {
       for (const row of selectedRoots) {
         const warehouse = row.warehouseId ? warehouseById.get(row.warehouseId) : row.fromCommonWarehouse ? null : route;
         if (row.warehouseId && !warehouse) throw new BadRequestException('Склад рецептуры недоступен');
-        const parts = await resolver.expand(row.ingredientId, row.consumed, warehouse ?? null);
+        const parts = await resolver.expand(row.ingredientId, row.consumed, warehouse ?? null, { exactStockQuantity: !!directId && !row.modifier });
         for (const part of parts) {
           const change = part.amount.toDecimalPlaces(3).negated();
           if (change.isZero()) continue;
@@ -174,7 +210,8 @@ export class IngredientStockService {
               kind: row.modifier ? 'modifier' : directId ? 'direct' : 'recipe', modifier: row.modifier as unknown as Prisma.InputJsonValue ?? null,
               excludedIngredientIds: [...exclusions], componentId: serving.componentId ?? null, path: part.path, preparationRecipes: part.preparations,
               ...('processingStages' in row ? processingSnapshot(row) : {}),
-              amount: part.amount.toString(), warehouseId: part.warehouse?.id ?? null } });
+              amount: part.amount.toString(), warehouseId: part.warehouse?.id ?? null,
+              ...(part.roundedFromAmount && { pieceRounding: { rawAmount: part.roundedFromAmount.toString(), portions: line.quantity!, offset: 0 } }) } });
         }
       }
       }
@@ -251,8 +288,14 @@ export class IngredientStockService {
       mixedSaleAllocation(sale.recipeSnapshot as SaleSnapshot | null, sale.change.abs())] as const) : []);
     const refunded = new Map<string, Prisma.Decimal>();
     const refundedDirect = new Map<string, Prisma.Decimal>();
+    const cancelledPortions = new Map<string, number>();
     for (const row of returns) {
       const key = movementKey(row.saleLineId ?? row.orderItemId, row);
+      const slice = (row.recipeSnapshot as SaleSnapshot | null)?.pieceReturn;
+      if (slice) {
+        const scope = JSON.stringify([key, slice.componentId]);
+        cancelledPortions.set(scope, (cancelledPortions.get(scope) ?? 0) + slice.portions);
+      }
       const loss = row.type === 'writeoff' ? new Prisma.Decimal(String((row.recipeSnapshot as { lossQuantity?: string } | null)?.lossQuantity ?? 0)) : new Prisma.Decimal(0);
       const handled = row.change.add(loss);
       refunded.set(key, (refunded.get(key) ?? new Prisma.Decimal(0)).add(handled));
@@ -260,7 +303,9 @@ export class IngredientStockService {
       if (mixed && handled.gt(0)) {
         // Prior regular cancellations covered the recorded mix. Paid returns below cover the direct portion alone.
         const paidDirect = row.type === 'return' && (row.recipeSnapshot as SaleSnapshot | null)?.restockedDirectGoods === true;
-        const directAmount = paidDirect ? handled : mixed.previous(handled, row.orderItemId);
+        const directAmount = paidDirect ? handled : slice
+          ? slice.parts.reduce((sum, part) => sum.add(part.kind === 'direct' ? part.amount ?? 0 : 0), new Prisma.Decimal(0))
+          : mixed.previous(handled, row.orderItemId);
         refundedDirect.set(key, (refundedDirect.get(key) ?? new Prisma.Decimal(0)).add(directAmount));
       }
     }
@@ -275,23 +320,31 @@ export class IngredientStockService {
       for (const sale of sourceSales) {
         // A prepared portion's cancellation is a loss, already recorded by the order/kitchen audit.
         // Returning money must not replenish consumed ingredients.
-        const snapshot = sale.recipeSnapshot as { kind?: string; parts?: { kind?: string }[] } | null;
+        const snapshot = sale.recipeSnapshot as SaleSnapshot | null;
         const direct = snapshot?.kind === 'direct' || (snapshot?.parts?.length && snapshot.parts.every((part) => part.kind === 'direct'));
         const key = movementKey(sourceId, sale);
         const mixed = mixedSales.get(key);
         if (paidGoodsOnly && !direct && !mixed) continue;
         const unstarted = status === 'new' || status === 'accepted';
         const restorable = paidGoodsOnly || unstarted || (direct && (line.prepStation ?? original?.prepStation) === 'none' && status === 'ready');
-        if (sale.saleCycle !== latestCycle || recorded.has([line.id, sale.ingredientId, sale.saleCycle, sale.warehouseKey].join(':'))) continue;
+        const eventKey = movementKey(line.id, sale);
+        if (sale.saleCycle !== latestCycle || recorded.has(eventKey)) continue;
         const quantity = sale.saleQuantity ?? line.sourceLineQuantity ?? original?.quantity ?? line.quantity;
         const remaining = sale.change.abs().sub(refunded.get(key) ?? 0);
-        const snapshotParts = sale.recipeSnapshot as { componentId?: string; amount?: string; parts?: { componentId?: string; amount?: string }[] } | null;
-        const componentAmount = line.componentId ? (snapshotParts?.parts ?? (snapshotParts ? [snapshotParts] : []))
+        const parts = snapshot?.parts ?? (snapshot ? [snapshot] : []);
+        const componentAmount = line.componentId ? parts
           .filter((part) => part.componentId === line.componentId).reduce((sum, part) => sum.add(part.amount ?? 0), new Prisma.Decimal(0)) : null;
         const target = mixed?.target(line.componentId) ?? componentAmount ?? sale.change.abs();
         const remainingDirect = mixed ? mixed.target().sub(refundedDirect.get(key) ?? 0) : remaining;
-        const change = Prisma.Decimal.min(remaining, remainingDirect, target.mul(line.quantity).div(quantity).toDecimalPlaces(3));
-        if (change.lte(0)) continue;
+        const scope = JSON.stringify([key, line.componentId ?? null]);
+        const prior = cancelledPortions.get(scope) ?? 0;
+        const slice = paidGoodsOnly ? null : pieceReturnSlice(parts, quantity, prior, line.quantity, line.componentId);
+        const share = slice ? slice.parts.reduce((sum, part) => sum.add(part.amount ?? 0), new Prisma.Decimal(0))
+          : target.mul(line.quantity).div(quantity).toDecimalPlaces(3);
+        const change = Prisma.Decimal.min(remaining, remainingDirect, share);
+        if (slice ? !slice.portions : change.lte(0)) continue;
+        recorded.add(eventKey);
+        if (slice) cancelledPortions.set(scope, prior + slice.portions);
         refunded.set(key, (refunded.get(key) ?? new Prisma.Decimal(0)).add(change));
         if (mixed) refundedDirect.set(key, (refundedDirect.get(key) ?? new Prisma.Decimal(0)).add(change));
         if (!restorable) {
@@ -299,12 +352,13 @@ export class IngredientStockService {
             movement: { type: 'writeoff', sourceType: 'order', sourceId: orderId, orderItemId: line.id, saleLineId: sourceId, saleCycle: sale.saleCycle,
               comment: reason ?? line.rejectReason ?? 'Отмена после начала приготовления',
               recipeSnapshot: { kind: 'prepared_loss', lossQuantity: change.toString(), reason: reason ?? line.rejectReason ?? 'Отмена после начала приготовления', sourceLineId: sourceId,
-                originalRecipe: sale.recipeSnapshot ?? null, status: status ?? 'unknown' } } });
+                originalRecipe: sale.recipeSnapshot ?? null, status: status ?? 'unknown', ...(slice && { pieceReturn: slice }) } } });
           continue;
         }
         plan.push({ ingredient: sale.ingredient, warehouse: sale.warehouse, lineId: line.id, quantity: line.quantity, cycle: sale.saleCycle,
           sourceLineId: sourceId, change, cost: sale.costAtMoment, costKnown: sale.costKnown, comment: paidGoodsOnly ? 'Возврат оплаченного товара: ' + reason : 'Возврат до начала приготовления',
-          snapshot: mixed ? { ...(sale.recipeSnapshot as Prisma.InputJsonObject), restockedDirectGoods: true }
+          snapshot: slice ? { ...(sale.recipeSnapshot as Prisma.InputJsonObject), pieceReturn: slice }
+            : mixed ? { ...(sale.recipeSnapshot as Prisma.InputJsonObject), restockedDirectGoods: true }
             : sale.recipeSnapshot as Prisma.InputJsonValue ?? undefined });
       }
     }

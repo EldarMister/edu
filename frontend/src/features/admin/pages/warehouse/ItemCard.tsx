@@ -139,6 +139,7 @@ function ItemForm({
     item?.processingLosses ?? {},
   );
   const [pieceWeight, setPieceWeight] = useState(item?.pieceWeightGrams == null ? '' : String(item.pieceWeightGrams));
+  const [roundPieceWriteoff, setRoundPieceWriteoff] = useState(item ? item.roundPieceWriteoff === true : true);
   const [error, setError] = useState('');
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const prepared = kind === 'preparation' || kind === 'prepared_dish';
@@ -153,10 +154,11 @@ function ItemForm({
   const [openingRequestKey] = useState(() => crypto.randomUUID());
   const mass = unitTypeOf(unit) === 'mass';
   const pieces = unitTypeOf(unit) === 'count';
+  const canRoundPieces = pieces && (kind === 'raw' || kind === 'consumable');
   const pieceWeightGrams = parsePieceWeightGrams(pieceWeight);
   const unitOptions = item ? unitsForType(item.unitType) : UNIT_OPTIONS;
   const values = JSON.stringify([name, unit, category, supplier, threshold, mode, losses, pieceWeight,
-    warehouseId, openingQuantity, openingPrice]);
+    canRoundPieces && roundPieceWriteoff, warehouseId, openingQuantity, openingPrice]);
   const initialValues = useRef(values);
   const dirty = editable && initialValues.current !== values;
   const { markSaved } = useEditorDirty(dirty);
@@ -222,6 +224,7 @@ function ItemForm({
         preparationMode: mode,
         ...(mass ? { processingLosses: losses } : {}),
         ...(pieces ? { pieceWeightGrams } : {}),
+        ...(canRoundPieces ? { roundPieceWriteoff } : {}),
       };
       const saved = item
         ? await mutations.update.mutateAsync({ ...body, id: item.id })
@@ -292,6 +295,11 @@ function ItemForm({
           {pieceWeightGrams === undefined && <span id={pieceWeightErrorId} className="mt-1 block text-xs text-danger">
             Укажите положительный вес с точностью до трёх знаков после запятой.
           </span>}
+        </DocumentField>}
+        {canRoundPieces && <DocumentField label="Списание со склада">
+          <Select ariaLabel="Списание со склада" className="h-10 w-[170px]"
+            value={roundPieceWriteoff ? 'round' : 'exact'} onChange={(value) => setRoundPieceWriteoff(value === 'round')}
+            options={[{ value: 'round', label: 'Округлять' }, { value: 'exact', label: 'Без округления' }]} />
         </DocumentField>}
         <details className="poster-advanced">
           <summary>Дополнительно</summary>

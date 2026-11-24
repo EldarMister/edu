@@ -62,6 +62,85 @@ test('PostgreSQL: unified stock covers direct sales, recipes, production, stages
         assert.equal((await recipes.getByDish(menu.id)).foodCost, 40);
       });
 
+      await t.test('piece rounding applies to recipe consumption after scaling, with exact supplies, yields and historical returns', async () => {
+        const egg = await ingredients.create({ name: 'Яйцо с округлением', unit: 'pcs', roundPieceWriteoff: true, pieceWeightGrams: 50,
+          initialSupply: { warehouseId: main.id, quantity: 10.5, unitPrice: 14, requestKey: randomUUID() } }, owner);
+        assert.deepEqual([egg.roundPieceWriteoff, await balance(egg.id)], [true, 10.5]);
+        assert.equal((await ingredients.findAll({})).find(({ id }) => id === egg.id).roundPieceWriteoff, true);
+        await assert.rejects(ingredients.create({ name: 'Молоко', unit: 'l', roundPieceWriteoff: true }), /штучных/);
+        await assert.rejects(ingredients.create({ name: 'Товар', kind: 'goods', unit: 'pcs', roundPieceWriteoff: true }), /штучных/);
+        const menu = await dish('Омлет с половиной яйца');
+        const items = [{ ingredientId: egg.id, amount: 0.5, unit: 'pcs' }];
+        const card = (await recipes.saveDraft(menu.id, { expectedVersion: 1, items })).recipe;
+        assert.deepEqual([card.output, card.items[0].amount, card.items[0].stockWriteoffAmount, card.items[0].avgCost, card.foodCost],
+          [{ amount: 25, unit: 'g' }, 0.5, 1, 14, 14]);
+        const preview = await recipes.preview({ dishId: menu.id, items, batchPortions: 2 });
+        assert.deepEqual([preview.batch.items[0].stockWriteoffAmount, preview.batch.compositionCost], [1, 14]);
+        const small = await recipes.preview({ dishId: menu.id, items: [{ ...items[0], amount: 0.1 }], batchPortions: 11 });
+        assert.deepEqual([small.items[0].stockWriteoffAmount, small.batch.items[0].stockWriteoffAmount, small.batch.compositionCost], [1, 2, 28]);
+        const stages = new WarehouseDocumentsService(db);
+        const sourceLine = { kind: 'dish', sourceId: menu.id, sourceLineId: 'half-egg', quantity: 1 };
+        const effectiveAt = new Date().toISOString();
+        const writeoff = (when) => stages.writeoffPreview({ warehouseId: main.id, effectiveAt: when, sourceLines: [sourceLine] });
+        assert.equal((await writeoff(effectiveAt)).sourceLines[0].parts[0].quantity, 1);
+        const manual = await stages.writeoffPreview({ warehouseId: main.id, sourceLines: [{
+          kind: 'ingredient', sourceId: egg.id, sourceLineId: 'counted', quantity: 0.25, unit: 'pcs',
+        }] });
+        assert.equal(manual.sourceLines[0].parts[0].quantity, 0.25);
+        const ticket = await order([{ dishId: menu.id, quantity: 3 }]);
+        const movement = await db.stockMovement.findFirstOrThrow({ where: { sourceId: ticket.id, ingredientId: egg.id, type: 'sale' } });
+        assert.deepEqual([Number(movement.change), Number(movement.costAtMoment), await balance(egg.id)], [-2, 14, 8.5]);
+        const cream = await preparation.saveCard({ name: 'Яичная заготовка', unit: 'g', mode: 'virtual', outputQuantity: 25, outputUnit: 'g',
+          items: [{ ingredientId: egg.id, quantity: 0.5, unit: 'pcs' }] });
+        const component = await recipes.preview({ dishId: menu.id, items: [{ ingredientId: cream.id, amount: 25, unit: 'g' }], batchPortions: 2 });
+        assert.deepEqual([cream.items[0].stockWriteoffAmount, cream.totalCost, component.foodCost, component.batch.compositionCost], [1, 14, 14, 14]);
+        const recommended = (await ingredients.findAll({})).find(({ id }) => id === cream.id);
+        assert.deepEqual([recommended.recipeTotalCost, recommended.recipeUnitCost], [14, 0.56]);
+        await ingredients.update(egg.id, { roundPieceWriteoff: false });
+        assert.equal((await writeoff(effectiveAt)).sourceLines[0].parts[0].quantity, 1);
+        assert.equal((await writeoff()).sourceLines[0].parts[0].quantity, 0.5);
+        assert.equal((await recipes.getByDish(menu.id)).foodCost, 7);
+        await orders.cancelOrder(ticket.id, owner, 'Возвращаем историческое списание');
+        assert.equal(await balance(egg.id), 10.5);
+        const nextTicket = await order([{ dishId: menu.id, quantity: 1 }]);
+        assert.equal(await balance(egg.id), 10);
+        await ingredients.update(egg.id, { roundPieceWriteoff: true });
+        await orders.cancelOrder(nextTicket.id, owner, 'Возвращаем дробное историческое списание');
+        assert.equal(await balance(egg.id), 10.5);
+      });
+
+      await t.test('partial cancellations of rounded pieces follow the original portion ranges, including a zero return and reopening', async () => {
+        const egg = await ingredients.create({ name: 'Яйцо для возврата частями', unit: 'pcs', roundPieceWriteoff: true, stock: 10, avgCost: 14 });
+        const menu = await dish('Половина яйца для частичной отмены');
+        await recipes.addItem(menu.id, { ingredientId: egg.id, amount: 0.5, unit: 'pcs' });
+        const ticket = await order([{ dishId: menu.id, quantity: 3 }]);
+        const source = ticket.items[0];
+        assert.equal(await balance(egg.id), 8);
+        await ingredients.update(egg.id, { roundPieceWriteoff: false });
+        const edit = (quantity) => orders.editOrder(ticket.id, owner, [{ id: source.id, dishId: menu.id, quantity }], undefined, 'Отмена порции');
+        await edit(2);
+        assert.equal(await balance(egg.id), 9);
+        const reduced = await edit(1);
+        assert.equal(await balance(egg.id), 9);
+        const returns = (cycle) => db.stockMovement.findMany({ where: { sourceId: ticket.id, ingredientId: egg.id, type: 'return', saleCycle: cycle } });
+        const zeroReturn = (await returns(0)).find((row) => row.change.isZero());
+        const cancelled = reduced.items.find(({ id }) => id === zeroReturn.orderItemId);
+        await db.$transaction(tx => stock.restoreDishSale(tx, ticket.id, [{ ...cancelled, sourceLineId: source.id, sourceStatus: 'new' }], 'Дубликат'));
+        assert.equal((await returns(0)).length, 2);
+        await orders.cancelOrder(ticket.id, owner, 'Последняя порция');
+        assert.equal(await balance(egg.id), 10);
+        const credited = await returns(0);
+        assert.deepEqual(credited.map((row) => Number(row.change)).sort(), [0, 1, 1]);
+        await orders.adminUpdateStatus(ticket.id, owner, 'sent_to_kitchen');
+        assert.equal(await balance(egg.id), 8);
+        const reopened = await db.stockMovement.findMany({ where: { sourceId: ticket.id, ingredientId: egg.id, type: 'sale', saleCycle: 1 } });
+        assert.deepEqual(reopened.map((row) => [row.orderItemId, Number(row.change)]).sort(),
+          credited.map((row) => [row.orderItemId, -Number(row.change) || 0]).sort());
+        await orders.adminUpdateStatus(ticket.id, owner, 'cancelled', 'Проверка повторной отмены');
+        assert.equal(await balance(egg.id), 10);
+        assert.deepEqual((await returns(1)).map((row) => Number(row.change)).sort(), [0, 1, 1]);
+      });
+
       await t.test('weight per piece derives recipe yield and preserves fractional piece supply, cost and debit', async () => {
         const request = { name: 'Яйцо для расчёта выхода', unit: 'pcs', pieceWeightGrams: 54.3,
           initialSupply: { warehouseId: main.id, quantity: 2.5, unitPrice: 20, requestKey: randomUUID() } };

@@ -17,6 +17,16 @@ const { displayedProcessingStages, grossFromLoss, lossFromAmounts, netFromLoss, 
 const potato = { ingredientId: 'potato', name: 'Картофель', unit: 'g', unitType: 'mass', amount: 200, netAmount: 160,
   lossPercent: 20, warehouseId: 'kitchen' };
 
+test('piece writeoff rounds the batch gross up while the net yield keeps the recipe norm', () => {
+  assert.equal(draft.stockWriteoffQuantity(0.5, 'pcs', true), 1);
+  assert.equal(draft.stockWriteoffQuantity(0.5 * 2, 'pcs', true), 1);
+  assert.equal(draft.stockWriteoffQuantity(0.14 * 100, 'pcs', true), 14);
+  assert.equal(draft.stockWriteoffQuantity(14.001, 'pcs', true), 15);
+  assert.equal(draft.stockWriteoffQuantity(0.5, 'pcs', false), 0.5);
+  assert.equal(draft.stockWriteoffQuantity(0.5, 'l', true), 0.5);
+  assert.equal(draft.pieceNetWeight(0.5, 60), 30);
+});
+
 test('batch editing scales per-portion gross, net, measured weight and variant quantities in both directions', () => {
   const saved = { ingredientId: 'cheese', name: 'Сыр', unitType: 'count', amountUnit: 'pcs',
     amount: 0.2, netAmount: 0.2, measuredNetWeightGrams: 40, variantAmounts: { small: 0.1, excluded: 0 } };

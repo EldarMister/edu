@@ -31,7 +31,8 @@ import { DocumentField, DocumentFooter, QueryState } from './WarehouseUi';
 import { UNIT_OPTIONS, unitLabel, unitTypeOf, unitsForType, type UnitCode } from './units';
 import { inventoryTimeDisplay, inventoryTimeIso } from './inventory-time';
 import { displayedProcessingStages, lossFromAmounts, pieceNetWeight, preparationYieldBase, processingQuantities,
-  processingRetention, supportsProcessing, validRecipeRows } from './recipe-draft-values';
+  processingRetention, recipeQuantity, stockWriteoffQuantity, supportsProcessing, validRecipeRows } from './recipe-draft-values';
+import { useRecipePreview } from './recipe-preview-api';
 import { RecipeProcessingFields, recipeProcessingLabel } from './RecipeProcessingFields';
 import { QuantityInput, VolumeNetFields } from './RecipeQuantityInput';
 import { WorkspaceHeaderActions } from '../WorkspaceHeader';
@@ -267,34 +268,33 @@ function RecipeForm({ recipe, copy = false, warehouseId, onClose }: { recipe: Pr
           processingStages: row.processingStages, processingBasis: row.processingBasis,
         }]),
     );
+  const virtualRows = rows.flatMap((row) => {
+    const item = byId.get(row.ingredientId);
+    return item?.isActive && item.isPrepared && item.preparationMode === 'virtual' && row.unit && isPositive(row.quantity)
+      ? [{ ingredientId: item.id, unit: row.unit, amount: Number(row.quantity), warehouseId }] : [];
+  });
+  const virtualPreview = useRecipePreview(costs && virtualRows.length ? { categoryId: '__main_screen__', items: virtualRows } : null);
+  const virtualById = new Map(virtualPreview.data?.items.map((item) => [item.ingredientId, item]));
+  function savedCost(row: RecipeDraft) {
+    const saved = savedItems.get(row.ingredientId);
+    return saved && row.unit && saved.quantity * unitFactor(saved.unit) === Number(row.quantity) * unitFactor(row.unit)
+      ? saved : undefined;
+  }
   function rowCost(row: RecipeDraft) {
     const ingredient = byId.get(row.ingredientId);
     if (!ingredient || !row.unit || !isPositive(row.quantity)) return null;
     if (ingredient.preparationMode === 'virtual' && ingredient.isPrepared) {
-      if (ingredient.recipeUnitCost != null)
-        return (
-          (ingredient.recipeUnitCost * Number(row.quantity) * unitFactor(row.unit)) /
-          unitFactor(ingredient.displayUnit)
-        );
-      const saved = savedItems.get(row.ingredientId) as
-        | (PreparationRecipe['items'][number] & { lineCost?: number | null })
-        | undefined;
-      return saved?.lineCost == null
-        ? null
-        : (saved.lineCost * Number(row.quantity) * unitFactor(row.unit)) /
-            (saved.quantity * unitFactor(saved.unit));
+      const calculated = virtualById.get(ingredient.id);
+      return calculated ? calculated.lineCostForScaling ?? calculated.lineCost : savedCost(row)?.lineCost ?? null;
     }
     return ingredient.avgCostBase == null
       ? null
-      : ingredient.avgCostBase * Number(row.quantity) * unitFactor(row.unit);
+      : ingredient.avgCostBase * stockWriteoffQuantity(Number(row.quantity), row.unit, ingredient.roundPieceWriteoff) * unitFactor(row.unit);
   }
   const rowCosts = rows.map(rowCost);
   const knownCosts = rows.map((row, index) => {
     if (rowCosts[index] != null) return rowCosts[index]!;
-    const ingredient = byId.get(row.ingredientId);
-    if (ingredient?.preparationMode !== 'virtual' || !ingredient.recipeOutputQuantity || !ingredient.recipeOutputUnit || !row.unit) return 0;
-    return (ingredient.knownRecipeTotalCost ?? 0) * Number(row.quantity) * unitFactor(row.unit)
-      / (ingredient.recipeOutputQuantity * unitFactor(ingredient.recipeOutputUnit));
+    return virtualById.get(row.ingredientId)?.knownLineCost ?? savedCost(row)?.knownLineCost ?? 0;
   });
   const totalCost =
     rowCosts.length > 0 && rowCosts.every((cost) => cost != null)
@@ -398,6 +398,8 @@ function RecipeForm({ recipe, copy = false, warehouseId, onClose }: { recipe: Pr
                   const pieceNet = pieces && row.netAmount !== '' ? Number(row.netAmount) : null;
                   const netGrams = row.measuredNetWeightGrams ?? pieceNetWeight(pieceNet, ingredient?.pieceWeightGrams);
                   const saved = savedItems.get(row.ingredientId);
+                  const stockWriteoff = row.unit && stockWriteoffQuantity(Number(row.quantity), row.unit,
+                    ingredient?.roundPieceWriteoff ?? saved?.roundPieceWriteoff);
                   const processingConfig = { processingStages: row.processingStages, lossPercent: Number(row.lossPercent),
                     processingMethod: row.processingMethod || null };
                   const stages = displayedProcessingStages(processingConfig);
@@ -517,6 +519,8 @@ function RecipeForm({ recipe, copy = false, warehouseId, onClose }: { recipe: Pr
                             ))}
                           </select>
                         </div>
+                        {row.unit && stockWriteoff !== '' && stockWriteoff !== Number(row.quantity) &&
+                          <p className="mt-1 text-xs text-text-muted">Спишется {recipeQuantity(stockWriteoff, unitLabel(row.unit))}</p>}
                       </td>
                       <td data-label="Нетто">
                         <div className="flex items-center gap-1.5">
@@ -563,7 +567,9 @@ function RecipeForm({ recipe, copy = false, warehouseId, onClose }: { recipe: Pr
                         </div>
                       </td>
                       {costs && (
-                        <td data-label="Себестоимость" className="text-right whitespace-nowrap"><PreparationCost value={rowCosts[index]} known={knownCosts[index]} /></td>
+                        <td data-label="Себестоимость" className="text-right whitespace-nowrap">
+                          {virtualPreview.pending && ingredient?.preparationMode === 'virtual' && rowCosts[index] == null ? 'Расчёт…'
+                            : <PreparationCost value={rowCosts[index]} known={knownCosts[index]} />}</td>
                       )}
                       <td>
                         <button
@@ -635,13 +641,16 @@ function RecipeForm({ recipe, copy = false, warehouseId, onClose }: { recipe: Pr
                     </div>
                   </td>
                   {costs && (
-                    <td className="text-right font-medium whitespace-nowrap"><PreparationCost value={totalCost} known={knownCosts.reduce((sum, cost) => sum + cost, 0)} /></td>
+                    <td className="text-right font-medium whitespace-nowrap">{virtualPreview.pending && totalCost == null ? 'Расчёт…'
+                      : <PreparationCost value={totalCost} known={knownCosts.reduce((sum, cost) => sum + cost, 0)} />}</td>
                   )}
                   <td />
                 </tr>
               </tfoot>
             </table>
           </div>
+          {virtualPreview.error && <p role="alert" className="text-sm text-danger">{apiError(virtualPreview.error)}{' '}
+            <button type="button" className="underline" onClick={() => void virtualPreview.retry()}>Повторить расчёт</button></p>}
         </fieldset>
         <fieldset disabled={!editable || save.isPending}>
           <details className="poster-advanced mt-5">
@@ -767,7 +776,7 @@ function BatchForm({
         items: Object.keys(actual).length
           ? recipe.items.map((item) => ({
               ingredientId: item.ingredientId,
-              quantity: Number(actual[item.ingredientId] ?? item.quantity * factor),
+              quantity: Number(actual[item.ingredientId] ?? stockWriteoffQuantity(item.quantity * factor, item.unit, item.roundPieceWriteoff)),
               unit: item.unit,
             }))
           : undefined,
@@ -852,14 +861,19 @@ function BatchForm({
             Отклонение: {qty(Number(quantity || 0) - Number(effectivePlanned || 0), unitLabel(unit))}
           </p>
           <h3 className="font-medium">Фактический расход сырья</h3>
-          {recipe.items.map((item) => (
-            <Quantity
-              key={item.ingredientId}
-              label={`${item.name}, ${unitLabel(item.unit)} · по норме ${Number((item.quantity * factor).toFixed(3))}`}
-              value={actual[item.ingredientId] ?? String(Number((item.quantity * factor).toFixed(3)))}
-              onChange={(v) => setActual((current) => ({ ...current, [item.ingredientId]: v }))}
-            />
-          ))}
+          {recipe.items.map((item) => {
+            const norm = item.quantity * factor;
+            const writeoff = stockWriteoffQuantity(norm, item.unit, item.roundPieceWriteoff);
+            return <div key={item.ingredientId}>
+              <Quantity
+                label={`${item.name}, ${unitLabel(item.unit)} · по норме ${Number(norm.toFixed(3))}`}
+                value={actual[item.ingredientId] ?? String(Number(writeoff.toFixed(3)))}
+                onChange={(v) => setActual((current) => ({ ...current, [item.ingredientId]: v }))}
+              />
+              {actual[item.ingredientId] == null && item.unit === 'pcs' && item.roundPieceWriteoff && writeoff !== Number(norm.toPrecision(15)) &&
+                <p className="mt-1 text-xs text-text-muted">Спишется {recipeQuantity(writeoff, unitLabel(item.unit))}</p>}
+            </div>;
+          })}
           <Field label="Номер партии">
             <input className="input w-full" value={number} onChange={(e) => setNumber(e.target.value)} />
           </Field>

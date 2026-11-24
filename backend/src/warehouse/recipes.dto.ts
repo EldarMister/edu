@@ -44,6 +44,7 @@ export class RecipeDraftDto {
 }
 
 export class RecipePreviewDto {
+  @IsOptional() @IsInt() @Min(1) @Max(MAX_RECIPE_PORTIONS) batchPortions?: number;
   @IsOptional() @IsInt() @Min(1) @Max(MAX_RECIPE_PORTIONS) inputPortions?: number;
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160) dishId?: string;
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160) categoryId?: string;

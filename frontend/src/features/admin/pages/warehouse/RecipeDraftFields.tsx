@@ -106,6 +106,7 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
   const hasAvailable = options.some((option) => !option.disabled);
   const ingredientsById = new Map(ingredients.data?.map((item) => [item.id, item]));
   const calculatedById = new Map(preview.data?.items.map((item) => [item.ingredientId, item]));
+  const batchById = new Map(preview.data?.batch?.items.map((item) => [item.ingredientId, item]));
   const namedVariants = variants.filter((variant): variant is NamedVariant => !!variant.id);
 
   function add(item: Ingredient) {
@@ -124,8 +125,7 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
   const missingCosts = preview.data?.compositionMissingCosts ?? [];
   const output = calculatedOutput ? recipeQuantity(calculatedOutput.amount, unitLabel(calculatedOutput.unit)) : null;
   const scaleCostToBatch = inputPortions > 1 && !previewVariant;
-  const compositionCost = preview.data?.compositionCostForScaling ?? preview.data?.compositionFoodCost;
-  const footerCost = compositionCost == null ? null : compositionCost * (scaleCostToBatch ? inputPortions : 1);
+  const footerCost = scaleCostToBatch ? preview.data?.batch?.compositionCost : preview.data?.compositionFoodCost;
   const totalLabel = scaleCostToBatch ? 'Итого на партию' : inputPortions > 1 ? 'Итого на порцию' : 'Итого';
   const addProduct = !disabled && !addingProduct && <button type="button" ref={addProductButton}
     className={(rows.length ? 'btn-ghost' : 'btn-secondary') + ' btn-md inline-flex items-center gap-1.5 text-primary'}
@@ -158,7 +158,7 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
           {rows.map((row, index) => <CompositionRow key={row.ingredientId} row={row} showCosts={showCosts} disabled={disabled}
             ingredient={ingredientsById.get(row.ingredientId)} options={options}
             autoFocusGross={focusGrossId === row.ingredientId} canReplace={hasAvailable}
-            calculated={calculatedById.get(row.ingredientId)} pending={preview.pending}
+            calculated={calculatedById.get(row.ingredientId)} batch={batchById.get(row.ingredientId)} pending={preview.pending}
             previewVariant={previewVariant} inputPortions={inputPortions}
             variants={namedVariants} locations={warehouses.data?.locations ?? []} loadingWarehouses={warehouses.isPending}
             onChange={(next) => onChange(rows.map((item, position) => position === index ? next : item))}
@@ -217,7 +217,7 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
       </div>
       {(addProduct || inputPortions > 1) && <div className="flex flex-wrap items-center gap-2">{addProduct}{batchAction}</div>}
     </div>}
-    {rows.length > 0 && showBatchPreview && <RecipeBatchPreview preview={preview.data} pending={preview.pending} showCosts={showCosts} />}
+    {rows.length > 0 && showBatchPreview && <RecipeBatchPreview preview={preview.data} input={preview.input} pending={preview.pending} showCosts={showCosts} />}
     {!addingProduct && ingredients.error && <p role="alert" className="text-sm text-danger">{apiError(ingredients.error)}{' '}
       <button type="button" className="underline" onClick={() => void ingredients.refetch()}>Повторить</button></p>}
     {preview.error && <p role="alert" className="text-sm text-danger">{apiError(preview.error)}{' '}
@@ -230,7 +230,7 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
   </section>;
 }
 
-function CompositionRow({ row, ingredient, options, canReplace, autoFocusGross, calculated, pending, showCosts, disabled, previewVariant, inputPortions,
+function CompositionRow({ row, ingredient, options, canReplace, autoFocusGross, calculated, batch, pending, showCosts, disabled, previewVariant, inputPortions,
   variants, locations, loadingWarehouses, onChange, onReplace, onRemove }: {
   row: RecipeDraftRow;
   ingredient?: Ingredient;
@@ -238,6 +238,7 @@ function CompositionRow({ row, ingredient, options, canReplace, autoFocusGross, 
   canReplace: boolean;
   autoFocusGross: boolean;
   calculated?: PreviewRow;
+  batch?: NonNullable<RecipePreview['batch']>['items'][number];
   pending: boolean;
   showCosts: boolean;
   disabled: boolean;
@@ -255,7 +256,9 @@ function CompositionRow({ row, ingredient, options, canReplace, autoFocusGross, 
   const volume = row.unitType === 'volume';
   const pieces = row.unitType === 'count';
   const unit = unitLabel(row.unit);
-  const lineCostScale = previewVariant ? 1 : inputPortions;
+  const displayedCost = inputPortions > 1 && !previewVariant ? batch : calculated;
+  const stockWriteoff = displayedCost?.stockWriteoffAmount;
+  const grossForComparison = previewVariant ? calculated?.amount : row.amount;
   const fallbackLoss = row.lossPercent ?? 0;
   const stages = displayedProcessingStages(row);
   const basis = row.processingBasis ?? (row.netAmount == null ? 'gross' : 'manual');
@@ -280,7 +283,7 @@ function CompositionRow({ row, ingredient, options, canReplace, autoFocusGross, 
   const savedWarehouseName = explicitWarehouse?.name ?? calculated?.warehouseName ?? 'Сохранённый склад';
   const warehouseOverride = row.warehouseId ? savedWarehouseName : row.fromCommonWarehouse ? 'Общий склад' : null;
   const visibleWarehouse = warehouseOverride ?? (disabled ? calculated?.warehouseName : null);
-  const previewCost = calculated?.lineCostForScaling ?? calculated?.lineCost;
+  const previewCost = displayedCost?.lineCost;
   const selectedOption = ingredient ? ingredientOption(ingredient) : { id: row.ingredientId, name: row.name };
   const grossLabel = 'Брутто ' + row.name;
   const netLabel = 'Нетто ' + row.name;
@@ -387,6 +390,8 @@ function CompositionRow({ row, ingredient, options, canReplace, autoFocusGross, 
           {unitsForType(row.unitType).map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
         </select> : <span className="shrink-0 text-xs text-text-muted">{unit}</span>}
       </div>
+      {pieces && stockWriteoff != null && grossForComparison != null && stockWriteoff !== grossForComparison &&
+        <p className="mt-1 text-xs text-text-muted">Спишется {recipeQuantity(stockWriteoff, unit)}</p>}
     </DraftCell>
     <DraftCell label="Нетто">
       {processing ? <div className="flex min-w-0 items-center gap-1.5 xl:max-w-36">
@@ -403,7 +408,7 @@ function CompositionRow({ row, ingredient, options, canReplace, autoFocusGross, 
     {showCosts && <DraftCell label="Себестоимость" className="max-xl:col-span-2 max-xl:flex max-xl:items-baseline max-xl:justify-between xl:text-right">
       <div className="font-medium tabular-nums xl:pt-2">{previewCost == null
         ? <span className="text-xs text-text-muted">{pending ? 'Расчёт…' : 'Не рассчитана'}</span>
-        : money(previewCost * lineCostScale)}</div>
+        : money(previewCost)}</div>
     </DraftCell>}
     <td className="hidden py-2 xl:table-cell">{rowActions}</td>
     {dialog && createPortal(

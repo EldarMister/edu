@@ -48,6 +48,12 @@ export function pieceNetWeight(pieces: number | null | undefined, gramsPerPiece:
   return Number((pieces * gramsPerPiece).toFixed(6));
 }
 
+export function stockWriteoffQuantity(gross: number, unit: UnitCode, roundPieces = false) {
+  if (!roundPieces || unit !== 'pcs' || gross <= 0) return gross;
+  // A decimal production factor can produce 14.000000000000002 for exactly 14 pieces.
+  return Math.ceil(Number(gross.toPrecision(15)));
+}
+
 export function validMeasuredNetWeight(grams: number) {
   return Number.isFinite(grams) && grams >= 0 && grams < 100_000_000_000 && Number(grams.toFixed(3)) === grams;
 }

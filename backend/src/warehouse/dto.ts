@@ -31,6 +31,8 @@ export class IngredientMetadataDto {
   processingLosses?: Record<string, number>;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) @Max(99999999999.999)
   pieceWeightGrams?: number | null;
+  @IsOptional() @IsBoolean()
+  roundPieceWriteoff?: boolean;
   @IsOptional() @IsString() @MaxLength(160)
   supplierId?: string | null;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PurchaseUnitDto)

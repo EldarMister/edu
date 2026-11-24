@@ -1368,6 +1368,7 @@ model Ingredient {
   unitType          IngredientUnitType @default(count) @map("unit_type")
   displayUnit       String             @default("pcs") @map("display_unit")
   pieceWeightGrams  Decimal?           @map("piece_weight_grams") @db.Decimal(14, 3)
+  roundPieceWriteoff Boolean           @default(false) @map("round_piece_writeoff")
   // ВНИМАНИЕ: stock/avgCost/lowStockThreshold хранятся в БАЗОВЫХ единицах (g|ml|pcs).
   valuationKnown Boolean @default(false) @map("valuation_known")
   stock             Decimal            @default(0) @db.Decimal(14, 3) // в базовых единицах

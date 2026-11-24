@@ -16,6 +16,7 @@ export interface RecipePreviewInput {
   producedStockIngredientId?: string | null;
   weightedPriceBase?: number;
   inputPortions?: number;
+  batchPortions?: number;
   metadata?: Pick<RecipeMetadata, 'outputQuantity' | 'outputUnit'>;
   items: (Omit<RecipeRowInput, 'netAmount'> & { ingredientId: string; netAmount?: number | null })[];
 }
@@ -26,6 +27,8 @@ export interface RecipePreview {
     name: string;
     warehouseName: string | null;
     amount: number;
+    stockWriteoffAmount?: number;
+    roundPieceWriteoff?: boolean;
     netAmount: number | null;
     measuredNetWeightGrams?: number | null;
     pieceWeightGrams?: number | null;
@@ -34,7 +37,12 @@ export interface RecipePreview {
     avgCost: number | null;
     lineCost: number | null;
     lineCostForScaling?: number | null;
+    knownLineCost?: number | null;
   }[];
+  batch?: {
+    items: { ingredientId: string; stockWriteoffAmount: number; lineCost: number | null; lineCostForScaling?: number | null }[];
+    compositionCost: number | null;
+  };
   stockItem: { id: string; name: string; unit: UnitCode; amount: number; warehouseName: string; kind: string } | null;
   output: { amount: number; unit: UnitCode } | null;
   compositionOutput?: { amount: number; unit: UnitCode } | null;
@@ -74,6 +82,7 @@ export function useRecipePreview(input: RecipePreviewInput | null) {
   });
 
   return {
+    input,
     data: ready ? query.data : undefined,
     pending: !!payload && (!ready || query.isPending),
     error: ready ? query.error : null,

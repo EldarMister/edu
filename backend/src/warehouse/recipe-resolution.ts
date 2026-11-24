@@ -13,6 +13,7 @@ type PreparationSnapshot = {
 export type ResolvedRecipePart = {
   ingredient: Prisma.IngredientGetPayload<{}>;
   amount: Prisma.Decimal;
+  roundedFromAmount?: Prisma.Decimal;
   warehouse: Pick<Prisma.WarehouseGetPayload<{}>, 'id' | 'name' | 'cafeId' | 'isDefault'> | null;
   path: string[];
   preparations: PreparationSnapshot[];
@@ -20,19 +21,26 @@ export type ResolvedRecipePart = {
 
 type StoredPreparation = {
   mode: string;
+  roundPieceWriteoff?: boolean;
   recipe: Omit<PreparationSnapshot, 'signature'> | null;
 };
 
-async function currentPreparation(tx: Prisma.TransactionClient, ingredient: { id: string; isPrepared: boolean; preparationMode: string }): Promise<StoredPreparation> {
+type RecipeStockSettings = Pick<Prisma.IngredientGetPayload<{}>, 'id' | 'isPrepared' | 'preparationMode' | 'roundPieceWriteoff'>;
+
+export function recipeStockAmount(amount: Prisma.Decimal, roundPieces?: boolean) {
+  return roundPieces ? amount.ceil() : amount;
+}
+
+async function currentPreparation(tx: Prisma.TransactionClient, ingredient: RecipeStockSettings): Promise<StoredPreparation> {
   const mode = ingredient.isPrepared ? ingredient.preparationMode : 'stocked';
   const recipe = mode === 'virtual' ? await tx.preparationRecipe.findUnique({ where: { ingredientId: ingredient.id }, include: { items: true } }) : null;
-  return { mode, recipe: recipe ? { ingredientId: ingredient.id, outputAmount: recipe.outputAmount.toString(), outputUnit: recipe.outputUnit, instructions: recipe.instructions,
+  return { mode, roundPieceWriteoff: ingredient.roundPieceWriteoff, recipe: recipe ? { ingredientId: ingredient.id, outputAmount: recipe.outputAmount.toString(), outputUnit: recipe.outputUnit, instructions: recipe.instructions,
     items: recipe.items.map((item) => ({ ingredientId: item.ingredientId, amount: item.amount.toString(), unit: item.unit,
       netAmount: item.netAmount?.toString() ?? null, lossPercent: item.lossPercent.toString(), processingMethod: item.processingMethod,
       ...processingSnapshot(item) })).sort((a, b) => a.ingredientId.localeCompare(b.ingredientId)) } : null };
 }
 
-export async function archivePreparation(tx: Prisma.TransactionClient, ingredient: { id: string; isPrepared: boolean; preparationMode: string; cafeId: string | null }) {
+export async function archivePreparation(tx: Prisma.TransactionClient, ingredient: RecipeStockSettings & { cafeId: string | null }) {
   if (!ingredient.cafeId) return;
   const previous = await currentPreparation(tx, ingredient);
   // Preserve field order for signatures issued before this edit (jsonb normalizes object keys).
@@ -58,7 +66,8 @@ export class RecipeResolver {
     return state;
   }
 
-  async expand(ingredientId: string, amount: Prisma.Decimal, warehouse: Pick<Prisma.WarehouseGetPayload<{}>, 'id' | 'name' | 'cafeId' | 'isDefault'> | null, path: string[] = [], preparations: PreparationSnapshot[] = []): Promise<ResolvedRecipePart[]> {
+  async expand(ingredientId: string, amount: Prisma.Decimal, warehouse: ResolvedRecipePart['warehouse'],
+    { path = [], preparations = [], exactStockQuantity = false }: { path?: string[]; preparations?: PreparationSnapshot[]; exactStockQuantity?: boolean } = {}): Promise<ResolvedRecipePart[]> {
     if (path.includes(ingredientId)) throw new BadRequestException('Циклическая зависимость в рецептуре полуфабриката');
     if (path.length >= 32) throw new BadRequestException('Слишком много уровней в рецептуре');
     if (amount.lte(0)) return [];
@@ -69,15 +78,17 @@ export class RecipeResolver {
       this.ingredients.set(ingredientId, ingredient);
     }
     const nextPath = [...path, ingredientId];
-    const { mode, recipe: recipeSnapshot } = await this.preparation(ingredient);
+    const { mode, recipe: recipeSnapshot, roundPieceWriteoff } = await this.preparation(ingredient);
     if (mode !== 'virtual') {
-      return [{ ingredient, amount, warehouse, path: nextPath, preparations }];
+      const rounded = !exactStockQuantity && roundPieceWriteoff;
+      return [{ ingredient, amount: recipeStockAmount(amount, rounded), ...(rounded && { roundedFromAmount: amount }), warehouse, path: nextPath, preparations }];
     }
     if (!recipeSnapshot?.items.length || !new Prisma.Decimal(recipeSnapshot.outputAmount).gt(0)) throw new BadRequestException(`Не настроена рецептура заготовки «${ingredient.name}»`);
     const parts: ResolvedRecipePart[] = [];
     const signature = createHash('sha256').update(JSON.stringify(recipeSnapshot)).digest('hex');
     const snapshot = { ...recipeSnapshot, signature };
-    for (const item of recipeSnapshot.items) parts.push(...await this.expand(item.ingredientId, amount.mul(item.amount).div(recipeSnapshot.outputAmount), warehouse, nextPath, [...preparations, snapshot]));
+    for (const item of recipeSnapshot.items) parts.push(...await this.expand(item.ingredientId, amount.mul(item.amount).div(recipeSnapshot.outputAmount), warehouse,
+      { path: nextPath, preparations: [...preparations, snapshot] }));
     return parts;
   }
 }

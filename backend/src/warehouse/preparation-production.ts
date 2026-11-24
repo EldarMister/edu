@@ -12,7 +12,7 @@ import { lockIngredients, lockWarehouseCatalog } from './stock-lock';
 import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, unitLabel, unitType as unitTypeOf, type UnitCode } from './units';
 import { getWarehouseBalance, resolveWarehouse, warehouseBalances } from './warehouse-location';
 import { IngredientsService } from './ingredients.service';
-import { archivePreparation, lockRecipeGraph, RecipeResolver, warehouseKey } from './recipe-resolution';
+import { archivePreparation, lockRecipeGraph, RecipeResolver, recipeStockAmount, warehouseKey } from './recipe-resolution';
 import { massProcessing, measuredNetWeight, nonMassProcessing, processingSnapshot, processingStageResults, readProcessingStages } from './recipe-processing';
 import { ProcessingOptionsDto } from './recipe-processing.dto';
 import { postStockMovement } from './stock-posting';
@@ -124,7 +124,8 @@ export class PreparationProductionService {
         return { ingredientId: item.ingredientId, name: item.ingredient.name, lineCost: cost?.known ? Number(cost.cost.toDecimalPlaces(2)) : null,
           costKnown: cost?.known ?? false, knownLineCost: Number(cost?.cost.toDecimalPlaces(2) ?? 0), quantity: fromBase(Number(item.amount), unit),
           netAmount: item.netAmount == null ? null : fromBase(Number(item.netAmount), unit), lossPercent: Number(item.lossPercent),
-          measuredNetWeightGrams, netWeightGrams,
+          measuredNetWeightGrams, netWeightGrams, roundPieceWriteoff: item.ingredient.roundPieceWriteoff,
+          stockWriteoffAmount: fromBase(Number(recipeStockAmount(item.amount, item.ingredient.roundPieceWriteoff)), unit),
           processingMethod: item.processingMethod, processingStages: stages, processingBasis: item.processingBasis,
           processingStageResults: processingStageResults(stages, item.amount, unit), unit: item.unit };
       }) ?? [] };
@@ -311,7 +312,8 @@ export class PreparationProductionService {
         return { ingredientId: item.ingredientId, ...this.amount(item.quantity, item.unit, ingredient.unitType) };
       }) : recipe.items.map((item) => ({ ingredientId: item.ingredientId, amount: item.amount.mul(planned).div(recipe.outputAmount), unit: item.unit }));
       const resolver = new RecipeResolver(tx), parts: Awaited<ReturnType<RecipeResolver['expand']>> = [];
-      for (const input of inputs) parts.push(...await resolver.expand(input.ingredientId, input.amount, warehouse, [id]));
+      for (const input of inputs) parts.push(...await resolver.expand(input.ingredientId, input.amount, warehouse,
+        { path: [id], exactStockQuantity: !!dto.items }));
       await lockIngredients(tx, [id, ...parts.map((part) => part.ingredient.id)]);
       const grouped = new Map<string, { ingredient: typeof output; amount: Prisma.Decimal }>();
       for (const part of parts) {
