@@ -603,8 +603,14 @@ export function useCategoryMutations() {
   ]);
   const create = useMutation({
     mutationFn: (b: { name: string; prepStation?: PrepStation; taxId?: string | null }) =>
-      api.post('/admin/categories', b).then((r) => r.data),
-    onSuccess: invalidate,
+      api.post<Omit<AdminCategory, '_count'>>('/admin/categories', b).then((r) => r.data),
+    onSuccess: async (category) => {
+      await qc.cancelQueries({ queryKey: ['admin', 'categories'], exact: true });
+      qc.setQueryData<AdminCategory[]>(['admin', 'categories'], (categories = []) => [
+        ...categories.filter(({ id }) => id !== category.id), { ...category, _count: { dishes: 0 } },
+      ]);
+      invalidate();
+    },
   });
   const update = useMutation({
     mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; prepStation?: PrepStation; sortOrder?: number; position?: number; taxId?: string | null }) =>

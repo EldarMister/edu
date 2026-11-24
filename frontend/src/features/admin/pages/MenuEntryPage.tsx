@@ -13,7 +13,7 @@ import { printReport } from '@/lib/report-output';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
 import { routingOptions, usePreparationStations } from '@/features/kitchen/stations';
-import { useAdminCategories, type AdminDish } from '../api';
+import { useAdminCategories, useCategoryMutations, type AdminDish } from '../api';
 import { IconPrinter } from '../components/icons';
 import { dishTaxInput, dishTaxValue, MenuTaxSelect } from '../../settings/MenuTaxSelect';
 import { useIngredients, type Ingredient, type Recipe, type RecipeMetadata } from './warehouse/api';
@@ -50,6 +50,7 @@ type VariantDraft = {
 
 const emptyModifiers: ModifierDraft = { allowIngredientExclusions: false, groups: [] };
 const maxRecipePortions = 10_000;
+const addCategoryOption = { value: '__new_category__', label: 'Добавить новую категорию…', alwaysVisible: true };
 
 function validPortionCount(count: number) {
   return Number.isSafeInteger(count) && count >= 1 && count <= maxRecipePortions;
@@ -108,6 +109,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
   const title = copy ? 'Копирование техкарты' : dish ? (isGoods ? 'Редактирование товара' : 'Редактирование техкарты')
     : (isGoods ? 'Добавление товара' : 'Добавление техкарты');
   const categories = useAdminCategories().data ?? [];
+  const { create: createCategory } = useCategoryMutations();
   const stations = usePreparationStations().data ?? [];
   const { can, canEditSection } = usePermissions();
   const canEdit = can('actions.editMenu');
@@ -173,6 +175,11 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [categoryFormOpen, setCategoryFormOpen] = useState(false);
+  const [categoryError, setCategoryError] = useState('');
+  const categoryPickerRef = useRef<HTMLDivElement>(null);
+  const categorySubmission = useRef(false);
+  const categorySaving = createCategory.isPending;
   const [batchOpen, setBatchOpen] = useState(false);
   const [variantEditor, setVariantEditor] = useState<VariantDraft>();
   const submission = useRef(false);
@@ -180,7 +187,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
     form, tax, activeVariants, withVariants, scaleRecipeDraftRows(rows, inputPortions, 1), metadata, modifiers, recipePortions, producedStockId,
   ]);
   const [baseline] = useState(snapshot);
-  const { markSaved } = useEditorDirty(snapshot !== baseline || pending);
+  const { markSaved } = useEditorDirty(snapshot !== baseline || pending || categorySaving);
   const busy = pending || photoBusy;
   const weightedLocked = !!dish && isGoods && (!!dish.stockIngredientId || !!dish.hasDirectStock);
   const smallUnit = form.weightedMeasure === 'weight' ? 'г' : 'мл';
@@ -228,8 +235,30 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
     startRef.current?.scrollIntoView({ block: 'start' });
   }
 
+  function closeCategoryForm() {
+    setCategoryFormOpen(false);
+    setCategoryError('');
+    requestAnimationFrame(() => categoryPickerRef.current?.querySelector('button')?.focus({ preventScroll: true }));
+  }
+
+  async function addCategory(name: string, taxId: string) {
+    if (!canEdit || categorySubmission.current) return;
+    categorySubmission.current = true;
+    setCategoryError('');
+    try {
+      const category = await createCategory.mutateAsync({ name, taxId: taxId || null });
+      patch({ categoryId: category.id });
+      setError('');
+      closeCategoryForm();
+    } catch (failure) {
+      setCategoryError(apiError(failure));
+    } finally {
+      categorySubmission.current = false;
+    }
+  }
+
   async function save(createAnother = false) {
-    if (submission.current || photoBusy || !canEdit) return;
+    if (submission.current || photoBusy || categoryFormOpen || !canEdit) return;
     setError('');
     if (!form.name.trim() || !form.categoryId) {
       focusMain();
@@ -387,16 +416,16 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
   }
 
   return (
-    <EditorPage title={title} onClose={() => !busy && onClose()} footer={
+    <EditorPage title={title} onClose={() => !busy && !categorySaving && onClose()} footer={
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex flex-wrap gap-2">
-          {canEdit && <button type="submit" form={formId} className="btn-primary btn-md min-w-32 font-semibold" disabled={busy}>
+          {canEdit && <button type="submit" form={formId} className="btn-primary btn-md min-w-32 font-semibold" disabled={busy || categoryFormOpen}>
             {pending ? <Spinner /> : 'Сохранить'}
           </button>}
-          {canEdit && !dish && <button type="button" className="btn-secondary btn-md" onClick={() => void save(true)} disabled={busy}>
+          {canEdit && !dish && <button type="button" className="btn-secondary btn-md" onClick={() => void save(true)} disabled={busy || categoryFormOpen}>
             Сохранить и создать ещё
           </button>}
-          <button type="button" className="btn-ghost btn-md" onClick={onClose} disabled={busy}>{canEdit ? 'Отмена' : 'Закрыть'}</button>
+          <button type="button" className="btn-ghost btn-md" onClick={onClose} disabled={busy || categorySaving}>{canEdit ? 'Отмена' : 'Закрыть'}</button>
         </div>
         {error && <p role="alert" className="min-w-0 grow text-sm text-danger">{error}</p>}
       </div>
@@ -415,16 +444,27 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
         }}>
         <fieldset ref={startRef} disabled={!canEdit || busy} aria-label="Основные параметры"
           className="grid min-w-0 max-w-3xl scroll-mt-4 gap-3">
-          <div className={isGoods ? 'grid min-w-0 gap-3' : 'grid min-w-0 gap-3 sm:grid-cols-2 sm:gap-x-5'}>
+          <div className={isGoods ? 'grid min-w-0 gap-3' : 'grid min-w-0 items-start gap-3 sm:grid-cols-2 sm:gap-x-5'}>
             <FormRow label="Название" htmlFor={formId + '-name'} stacked={!isGoods}>
               <input id={formId + '-name'} ref={nameRef} className="input" value={form.name} maxLength={120}
                 onChange={(event) => patch({ name: event.target.value })}
                 placeholder={isGoods ? 'Например, лимонад 0,5 л' : 'Например, капучино'} required />
             </FormRow>
             <FormRow label="Категория" stacked={!isGoods}>
-              <Select searchable ariaLabel="Категория" placeholder="Выберите категорию" className="h-11 w-full"
-                value={form.categoryId} disabled={!canEdit || busy} onChange={(value) => patch({ categoryId: value })}
-                options={categories.map(({ id, name }) => ({ value: id, label: name }))} />
+              <div ref={categoryPickerRef}>
+                <Select searchable ariaLabel="Категория" placeholder="Выберите категорию" className="h-11 w-full"
+                  value={categoryFormOpen ? addCategoryOption.value : form.categoryId} disabled={!canEdit || busy || categorySaving}
+                  onChange={(value) => {
+                    if (value === addCategoryOption.value) setCategoryFormOpen(true);
+                    else {
+                      patch({ categoryId: value });
+                      if (categoryFormOpen) closeCategoryForm();
+                    }
+                  }}
+                  options={[...categories.map(({ id, name }) => ({ value: id, label: name })), ...(canEdit ? [addCategoryOption] : [])]} />
+              </div>
+              {categoryFormOpen && <NewMenuCategoryFields disabled={busy || categorySaving} saving={categorySaving}
+                error={categoryError} onSave={addCategory} onCancel={closeCategoryForm} />}
             </FormRow>
             <FormRow label="Цех приготовления" stacked={!isGoods}>
               <Select ariaLabel="Цех приготовления" className="h-11 w-full" value={form.prepStation} disabled={!canEdit || busy}
@@ -730,6 +770,47 @@ function ProducedStockField({ items, value, onChange, savedStockId, canProduce }
       {canProduce && <Link className="text-sm text-primary" to={target('produce')}>Провести производство</Link>}
     </div>}
   </div>;
+}
+
+function NewMenuCategoryFields({ disabled, saving, error, onSave, onCancel }: {
+  disabled: boolean; saving: boolean; error: string; onSave: (name: string, taxId: string) => void; onCancel: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [taxId, setTaxId] = useState('');
+  const trimmedName = name.trim();
+
+  function submit() {
+    if (!disabled && trimmedName) onSave(trimmedName, taxId);
+  }
+
+  return <fieldset aria-label="Новая категория" disabled={disabled}
+    className="mt-2 min-w-0 space-y-3 rounded-xl border border-border bg-background p-3"
+    onKeyDown={(event) => {
+      if (event.key !== 'Escape' || disabled) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onCancel();
+    }}>
+    <label className="grid gap-1.5 text-sm font-medium text-text-secondary">
+      Название новой категории
+      <input autoFocus className="input" value={name} maxLength={60} onChange={(event) => setName(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+          event.preventDefault();
+          submit();
+        }} />
+    </label>
+    <Field label="Налог категории">
+      <MenuTaxSelect ariaLabel="Налог категории" value={taxId} onChange={setTaxId} disabled={disabled} />
+    </Field>
+    <div className="flex flex-wrap gap-2">
+      <button type="button" className="btn-primary btn-md" disabled={!trimmedName || disabled} onClick={submit}>
+        {saving ? 'Добавление…' : 'Добавить'}
+      </button>
+      <button type="button" className="btn-ghost btn-md" onClick={onCancel}>Отмена</button>
+    </div>
+    {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+  </fieldset>;
 }
 
 function FormRow({ label, htmlFor, children, stacked = false }: { label: string; htmlFor?: string; children: ReactNode; stacked?: boolean }) {

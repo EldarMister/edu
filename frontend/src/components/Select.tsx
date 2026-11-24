@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 export interface SelectOption {
   value: string;
   label: string;
+  alwaysVisible?: boolean;
 }
 
 /**
@@ -46,7 +47,7 @@ export function Select({
 
   const selected = options.find((o) => o.value === value);
   const query = searchable ? search.trim().toLocaleLowerCase() : '';
-  const visibleOptions = query ? options.filter((option) => option.label.toLocaleLowerCase().includes(query)) : options;
+  const visibleOptions = query ? options.filter((option) => option.alwaysVisible || option.label.toLocaleLowerCase().includes(query)) : options;
   const activeOptionId = visibleOptions[activeIndex] ? `${id}-option-${activeIndex}` : undefined;
 
   function place() {

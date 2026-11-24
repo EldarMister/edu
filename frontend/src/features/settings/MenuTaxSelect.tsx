@@ -14,18 +14,19 @@ export function dishTaxInput(value: string) {
   return { taxId: value && value !== 'exempt' ? value : null, taxExempt: value === 'exempt' };
 }
 
-export function MenuTaxSelect({ value, onChange, inherit = false, categoryTaxId, disabled }: {
+export function MenuTaxSelect({ value, onChange, inherit = false, categoryTaxId, disabled, ariaLabel = 'Налог' }: {
   value: string;
   onChange: (value: string) => void;
   inherit?: boolean;
   categoryTaxId?: string | null;
   disabled?: boolean;
+  ariaLabel?: string;
 }) {
   const taxes = useMenuTaxOptions();
   const options = (taxes.data ?? []).map((tax) => ({ value: tax.id, label: `${tax.name} · ${taxRateLabel(tax.rate)}` }));
   const parent = options.find((tax) => tax.value === categoryTaxId);
   return <>
-    <Select ariaLabel="Налог" value={value} onChange={onChange} className="w-full"
+    <Select ariaLabel={ariaLabel} value={value} onChange={onChange} className="w-full"
       disabled={disabled || taxes.isPending || taxes.isError}
       options={[
         { value: '', label: inherit ? (parent ? `По категории · ${parent.label}` : 'По категории') : 'Без налога' },
