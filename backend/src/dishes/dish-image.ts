@@ -104,7 +104,7 @@ async function downloadDishImage(url: URL): Promise<string> {
   return `data:${mime};base64,${buffer.toString('base64')}`;
 }
 
-function sniffImageMime(buffer: Buffer): string | null {
+export function sniffImageMime(buffer: Buffer): string | null {
   if (
     buffer.length >= 8 &&
     buffer[0] === 0x89 &&

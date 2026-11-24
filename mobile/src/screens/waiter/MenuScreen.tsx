@@ -11,6 +11,7 @@ import { useCart } from '@/store/cart';
 import { buildSetLine } from '@/utils/set';
 import { makeIdempotencyKey, money } from '@/utils/format';
 import { apiError } from '@/lib/api';
+import { API_BASE } from '@/config/env';
 import { useConnectionStatus } from '@/services/socket';
 import { CartSheet } from './CartSheet';
 import { ModifierSheet } from './ModifierSheet';
@@ -56,14 +57,16 @@ export function MenuScreen() {
 
   const filteredDishes = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const scope = categoryId === 'all' ? null : new Set([categoryId,
+      ...sortedCategories.filter((category) => category.ancestorIds?.includes(categoryId)).map(({ id }) => id)]);
     const list = (dishes.data ?? []).filter((d) => {
       if (d.isSet) return false;
-      const byCat = categoryId === 'all' || d.categoryId === categoryId;
+      const byCat = !scope || scope.has(d.categoryId);
       const byQ = !q || d.name.toLowerCase().includes(q);
       return byCat && byQ;
     });
     return [...list.filter((d) => d.isAvailable), ...list.filter((d) => !d.isAvailable)];
-  }, [dishes.data, categoryId, search]);
+  }, [dishes.data, sortedCategories, categoryId, search]);
 
   if (!tableId) {
     return (
@@ -144,7 +147,9 @@ export function MenuScreen() {
 
       {/* Категории */}
       <PillTabs
-        items={[{ key: 'all', label: 'Все' }, ...sortedCategories.map((c) => ({ key: c.id, label: c.name }))]}
+        items={[{ key: 'all', label: 'Все' }, ...sortedCategories.map((c) => ({
+          key: c.id, label: c.pathLabel || c.name, image: c.imageUrl ? API_BASE + c.imageUrl : undefined,
+        }))]}
         value={categoryId}
         onChange={setCategoryId}
         style={{ paddingHorizontal: spacing.md, marginBottom: spacing.sm }}

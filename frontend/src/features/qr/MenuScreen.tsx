@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
 import { money } from '@/lib/format';
+import { resolveApiImage } from '@/lib/image';
+import { menuCategoryScope } from '@/lib/menu-category-scope';
 import { NumberTicker } from '@/components/NumberTicker';
 import type { QrDish, QrMenu, QrSession } from './api';
 import { QrHeader, DishPhoto } from './ui';
@@ -31,12 +33,13 @@ export function MenuScreen({
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const scope = categoryId ? menuCategoryScope(menu.categories, categoryId) : null;
     return dishes.filter(
       (d) =>
-        (!categoryId || d.categoryId === categoryId) &&
+        (!scope || scope.has(d.categoryId)) &&
         (!q || d.name.toLowerCase().includes(q)),
     );
-  }, [dishes, categoryId, search]);
+  }, [dishes, menu.categories, categoryId, search]);
 
   const itemCount = session?.itemCount ?? 0;
   const activeGuestCount = session?.activeGuestCount ?? 0;
@@ -71,7 +74,8 @@ export function MenuScreen({
           {menu.categories.map((c) => (
             <CategoryChip
               key={c.id}
-              label={c.name}
+              label={c.pathLabel || c.name}
+              imageUrl={c.imageUrl}
               active={categoryId === c.id}
               onClick={() => setCategoryId(c.id)}
             />
@@ -194,7 +198,7 @@ export function MenuScreen({
   );
 }
 
-function CategoryChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+function CategoryChip({ label, imageUrl, active, onClick }: { label: string; imageUrl?: string | null; active: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -203,6 +207,7 @@ function CategoryChip({ label, active, onClick }: { label: string; active: boole
         active ? 'bg-primary text-white' : 'bg-card text-text-secondary border border-border hover:bg-background'
       }`}
     >
+      {imageUrl && <img src={resolveApiImage(imageUrl) ?? undefined} alt="" loading="lazy" className="mr-1.5 inline-block h-6 w-6 rounded object-cover" />}
       {label}
     </button>
   );

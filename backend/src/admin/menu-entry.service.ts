@@ -37,7 +37,8 @@ export class MenuEntryService {
         const dish = await tx.dish.findUnique({
           where: { id, archivedAt: null },
           include: {
-            category: true,
+            category: { select: { id: true, cafeId: true, name: true, prepStation: true, taxId: true, sortOrder: true,
+              isActive: true, createdAt: true, updatedAt: true, parentId: true } },
             variants: { orderBy: { sortOrder: 'asc' } },
             setComponents: true,
           },

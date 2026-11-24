@@ -34,6 +34,8 @@ import { WarehouseMultiFilter, warehouseMultiFilterValues } from './warehouse/Wa
 import { filterMenuGoods, MenuAdditionalFilters, MenuGoodsActions, menuGoodsColumns, menuListFilters,
   useMenuGoodsColumns, type MenuGoodsColumn } from './MenuGoodsControls';
 import { MenuEntryPage } from './MenuEntryPage';
+import { MenuCategoryFields, useMenuCategoryDraft } from './MenuCategoryFields';
+import { menuCategoryOptions } from '@/lib/menu-category-scope';
 import { InlineMenuPrice } from './InlineMenuPrice';
 import { RecipeExportButton } from './warehouse/RecipeExportButton';
 import { costPercent, menuOutputLabel, useMenuCosts, type MenuCostRow } from './menu-cost-api';
@@ -110,6 +112,8 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
     updateFilters({ ...menuListFilters, nameSort, taxSort });
   }
   const categoryStations = new Map((categoriesQ.data ?? []).map((category) => [category.id, category.prepStation]));
+  const categoryOptions = menuCategoryOptions(categoriesQ.data ?? [], { includeMain: true });
+  const categoryLabels = new Map(categoryOptions.map(({ value, label }) => [value, label]));
   const dishStation = (dish: AdminDish) => dish.prepStation ?? categoryStations.get(dish.categoryId) ?? 'none';
   const selectedCategories = warehouseMultiFilterValues(categoryId);
   const selectedStations = warehouseMultiFilterValues(stationId);
@@ -151,7 +155,7 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
     }} /> : display;
   const goodsCell = (dish: AdminGood, column: MenuGoodsColumn) => {
     switch (column) {
-      case 'category': return dish.category.name;
+      case 'category': return categoryLabels.get(dish.categoryId) ?? dish.category.name;
       case 'price': return priceCell(dish, `${dish.variants.length ? 'от ' : ''}${balanceMoney(dish.goodsPrice)}`);
       case 'station': return stationOptions.find((option) => option.value === dish.goodsStation)?.label ?? dish.goodsStation;
       case 'unit': return dish.goodsUnits.join(', ');
@@ -208,7 +212,7 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
           onChange={(search) => updateFilters({ search })}
         />
         <WarehouseMultiFilter label="Категория" value={categoryId} onChange={(category) => updateFilters({ category })}
-          options={(categoriesQ.data ?? []).map(({ id, name }) => ({ value: id, label: name }))} />
+          options={categoryOptions} />
         <WarehouseMultiFilter label="Цех" value={stationId} onChange={(station) => updateFilters({ station })}
           options={stationOptions} />
         <MenuAdditionalFilters filters={filters} update={updateFilters} goods={isGoods} units={unitOptions}
@@ -317,7 +321,7 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
                     className={`px-4 py-3 ${column === 'price' ? 'whitespace-nowrap text-right' : 'text-text-secondary'}`}>
                     {goodsCell(dish as AdminGood, column)}
                   </td>) : <>
-                    <td className="px-4 py-3 text-text-secondary">{dish.category.name}</td>
+                    <td className="px-4 py-3 text-text-secondary">{categoryLabels.get(dish.categoryId) ?? dish.category.name}</td>
                     {displayTax && <td className="px-4 py-3 text-text-secondary">{taxCell(dish)}</td>}
                     <td className="whitespace-nowrap px-4 py-3 text-right text-text-secondary">{dishOutput(dish, costsByDish.get(dish.id))}</td>
                     {showRecipeCosts && <td className="min-w-28 px-4 py-3 text-right tabular-nums">
@@ -539,8 +543,9 @@ export function MenuCategoriesPage() {
   const push = useNotifications((state) => state.push);
   const [deleteTarget, setDeleteTarget] = useState<AdminCategory | null>(null);
   const sorted = (categoriesQ.data ?? []).filter((category) => !category.id.startsWith('menu-root:')).sort((a, b) => a.sortOrder - b.sortOrder);
+  const categoryPaths = new Map(menuCategoryOptions(sorted).map(({ value, label }) => [value, label]));
   const rows = sorted.filter((category) =>
-    category.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
+    (categoryPaths.get(category.id) ?? category.name).toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
   );
   const stationNames = new Map(
     routingOptions(stations).map((station) => [station.value, station.label]),
@@ -603,10 +608,11 @@ export function MenuCategoriesPage() {
                   <td>
                     <button
                       type="button"
-                      className="text-left text-primary"
+                      className="inline-flex items-center gap-2 text-left text-primary"
                       onClick={() => openEditor({ type: 'category', id: category.id })}
                     >
-                      {category.name}
+                      {category.imageUrl && <img src={resolveApiImage(category.imageUrl) ?? undefined} loading="lazy" alt="" className="h-8 w-10 rounded object-cover" />}
+                      {categoryPaths.get(category.id) ?? category.name}
                     </button>
                   </td>
                   <td className="text-text-secondary">
@@ -707,14 +713,14 @@ function MenuCategoryForm({
   const { can } = usePermissions();
   const editable = can('actions.editMenu');
   const [name, setName] = useState(category?.name ?? '');
-  const [tax, setTax] = useState(category?.taxId ?? '');
+  const draft = useMenuCategoryDraft(category);
   const [selectedStation, setSelectedStation] = useState(category?.prepStation);
   const prepStation = selectedStation ?? stations.find((station) => station.isActive)?.id ?? 'none';
   const [initialPosition] = useState(position);
   const [newPosition, setNewPosition] = useState(String(position));
   const [error, setError] = useState('');
   const push = useNotifications((state) => state.push);
-  const pending = create.isPending || update.isPending;
+  const pending = create.isPending || update.isPending || draft.uploading;
   const close = () => { if (!pending) onClose(); };
   async function save(event: React.FormEvent) {
     event.preventDefault();
@@ -730,7 +736,7 @@ function MenuCategoryForm({
     }
     setError('');
     try {
-      const body = { name: name.trim(), prepStation, ...(tax !== (category?.taxId ?? '') ? { taxId: tax || null } : {}) };
+      const body = { name: name.trim(), prepStation, ...draft.input() };
       if (category) await update.mutateAsync({
         id: category.id, ...body, ...(nextPosition !== initialPosition ? { position: nextPosition } : {}),
       });
@@ -752,9 +758,7 @@ function MenuCategoryForm({
           <Select ariaLabel="Станция категории" className="h-11 w-full" value={prepStation}
             onChange={setSelectedStation} options={routingOptions(stations, prepStation)} disabled={!editable || pending} />
         </CategoryModalField>
-        <CategoryModalField label="Налог">
-          <MenuTaxSelect value={tax} onChange={setTax} disabled={!editable || pending} />
-        </CategoryModalField>
+        <MenuCategoryFields editingId={category?.id} draft={draft} disabled={!editable || pending} />
         {category && <CategoryModalField label="Позиция в списке">
           <div className="flex items-center gap-3">
             <input aria-label="Позиция в списке" className="input max-w-24" type="number" inputMode="numeric"
@@ -836,6 +840,9 @@ function DeleteCategorySheet({
       </div>
     }>
       <p className="text-sm text-text-secondary">Удалить категорию «{category.name}»?</p>
+      {categories.some((item) => item.parentId === category.id) && <p className="mt-2 text-sm text-text-secondary">
+        Вложенные категории переместятся в «{categories.find((item) => item.id === category.parentId)?.name ?? 'Главный экран'}».
+      </p>}
       {hasDishes && <>
         <p className="mt-2 text-sm text-text-muted">
           Позиций в категории: {category._count.dishes}. История заказов и чеки сохранятся.

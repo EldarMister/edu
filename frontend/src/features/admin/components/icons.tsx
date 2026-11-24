@@ -137,6 +137,15 @@ export const IconPrinter = (p: P) => (
     <rect x="6" y="14" width="12" height="8" rx="1" />
   </S>
 );
+export const IconColumns = (p: P) => (
+  <S {...p}><rect x="2" y="4" width="20" height="16" rx="1.5" /><path d="M2 9h20M9 4v16M16 4v16" /></S>
+);
+export const IconExport = (p: P) => (
+  <S {...p}><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7M12 15V3m-4 4 4-4 4 4" /></S>
+);
+export const IconImport = (p: P) => (
+  <S {...p}><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7M12 3v12m-4-4 4 4 4-4" /></S>
+);
 export const IconGlobe = (p: P) => (
   <S {...p}>
     <circle cx="12" cy="12" r="9" />

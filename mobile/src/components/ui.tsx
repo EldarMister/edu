@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -159,7 +160,7 @@ export function PillTabs<T extends string>({
   onChange,
   style,
 }: {
-  items: { key: T; label: string }[];
+  items: { key: T; label: string; image?: string }[];
   value: T;
   onChange: (key: T) => void;
   style?: ViewStyle;
@@ -178,6 +179,7 @@ export function PillTabs<T extends string>({
             onPress={() => onChange(it.key)}
             style={[styles.pill, active && styles.pillActive]}
           >
+            {it.image && <Image source={{ uri: it.image }} style={styles.pillImage} accessible={false} />}
             <Text style={[styles.pillText, active && styles.pillTextActive]}>{it.label}</Text>
           </Pressable>
         );
@@ -285,6 +287,8 @@ const styles = StyleSheet.create({
 
   pillRow: { gap: spacing.sm, paddingVertical: 2 },
   pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 18,
     paddingVertical: 11,
     borderRadius: radius.md,
@@ -293,6 +297,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   pillActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  pillImage: { width: 22, height: 22, marginRight: 6, borderRadius: 4 },
   pillText: { fontSize: fontSize.base, color: colors.textSecondary, fontWeight: '600' },
   pillTextActive: { color: colors.white },
 

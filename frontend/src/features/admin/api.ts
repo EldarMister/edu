@@ -26,6 +26,9 @@ export interface AdminHall {
 }
 export interface AdminCategory {
   taxId?: string | null;
+  parentId?: string | null;
+  taxMode?: 'inherit' | 'none' | 'explicit';
+  imageUrl?: string | null;
   id: string;
   name: string;
   sortOrder: number;
@@ -33,6 +36,8 @@ export interface AdminCategory {
   prepStation: PrepStation;
   _count: { dishes: number };
 }
+export type MenuCategoryInput = { name: string; prepStation?: PrepStation; parentId?: string | null;
+  taxMode?: AdminCategory['taxMode']; taxId?: string | null; imageUrl?: string };
 export interface AdminDish {
   taxId?: string | null;
   taxExempt?: boolean;
@@ -604,7 +609,7 @@ export function useCategoryMutations() {
     ['admin', 'dishes'],
   ]);
   const create = useMutation({
-    mutationFn: (b: { name: string; prepStation?: PrepStation; taxId?: string | null }) =>
+    mutationFn: (b: MenuCategoryInput) =>
       api.post<Omit<AdminCategory, '_count'>>('/admin/categories', b).then((r) => r.data),
     onSuccess: async (category) => {
       await qc.cancelQueries({ queryKey: ['admin', 'categories'], exact: true });
@@ -615,7 +620,7 @@ export function useCategoryMutations() {
     },
   });
   const update = useMutation({
-    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; prepStation?: PrepStation; sortOrder?: number; position?: number; taxId?: string | null }) =>
+    mutationFn: ({ id, ...b }: Partial<MenuCategoryInput> & { id: string; isActive?: boolean; sortOrder?: number; position?: number }) =>
       api.patch(`/admin/categories/${id}`, b).then((r) => r.data),
     onSuccess: invalidate,
   });

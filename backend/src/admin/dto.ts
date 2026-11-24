@@ -78,10 +78,21 @@ export class UpdateTableDto {
 }
 
 // ---------- Категории ----------
-export class CreateCategoryDto {
+class CategorySettingsDto {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  parentId?: string | null;
+
+  @IsOptional() @IsIn(['inherit', 'none', 'explicit'])
+  taxMode?: 'inherit' | 'none' | 'explicit';
+
   @IsOptional() @IsUUID()
   taxId?: string | null;
 
+  @IsOptional() @IsString() @MaxLength(1500000)
+  imageUrl?: string;
+}
+
+export class CreateCategoryDto extends CategorySettingsDto {
   @IsString() @IsNotEmpty() @MaxLength(60)
   name: string;
 
@@ -91,12 +102,9 @@ export class CreateCategoryDto {
   @IsOptional() @IsString() @MaxLength(64)
   prepStation?: string;
 }
-export class UpdateCategoryDto {
+export class UpdateCategoryDto extends CategorySettingsDto {
   @IsOptional() @IsInt() @Min(1)
   position?: number;
-
-  @IsOptional() @IsUUID()
-  taxId?: string | null;
 
   @IsOptional() @IsString() @MaxLength(60)
   name?: string;

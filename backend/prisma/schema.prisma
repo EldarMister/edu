@@ -553,7 +553,15 @@ model Category {
   dishes Dish[]
   taxId  String? @map("tax_id")
   tax    MenuTax? @relation(fields: [taxId], references: [id], onDelete: NoAction)
+  parentId   String?   @map("parent_id")
+  parent     Category? @relation("MenuCategoryTree", fields: [cafeId, parentId], references: [cafeId, id], onDelete: NoAction, onUpdate: NoAction)
+  children   Category[] @relation("MenuCategoryTree")
+  inheritTax Boolean   @default(false) @map("inherit_tax")
+  imageUrl   String?   @map("image_url")
+  imageKey   String?   @map("image_key")
 
+  @@unique([cafeId, id])
+  @@index([cafeId, parentId])
   @@index([taxId])
   @@map("categories")
 }

@@ -4,6 +4,7 @@ import { Modal } from '@/components/Modal';
 import { api, apiError } from '@/lib/api';
 import { exportCsv } from '@/lib/report-output';
 import { useNotifications } from '@/store/notifications';
+import { IconImport } from '../../components/icons';
 
 type Sheet = { headings: string[]; rows: string[][] };
 type Check = { count: number; rows: { status: string; message: string }[] };
@@ -14,7 +15,8 @@ const keys = Object.keys(fields) as Field[];
 export function IngredientImportButton() {
   const [open, setOpen] = useState(false);
   return <>
-    <button type="button" className="supply-header-action" onClick={() => setOpen(true)}>Импорт</button>
+    <button type="button" className="supply-header-action" title="Импорт" aria-haspopup="dialog" onClick={() => setOpen(true)}>
+      <IconImport /><span className="catalogue-action-label">Импорт</span></button>
     {open && <ImportDialog close={() => setOpen(false)} />}
   </>;
 }

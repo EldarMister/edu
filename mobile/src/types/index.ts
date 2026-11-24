@@ -55,6 +55,9 @@ export interface Hall {
 export interface Category {
   id: string;
   name: string;
+  pathLabel?: string;
+  imageUrl?: string | null;
+  ancestorIds?: string[];
   sortOrder: number;
   prepStation?: PrepStation;
 }

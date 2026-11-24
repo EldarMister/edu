@@ -1,6 +1,7 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { Modal } from '@/components/Modal';
 import { api, apiError } from '@/lib/api';
+import { IconExport } from '../../components/icons';
 
 export function RecipeExportButton({ kind, ids, pending }: {
   kind: 'recipes' | 'preparations';
@@ -45,11 +46,11 @@ export function RecipeExportButton({ kind, ids, pending }: {
   }
 
   return <>
-    <button type="button" className="supply-header-action" disabled={pending || !ids.length} onClick={() => {
+    <button type="button" className="supply-header-action" title="Экспорт" aria-haspopup="dialog" data-catalogue-disclosure={recipes ? undefined : true} disabled={pending || !ids.length} onClick={() => {
       setComposition(false);
       setError('');
       setOpen(true);
-    }}>Экспорт</button>
+    }}>{recipes ? 'Экспорт' : <><IconExport /><span className="catalogue-action-label">Экспорт</span></>}</button>
     {open && <Modal open manageFocus title={recipes ? 'Экспорт техкарт' : 'Экспорт полуфабрикатов'} onClose={close}
       footer={<div className="flex justify-end gap-2">
         <button type="button" className="btn-secondary btn-md" onClick={close} disabled={exporting}>Отмена</button>

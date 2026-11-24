@@ -15,7 +15,9 @@ import { lockRecipeGraph } from '../warehouse/recipe-resolution';
 import { archiveDishRecipe } from '../warehouse/recipe-revisions';
 import { assertAssignableStation, BUILTIN_STATIONS, defaultCategoryStation, lockStationRouting, stationCatalog } from '../kitchen/preparation-stations';
 import { goodsExportColumns, writeGoodsWorkbook, type GoodsExportQuery } from './goods-xlsx';
-import { assertMenuTax, dishTaxFields } from '../settings/order-taxes';
+import { dishTaxFields } from '../settings/order-taxes';
+import { categorySettings, categoryTaxMode, updateInheritedTaxes } from './menu-category-tax';
+import { categoryImageRef, categoryPhoto } from '../categories/category-image';
 import { type SaveFloorPlanDto, withinFloorPlan } from './floor-plan.dto';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import type { MenuPriceBatchDto } from './menu-prices.dto';
@@ -47,6 +49,11 @@ type NormalizedDishVariant = {
 };
 
 const categoryOrder: Prisma.CategoryOrderByWithRelationInput[] = [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }];
+const categorySelect = { id: true, name: true, parentId: true, sortOrder: true, isActive: true, prepStation: true, taxId: true,
+  inheritTax: true, imageKey: true, _count: { select: { dishes: { where: { archivedAt: null } } } } } as const;
+function adminCategory({ imageKey, inheritTax, ...category }: Prisma.CategoryGetPayload<{ select: typeof categorySelect }>) {
+  return { ...category, taxMode: categoryTaxMode({ inheritTax, taxId: category.taxId }), imageUrl: categoryImageRef(category.id, imageKey) };
+}
 
 /** Управление каталогом (залы, столы, категории, блюда) для админа/владельца. */
 @Injectable()
@@ -258,21 +265,24 @@ export class CatalogService {
     };
   }
 
-  categoriesAll() {
-    return this.prisma.category.findMany({
+  async categoriesAll() {
+    const categories = await this.prisma.category.findMany({
       orderBy: categoryOrder,
-      select: { id: true, name: true, sortOrder: true, isActive: true, prepStation: true, taxId: true, _count: { select: { dishes: { where: { archivedAt: null } } } } },
+      select: categorySelect,
     });
+    return categories.map(adminCategory);
   }
 
   async createCategory(dto: CreateCategoryDto, actor: AuditActor) {
+    const photo = await categoryPhoto(dto.imageUrl);
     const category = await this.prisma.$transaction(async (tx) => {
       await lockStationRouting(tx);
       const prepStation = dto.prepStation ?? await defaultCategoryStation(tx);
       await assertAssignableStation(tx, prepStation);
-      await assertMenuTax(tx, dto.taxId);
+      const settings = await categorySettings(tx, dto);
       return tx.category.create({
-        data: { name: dto.name, sortOrder: dto.sortOrder ?? 0, prepStation, taxId: dto.taxId },
+        data: { name: dto.name, sortOrder: dto.sortOrder ?? 0, prepStation, ...settings, ...photo },
+        select: categorySelect,
       });
     });
     await this.audit.log({
@@ -284,18 +294,20 @@ export class CatalogService {
       newValue: { name: category.name, taxId: category.taxId },
     });
     this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { categoryId: category.id, action: 'create-category' });
-    return category;
+    return adminCategory(category);
   }
 
   async updateCategory(id: string, dto: UpdateCategoryDto, actor: AuditActor) {
     if (id === mainMenuCategoryId()) throw new BadRequestException('Главный экран — корневой раздел меню');
-    const before = await this.ensureCategory(id);
-    const { position, ...fields } = dto;
-    const updated = await this.prisma.$transaction(async (tx) => {
+    const { position, parentId, taxId, taxMode, imageUrl, ...fields } = dto;
+    const photo = await categoryPhoto(imageUrl);
+    const { before, updated } = await this.prisma.$transaction(async (tx) => {
       await lockStationRouting(tx);
+      const before = await tx.category.findUnique({ where: { id }, select: categorySelect });
+      if (!before) throw new NotFoundException('Категория не найдена');
       await assertAssignableStation(tx, fields.prepStation);
-      await assertMenuTax(tx, fields.taxId);
-      const data = { ...fields, prepStation: fields.prepStation ?? undefined };
+      const settings = await categorySettings(tx, { parentId, taxId, taxMode }, before);
+      const data = { ...fields, prepStation: fields.prepStation ?? undefined, ...photo, ...settings };
       if (position != null) {
         const categories = await tx.category.findMany({ where: { id: { not: mainMenuCategoryId() } }, orderBy: categoryOrder, select: { id: true, sortOrder: true } });
         const index = categories.findIndex((category) => category.id === id);
@@ -312,7 +324,9 @@ export class CatalogService {
         }
         data.sortOrder = position - 1;
       }
-      return tx.category.update({ where: { id }, data });
+      const updated = await tx.category.update({ where: { id }, data, select: categorySelect });
+      if (updated.taxId !== before.taxId) await updateInheritedTaxes(tx, id, updated.taxId);
+      return { before, updated };
     });
     await this.audit.log({
       actor,
@@ -324,7 +338,7 @@ export class CatalogService {
       newValue: { name: updated.name, isActive: updated.isActive, taxId: updated.taxId, sortOrder: updated.sortOrder },
     });
     this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { categoryId: id, action: 'update-category' });
-    return updated;
+    return adminCategory(updated);
   }
 
   async deleteCategory(id: string, dto: DeleteCategoryDto, actor: AuditActor) {
@@ -348,6 +362,9 @@ export class CatalogService {
           await tx.dish.updateMany({ where: { categoryId: id, archivedAt: { not: null } }, data: { categoryId: main.id } });
         }
       }
+      const parent = before.parentId ? await tx.category.findUnique({ where: { id: before.parentId }, select: { taxId: true } }) : null;
+      if (before.taxId !== (parent?.taxId ?? null)) await updateInheritedTaxes(tx, id, parent?.taxId ?? null);
+      await tx.category.updateMany({ where: { parentId: id }, data: { parentId: before.parentId } });
       await tx.category.delete({ where: { id } });
       return { before, dishes };
     });

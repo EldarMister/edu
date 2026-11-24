@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import type { Category, CartSetComponent, Dish, DishVariant } from '@/types';
 import { money, dishUnitPrice, minDishUnitPrice, variantNamesLine } from '@/lib/format';
 import { useT } from '@/lib/i18n';
+import { resolveApiImage } from '@/lib/image';
+import { menuCategoryScope } from '@/lib/menu-category-scope';
 import { SetPickerSheet, SetConfigSheet, defaultSetComponents } from './SetSheets';
 import { VariantPickerSheet } from './VariantPickerSheet';
 import { WeightPickerSheet } from './WeightPickerSheet';
@@ -45,8 +47,9 @@ export function DishMenu({
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const scope = activeCat === 'all' ? null : menuCategoryScope(categories, activeCat);
     const matching = menuDishes.filter((d) => {
-      const byCat = activeCat === 'all' || d.categoryId === activeCat;
+      const byCat = !scope || scope.has(d.categoryId);
       const byQ = !q || d.name.toLowerCase().includes(q);
       return byCat && byQ;
     });
@@ -55,7 +58,7 @@ export function DishMenu({
       ...matching.filter((d) => d.isAvailable),
       ...matching.filter((d) => !d.isAvailable),
     ];
-  }, [menuDishes, activeCat, search]);
+  }, [menuDishes, categories, activeCat, search]);
 
   return (
     <div className="flex h-full flex-col">
@@ -92,7 +95,8 @@ export function DishMenu({
               disabled={isSetsCat && disabled}
               onClick={() => (isSetsCat ? setSetPickerOpen(true) : setActiveCat(c.id))}
             >
-              {c.name}
+              {c.imageUrl && <img src={resolveApiImage(c.imageUrl) ?? undefined} loading="lazy" alt="" className="mr-1.5 inline-block h-6 w-6 rounded object-cover" />}
+              {c.pathLabel || c.name}
             </CatTab>
           );
         })}

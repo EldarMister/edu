@@ -34,6 +34,9 @@ export interface QrDish {
 export interface QrCategory {
   id: string;
   name: string;
+  pathLabel?: string;
+  imageUrl?: string | null;
+  ancestorIds?: string[];
   sortOrder: number;
 }
 

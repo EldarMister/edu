@@ -13,7 +13,7 @@ import { printReport } from '@/lib/report-output';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
 import { routingOptions, usePreparationStations } from '@/features/kitchen/stations';
-import { useAdminCategories, useCategoryMutations, type AdminDish } from '../api';
+import { useAdminCategories, useCategoryMutations, type AdminDish, type MenuCategoryInput } from '../api';
 import { IconPrinter } from '../components/icons';
 import { dishTaxInput, dishTaxValue, MenuTaxSelect } from '../../settings/MenuTaxSelect';
 import { useIngredients, type Ingredient, type Recipe, type RecipeMetadata } from './warehouse/api';
@@ -31,6 +31,8 @@ import { useWarehousePolicy } from './warehouse/settings-api';
 import { salePrice } from './menu-sale-price';
 import { WorkspaceHeaderActions } from './WorkspaceHeader';
 import { MenuEntryPhoto } from './MenuEntryPhoto';
+import { MenuCategoryFields, useMenuCategoryDraft } from './MenuCategoryFields';
+import { menuCategoryOptions } from '@/lib/menu-category-scope';
 
 type MenuEntry = {
   dish: Omit<AdminDish, 'variants'> & {
@@ -258,12 +260,12 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
     requestAnimationFrame(() => categoryPickerRef.current?.querySelector('button')?.focus({ preventScroll: true }));
   }
 
-  async function addCategory(name: string, taxId: string) {
+  async function addCategory(fields: MenuCategoryInput) {
     if (!canEdit || categorySubmission.current) return;
     categorySubmission.current = true;
     setCategoryError('');
     try {
-      const category = await createCategory.mutateAsync({ name, taxId: taxId || null });
+      const category = await createCategory.mutateAsync(fields);
       patch({ categoryId: category.id });
       setError('');
       closeCategoryForm();
@@ -472,13 +474,13 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
         }}>
         <fieldset ref={startRef} disabled={!canEdit || busy} aria-label="Основные параметры"
           className="grid min-w-0 max-w-3xl scroll-mt-4 gap-3">
-          <div className={isGoods ? 'grid min-w-0 gap-3' : 'grid min-w-0 items-start gap-3 sm:grid-cols-2 sm:gap-x-5'}>
-            <FormRow label="Название" htmlFor={formId + '-name'} stacked={!isGoods}>
+          <div className="grid min-w-0 gap-3">
+            <FormRow label="Название" htmlFor={formId + '-name'}>
               <input id={formId + '-name'} ref={nameRef} className="input" value={form.name} maxLength={120}
                 onChange={(event) => patch({ name: event.target.value })}
                 placeholder={isGoods ? 'Например, лимонад 0,5 л' : 'Например, капучино'} required />
             </FormRow>
-            <FormRow label="Категория" stacked={!isGoods}>
+            <FormRow label="Категория">
               <div ref={categoryPickerRef}>
                 <Select searchable ariaLabel="Категория" placeholder="Выберите категорию" className="h-11 w-full"
                   value={categoryFormOpen ? addCategoryOption.value : form.categoryId.startsWith('menu-root:') ? mainScreen.value : form.categoryId} disabled={!canEdit || busy || categorySaving}
@@ -489,17 +491,17 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
                       if (categoryFormOpen) closeCategoryForm();
                     }
                   }}
-                  options={[mainScreen, ...categories.filter(({ id }) => !id.startsWith('menu-root:')).map(({ id, name }) => ({ value: id, label: name })), ...(canEdit ? [addCategoryOption] : [])]} />
+                  options={[mainScreen, ...menuCategoryOptions(categories), ...(canEdit ? [addCategoryOption] : [])]} />
               </div>
               {categoryFormOpen && <NewMenuCategoryFields disabled={busy || categorySaving} saving={categorySaving}
                 error={categoryError} onSave={addCategory} onCancel={closeCategoryForm} />}
             </FormRow>
-            <FormRow label="Цех приготовления" stacked={!isGoods}>
+            <FormRow label="Цех приготовления">
               <Select ariaLabel="Цех приготовления" className="h-11 w-full" value={form.prepStation} disabled={!canEdit || busy}
                 onChange={(value) => patch({ prepStation: value })}
                 options={[{ value: '', label: 'По категории' }, ...routingOptions(stations, form.prepStation)]} />
             </FormRow>
-            <FormRow label="Налог" stacked={!isGoods}>
+            <FormRow label="Налог">
               <MenuTaxSelect value={tax} onChange={setTax} inherit disabled={!canEdit || busy}
                 categoryTaxId={categories.find((category) => category.id === form.categoryId)?.taxId} />
             </FormRow>
@@ -869,18 +871,18 @@ function ProducedStockField({ items, value, onChange, savedStockId, canProduce }
 }
 
 function NewMenuCategoryFields({ disabled, saving, error, onSave, onCancel }: {
-  disabled: boolean; saving: boolean; error: string; onSave: (name: string, taxId: string) => void; onCancel: () => void;
+  disabled: boolean; saving: boolean; error: string; onSave: (fields: MenuCategoryInput) => void; onCancel: () => void;
 }) {
   const [name, setName] = useState('');
-  const [taxId, setTaxId] = useState('');
+  const draft = useMenuCategoryDraft();
   const trimmedName = name.trim();
 
   function submit() {
-    if (!disabled && trimmedName) onSave(trimmedName, taxId);
+    if (!disabled && !draft.uploading && trimmedName) onSave({ name: trimmedName, ...draft.input() });
   }
 
   return <fieldset aria-label="Новая категория" disabled={disabled}
-    className="mt-2 min-w-0 space-y-3 rounded-xl border border-border bg-background p-3"
+    className="mt-3 min-w-0 space-y-3 rounded-lg border border-border bg-background p-4"
     onKeyDown={(event) => {
       if (event.key !== 'Escape' || disabled) return;
       event.preventDefault();
@@ -896,11 +898,9 @@ function NewMenuCategoryFields({ disabled, saving, error, onSave, onCancel }: {
           submit();
         }} />
     </label>
-    <Field label="Налог категории">
-      <MenuTaxSelect ariaLabel="Налог категории" value={taxId} onChange={setTaxId} disabled={disabled} />
-    </Field>
-    <div className="flex flex-wrap gap-2">
-      <button type="button" className="btn-primary btn-md" disabled={!trimmedName || disabled} onClick={submit}>
+    <MenuCategoryFields draft={draft} disabled={disabled} />
+    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+      <button type="button" className="btn-primary btn-md" disabled={!trimmedName || disabled || draft.uploading} onClick={submit}>
         {saving ? 'Добавление…' : 'Добавить'}
       </button>
       <button type="button" className="btn-ghost btn-md" onClick={onCancel}>Отмена</button>
@@ -909,9 +909,9 @@ function NewMenuCategoryFields({ disabled, saving, error, onSave, onCancel }: {
   </fieldset>;
 }
 
-function FormRow({ label, htmlFor, children, stacked = false }: { label: string; htmlFor?: string; children: ReactNode; stacked?: boolean }) {
-  const labelClass = 'text-sm font-medium text-text-secondary' + (stacked ? '' : ' sm:pt-2.5');
-  return <div className={'grid min-w-0 gap-1.5' + (stacked ? '' : ' sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-x-5')}>
+function FormRow({ label, htmlFor, children }: { label: string; htmlFor?: string; children: ReactNode }) {
+  const labelClass = 'text-sm font-medium text-text-secondary sm:pt-2.5';
+  return <div className="grid min-w-0 gap-1.5 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-x-5">
     {htmlFor ? <label htmlFor={htmlFor} className={labelClass}>{label}</label> : <div className={labelClass}>{label}</div>}
     <div className="min-w-0">{children}</div>
   </div>;

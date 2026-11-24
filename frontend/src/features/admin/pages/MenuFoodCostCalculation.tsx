@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
 import { apiError } from '@/lib/api';
+import { menuCategoryOptions } from '@/lib/menu-category-scope';
 import { WorkspacePending } from '../components/WorkspacePending';
 import { useAdminCategories } from '../api';
 import { financeMoney } from './finance/finance-format';
@@ -38,7 +39,7 @@ export function MenuFoodCostCalculation({ onOpen }: { onOpen: (row: MenuCostRow)
         onChange={(foodSearch) => setFilters({ foodSearch, foodPage: '1' })} />
       <Select ariaLabel="Категория меню" className="h-9" value={filters.foodCategory}
         onChange={(foodCategory) => setFilters({ foodCategory, foodPage: '1' })}
-        options={[{ value: '', label: 'Все категории' }, ...(categories.data ?? []).map(({ id, name }) => ({ value: id, label: name }))]} />
+        options={[{ value: '', label: 'Все категории' }, ...menuCategoryOptions(categories.data ?? [], { includeMain: true })]} />
       {hasActual && <Link className="btn-secondary btn-md ml-auto" to="?section=stats&view=products">Фактический фудкост продаж</Link>}
     </div>
     <p className="text-sm text-text-secondary">

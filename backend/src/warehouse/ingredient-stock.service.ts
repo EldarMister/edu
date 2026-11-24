@@ -78,7 +78,7 @@ export class IngredientStockService {
     const cafeId = getCafeId();
     const dishes = await tx.dish.findMany({
       where: { id: { in: usable.map((line) => line.dishId!) } },
-      include: { recipeItems: true, variants: true, category: true, setComponents: true },
+      include: { recipeItems: true, variants: true, category: { select: { prepStation: true } }, setComponents: true },
     });
     const routes = cafeId ? await tx.stationWarehouse.findMany({ where: { cafeId }, include: { warehouse: true } }) : [];
     const warehouses = cafeId ? await tx.warehouse.findMany({ where: { cafeId } }) : [];
@@ -135,7 +135,7 @@ export class IngredientStockService {
         })) : parentDish.setComponents.map((component) => ({ id: component.id, dishId: component.dishId, variantId: component.dishVariantId, variantName: null, quantity: component.quantity }));
         for (const component of definitions) {
           if (!component.dishId) continue;
-          const dish = await tx.dish.findUnique({ where: { id: component.dishId }, include: { recipeItems: true, variants: true, category: true, setComponents: true } });
+          const dish = await tx.dish.findUnique({ where: { id: component.dishId }, include: { recipeItems: true, variants: true, category: { select: { prepStation: true } }, setComponents: true } });
           if (!dish || dish.isSet) throw new BadRequestException('Блюдо состава сета недоступно');
           servings.push({ dish, quantity: line.quantity! * component.quantity, componentId: component.id,
             variantId: component.variantId ?? dish.variants.find((variant) => variant.name === component.variantName)?.id });
