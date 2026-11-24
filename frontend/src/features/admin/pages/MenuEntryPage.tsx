@@ -19,7 +19,9 @@ import { dishTaxInput, dishTaxValue, MenuTaxSelect } from '../../settings/MenuTa
 import { useIngredients, type Ingredient, type Recipe, type RecipeMetadata } from './warehouse/api';
 import { EditorPage } from './warehouse/EditorPage';
 import { RecipeDraftFields } from './warehouse/RecipeDraftFields';
-import { recipeDraftPayload, recipeDraftRows, recipePreviewItems, recipeQuantity, validRecipeRows } from './warehouse/recipe-draft-values';
+import {
+  recipeDraftPayload, recipeDraftRows, recipePreviewItems, recipeQuantity, scaleRecipeDraftRows, validRecipeRows,
+} from './warehouse/recipe-draft-values';
 import { RecipeCostSummary } from './warehouse/RecipeCostSummary';
 import { RecipeBatchPanel } from './warehouse/RecipeBatchPreview';
 import { useRecipePreview, type RecipePreview } from './warehouse/recipe-preview-api';
@@ -152,11 +154,10 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
   const costVariant = activeVariants.find((variant) => variant.key === costVariantKey) ?? (isGoods ? activeVariants[0] : undefined);
   const [metadata, setMetadata] = useState<RecipeMetadata>(() => initial?.recipe.metadata ?? {});
   const savedPortions = initial?.recipe.metadata?.recipePortions ?? 1;
-  const initialPortions = validPortionCount(savedPortions) ? savedPortions : 1;
-  const [recipePortions, setRecipePortions] = useState(String(initialPortions));
-  const inputPortions = Number(recipePortions);
-  const portionsValid = validPortionCount(inputPortions);
-  const [rows, setRows] = useState(() => recipeDraftRows(initial?.recipe.items ?? [], copy, initialPortions));
+  const [recipePortions, setRecipePortions] = useState(validPortionCount(savedPortions) ? savedPortions : 1);
+  const [inputPortions, setInputPortions] = useState(1);
+  const [rows, setRows] = useState(() => recipeDraftRows(initial?.recipe.items ?? [], copy));
+  const [basisOpen, setBasisOpen] = useState(false);
   const savedStockId = copy ? '' : initial?.recipe.stockIngredientId ?? '';
   const [producedStockId, setProducedStockId] = useState(savedStockId);
   const producedStock = stock?.find((item) => item.id === producedStockId && item.isPrepared);
@@ -175,7 +176,9 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
   const [batchOpen, setBatchOpen] = useState(false);
   const [variantEditor, setVariantEditor] = useState<VariantDraft>();
   const submission = useRef(false);
-  const snapshot = JSON.stringify([form, tax, activeVariants, withVariants, rows, metadata, modifiers, recipePortions, producedStockId]);
+  const snapshot = JSON.stringify([
+    form, tax, activeVariants, withVariants, scaleRecipeDraftRows(rows, inputPortions, 1), metadata, modifiers, recipePortions, producedStockId,
+  ]);
   const [baseline] = useState(snapshot);
   const { markSaved } = useEditorDirty(snapshot !== baseline || pending);
   const busy = pending || photoBusy;
@@ -191,7 +194,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
   const hasVariantNorms = !!costVariant && rows.some((row) => row.variantAmounts?.[costVariant.id ?? costVariant.key] != null);
   const previewPrice = salePrice(costVariant?.price ?? form.price);
   const goodsBindingPending = isGoods && (!!costVariant && !costVariant.id || !withVariants && !dish?.stockIngredientId);
-  const preview = useRecipePreview(canWarehouse && !goodsBindingPending && (isGoods || portionsValid) && !!form.categoryId && (dish || rows.length || hasStockBinding)
+  const preview = useRecipePreview(canWarehouse && !goodsBindingPending && !!form.categoryId && (dish || rows.length || hasStockBinding)
     && (validRows || hasStockBinding || isGoods) ? {
       dishId: dish?.id,
       categoryId: form.categoryId,
@@ -254,11 +257,6 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
       setError('Проверьте количество и этапы обработки. Для расчёта от нетто нужен положительный выход.');
       return;
     }
-    if (canRecipe && !isGoods && !dish?.isSet && !portionsValid) {
-      focusMain();
-      setError('Укажите целое количество порций от 1 до 10 000.');
-      return;
-    }
     submission.current = true;
     setPending(true);
     try {
@@ -282,7 +280,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
               variantAmounts: Object.fromEntries(Object.entries(row.variantAmounts ?? {})
                 .filter(([id]) => activeVariants.some((variant) => (variant.id ?? variant.key) === id))),
             })),
-            metadata: dish?.isSet ? metadata : { ...metadata, recipePortions: inputPortions },
+            metadata: dish?.isSet ? metadata : { ...metadata, recipePortions },
             ...(!dish?.isSet && { inputPortions }),
             ...(producedStockId !== savedStockId || (producedStock && (form.isWeighted !== dish?.isWeighted ||
               form.weightedMeasure !== dish?.weightedMeasure || form.weightedPriceBase !== dish?.weightedPriceBase))
@@ -366,8 +364,9 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
   </div>;
 
   const priceLabel = priceBasis && form.isWeighted ? 'Цена за ' + priceBasis : 'Цена продажи';
-  const priceInput = <PriceInput label={priceLabel} value={form.price} onChange={(price) => patch({ price })} />;
-  const priceMetrics = canWarehouse && (canCosts || preview.data?.stockItem) && <div className="space-y-3">
+  const priceInput = <PriceInput label={priceLabel} value={form.price} disabled={!canEdit || busy}
+    onChange={(price) => patch({ price })} />;
+  const priceMetrics = canWarehouse && (canCosts || preview.data?.stockItem) && <div className="min-w-0 space-y-3">
     {activeVariants.length > 0 && <div className="max-w-sm">
       <Select ariaLabel="Вариант для расчёта себестоимости" className="h-10 w-full" value={costVariant?.key ?? ''} onChange={setCostVariantKey}
         options={[...(!isGoods ? [{ value: '', label: 'Базовая норма' }] : []),
@@ -376,12 +375,16 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
     {goodsBindingPending ? <p className="text-sm text-text-secondary">Складская привязка появится после сохранения.</p>
       : <RecipeCostSummary preview={preview} showCosts={canCosts} showPriceMetrics={previewPrice != null && (!activeVariants.length || !!costVariant)}
         showMissing={isGoods || hasStockBinding || !!dish?.isSet || !canRecipe}
-        showError={isGoods || hasStockBinding || !!dish?.isSet || !canRecipe} compactMetrics={!isGoods}
-        showCostValue={isGoods || hasStockBinding || !!dish?.isSet || !canRecipe} />}
+        showError={isGoods || hasStockBinding || !!dish?.isSet || !canRecipe} compactMetrics={!isGoods} />}
   </div>;
   const outputDetails = <RecipeOutput preview={preview.data} pending={preview.pending} metadata={metadata}
     manualApplies={!hasVariantNorms} editable={canEdit && !busy && !costVariant}
     onChange={(outputQuantity, outputUnit) => setMetadata((current) => ({ ...current, outputQuantity, outputUnit }))} />;
+
+  function changeInputPortions(portions: number) {
+    setRows((current) => scaleRecipeDraftRows(current, inputPortions, portions));
+    setInputPortions(portions);
+  }
 
   return (
     <EditorPage title={title} onClose={() => !busy && onClose()} footer={
@@ -411,28 +414,26 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
           void save();
         }}>
         <fieldset ref={startRef} disabled={!canEdit || busy} aria-label="Основные параметры"
-          className={'grid min-w-0 scroll-mt-4 gap-3 sm:gap-4 ' + (isGoods ? 'max-w-3xl' : 'xl:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)] xl:gap-x-8')}>
-          <div className={'grid content-start gap-3' + (isGoods ? '' : ' min-[1450px]:grid-cols-2 min-[1450px]:gap-x-5')}>
-          <FormRow label="Название" htmlFor={formId + '-name'} stackOnWide={!isGoods}>
+          className="grid min-w-0 max-w-3xl scroll-mt-4 gap-3">
+          <FormRow label="Название" htmlFor={formId + '-name'}>
             <input id={formId + '-name'} ref={nameRef} className="input" value={form.name} maxLength={120}
               onChange={(event) => patch({ name: event.target.value })}
               placeholder={isGoods ? 'Например, лимонад 0,5 л' : 'Например, капучино'} required />
           </FormRow>
-          <FormRow label="Категория" stackOnWide={!isGoods}>
+          <FormRow label="Категория">
             <Select searchable ariaLabel="Категория" placeholder="Выберите категорию" className="h-11 w-full"
               value={form.categoryId} disabled={!canEdit || busy} onChange={(value) => patch({ categoryId: value })}
               options={categories.map(({ id, name }) => ({ value: id, label: name }))} />
           </FormRow>
-          <FormRow label="Цех приготовления" stackOnWide={!isGoods}>
+          <FormRow label="Цех приготовления">
             <Select ariaLabel="Цех приготовления" className="h-11 w-full" value={form.prepStation} disabled={!canEdit || busy}
               onChange={(value) => patch({ prepStation: value })}
               options={[{ value: '', label: 'По категории' }, ...routingOptions(stations, form.prepStation)]} />
           </FormRow>
-          <FormRow label="Налог" stackOnWide={!isGoods}>
+          <FormRow label="Налог">
             <MenuTaxSelect value={tax} onChange={setTax} inherit disabled={!canEdit || busy}
               categoryTaxId={categories.find((category) => category.id === form.categoryId)?.taxId} />
           </FormRow>
-          </div>
           <FormRow label="Обложка">
             <MenuEntryPhoto name={form.name} imageUrl={form.imageUrl} loading={photoBusy} onBusy={setPhotoBusy}
               onImage={(imageUrl) => patch({ imageUrl })}>
@@ -464,8 +465,8 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
           </FormRow>
         </fieldset>
 
-        <fieldset disabled={!canEdit || busy} aria-label={isGoods ? 'Цена и варианты' : 'База рецептуры и цена'}
-          className={'min-w-0 border-t border-border pt-4' + (isGoods ? ' max-w-3xl' : '')}>
+        <fieldset disabled={busy || (isGoods && !canEdit)} aria-label={isGoods ? 'Цена и варианты' : 'Цена и себестоимость'}
+          className={'min-w-0 max-w-3xl' + (isGoods ? ' border-t border-border pt-4' : '')}>
           {isGoods ? <FormRow label="Цена товара">
             <div role="group" aria-label="Формат товара" className="divide-y divide-border rounded-xl border border-border">
               <div className={!withVariants ? 'bg-background/50' : undefined}>
@@ -497,23 +498,16 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
                 {withVariants && <div className="space-y-4 px-4 pb-4">{variantCards}{priceMetrics}</div>}
               </div>
             </div>
-          </FormRow> : <div className="grid gap-x-8 gap-y-3 lg:grid-cols-2">
-            {canRecipe && !dish?.isSet && <FormRow label="Рецепт на" htmlFor={formId + '-portions'}>
-              <div className="flex items-center gap-2">
-                <input id={formId + '-portions'} type="number" min={1} max={maxRecipePortions} step={1} inputMode="numeric"
-                  aria-invalid={!portionsValid || undefined} aria-describedby={!portionsValid ? formId + '-portions-error' : undefined}
-                  className="input w-24 tabular-nums" value={recipePortions} onChange={(event) => setRecipePortions(event.target.value)} />
-                <span className="text-sm text-text-secondary">порций</span>
-              </div>
-              {!portionsValid && <p id={formId + '-portions-error'} className="mt-1 text-sm text-danger">От 1 до 10 000 целых порций.</p>}
-            </FormRow>}
-            {!activeVariants.length ? <FormRow label={priceLabel}>
-              <div className="max-w-44">{priceInput}</div>
-            </FormRow> : <FormRow label="Цена продажи"><p className="py-2 text-sm text-text-secondary">Указывается у каждого варианта.</p></FormRow>}
-          </div>}
+          </FormRow> : <FormRow label={priceLabel}>
+            <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
+              {!activeVariants.length ? <div className="w-40 max-w-full">{priceInput}</div>
+                : <p className="py-2.5 text-sm text-text-secondary">У каждого варианта своя цена</p>}
+              {priceMetrics}
+            </div>
+          </FormRow>}
         </fieldset>
 
-        {!isGoods && canRecipe && <fieldset ref={recipeRef} aria-label="Состав техкарты" disabled={!canEdit || busy}
+        {!isGoods && canRecipe && <fieldset ref={recipeRef} aria-label="Состав техкарты" disabled={busy}
           className="min-w-0 scroll-mt-4 space-y-3">
           {!!initial?.recipe.components?.length && <section className="space-y-2 rounded-xl border border-border p-4">
             <h3 className="font-semibold">Состав сета</h3>
@@ -526,24 +520,23 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
           {!hasStockBinding && !dish?.isSet && <RecipeDraftFields rows={rows} onChange={setRows} showCosts={canCosts} disabled={!canEdit || busy}
             allowCreate={canEditSection('warehouse') && can('actions.warehouseReceive')}
             variants={activeVariants.map((variant) => ({ id: variant.id ?? variant.key, name: variant.name }))}
-            preview={preview} previewVariant={costVariant?.key} inputPortions={portionsValid ? inputPortions : 1}
-            outputDetails={outputDetails} showBatchPreview={false} />}
-          {canBindProducedStock && <details open={hasStockBinding}>
-            <summary className="w-fit cursor-pointer text-sm text-primary">Складской учёт блюда</summary>
-            <div className="mt-2"><ProducedStockField items={stock ?? []} value={producedStockId} onChange={setProducedStockId}
-              savedStockId={savedStockId} canProduce={can('actions.warehouseProduce')} /></div>
-          </details>}
+            preview={preview} previewVariant={costVariant?.key} inputPortions={inputPortions}
+            outputDetails={outputDetails} showBatchPreview={false} batchAction={<>
+              {!!rows.length && <button type="button" className="btn-ghost btn-md text-primary"
+                disabled={busy || !preview.data?.items.length || preview.pending} onClick={() => setBatchOpen(true)}>Рассчитать партию</button>}
+              {inputPortions > 1 && <button type="button" className="btn-ghost btn-md text-primary"
+                onClick={() => changeInputPortions(1)}>Показать на одну порцию</button>}
+            </>} />}
+          {canBindProducedStock && hasStockBinding && <fieldset disabled={!canEdit}>
+            <ProducedStockField items={stock ?? []} value={producedStockId}
+              onChange={setProducedStockId} savedStockId={savedStockId} canProduce={can('actions.warehouseProduce')} />
+          </fieldset>}
         </fieldset>}
-        {!isGoods && <div className="flex flex-wrap items-start justify-between gap-3">
-          {priceMetrics}
-          {canRecipe && !hasStockBinding && !dish?.isSet && <button type="button" className="btn-secondary btn-md ml-auto"
-            disabled={busy || !preview.data?.items.length || preview.pending} onClick={() => setBatchOpen(true)}>Рассчитать на N порций</button>}
-        </div>}
         {!isGoods && !form.isWeighted && !dish?.isSet && <fieldset aria-label="Варианты порций" disabled={!canEdit || busy}
           className="min-w-0 space-y-2 border-t border-border pt-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-3">
             <h2 className="text-base font-semibold">Варианты порций</h2>
-            <button type="button" className="btn-secondary btn-md" onClick={() => setVariantEditor(newVariant())}>+ Добавить вариант</button>
+            <button type="button" className="btn-ghost btn-md text-primary" onClick={() => setVariantEditor(newVariant())}>+ Добавить вариант</button>
           </div>
           {activeVariants.length > 0 && <ul className="divide-y divide-border">
             {activeVariants.map((variant, index) => <li key={variant.key} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2"
@@ -582,22 +575,64 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
                 <input id={formId + '-voice-name'} className="input" value={form.voiceName} maxLength={120}
                   placeholder="Как произносить вслух" onChange={(event) => patch({ voiceName: event.target.value })} />
               </FormRow>
+              {!isGoods && canRecipe && !dish?.isSet && <>
+                <FormRow label="Технология приготовления" htmlFor={formId + '-instructions'}>
+                  <textarea id={formId + '-instructions'} className="input min-h-24 py-2" value={metadata.instructions ?? ''} maxLength={12_000}
+                    onChange={(event) => setMetadata((current) => ({ ...current, instructions: event.target.value }))} />
+                </FormRow>
+                {!hasStockBinding && <FormRow label="Нормы рецепта">
+                  <button type="button" className="btn-secondary btn-md" onClick={() => setBasisOpen(true)}>Ввести нормы на партию</button>
+                </FormRow>}
+              </>}
+              {canBindProducedStock && !hasStockBinding && <ProducedStockField items={stock ?? []} value={producedStockId}
+                onChange={setProducedStockId} savedStockId={savedStockId} canProduce={can('actions.warehouseProduce')} />}
             </div>
           </details>
-          {!isGoods && canRecipe && !dish?.isSet && <details className="max-w-3xl">
-            <summary className="w-fit cursor-pointer text-sm font-semibold text-primary">Технология приготовления</summary>
-            <textarea aria-label="Технология приготовления" className="input mt-3 min-h-24" value={metadata.instructions ?? ''} maxLength={12_000}
-              onChange={(event) => setMetadata((current) => ({ ...current, instructions: event.target.value }))} />
-          </details>}
         </fieldset>
       </form>
       {batchOpen && createPortal(<Modal open manageFocus title="Расчёт партии" onClose={() => setBatchOpen(false)} panelClassName="max-w-xl">
         <RecipeBatchPanel preview={preview.data} pending={preview.pending} showCosts={canCosts} />
       </Modal>, document.body)}
+      {basisOpen && <RecipeBasisDialog initial={recipePortions} onClose={() => setBasisOpen(false)}
+        onApply={(portions) => {
+          changeInputPortions(portions);
+          setRecipePortions(portions);
+          setBasisOpen(false);
+          recipeRef.current?.scrollIntoView({ block: 'start' });
+        }} />}
       {variantEditor && <RecipeVariantDialog initial={variantEditor} editing={variants.some(({ key }) => key === variantEditor.key)}
         onSave={saveRecipeVariant} onClose={() => setVariantEditor(undefined)} />}
     </EditorPage>
   );
+}
+
+function RecipeBasisDialog({ initial, onApply, onClose }: {
+  initial: number; onApply: (portions: number) => void; onClose: () => void;
+}) {
+  const formId = useId();
+  const [value, setValue] = useState(String(initial));
+  const portions = Number(value);
+  const valid = validPortionCount(portions);
+  return createPortal(<Modal open manageFocus title="Нормы на партию" onClose={onClose} panelClassName="max-w-md"
+    footer={<div className="flex justify-end gap-2">
+      <button type="button" className="btn-secondary btn-md" onClick={onClose}>Отмена</button>
+      <button type="submit" form={formId} className="btn-primary btn-md" disabled={!valid}>Применить</button>
+    </div>}>
+    <form id={formId} noValidate className="space-y-3" onSubmit={(event) => {
+      event.preventDefault();
+      if (valid) onApply(portions);
+    }}>
+      <p className="text-sm text-text-secondary">Укажите, на сколько порций вы отмерили ингредиенты. EDU POS пересчитает введённые количества на одну порцию.</p>
+      <label className="grid w-fit gap-1 text-sm">
+        Количество порций
+        <input data-dialog-initial-focus type="number" min={1} max={maxRecipePortions} step={1} inputMode="numeric"
+          className="input w-32 tabular-nums" value={value} aria-invalid={!valid || undefined}
+          aria-describedby={!valid ? formId + '-error' : undefined}
+          onChange={(event) => setValue(event.target.value)} />
+      </label>
+      {!valid && <p id={formId + '-error'} className="text-sm text-danger">Введите целое число от 1 до 10 000.</p>}
+    </form>
+  </Modal>, document.body);
 }
 
 function RecipeVariantDialog({ initial, editing, onSave, onClose }: {
@@ -694,9 +729,9 @@ function ProducedStockField({ items, value, onChange, savedStockId, canProduce }
   </div>;
 }
 
-function FormRow({ label, htmlFor, children, stackOnWide = false }: { label: string; htmlFor?: string; children: ReactNode; stackOnWide?: boolean }) {
-  const labelClass = 'text-sm font-medium text-text-secondary sm:pt-2.5' + (stackOnWide ? ' min-[1450px]:pt-0' : '');
-  return <div className={'grid min-w-0 gap-1.5 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-x-5' + (stackOnWide ? ' min-[1450px]:grid-cols-1' : '')}>
+function FormRow({ label, htmlFor, children }: { label: string; htmlFor?: string; children: ReactNode }) {
+  const labelClass = 'text-sm font-medium text-text-secondary sm:pt-2.5';
+  return <div className="grid min-w-0 gap-1.5 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-x-5">
     {htmlFor ? <label htmlFor={htmlFor} className={labelClass}>{label}</label> : <div className={labelClass}>{label}</div>}
     <div className="min-w-0">{children}</div>
   </div>;
@@ -719,12 +754,12 @@ function ModeOption({ name, checked, label, description, onSelect, disabled }: {
   </label>;
 }
 
-function PriceInput({ label, value, onChange }: {
-  label: string; value: string; onChange: (price: string) => void;
+function PriceInput({ label, value, onChange, disabled }: {
+  label: string; value: string; onChange: (price: string) => void; disabled?: boolean;
 }) {
   return <div className="relative">
     <input aria-label={label} type="text" inputMode="decimal" className="input !pr-9"
-      value={value} onChange={(event) => onChange(event.target.value)} />
+      value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
     <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-text-muted">с</span>
   </div>;
 }

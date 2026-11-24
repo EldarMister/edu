@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
+import { IconSettings, IconX } from '../../components/icons';
 import { apiError } from '@/lib/api';
 import { money, taxRateLabel } from '@/lib/format';
 import { ItemCard } from './ItemCard';
@@ -42,7 +43,7 @@ function replacementRow(row: RecipeDraftRow, item: Ingredient): RecipeDraftRow {
 function DraftCell({ label, children, className = '', mobileActions }: {
   label: string; children: ReactNode; className?: string; mobileActions?: ReactNode;
 }) {
-  return <td className={'min-w-0 xl:px-2 xl:py-2 ' + className}>
+  return <td className={'min-w-0 max-xl:!p-0 xl:px-2 xl:py-2 ' + className}>
     <div className="mb-1 flex items-center justify-between gap-2 text-xs text-text-muted xl:hidden">
       <span>{label}</span>
       {mobileActions}
@@ -62,13 +63,13 @@ function lossLabel(loss: number) {
 function processingSummary(stages: readonly ProcessingStage[], appliedLoss: number | null) {
   if (!stages.length) return appliedLoss
     ? 'По брутто и нетто · ' + lossLabel(appliedLoss)
-    : 'Без обработки · 0%';
+    : 'Без обработки';
   if (stages.length === 1) {
     const stage = stages[0];
     const method = PROCESSING_METHODS.find(({ value }) => value === stage.method)?.label ?? stage.method;
     return method + ' · ' + lossLabel(appliedLoss ?? stage.lossPercent);
   }
-  return stages.length + ' этапа' + (appliedLoss == null ? '' : ' · ' + lossLabel(appliedLoss));
+  return 'Несколько этапов' + (appliedLoss == null ? '' : ' · ' + lossLabel(appliedLoss));
 }
 
 function scaleAmount(amount: number | null | undefined, factor: number) {
@@ -76,7 +77,7 @@ function scaleAmount(amount: number | null | undefined, factor: number) {
 }
 
 export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = true, allowCreate = true,
-  disabled = false, preview, previewVariant, outputDetails, showBatchPreview = true, inputPortions = 1 }: {
+  disabled = false, preview, previewVariant, outputDetails, showBatchPreview = true, batchAction, inputPortions = 1 }: {
   rows: RecipeDraftRow[];
   onChange: (rows: RecipeDraftRow[]) => void;
   variants?: { id?: string; name: string }[];
@@ -87,6 +88,7 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
   previewVariant?: string;
   outputDetails?: ReactNode;
   showBatchPreview?: boolean;
+  batchAction?: ReactNode;
   inputPortions?: number;
 }) {
   const ingredients = useIngredients('');
@@ -107,6 +109,10 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
   const calculatedOutput = preview.data?.output;
   const missingCosts = preview.data?.compositionMissingCosts ?? [];
   const output = calculatedOutput ? recipeQuantity(calculatedOutput.amount, unitLabel(calculatedOutput.unit)) : null;
+  const scaleCostToBatch = inputPortions > 1 && !previewVariant;
+  const compositionCost = preview.data?.compositionCostForScaling ?? preview.data?.compositionFoodCost;
+  const footerCost = compositionCost == null ? null : compositionCost * (scaleCostToBatch ? inputPortions : 1);
+  const totalLabel = scaleCostToBatch ? 'Итого на партию' : inputPortions > 1 ? 'Итого на порцию' : 'Итого';
   const addActions = <div className="flex min-w-0 flex-wrap items-center gap-2">
     <div className="w-full min-w-0 sm:w-64">
       <Select searchable ariaLabel="Добавить компонент" placeholder="Добавить компонент…" className="h-9 w-full" value=""
@@ -119,6 +125,7 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
     </div>
     {allowCreate && <button className="btn-ghost btn-md shrink-0 text-primary" type="button" disabled={disabled}
       onClick={() => setCreateIngredient(true)}>+ Новый ингредиент</button>}
+    {batchAction}
   </div>;
 
   return <section className="w-full min-w-0 space-y-3 border-t border-border pt-4" aria-label="Состав техкарты">
@@ -130,13 +137,12 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
       <table className="w-full text-sm max-xl:block xl:min-w-[800px] xl:table-fixed">
         <thead className="max-xl:sr-only">
           <tr className="border-b border-border text-left text-xs text-text-muted">
-            <th scope="col" className="w-[25%] py-2 pl-2 font-medium">Ингредиент / полуфабрикат</th>
-            <th scope="col" className="w-[17%] px-2 font-medium">Обработка / потери</th>
-            <th scope="col" className="w-[14%] px-2 font-medium">Брутто</th>
-            <th scope="col" className="w-[12%] px-2 font-medium">Нетто</th>
-            <th scope="col" className="px-2 font-medium">Склад</th>
-            {showCosts && <th scope="col" className="w-[11%] px-2 text-right font-medium">Себестоимость</th>}
-            <th scope="col" className="w-[76px]"><span className="sr-only">Действия</span></th>
+            <th scope="col" className="py-2 pl-2 font-medium">Ингредиент / полуфабрикат</th>
+            <th scope="col" className="w-[19%] px-2 font-medium">Обработка</th>
+            <th scope="col" className="w-[17%] px-2 font-medium">Брутто</th>
+            <th scope="col" className="w-[15%] px-2 font-medium">Нетто</th>
+            {showCosts && <th scope="col" className="w-[14%] px-2 text-right font-medium">Себестоимость</th>}
+            <th scope="col" className="w-[80px]"><span className="sr-only">Действия</span></th>
           </tr>
         </thead>
         <tbody className="max-xl:grid max-xl:gap-2">
@@ -156,13 +162,13 @@ export function RecipeDraftFields({ rows, onChange, variants = [], showCosts = t
         </tbody>
         <tfoot className="max-xl:block">
           <tr className="max-xl:block">
-            <td colSpan={showCosts ? 7 : 6} className="px-2 py-3 max-xl:block max-xl:px-0">
+            <td colSpan={showCosts ? 6 : 5} className="px-2 py-3 max-xl:block max-xl:!px-0">
               <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
                 {addActions}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                   {outputDetails ?? (output && <span>Выход порции: <strong>{output}</strong></span>)}
-                  {showCosts && <span>Себестоимость порции: <strong>{preview.data?.compositionFoodCost == null
-                    ? preview.pending ? 'Расчёт…' : 'не рассчитана' : money(preview.data.compositionFoodCost)}</strong></span>}
+                  {showCosts && <span>{totalLabel}: <strong>{footerCost == null
+                    ? preview.pending ? 'Расчёт…' : 'не рассчитано' : money(footerCost)}</strong></span>}
                 </div>
               </div>
             </td>
@@ -229,7 +235,10 @@ function CompositionRow({ row, ingredient, options, calculated, pending, showCos
   const missingDefaults = ingredient && stages.some(({ method, lossPercent }) =>
     lossPercent === 0 && ingredient.processingLosses?.[method] == null);
   const warehouseChoice = row.warehouseId ?? (row.fromCommonWarehouse ? 'common' : 'auto');
-  const explicitWarehouseRemoved = row.warehouseId && !locations.some((location) => location.id === row.warehouseId);
+  const explicitWarehouse = locations.find((location) => location.id === row.warehouseId);
+  const savedWarehouseName = explicitWarehouse?.name ?? calculated?.warehouseName ?? 'Сохранённый склад';
+  const warehouseOverride = row.warehouseId ? savedWarehouseName : row.fromCommonWarehouse ? 'Общий склад' : null;
+  const visibleWarehouse = warehouseOverride ?? (disabled ? calculated?.warehouseName : null);
   const previewCost = calculated?.lineCostForScaling ?? calculated?.lineCost;
   const selectedOption = ingredient ? ingredientOption(ingredient) : { value: row.ingredientId, label: row.name };
   const grossLabel = 'Брутто ' + row.name;
@@ -291,10 +300,15 @@ function CompositionRow({ row, ingredient, options, calculated, pending, showCos
   </div>;
 
   const rowActions = <div className="flex shrink-0 items-center justify-end">
-    <button type="button" aria-label={'Редактировать строку: ' + row.name}
-      className="btn-ghost min-h-9 px-1.5 text-xs text-primary" disabled={disabled} onClick={() => setDialog('settings')}>Ред.</button>
-    <button type="button" aria-label={'Убрать ' + row.name}
-      className="btn-ghost min-h-9 px-2 text-danger" disabled={disabled} onClick={onRemove}>×</button>
+    <button type="button" aria-label={'Параметры строки: ' + row.name}
+      title={variants.length ? 'Склад и нормы по вариантам' : 'Склад списания'}
+      className="btn-ghost h-9 w-9 text-text-muted" disabled={disabled} onClick={() => setDialog('settings')}>
+      <IconSettings className="h-4 w-4" />
+    </button>
+    <button type="button" aria-label={'Убрать ' + row.name} title="Убрать из состава"
+      className="btn-ghost h-9 w-9 text-text-muted hover:text-danger" disabled={disabled} onClick={onRemove}>
+      <IconX className="h-4 w-4" />
+    </button>
   </div>;
   return <tr className="relative align-top max-xl:grid max-xl:grid-cols-2 max-xl:gap-3 max-xl:rounded-md max-xl:border max-xl:border-border max-xl:p-3 xl:border-b xl:border-border">
     <DraftCell label="Ингредиент / полуфабрикат" className="max-xl:col-span-2" mobileActions={rowActions}>
@@ -306,15 +320,14 @@ function CompositionRow({ row, ingredient, options, calculated, pending, showCos
         {calculated.netWeightGrams != null ? ' · ' + recipeQuantity(calculated.netWeightGrams, 'г') + ' нетто'
           : calculated.netAmount != null && ' · ' + recipeQuantity(calculated.netAmount, unitLabel(calculated.amountUnit)) + ' нетто'}
       </p>}
-      {variants.length > 0 && <button type="button" className="mt-0.5 text-xs text-primary hover:underline" disabled={disabled}
-        onClick={() => setDialog('settings')}>Нормы по вариантам</button>}
+      {visibleWarehouse && <p className="mt-1 break-words text-xs text-text-muted">Склад: {visibleWarehouse}</p>}
     </DraftCell>
-    <DraftCell label="Обработка / потери">
-      {processing ? <button type="button" className="min-h-9 break-words text-left text-sm text-primary hover:underline"
+    <DraftCell label="Обработка" className={processing || stages.length ? 'max-xl:col-span-2' : 'max-xl:hidden'}>
+      {processing ? <button type="button" className="break-words text-left text-sm text-primary hover:underline xl:min-h-10"
         aria-label={'Обработка: ' + row.name} disabled={disabled} onClick={() => setDialog('processing')}>
         {processingSummary(stages, appliedProcessingLoss)}
       </button> : <span className="block py-2 text-sm text-text-muted">
-        {stages.length ? processingSummary(stages, fallbackLoss) : 'Не применимо'}
+        {stages.length ? processingSummary(stages, fallbackLoss) : '—'}
       </span>}
       {missingDefaults && <p className="text-xs text-warning">Потери не настроены в карточке</p>}
       {processing && basis === 'manual' && stages.length > 0 && effectiveLoss != null &&
@@ -340,31 +353,15 @@ function CompositionRow({ row, ingredient, options, calculated, pending, showCos
             amount: processingQuantities(row.amount, value ?? 0, basis, retention).amount })} />
         <span className="shrink-0 text-xs text-text-muted">{unit}</span>
       </div> : <button type="button"
-        className={'min-h-9 text-left text-primary hover:underline' + (invalidNet ? ' text-danger' : '')}
+        className={'min-h-10 text-left hover:underline ' + (invalidNet ? 'text-danger' : 'text-primary')}
         aria-label={netLabel} title={pieces ? pieceWeightLabel : undefined} disabled={disabled} onClick={() => setDialog('net')}>
         {netGrams == null ? inlineAmount(netAmount, row.unit) : recipeQuantity(netGrams, 'г')}
       </button>}
     </DraftCell>
-    <DraftCell label="Склад">
-      <select aria-label={'Склад: ' + row.name} className="input h-9 w-full min-w-0 truncate px-2"
-        value={warehouseChoice} disabled={disabled || loadingWarehouses} onChange={(event) => {
-          const value = event.target.value;
-          patch({ warehouseId: value === 'auto' || value === 'common' ? null : value, fromCommonWarehouse: value === 'common' });
-        }}>
-        <option value="auto">По цеху</option>
-        <option value="common">Общий склад</option>
-        {explicitWarehouseRemoved && <option value={row.warehouseId!}>{calculated?.warehouseName ?? 'Сохранённый склад'}</option>}
-        {locations.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
-      </select>
-      {warehouseChoice === 'auto' && calculated?.warehouseName && <div className="mt-0.5 break-words text-xs text-text-muted">
-        <span aria-hidden="true">→ </span>{calculated.warehouseName}
-      </div>}
-    </DraftCell>
-    {showCosts && <DraftCell label="Себестоимость" className="xl:text-right">
-      <div className="pt-1 font-medium tabular-nums">{previewCost == null
+    {showCosts && <DraftCell label="Себестоимость" className="max-xl:col-span-2 max-xl:flex max-xl:items-baseline max-xl:justify-between xl:text-right">
+      <div className="font-medium tabular-nums xl:pt-2">{previewCost == null
         ? <span className="text-xs text-text-muted">{pending ? 'Расчёт…' : 'Не рассчитана'}</span>
         : money(previewCost * lineCostScale)}</div>
-      {calculated?.avgCost != null && <p className="text-xs text-text-muted">{money(calculated.avgCost)} / {unit}</p>}
     </DraftCell>}
     <td className="hidden py-2 xl:table-cell">{rowActions}</td>
     {dialog && createPortal(
@@ -374,8 +371,27 @@ function CompositionRow({ row, ingredient, options, calculated, pending, showCos
         footer={<div className="flex justify-end"><button type="button" className="btn-primary btn-md"
           onClick={() => setDialog(undefined)}>Готово</button></div>}>
         <div className="space-y-4">
-          {(dialog === 'processing' || dialog === 'settings') && processingFields}
-          {(dialog === 'net' || dialog === 'settings') && measuredFields}
+          {dialog === 'processing' && processingFields}
+          {dialog === 'net' && measuredFields}
+          {dialog === 'settings' && <div className="space-y-2">
+            <label className="grid gap-1.5 text-sm font-medium">
+              Склад списания
+              <select aria-label={'Склад: ' + row.name} className="input h-10 w-full min-w-0 truncate"
+                value={warehouseChoice} disabled={disabled || loadingWarehouses} onChange={(event) => {
+                  const value = event.target.value;
+                  patch({ warehouseId: value === 'auto' || value === 'common' ? null : value, fromCommonWarehouse: value === 'common' });
+                }}>
+                <option value="auto">По цеху</option>
+                <option value="common">Общий склад</option>
+                {row.warehouseId && !explicitWarehouse && <option value={row.warehouseId}>{savedWarehouseName}</option>}
+                {locations.map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
+              </select>
+            </label>
+            {warehouseChoice === 'auto' && calculated?.warehouseName &&
+              <p className="text-xs text-text-muted">Списание по цеху: {calculated.warehouseName}</p>}
+            {showCosts && calculated?.avgCost != null &&
+              <p className="text-xs text-text-muted">Себестоимость за {unit}: {money(calculated.avgCost)}</p>}
+          </div>}
           {dialog === 'settings' && variants.length > 0 && <div className="space-y-2">
             <h4 className="font-medium">Нормы брутто по вариантам</h4>
             <p className="text-xs text-text-muted">{inputPortions > 1 && 'Введите брутто для всей партии. '}

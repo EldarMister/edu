@@ -5,25 +5,42 @@ const { test } = require('node:test');
 const ts = require('typescript');
 
 const filename = resolve(__dirname, '../src/features/admin/pages/warehouse/recipe-draft-values.ts');
-const code = ts.transpileModule(readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } });
+const code = ts.transpileModule(readFileSync(filename, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+});
 const draft = {};
 new Function('exports', code.outputText)(draft);
 const { displayedProcessingStages, grossFromLoss, lossFromAmounts, netFromLoss, parsePieceWeightGrams, pieceNetWeight,
   preparationYieldBase, processingQuantities, processingRetention, recipeDraftPayload, recipeDraftRows,
-  recipePreviewItems, supportsProcessing, validMeasuredNetWeight, validRecipeRows } = draft;
+  recipePreviewItems, scaleRecipeDraftRows, supportsProcessing, validMeasuredNetWeight, validRecipeRows } = draft;
 
 const potato = { ingredientId: 'potato', name: 'Картофель', unit: 'g', unitType: 'mass', amount: 200, netAmount: 160,
   lossPercent: 20, warehouseId: 'kitchen' };
 
-test('reopening a batch recipe restores batch gross, net and explicit variant quantities', () => {
+test('batch editing scales per-portion gross, net, measured weight and variant quantities in both directions', () => {
   const saved = { ingredientId: 'cheese', name: 'Сыр', unitType: 'count', amountUnit: 'pcs',
     amount: 0.2, netAmount: 0.2, measuredNetWeightGrams: 40, variantAmounts: { small: 0.1, excluded: 0 } };
-  const [row] = recipeDraftRows([saved], false, 10);
+  const perPortion = recipeDraftRows([saved, { ...potato, amountUnit: 'kg', amount: 0.012345, netAmount: null }]);
+  const [row, mass] = scaleRecipeDraftRows(perPortion, 1, 10);
   assert.equal(row.amount, 2);
   assert.equal(row.netAmount, 2);
   assert.equal(row.measuredNetWeightGrams, 400);
   assert.deepEqual(row.variantAmounts, { small: 1, excluded: 0 });
+  assert.equal(mass.amount, 0.12345);
+  assert.equal(mass.netAmount, null);
+  assert.deepEqual(scaleRecipeDraftRows([row, mass], 10, 1), perPortion);
   assert.equal(saved.amount, 0.2);
+});
+
+test('changing the portion basis rounds decimal midpoints like saving a batch', () => {
+  const [row] = scaleRecipeDraftRows([{
+    ingredientId: 'cheese', name: 'Сыр', unitType: 'count', unit: 'pcs', amount: 0.009,
+    netAmount: 0.007, measuredNetWeightGrams: 0.009, variantAmounts: { small: 0.003 },
+  }], 2, 1);
+  assert.equal(row.amount, 0.005);
+  assert.equal(row.netAmount, 0.004);
+  assert.equal(row.measuredNetWeightGrams, 0.005);
+  assert.deepEqual(row.variantAmounts, { small: 0.002 });
 });
 
 test('gross and net can be the basis of the same 20% processing loss', () => {

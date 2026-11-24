@@ -88,30 +88,57 @@ export type RecipeDraftRow = Omit<RecipeRowInput, 'netAmount'> & {
   netAmount?: number | null;
 };
 
-export function recipeDraftRows(items: RecipeItem[], copying = false, portions = 1): RecipeDraftRow[] {
+export function recipeDraftRows(items: RecipeItem[], copying = false): RecipeDraftRow[] {
   return items.map((row) => {
     const copyNonMass = copying && !supportsProcessing(row.unitType);
-    const decimals = row.amountUnit === 'kg' || row.amountUnit === 'l' ? 6 : 3;
-    const scale = (amount: number) => portions === 1 ? amount : Number((amount * portions).toFixed(decimals));
     const net = copyNonMass ? row.netAmount ?? netFromLoss(row.amount, row.lossPercent ?? 0) : row.netAmount;
     return {
       ingredientId: row.ingredientId,
       name: row.name,
       unitType: row.unitType,
-      amount: scale(row.amount),
+      amount: row.amount,
       unit: row.amountUnit,
-      netAmount: net == null ? net : scale(net),
+      netAmount: net,
       ...(row.unitType !== 'mass' && row.measuredNetWeightGrams !== undefined && {
-        measuredNetWeightGrams: row.measuredNetWeightGrams == null ? null : Number((row.measuredNetWeightGrams * portions).toFixed(3)),
+        measuredNetWeightGrams: row.measuredNetWeightGrams,
       }),
       lossPercent: copyNonMass ? undefined : row.lossPercent,
       processingMethod: copyNonMass ? undefined : row.processingMethod,
       processingStages: !copyNonMass && row.processingStages?.length ? row.processingStages : undefined,
       processingBasis: copyNonMass ? undefined : row.processingBasis,
-      variantAmounts: portions === 1 || !row.variantAmounts ? row.variantAmounts
-        : Object.fromEntries(Object.entries(row.variantAmounts).map(([id, amount]) => [id, scale(amount)])),
+      variantAmounts: row.variantAmounts,
       fromCommonWarehouse: row.fromCommonWarehouse,
       warehouseId: row.warehouseId,
+    };
+  });
+}
+
+export function scaleRecipeDraftRows(rows: RecipeDraftRow[], fromPortions: number, toPortions: number): RecipeDraftRow[] {
+  if (fromPortions === toPortions) return rows;
+
+  function scale(amount: number, decimals: number) {
+    if (!Number.isFinite(amount) || amount <= 0) return amount;
+    // Round decimal quantities half up, as the API does when it stores a portion.
+    const [mantissa, exponent = '0'] = String(amount).split('e');
+    const [whole, fraction = ''] = mantissa.split('.');
+    const places = decimals + Number(exponent) - fraction.length;
+    const units = BigInt(whole + fraction) * BigInt(toPortions) * 10n ** BigInt(Math.max(0, places));
+    const divisor = BigInt(fromPortions) * 10n ** BigInt(Math.max(0, -places));
+    const roundedUnits = (2n * units + divisor) / (2n * divisor);
+    return Number(`${roundedUnits}e-${decimals}`);
+  }
+
+  return rows.map((row) => {
+    const decimals = row.unit === 'kg' || row.unit === 'l' ? 6 : 3;
+    const measured = row.measuredNetWeightGrams;
+    return {
+      ...row,
+      amount: scale(row.amount, decimals),
+      netAmount: row.netAmount == null ? row.netAmount : scale(row.netAmount, decimals),
+      ...(measured != null && { measuredNetWeightGrams: scale(measured, 3) }),
+      variantAmounts: row.variantAmounts && Object.fromEntries(
+        Object.entries(row.variantAmounts).map(([id, amount]) => [id, scale(amount, decimals)]),
+      ),
     };
   });
 }

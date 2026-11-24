@@ -13,14 +13,13 @@ export function RecipeStockBasis({ stockItem }: { stockItem: NonNullable<RecipeP
 }
 
 export function RecipeCostSummary({ preview, showCosts, showPriceMetrics = true, showMissing = true, showError = true,
-  compactMetrics = false, showCostValue = true }: {
+  compactMetrics = false }: {
   preview: ReturnType<typeof useRecipePreview>;
   showCosts: boolean;
   showPriceMetrics?: boolean;
   showMissing?: boolean;
   showError?: boolean;
   compactMetrics?: boolean;
-  showCostValue?: boolean;
 }) {
   const match = preview.data;
   const stockItem = match?.stockItem;
@@ -34,11 +33,11 @@ export function RecipeCostSummary({ preview, showCosts, showPriceMetrics = true,
   const secondary = compactMetrics ? metrics.filter(({ key }) => key !== 'food') : [];
   if (!showCosts && !stockItem) return null;
   return <div className="space-y-2 text-sm">
-    {showCosts && (showCostValue || primary.length > 0) && <dl className="flex flex-wrap gap-x-5 gap-y-2" aria-live="polite">
-      {showCostValue && <div><dt className="text-text-muted">{stockItem ? 'Себестоимость по складу' : 'Себестоимость'}</dt>
+    {showCosts && <dl className="flex flex-wrap gap-x-5 gap-y-2" aria-live="polite">
+      <div><dt className="text-text-muted">{stockItem ? 'Себестоимость по складу' : 'Себестоимость'}</dt>
         <dd className="font-medium tabular-nums">{match?.foodCost == null
           ? preview.pending ? 'Расчёт…' : match && !match.accountingConfigured ? 'Не настроена' : 'Не рассчитана'
-          : money(match.foodCost)}</dd></div>}
+          : money(match.foodCost)}</dd></div>
       {primary.map(({ key, label, value, format }) => <div key={key}>
         <dt className="text-text-muted">{label}</dt><dd className="font-medium tabular-nums">{format(value!)}</dd>
       </div>)}
