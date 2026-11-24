@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { ColumnButton } from '../../components/ColumnControl';
+import { RowIconButton } from '../../components/RowIconButton';
 import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
@@ -252,7 +253,8 @@ export function DocumentList({
                   <td>{statusCell(document)}</td>
                 </> : selectedColumns.map((key) => registerCell(key, document))}
                 <td><div className="poster-row-actions">
-                  <button type="button" onClick={() => onOpen(document.id)}>{document.status === 'draft' ? 'Ред.' : inventory ? 'Посмотреть' : 'Открыть'}</button>
+                  {document.status === 'draft' ? <RowIconButton icon="edit" label="Редактировать документ" onClick={() => onOpen(document.id)} />
+                    : <button type="button" onClick={() => onOpen(document.id)}>{inventory ? 'Посмотреть' : 'Открыть'}</button>}
                   {transfer && canCreate && onCopy && <button type="button" onClick={() => onCopy(document.id)}>Копировать</button>}
                 </div></td>
               </tr>)}

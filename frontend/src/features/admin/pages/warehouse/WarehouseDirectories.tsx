@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { RowIconButton } from '../../components/RowIconButton';
 import { createPortal } from 'react-dom';
 import { usePageFilter, useEditorRoute } from './workspace-route';
 import { EditorPage, useEditorDirty } from './EditorPage';
@@ -71,9 +72,8 @@ function DirectoryActions({
   }, [position]);
   return (
     <div className="poster-row-actions justify-end">
-      <button type="button" aria-label={`${editable ? 'Редактировать' : 'Открыть'}: ${label}`} onClick={onEdit}>
-        {editable ? 'Ред.' : 'Открыть'}
-      </button>
+      {editable ? <RowIconButton icon="edit" label={`Редактировать: ${label}`} onClick={onEdit} />
+        : <button type="button" aria-label={`Открыть: ${label}`} onClick={onEdit}>Открыть</button>}
       {editable && onArchive && (
         <>
           <button

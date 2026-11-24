@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from 'react';
+import { RowIconButton } from '../components/RowIconButton';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { EditorPage } from './warehouse/EditorPage';
@@ -76,7 +77,8 @@ export function IngredientCategoriesPage() {
           <tbody>{rows.map(([category, count]) => <tr key={category}>
             <td><button type="button" className="block max-w-full truncate text-left text-primary" title={category} onClick={() => setRoute({ section: 'menu', view: 'ingredients', category })}>{category}</button></td>
             <td className="tabular-nums">{count}</td>
-            <td>{can('actions.warehouseSettings') && <div className="poster-row-actions"><button type="button" aria-label={`Редактировать категорию: ${category}`} onClick={() => { rename.reset(); setName(category); openEditor({ type: 'ingredientCategory', id: category }); }}>Ред.</button></div>}</td>
+            <td>{can('actions.warehouseSettings') && <div className="poster-row-actions"><RowIconButton icon="edit"
+              label={`Редактировать категорию: ${category}`} onClick={() => { rename.reset(); setName(category); openEditor({ type: 'ingredientCategory', id: category }); }} /></div>}</td>
           </tr>)}
           {!rows.length && <tr><td colSpan={3} className="poster-directory-empty text-center text-text-muted">
             {search ? 'Категории не найдены' : 'Категории пока не добавлены. Укажите категорию в карточке ингредиента.'}

@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useId, useState } from 'react';
+import { IconEye } from '../../components/icons';
 import { apiError } from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
 import { Select } from '@/components/Select';
@@ -114,7 +115,8 @@ export function WriteoffLines({ editor, sourceLines = [], total, disabled = fals
     {updatedRecipe && <p role="status" className="mb-3 px-4 text-sm text-text-secondary">Состав пересчитан по текущему рецепту. Проверьте продукты ниже перед сохранением.</p>}
     <div className="overflow-x-auto"><table className={`poster-table poster-document-table poster-document-table--compact poster-writeoff-table w-full table-fixed text-sm ${showPackages ? 'min-w-[840px]' : 'min-w-[720px]'}`}>
       <colgroup><col /><col style={{ width: showPackages ? 130 : 210 }} />{showPackages && <col style={{ width: 200 }} />}<col style={{ width: 130 }} /><col style={{ width: 155 }} /><col style={{ width: 40 }} /></colgroup>
-      <thead><tr><th className="text-left">Наименование</th><th className="text-right">Количество</th>{showPackages && <th className="text-left">Фасовки</th>}<th className="text-right">{costs ? 'Сумма' : ''}</th><th className="text-left">Детали</th><th /></tr></thead>
+      <thead><tr><th className="text-left">Наименование</th><th className="text-right">Количество</th>{showPackages && <th className="text-left">Фасовки</th>}<th className="text-right">{costs ? 'Сумма' : ''}</th>
+        <th scope="col" className="text-left" aria-label="Детали" title="Детали"><IconEye className="h-4 w-4" aria-hidden="true" /></th><th /></tr></thead>
       <tbody>{rows.map((row, index) => {
         const line = lines.get(row.sourceLineId);
         const oldLine = oldLines.get(row.sourceLineId);

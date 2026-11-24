@@ -1,5 +1,6 @@
 import { Fragment, useState, type ReactNode } from 'react';
 import { ColumnButton } from '../../components/ColumnControl';
+import { RowIconButton } from '../../components/RowIconButton';
 import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
@@ -152,9 +153,10 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
   }
   function rowActions(purchase: Purchase) {
     return <div className="supply-actions">
-      <button type="button" aria-expanded={expanded.has(purchase.id)} onClick={() => toggle(purchase.id)}>Детали</button>
-      {canEdit && purchase.status !== 'cancelled' && <button type="button" aria-label={`Редактировать поставку ${purchase.number}`}
-        onClick={() => onOpen(purchase.id, purchase.status === 'completed')}>Ред.</button>}
+      <RowIconButton icon="details" label={`Детали поставки ${purchase.number}`}
+        expanded={expanded.has(purchase.id)} onClick={() => toggle(purchase.id)} />
+      {canEdit && purchase.status !== 'cancelled' && <RowIconButton icon="edit" label={`Редактировать поставку ${purchase.number}`}
+        onClick={() => onOpen(purchase.id, purchase.status === 'completed')} />}
     </div>;
   }
   async function exportWorkbook() {

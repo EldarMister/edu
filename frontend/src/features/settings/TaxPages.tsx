@@ -1,5 +1,6 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { ColumnButton } from '@/features/admin/components/ColumnControl';
+import { RowIconButton } from '@/features/admin/components/RowIconButton';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
@@ -144,8 +145,7 @@ function TaxDirectory({ onEdit }: { onEdit: (id?: string) => void }) {
             return <tr key={tax.id}>
               {columns.map((key) => <td key={key}>{values[key]}</td>)}
               {editable && <td className="w-24"><div className="flex justify-end gap-2">
-                <button type="button" className="px-2 text-primary"
-                  aria-label={`Редактировать налог «${tax.name}»`} onClick={() => onEdit(tax.id)}>Ред.</button>
+                <RowIconButton icon="edit" label={`Редактировать налог «${tax.name}»`} onClick={() => onEdit(tax.id)} />
                 <button type="button" className="rounded-lg p-2 text-text-muted hover:bg-background hover:text-danger"
                   aria-label={`Удалить налог «${tax.name}»`} onClick={() => { remove.reset(); setToDelete(tax); }}><IconTrash className="h-4 w-4" /></button>
               </div></td>}

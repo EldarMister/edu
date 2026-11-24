@@ -1,4 +1,5 @@
 import { useId, useRef, useState, type ReactNode } from 'react';
+import { RowIconButton } from '../../components/RowIconButton';
 import { Modal } from '@/components/Modal';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -229,8 +230,8 @@ function CashShiftDetails({ shift, canManage }: { shift: CashShift; canManage: b
               <span className={'whitespace-nowrap' + (difference && amount ? ' text-danger' : '')}>
                 {difference ? signedCashAmount(amount) : financeMoney(amount)}
               </span>
-              {canManage && key && amount != null && <button type="button" className="text-primary hover:underline"
-                aria-label={'Изменить ' + label.toLowerCase()} onClick={() => setEditCount(key)}>Ред.</button>}
+              {canManage && key && amount != null && <RowIconButton icon="edit"
+                label={'Изменить ' + label.toLowerCase()} onClick={() => setEditCount(key)} />}
             </dd>
           </div>)}
         </dl>
@@ -253,8 +254,8 @@ function CashShiftDetails({ shift, canManage }: { shift: CashShift; canManage: b
             <p>{entry.deletedByName ? 'Удалена · ' + entry.deletedByName : 'Удалена'}</p>
             <time dateTime={entry.deletedAt}>{financeDateTime(entry.deletedAt)}</time>
           </div> : canManage && entry.editable && <div className="flex gap-3">
-            <button type="button" className="text-primary hover:underline"
-              onClick={() => setOperation({ ...entry, kind: entry.kind === 'transfer' ? 'collection' : entry.kind as 'income' | 'expense' })}>Ред.</button>
+            <RowIconButton icon="edit" label="Редактировать транзакцию"
+              onClick={() => setOperation({ ...entry, kind: entry.kind === 'transfer' ? 'collection' : entry.kind as 'income' | 'expense' })} />
             <button type="button" className="text-text-muted hover:text-danger" aria-label="Удалить транзакцию"
               onClick={() => { remove.reset(); setDeleteOperation(entry); }}>×</button>
           </div>,

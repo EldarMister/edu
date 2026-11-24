@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { RowIconButton } from '../../components/RowIconButton';
 import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Select } from '@/components/Select';
@@ -304,11 +305,13 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts' | 'ca
             type: { value: entryLabel(entry) }, actor: { value: entry.actorName || '—' },
           },
           action: <div className="flex items-center justify-end gap-2">
-            <button type="button" className="text-primary hover:underline"
-              aria-label={(entry.detailsEditable || entry.editable ? 'Редактировать транзакцию ' : 'Открыть транзакцию ') + financeDateTime(entry.occurredAt)}
-              onClick={() => openEditor({ type: 'financeTransaction', id: entry.id })}>
-              {entry.detailsEditable || entry.editable ? 'Ред.' : 'Открыть'}
-            </button>
+            {entry.detailsEditable || entry.editable ? (
+              <RowIconButton icon="edit" label={'Редактировать транзакцию ' + financeDateTime(entry.occurredAt)}
+                onClick={() => openEditor({ type: 'financeTransaction', id: entry.id })} />
+            ) : (
+              <button type="button" className="text-primary hover:underline" aria-label={'Открыть транзакцию ' + financeDateTime(entry.occurredAt)}
+                onClick={() => openEditor({ type: 'financeTransaction', id: entry.id })}>Открыть</button>
+            )}
             {entry.reversible && <FinanceRowMenu label={entry.note || financeDateTime(entry.occurredAt)}
               action="Удалить" onAction={() => setReversingEntryId(entry.id)} />}
           </div>,
@@ -329,7 +332,7 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts' | 'ca
 }
 
 function EditButton({ name, onClick }: { name: string; onClick: () => void }) {
-  return <button type="button" className="text-primary" aria-label={'Редактировать ' + name} onClick={onClick}>Ред.</button>;
+  return <RowIconButton icon="edit" label={'Редактировать ' + name} onClick={onClick} />;
 }
 
 function RegisterFilter({ active, children }: { active: boolean; children: ReactNode }) {

@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { RowIconButton } from '../../components/RowIconButton';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { apiError } from '@/lib/api';
@@ -83,8 +84,7 @@ export function CategoryDirectory({ categories, employees, positions, search, ki
             onClick={() => setCategoryVisibility.mutate({ id: category.id, showOnPos: !category.showOnPos })}><span /></button> },
           access: { value: access, display: <span className="text-text-secondary">{access}</span> },
         }, action: edit && <div className="flex items-center justify-end gap-2">
-          <button type="button" className="text-primary" aria-label={'Редактировать ' + category.name}
-            onClick={() => edit(category.id)}>Ред.</button>
+          <RowIconButton icon="edit" label={'Редактировать ' + category.name} onClick={() => edit(category.id)} />
           <FinanceRowMenu label={category.name} action="Удалить" onAction={() => setRemoving(category)} />
         </div> };
       })} empty="Категории транзакций не найдены" />

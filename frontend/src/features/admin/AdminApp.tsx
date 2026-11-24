@@ -259,7 +259,7 @@ export function AdminApp() {
   const menuView = (MENU_NAV.some((item) => item.key === route.get('view')) ? route.get('view') : 'goods') as MenuView;
   const financeView = financeNav.find(({ key }) => key === route.get('view'))?.key ?? financeNav[0]?.key;
   const staffView = personnelNav.find(({ key }) => key === route.get('view'))?.key ?? 'employees';
-  const staffTab = route.get('view') === 'waiter-report' ? 'waiter-orders' : 'directory';
+  const staffTab = route.get('view') === 'waiter-report' ? 'waiter-orders' : 'employees';
   const settingsTab = SETTINGS_NAV.find(({ key }) => key === route.get('view')) ?? SETTINGS_NAV[0];
   const settingsView = settingsTab.key;
   const posterWorkspace = ['menu', 'warehouse', 'finance', 'staff'].includes(section) || (section === 'settings' && settingsView === 'taxes');

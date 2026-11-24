@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { ColumnButton } from '../../components/ColumnControl';
+import { RowIconButton } from '../../components/RowIconButton';
 import { EditorPage, useEditorDirty } from './EditorPage';
 import { DocumentProductPicker } from './DocumentProductPicker';
 import { ItemCard } from './ItemCard';
@@ -138,9 +139,8 @@ export function ProcessingPage({
                     : <td key={column}>{productSummary(d[column])}</td>)}
                   <td>
                     <div className="poster-row-actions">
-                      <button type="button" onClick={() => onOpen(d.id)}>
-                        {d.status === 'draft' ? 'Ред.' : 'Открыть'}
-                      </button>
+                      {d.status === 'draft' ? <RowIconButton icon="edit" label="Редактировать переработку" onClick={() => onOpen(d.id)} />
+                        : <button type="button" onClick={() => onOpen(d.id)}>Открыть</button>}
                       {canProduce && <button type="button" onClick={() => onCopy(d.id)}>Копировать</button>}
                     </div>
                   </td>

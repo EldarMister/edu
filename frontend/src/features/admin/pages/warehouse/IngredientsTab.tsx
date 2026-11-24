@@ -22,6 +22,7 @@ import { IngredientImportButton } from './IngredientImportButton';
 import { PreparationCost } from './PreparationCost';
 import { IconExport, IconPrinter } from '../../components/icons';
 import { ColumnButton } from '../../components/ColumnControl';
+import { RowIconButton } from '../../components/RowIconButton';
 
 const balanceColumns = {
   name: { label: 'Название', width: 210 },
@@ -206,30 +207,30 @@ export function IngredientsTab({
         : <CatalogueUsage id={item.id} prepared={preparedCatalogue} />}
     </div>
   );
+  const canEditItem = can(preparedCatalogue ? 'actions.warehouseRecipes' : 'actions.warehouseSettings');
   const actions = (item: Ingredient) => (
     <div className={`poster-row-actions ${catalogue ? 'justify-end' : 'poster-balance-actions'}`}>
-      {catalogue && (
+      {preparedCatalogue ? (
         <button type="button"
-          aria-label={`${preparedCatalogue ? 'Состав' : 'Детали'}: ${item.name}`}
-          aria-expanded={catalogueDetailsOpen.get(item.id) === (preparedCatalogue ? 'composition' : 'usage')}
-          onClick={() => toggleCatalogue(item.id, preparedCatalogue ? 'composition' : 'usage')}>
-          {preparedCatalogue ? 'Состав' : 'Детали'}
+          aria-label={`Состав: ${item.name}`}
+          aria-expanded={catalogueDetailsOpen.get(item.id) === 'composition'}
+          onClick={() => toggleCatalogue(item.id, 'composition')}>
+          Состав
         </button>
+      ) : catalogue && (
+        <RowIconButton icon="details" label={`Детали: ${item.name}`}
+          expanded={catalogueDetailsOpen.get(item.id) === 'usage'} onClick={() => toggleCatalogue(item.id, 'usage')} />
       )}
       {!catalogue && can('actions.warehouseReports') && costs && (
         <button type="button" onClick={() => onHistory(item.id)}>
           История
         </button>
       )}
-      <button type="button" onClick={() => onOpen(item)}>
-        {preparedCatalogue
-          ? can('actions.warehouseRecipes')
-            ? catalogue ? 'Ред.' : 'Изменить'
-            : 'Открыть'
-          : can('actions.warehouseSettings')
-            ? catalogue ? 'Ред.' : 'Изменить'
-            : 'Открыть'}
-      </button>
+      {catalogue && canEditItem ? (
+        <RowIconButton icon="edit" label={`Редактировать: ${item.name}`} onClick={() => onOpen(item)} />
+      ) : (
+        <button type="button" onClick={() => onOpen(item)}>{canEditItem ? 'Изменить' : 'Открыть'}</button>
+      )}
       {preparedCatalogue && can('actions.warehouseRecipes') && <button type="button" title="Копировать полуфабрикат"
         onClick={() => openEditor({ type: 'preparation', id: item.id, action: 'copy' })}>Копировать</button>}
       {production &&

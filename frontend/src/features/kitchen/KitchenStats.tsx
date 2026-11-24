@@ -1,4 +1,5 @@
 import { DatePicker } from '@/components/DatePicker';
+import { RowIconButton } from '@/features/admin/components/RowIconButton';
 import { useMemo, useState } from 'react';
 import type { PrepStation } from '@/types';
 import { Spinner } from '@/components/Spinner';
@@ -192,13 +193,7 @@ export function KitchenStats({ station = 'kitchen' }: { station?: PrepStation })
           <section className="rounded-xl border border-border bg-white p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h3 className="text-base font-semibold text-text-primary">Приготовлено по часам</h3>
-              <button
-                type="button"
-                onClick={() => setHourlyOpen(true)}
-                className="text-sm font-medium text-primary hover:underline"
-              >
-                Смотреть детали
-              </button>
+              <RowIconButton icon="details" label="Посмотреть детали по часам" onClick={() => setHourlyOpen(true)} />
             </div>
             <HourlyChart data={d.hourly} height={200} />
           </section>

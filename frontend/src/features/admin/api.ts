@@ -909,15 +909,6 @@ export function useShiftHistoryActions() {
   return { update, close };
 }
 
-export function useSetCashHanded() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (b: { waiterId: string; date?: string; cashHanded: number }) =>
-      api.post('/admin/staff/cash-handed', b).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'staff', 'shift-report'] }),
-  });
-}
-
 const staffListKey = ['admin', 'staff', 'list'];
 
 export function useStaff(role: string, search: string) {

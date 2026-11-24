@@ -1,6 +1,6 @@
 // Минимальные line-иконки (по духу референсов — без декоративности).
-type P = { className?: string };
-const S = ({ children, className }: P & { children: React.ReactNode }) => (
+type P = { className?: string; 'aria-hidden'?: React.AriaAttributes['aria-hidden'] };
+const S = ({ children, className, 'aria-hidden': ariaHidden }: P & { children: React.ReactNode }) => (
   <svg
     width="20"
     height="20"
@@ -11,6 +11,7 @@ const S = ({ children, className }: P & { children: React.ReactNode }) => (
     strokeLinecap="round"
     strokeLinejoin="round"
     className={className}
+    aria-hidden={ariaHidden}
   >
     {children}
   </svg>
