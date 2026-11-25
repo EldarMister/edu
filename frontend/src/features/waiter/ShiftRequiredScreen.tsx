@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
+import type { ShiftRequestStatus } from '@/features/settings/work-shift-request';
 
 type Phase = 'idle' | 'loading' | 'success';
 
@@ -28,9 +29,10 @@ const TEXT: Record<Phase, { title: string; subtitle: string }> = {
  * success — галочка в синем круге, затем плавный переход в раздел.
  * onBusyChange(true) — запуск пошёл: родитель удерживает оверлей до конца анимации.
  */
-export function ShiftRequiredScreen({ onBusyChange, startShift, idleSubtitle = TEXT.idle.subtitle }: {
+export function ShiftRequiredScreen({ onBusyChange, startShift, request, idleSubtitle = TEXT.idle.subtitle }: {
   onBusyChange: (busy: boolean) => void;
-  startShift: () => Promise<unknown>;
+  startShift: () => Promise<object | null>;
+  request?: ShiftRequestStatus;
   idleSubtitle?: string;
 }) {
   const push = useNotifications((s) => s.push);
@@ -64,7 +66,11 @@ export function ShiftRequiredScreen({ onBusyChange, startShift, idleSubtitle = T
     setPhase('loading');
     const startedAt = Date.now();
     try {
-      await startShift();
+      if (!await startShift()) {
+        setPhase('idle');
+        onBusyChange(false);
+        return;
+      }
       const remaining = Math.max(MIN_LOADING_MS - (Date.now() - startedAt), 0);
       successTimerRef.current = setTimeout(() => {
         successTimerRef.current = null;
@@ -77,8 +83,10 @@ export function ShiftRequiredScreen({ onBusyChange, startShift, idleSubtitle = T
     }
   }
 
-  const { title } = TEXT[phase];
-  const subtitle = phase === 'idle' ? idleSubtitle : TEXT[phase].subtitle;
+  const waiting = phase === 'idle' && request === 'pending';
+  const title = waiting ? 'Ожидается подтверждение' : TEXT[phase].title;
+  const subtitle = waiting ? 'Запрос отправлен ответственному за смены.' : phase !== 'idle' ? TEXT[phase].subtitle
+    : request === 'rejected' ? 'Запрос отклонён. Можно отправить его снова.' : idleSubtitle;
 
   return (
     <div
@@ -146,12 +154,12 @@ export function ShiftRequiredScreen({ onBusyChange, startShift, idleSubtitle = T
           )}
         </div>
 
-        <h2 className="mt-8 text-center text-[22px] font-bold text-text-primary">{title}</h2>
+        <h2 aria-live="polite" className="mt-8 text-center text-[22px] font-bold text-text-primary">{title}</h2>
         {subtitle && <p className="mt-2 text-center text-[15px] leading-6 text-text-muted">{subtitle}</p>}
       </div>
 
       <div className="mx-auto w-full max-w-sm shrink-0 px-4 pb-6" style={{ minHeight: 48 + 24 }}>
-        {phase === 'idle' && (
+        {phase === 'idle' && !waiting && (
           <button className="btn-primary btn-lg w-full font-semibold" onClick={onStart}>
             Начать смену
           </button>

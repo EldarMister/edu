@@ -26,6 +26,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 interface Form {
   taxesEnabled: boolean;
   roundOrderTotal: boolean;
+  workShiftApprovalRequired: boolean;
   waiterOrderPermissions: WaiterOrderPermissions;
   cafeName: string;
   address: string;
@@ -70,6 +71,7 @@ function CafeSettings() {
     cafeName: data.cafeName,
     taxesEnabled: data.taxesEnabled ?? false,
     roundOrderTotal: data.roundOrderTotal ?? false,
+    workShiftApprovalRequired: data.workShiftApprovalRequired ?? false,
     address: data.address,
     phone: data.phone,
     phone2: data.phone2,
@@ -249,6 +251,14 @@ function CafeSettings() {
               />
             </Field>
             {isOwner && <CashShiftSettings />}
+            <div className="space-y-1 py-2">
+              <label className="flex items-center gap-2 font-medium">
+                <input type="checkbox" checked={form.workShiftApprovalRequired}
+                  onChange={(event) => set('workShiftApprovalRequired', event.target.checked)} />
+                Требовать подтверждения начала рабочей смены
+              </label>
+              <p className="text-xs text-text-muted">Владелец или сотрудник с правом управления сменами подтверждает запрос в разделе «Персонал → Смены».</p>
+            </div>
 
             {/* Гео-проверка QR-заказа — рядом со статусом принтера */}
             <div className="pt-2">

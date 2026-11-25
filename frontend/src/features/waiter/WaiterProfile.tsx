@@ -9,12 +9,14 @@ import { timeHM } from '@/lib/format';
 import { beep } from '@/lib/sound';
 import { useT } from '@/lib/i18n';
 import type { PushStatus } from '@/lib/push';
+import type { ShiftRequestStatus } from '@/features/settings/work-shift-request';
 
 export function WaiterProfile({
   shift,
   trackShift,
   shiftLoading,
   shiftPending,
+  shiftRequest,
   onStartShift,
   onEndShift,
   pushStatus,
@@ -25,6 +27,7 @@ export function WaiterProfile({
   trackShift: boolean;
   shiftLoading: boolean;
   shiftPending: boolean;
+  shiftRequest?: ShiftRequestStatus;
   onStartShift: () => void;
   onEndShift: () => void;
   pushStatus: PushStatus;
@@ -63,8 +66,10 @@ export function WaiterProfile({
         </svg>
       </button>
 
-      {trackShift && <ShiftCard startedAt={shiftActive ? shift.startedAt : undefined}
-        busy={shiftLoading || shiftPending} onAction={shiftActive ? onEndShift : onStartShift} showElapsed />}
+      {trackShift && (!shiftActive && shiftRequest === 'pending'
+        ? <p className="card p-5" role="status">Ожидается подтверждение начала смены</p>
+        : <ShiftCard startedAt={shiftActive ? shift.startedAt : undefined}
+          busy={shiftLoading || shiftPending} onAction={shiftActive ? onEndShift : onStartShift} showElapsed />)}
 
       <div className="card p-5">
         <div className="flex items-center justify-between gap-3">

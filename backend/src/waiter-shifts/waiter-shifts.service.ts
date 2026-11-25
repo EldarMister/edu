@@ -1,4 +1,5 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { OrderStatus, Prisma, Role, WaiterShift, WaiterShiftStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../realtime/events.gateway';
@@ -6,6 +7,7 @@ import { SERVER_EVENTS } from '../realtime/events';
 import { lockFinance } from '../finance/finance-ledger';
 import { resolveUserPermissions } from '../common/permissions';
 import { recordWorkShiftChange } from './work-shift-history';
+import type { AuthUser } from '../common/decorators/current-user.decorator';
 
 export const CLOSED_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.paid,
@@ -87,17 +89,71 @@ export class WaiterShiftsService {
     return shift;
   }
 
-  startStaff(employeeId: string) {
-    return this.start(employeeId, WORK_SHIFT_ROLES);
+  async requestState(employeeId: string) {
+    const request = await this.prisma.workShiftRequest.findUnique({ where: { userId: employeeId },
+      select: { cafeId: true, requestedAt: true, rejectedAt: true } });
+    if (!request || !await this.approvalRequired(this.prisma, request.cafeId)) return null;
+    return { requestedAt: request.requestedAt, status: request.rejectedAt ? 'rejected' : 'pending' };
+  }
+
+  async manageList(cafeId: string) {
+    const staff = await this.prisma.user.findMany({
+      where: { cafeId, role: { in: WORK_SHIFT_ROLES }, OR: [
+        { isActive: true }, { waiterShifts: { some: { status: WaiterShiftStatus.active } } },
+      ] },
+      include: { position: true, workShiftRequest: true, waiterShifts: {
+        where: { status: WaiterShiftStatus.active }, take: 1, orderBy: { startedAt: 'desc' },
+      } },
+      orderBy: { name: 'asc' },
+    });
+    return staff.flatMap((employee) => {
+      const active = employee.waiterShifts.at(0);
+      if (!active && resolveUserPermissions(employee).workShiftRequired === false) return [];
+      const request = !active && employee.isActive && employee.workShiftRequest;
+      return [{
+        id: employee.id, name: employee.name, role: employee.role, position: employee.position?.name ?? null,
+        active: active ? { id: active.id, startedAt: active.startedAt } : null,
+        request: request && !request.rejectedAt ? { id: request.requestId, requestedAt: request.requestedAt } : null,
+      }];
+    });
+  }
+
+  startStaff(employeeId: string, allowPending = false) {
+    return this.start(employeeId, WORK_SHIFT_ROLES, { allowPending });
   }
 
   endStaff(employeeId: string) {
     return this.end(employeeId, WORK_SHIFT_ROLES);
   }
 
-  async start(waiterId: string, allowedRoles: Role[] = [Role.WAITER]) {
+  startManaged(actor: AuthUser, employeeId: string, requestId?: string) {
+    if (actor.id === employeeId) throw new ForbiddenException('Свою смену начните в личном кабинете');
+    return this.start(employeeId, WORK_SHIFT_ROLES, { actor, requestId });
+  }
+
+  async rejectRequest(actor: AuthUser, employeeId: string, requestId: string) {
+    if (actor.id === employeeId) throw new ForbiddenException('Свой запрос обрабатывает другой ответственный');
+    const cafeId = actor.cafeId;
+    if (!cafeId) throw new ForbiddenException('Заведение не назначено');
+    await this.prisma.$transaction(async (tx) => {
+      await lockFinance(tx, cafeId);
+      const result = await tx.workShiftRequest.updateMany({
+        where: { cafeId, userId: employeeId, requestId, rejectedAt: null }, data: { rejectedAt: new Date() },
+      });
+      if (!result.count) throw new ConflictException('Запрос уже обработан. Обновите список');
+      await this.auditStart(tx, actor, cafeId, requestId, employeeId, 'Запрос на начало смены отклонён');
+    });
+    this.emitRequestUpdate(employeeId, cafeId);
+    return { ok: true };
+  }
+
+  async start(waiterId: string, allowedRoles: Role[] = [Role.WAITER],
+    options: { allowPending?: boolean; actor?: AuthUser; requestId?: string } = {}) {
     const employee = await this.prisma.user.findUnique({ where: { id: waiterId }, select: { cafeId: true } });
-    if (!employee) throw new ForbiddenException('Сотрудник не найден или отключён');
+    const { actor, requestId } = options;
+    if (!employee || (actor && (!actor.cafeId || actor.cafeId !== employee.cafeId))) {
+      throw new ForbiddenException('Сотрудник не найден или отключён');
+    }
     const shift = await this.prisma.$transaction(async (tx) => {
       if (employee.cafeId) await lockFinance(tx, employee.cafeId);
       // Recheck after the same lock used by staff reassignment and deactivation.
@@ -111,12 +167,49 @@ export class WaiterShiftsService {
       }
       const active = await this.current(waiterId, tx);
       if (active) throw new BadRequestException('Смена уже активна.');
-      return tx.waiterShift.create({ data: { cafeId: employee.cafeId, waiterId, status: WaiterShiftStatus.active } });
+      const cafeId = employee.cafeId;
+      if (!actor && cafeId && await this.approvalRequired(tx, cafeId)) {
+        const request = await tx.workShiftRequest.findUnique({ where: { userId: waiterId } });
+        if (!request || request.rejectedAt) {
+          const renewal = { requestId: randomUUID(), requestedAt: new Date(), rejectedAt: null };
+          await tx.workShiftRequest.upsert({ where: { userId: waiterId },
+            create: { cafeId, userId: waiterId, ...renewal }, update: renewal });
+        }
+        return null;
+      }
+      if (requestId && !await tx.workShiftRequest.findFirst({
+        where: { cafeId: cafeId!, userId: waiterId, requestId, rejectedAt: null }, select: { userId: true },
+      })) throw new ConflictException('Запрос уже обработан. Обновите список');
+      if (cafeId) await tx.workShiftRequest.deleteMany({ where: { cafeId, userId: waiterId } });
+      const created = await tx.waiterShift.create({ data: { cafeId, waiterId, status: WaiterShiftStatus.active } });
+      if (actor && cafeId) await this.auditStart(tx, actor, cafeId, created.id, waiterId,
+        requestId ? 'Начало рабочей смены подтверждено' : 'Рабочая смена открыта администратором');
+      return created;
     });
 
+    if (!shift) {
+      this.emitRequestUpdate(waiterId, employee.cafeId!);
+      if (!options.allowPending) throw new ConflictException('Запрос отправлен. Ожидайте подтверждения начала смены.');
+      return null;
+    }
     this.events.emitToWaiter(waiterId, SERVER_EVENTS.WAITER_SHIFT_STARTED, shift);
     this.events.emitToAdmin(SERVER_EVENTS.WAITER_SHIFT_STARTED, shift);
     return workShiftView(shift);
+  }
+
+  private async approvalRequired(db: PrismaClientLike, cafeId: string) {
+    return (await db.settings.findUnique({ where: { cafeId }, select: { workShiftApprovalRequired: true } }))?.workShiftApprovalRequired === true;
+  }
+
+  private emitRequestUpdate(userId: string, cafeId: string) {
+    const payload = { cafeId, userId };
+    this.events.emitToWaiter(userId, SERVER_EVENTS.WORK_SHIFT_REQUEST_UPDATED, payload);
+    this.events.emitToAdmin(SERVER_EVENTS.WORK_SHIFT_REQUEST_UPDATED, payload);
+  }
+
+  private auditStart(tx: Prisma.TransactionClient, actor: AuthUser, cafeId: string, id: string, employeeId: string, description: string) {
+    return tx.auditLog.create({ data: { cafeId, userId: actor.id, userName: actor.name, userRole: actor.identityRole ?? actor.role,
+      actionType: 'STAFF_SHIFT_CHANGED', entityType: 'STAFF_SHIFT', entityId: id, description, metadata: { employeeId } } });
   }
 
   async end(waiterId: string, allowedRoles: Role[] = [Role.WAITER]) {

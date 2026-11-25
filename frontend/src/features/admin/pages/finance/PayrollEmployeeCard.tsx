@@ -34,7 +34,7 @@ export function PayrollEmployeeCard({ employee, month, range, entries, accounts,
       </div>
       <dl className={`grid gap-px overflow-hidden rounded-lg border border-border bg-border ${range ? 'max-w-sm grid-cols-1' : 'grid-cols-2 sm:grid-cols-4'}`}>
         {[
-          ['Рассчитано', employee.estimate, 'По ставкам должности'], ['Начислено', employee.accrued, 'Подтверждено, включая доплаты'],
+          ['Рассчитано', employee.estimate, 'По действовавшим ставкам'], ['Начислено', employee.accrued, 'Подтверждено, включая доплаты'],
           ['Выплачено', employee.paid, 'Списано со счетов'], ['Остаток', employee.due, 'Ещё нужно выплатить'],
         ].slice(0, range ? 1 : 4).map(([label, amount, hint]) => <div key={String(label)} className="bg-white p-4">
           <dt className="text-sm text-text-muted">{label}</dt><dd className="mt-2 text-xl font-semibold tabular-nums">{financeMoney(Number(amount))}</dd>
@@ -95,7 +95,7 @@ function PayrollEvidence({ userId, period }: { userId: string; period: PayrollPe
     <PayrollTable headers={['Период', 'Должность', 'За час', 'За смену', 'За месяц', 'Личный %', 'Сменный %']}
       amounts={[2, 3, 4, 5, 6]} rows={employee.rateIntervals.map((interval) => ({
         key: interval.from,
-        cells: [shortDay(interval.from) + ' — ' + shortDay(interval.to), interval.position ?? '—',
+        cells: [shortDay(interval.from) + ' — ' + shortDay(interval.to), interval.personal ? 'Личные ставки' : interval.position ?? '—',
           financeMoney(interval.effectiveDay ? interval.rates.hourly : null), financeMoney(interval.effectiveDay ? interval.rates.perShift : null),
           financeMoney(interval.effectiveDay ? interval.rates.monthly : null),
           interval.effectiveDay ? number.format(interval.rates.personalPercent) + '%' : '—',

@@ -2,6 +2,9 @@ import { Equals, IsBoolean, IsIn, IsNumber, IsObject, IsOptional, IsString, Matc
 import { WaiterOrderPermissions } from '../orders/order-policy';
 
 export class UpdateSettingsDto {
+  @IsOptional() @IsBoolean()
+  workShiftApprovalRequired?: boolean;
+
   @ValidateIf((_object, value) => value !== undefined) @IsBoolean()
   taxesEnabled?: boolean;
 

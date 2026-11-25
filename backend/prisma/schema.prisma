@@ -233,6 +233,8 @@ model Cafe {
   financeEntries FinanceEntry[]
   salaryAccruals SalaryAccrual[]
   employeeSalaryRates EmployeeSalaryRate[]
+  employeeSalaryOverrides EmployeeSalaryOverride[]
+  workShiftRequests WorkShiftRequest[]
   warehouseSuppliers WarehouseSupplier[]
   warehousePackages WarehousePackage[]
   ingredientCategories IngredientCategory[]
@@ -417,6 +419,7 @@ model User {
   orders               Order[]               @relation("WaiterOrders")
   openedPayrollOrders  Order[]               @relation("PayrollOrderOpener")
   waiterShifts         WaiterShift[]         @relation("WaiterShifts")
+  workShiftRequest     WorkShiftRequest?
   payments             Payment[]
   kitchenEvents        KitchenEvent[]
   penalties            PenaltyReward[]       @relation("PenaltyTarget")
@@ -486,6 +489,22 @@ model EmployeeSalaryRate {
 
   @@id([cafeId, userId, effectiveDay])
   @@map("employee_salary_rates")
+}
+
+model EmployeeSalaryOverride {
+  cafeId          String   @map("cafe_id")
+  userId          String   @map("user_id")
+  effectiveDay    String   @map("effective_day")
+  usePosition     Boolean  @map("use_position")
+  hourly          Decimal  @default(0) @db.Decimal(14, 2)
+  perShift        Decimal  @default(0) @map("per_shift") @db.Decimal(14, 2)
+  monthly         Decimal  @default(0) @db.Decimal(14, 2)
+  personalPercent Decimal  @default(0) @map("personal_percent") @db.Decimal(5, 2)
+  shiftPercent    Decimal  @default(0) @map("shift_percent") @db.Decimal(5, 2)
+  cafe            Cafe     @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@id([cafeId, userId, effectiveDay])
+  @@map("employee_salary_overrides")
 }
 
 model Hall {
@@ -862,6 +881,19 @@ model CashShiftDeletedOperation {
   @@map("cash_shift_deleted_operations")
 }
 
+model WorkShiftRequest {
+  userId      String    @id @map("user_id")
+  cafeId      String    @map("cafe_id")
+  requestId   String    @default(uuid()) @map("request_id")
+  requestedAt DateTime  @default(now()) @map("requested_at")
+  rejectedAt  DateTime? @map("rejected_at")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cafe        Cafe      @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId])
+  @@map("work_shift_requests")
+}
+
 model WaiterShift {
   cafeId    String?           @map("cafe_id")
   id        String            @id @default(uuid())
@@ -1188,6 +1220,7 @@ model Settings {
   allowNegativeIngredientStock Boolean @default(false) @map("allow_negative_ingredient_stock")
   expenseWriteoffReasons WarehouseWriteoffReason[] @default([]) @map("expense_writeoff_reasons")
   archivedBuiltinWriteoffReasons WarehouseWriteoffReason[] @default([]) @map("archived_builtin_writeoff_reasons")
+  workShiftApprovalRequired Boolean @default(false) @map("work_shift_approval_required")
   warehouseProductionEnabled Boolean @default(false) @map("warehouse_production_enabled")
   warehouseProcessingEnabled Boolean @default(false) @map("warehouse_processing_enabled")
 

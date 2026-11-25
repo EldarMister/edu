@@ -1,4 +1,4 @@
-import { Controller, Get, Post } from '@nestjs/common';
+import { Controller, Get, Post, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -17,8 +17,13 @@ export class StaffShiftsController {
   }
 
   @Post('start')
-  start(@CurrentUser() user: AuthUser) {
-    return this.shifts.startStaff(user.id);
+  start(@CurrentUser() user: AuthUser, @Query('awaitApproval') awaitApproval?: string) {
+    return this.shifts.startStaff(user.id, awaitApproval === 'true');
+  }
+
+  @Get('start-request')
+  startRequest(@CurrentUser() user: AuthUser) {
+    return this.shifts.requestState(user.id);
   }
 
   @Post('end')

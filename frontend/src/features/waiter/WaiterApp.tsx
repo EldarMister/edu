@@ -74,6 +74,7 @@ import { canSplitOrder, SplitOrderModal } from './SplitOrderModal';
 import { ReceiptPrintSheet } from './ReceiptPrintSheet';
 import { ShiftSummaryModal } from './ShiftSummaryModal';
 import { ShiftRequiredScreen } from './ShiftRequiredScreen';
+import { useShiftStartRequest } from '@/features/settings/work-shift-request';
 import { CancelOrderModal } from './CancelOrderModal';
 import { InsufficientPermissionsModal } from './InsufficientPermissionsModal';
 import {
@@ -130,6 +131,7 @@ export function WaiterApp() {
   const ordersQ = useActiveOrders();
   const trackShift = user?.permissions?.workShiftRequired !== false;
   const currentShiftQ = useCurrentShift(trackShift);
+  const shiftRequest = useShiftStartRequest(trackShift && currentShiftQ.isSuccess && !currentShiftQ.data);
 
   const cart = useCart();
   const create = useCreateOrder();
@@ -1042,10 +1044,12 @@ export function WaiterApp() {
       trackShift={trackShift}
       shiftLoading={currentShiftQ.isFetching}
       shiftPending={shiftPending}
+      shiftRequest={shiftRequest.data?.status}
       onStartShift={() =>
         runAction(async () => {
-          await startShift.mutateAsync();
-          push({ message: t('Смена начата'), type: 'success', at: new Date().toISOString() });
+          const started = await startShift.mutateAsync();
+          if (!started) await shiftRequest.refetch();
+          push({ message: started ? t('Смена начата') : 'Запрос на начало смены отправлен', type: 'success', at: new Date().toISOString() });
         })
       }
       onEndShift={() =>
@@ -1167,7 +1171,11 @@ export function WaiterApp() {
       {/* Оверлей «Смена не начата» поверх контента вкладок (нижняя навигация остаётся видна) */}
       {showShiftGate && (
         <div className="absolute inset-0 z-30">
-          <ShiftRequiredScreen onBusyChange={setShiftBusy} startShift={() => startShift.mutateAsync()} />
+          <ShiftRequiredScreen onBusyChange={setShiftBusy} request={shiftRequest.data?.status} startShift={async () => {
+            const started = await startShift.mutateAsync();
+            if (!started) await shiftRequest.refetch();
+            return started;
+          }} />
         </div>
       )}
       </div>

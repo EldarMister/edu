@@ -311,6 +311,40 @@ test('PostgreSQL: work time for every position feeds payroll, reports and safe l
         assert.equal(await shifts.currentWithStats(foreign.id), null);
       });
 
+      await t.test('shift requests are separate from work time and only the latest request can be approved', async () => {
+        await db.settings.upsert({ where: { cafeId: cafe.id }, create: { cafeId: cafe.id, workShiftApprovalRequired: true },
+          update: { workShiftApprovalRequired: true } });
+        try {
+          assert.equal(await shifts.startStaff(waiter.id, true), null);
+          const findRequest = async () => (await shifts.manageList(cafe.id)).find(({ id }) => id === waiter.id).request;
+          const first = await findRequest();
+          assert.ok(first.id);
+          await assert.rejects(() => shifts.start(waiter.id), /Ожидайте подтверждения/);
+          assert.equal((await findRequest()).id, first.id);
+          assert.equal(await shifts.current(waiter.id), null);
+          await shifts.rejectRequest(ownerActor, waiter.id, first.id);
+          assert.equal((await shifts.requestState(waiter.id)).status, 'rejected');
+          await shifts.startStaff(waiter.id, true);
+          const latest = await findRequest();
+          assert.notEqual(latest.id, first.id);
+          await assert.rejects(() => shifts.startManaged(ownerActor, waiter.id, first.id), { status: 409 });
+          const [opened, duplicate] = await Promise.allSettled([
+            shifts.startManaged(ownerActor, waiter.id, latest.id), shifts.startManaged(ownerActor, waiter.id, latest.id),
+          ]);
+          const successful = [opened, duplicate].filter(({ status }) => status === 'fulfilled');
+          assert.equal(successful.length, 1);
+          const active = successful[0].value;
+          assert.ok(active.startedAt >= latest.requestedAt);
+          assert.equal(await shifts.requestState(waiter.id), null);
+          await staff.closeShiftHistory(active.id, ownerActor);
+          const manual = await shifts.startManaged(ownerActor, waiter.id);
+          assert.equal(manual.status, 'active');
+          await staff.closeShiftHistory(manual.id, ownerActor);
+        } finally {
+          await db.settings.update({ where: { cafeId: cafe.id }, data: { workShiftApprovalRequired: false } });
+        }
+      });
+
       await t.test('personal sales follow the Bishkek payment day and remain visible after a position change', async () => {
         await db.order.create({ data: { tableId: table.id, waiterId: waiter.id, orderNumber: randomUUID(),
           status: 'paid', finalAmount: 42, createdAt: new Date('2026-01-14T23:55:00+06:00'), closedAt: new Date('2026-01-15T00:05:00+06:00') } });
@@ -334,6 +368,7 @@ test('PostgreSQL: work time for every position feeds payroll, reports and safe l
     await db.table.deleteMany({ where: { cafeId: { in: ids } } });
     await db.hall.deleteMany({ where: { cafeId: { in: ids } } });
     await db.user.deleteMany({ where: { cafeId: { in: ids } } });
+    await db.settings.deleteMany({ where: { cafeId: { in: ids } } });
     await db.cafe.deleteMany({ where: { id: { in: ids } } });
     await db.$disconnect();
   }

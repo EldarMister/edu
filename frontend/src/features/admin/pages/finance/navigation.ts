@@ -11,6 +11,7 @@ export const FINANCE_NAV = [
 
 export const PERSONNEL_NAV = [
   { key: 'employees', label: 'Сотрудники' },
+  { key: 'shifts', label: 'Смены' },
   { key: 'positions', label: 'Должности' },
   { key: 'stations', label: 'Станции' },
 ] as const;

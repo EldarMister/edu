@@ -12,6 +12,7 @@ export function resolveQrSrc(value: string | null | undefined): string | null {
 }
 
 export interface Settings extends Partial<ReceiptPrintSettings> {
+  workShiftApprovalRequired?: boolean;
   taxesEnabled?: boolean;
   roundOrderTotal?: boolean;
   telegramStockAlertsEnabled?: boolean;

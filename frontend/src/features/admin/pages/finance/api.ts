@@ -335,7 +335,7 @@ export interface PayrollStaffRow {
   rates: PositionSalary;
   ratesByMonth?: { month: string; rates: PositionSalary }[];
   rateIntervals: {
-    from: string; to: string; effectiveDay: string | null; position: string | null; rates: PositionSalary;
+    from: string; to: string; effectiveDay: string | null; position: string | null; personal?: boolean; rates: PositionSalary;
     categoryRates: PositionCategoryRate[]; hours: number; shifts: number; days: number;
     sales: { orderId: string; number: string; closedAt: string; kind: 'personalPercent' | 'shiftPercent';
       openerRecorded: boolean; categoryId: string | null; categoryName?: string; base: number; percent: number; amount: number }[];

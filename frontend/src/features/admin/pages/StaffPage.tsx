@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { Role } from '@/types';
 import { useAssignableStaffPositions } from './positions-api';
 import { positionAccessSummary } from './position-permissions';
+import { EmployeeSalaryEditor } from './EmployeeSalaryEditor';
 import { financeDateTime, financeDay, financeLocalTime } from './finance/finance-format';
 import { useFinanceAccess } from './finance/api';
 import { Link } from 'react-router-dom';
@@ -1007,6 +1008,7 @@ function StaffEditor({
   onClose: () => void;
 }) {
   const isEdit = !!member;
+  const [salaryOpen, setSalaryOpen] = useState(false);
   const { create, update } = useStaffMutations();
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState(member?.name ?? '');
@@ -1091,8 +1093,9 @@ function StaffEditor({
   }
 
   return (
-    <Modal
+    <><Modal
       open
+      suspended={salaryOpen}
       onClose={close}
       title={isEdit ? 'Карточка сотрудника' : 'Добавление сотрудника'}
       panelClassName="max-w-xl"
@@ -1129,7 +1132,9 @@ function StaffEditor({
               }}
               options={member?.role === 'OWNER' ? [{ value: 'owner', label: 'Владелец' }] : positionOptions}
             />
-            <p className="mt-2 text-xs text-text-muted">Права доступа и ставки зарплаты задаются в должности и применяются ко всем её сотрудникам.</p>
+            <p className="mt-2 text-xs text-text-muted">Должность определяет права доступа и ставки по умолчанию.</p>
+            {isOwner && member && member.role !== 'OWNER' && <button type="button" className="mt-2 mr-4 text-sm text-primary hover:underline"
+              onClick={() => setSalaryOpen(true)}>Настроить личные ставки</button>}
             {canViewEmployeePayroll && <Link className="mt-2 inline-block text-sm text-primary hover:underline"
               to={`?section=finance&view=payroll&payrollEmployee=${encodeURIComponent(member.id)}`}>
               Зарплата сотрудника
@@ -1180,6 +1185,8 @@ function StaffEditor({
         {error && <p role="alert" className="mt-4 text-sm text-danger">{error}</p>}
       </form>
     </Modal>
+    {salaryOpen && member && <EmployeeSalaryEditor id={member.id} name={member.name} onClose={() => setSalaryOpen(false)} />}
+    </>
   );
 }
 

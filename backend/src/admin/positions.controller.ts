@@ -32,7 +32,7 @@ function positionView({ _count, salaryRates: history, ...position }: Position) {
     categoryRates: history[0]?.categoryRates ?? [] };
 }
 
-class PositionSalaryDto implements SalaryRates {
+export class PositionSalaryDto implements SalaryRates {
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(9_999_999_999.99) hourly!: number;
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(9_999_999_999.99) perShift!: number;
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(9_999_999_999.99) monthly!: number;

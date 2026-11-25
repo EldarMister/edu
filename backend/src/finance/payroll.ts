@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { OrderStatus, Prisma, Role, WaiterShiftStatus } from '@prisma/client';
+import { OrderStatus, Prisma, Role, WaiterShiftStatus, type EmployeeSalaryOverride } from '@prisma/client';
 import { warehouseDateRange, warehouseDay } from '../warehouse/report-range';
 import { categoryCommissions, payrollOrderSelect, payrollSale, salesBetween, salesCommission, type CommissionKind, type PayrollSale } from './payroll-sales';
 
@@ -86,8 +86,30 @@ function payrollAmounts(
 }
 
 type SalarySnapshot = Pick<Prisma.EmployeeSalaryRateGetPayload<object>,
-  'effectiveDay' | 'positionId' | 'positionName' | 'hourly' | 'perShift' | 'monthly' | 'personalPercent' | 'shiftPercent' | 'categoryRates'>;
+  'effectiveDay' | 'positionId' | 'positionName' | 'hourly' | 'perShift' | 'monthly' | 'personalPercent' | 'shiftPercent' | 'categoryRates'>
+  & { personal?: boolean };
 type PayrollAmounts = ReturnType<typeof payrollAmounts>;
+
+function effectiveSalaryRates(positionRates: SalarySnapshot[], personalRates: EmployeeSalaryOverride[]): SalarySnapshot[] {
+  if (!personalRates.length) return positionRates;
+  const positions = new Map(positionRates.map((rate) => [rate.effectiveDay, rate]));
+  const overrides = new Map(personalRates.map((rate) => [rate.effectiveDay, rate]));
+  const days = [...new Set([...positions.keys(), ...overrides.keys()])].sort();
+  let position: SalarySnapshot | undefined;
+  let override: EmployeeSalaryOverride | undefined;
+  return days.map((effectiveDay) => {
+    position = positions.get(effectiveDay) ?? position;
+    override = overrides.get(effectiveDay) ?? override;
+    const personal = !!override && !override.usePosition;
+    const rates = personal ? override : position;
+    return {
+      hourly: rates?.hourly ?? zero, perShift: rates?.perShift ?? zero, monthly: rates?.monthly ?? zero,
+      personalPercent: rates?.personalPercent ?? zero, shiftPercent: rates?.shiftPercent ?? zero,
+      effectiveDay, personal, positionId: position?.positionId ?? null, positionName: position?.positionName ?? '',
+      categoryRates: personal ? [] : position?.categoryRates ?? [],
+    };
+  });
+}
 
 function roundPayrollAmounts(raw: PayrollAmounts) {
   let total = zero;
@@ -144,7 +166,7 @@ function calculatePayrollIntervals(
     for (const key of Object.keys(raw) as (keyof PayrollAmounts)[]) raw[key] = raw[key].add(components[key]);
     return {
       from: warehouseDay(new Date(start)), to: warehouseDay(new Date(end - 1)), effectiveDay: rate?.effectiveDay ?? null,
-      position: rate?.positionName ?? null, rates, categoryRates: categories,
+      position: rate?.positionName ?? null, personal: rate?.personal ?? false, rates, categoryRates: categories,
       hours: Math.round(work.milliseconds / HOUR * 100) / 100, shifts: work.shifts, days: work.days,
       sales,
     };
@@ -156,7 +178,9 @@ export async function payrollReport(
   db: Db, cafeId: string, month: string, onlyUserId?: string, window = payrollMonth(month), details = false,
 ) {
   const paidInPeriod = { cafeId, status: OrderStatus.paid, closedAt: { gte: new Date(window.start), lt: new Date(window.end) } };
-  const [employees, accruals, shifts, employeeRates] = await Promise.all([
+  const throughDay = warehouseDay(new Date(window.end - 1));
+  const rateScope = { cafeId, effectiveDay: { lte: throughDay }, ...(onlyUserId ? { userId: onlyUserId } : {}) };
+  const [employees, accruals, shifts, employeeRates, overrides] = await Promise.all([
     db.user.findMany({
       where: { cafeId, role: { not: Role.OWNER }, ...(onlyUserId ? { id: onlyUserId } : {}), OR: [
         { isActive: true }, { waiterShifts: { some: {
@@ -177,15 +201,22 @@ export async function payrollReport(
       select: { id: true, waiterId: true, startedAt: true, endedAt: true },
     }),
     db.employeeSalaryRate.findMany({
-      where: { cafeId, effectiveDay: { lte: warehouseDay(new Date(window.end - 1)) }, ...(onlyUserId ? { userId: onlyUserId } : {}) },
+      where: rateScope,
       orderBy: { effectiveDay: 'asc' },
     }),
+    db.employeeSalaryOverride.findMany({ where: rateScope, orderBy: { effectiveDay: 'asc' } }),
   ]);
   const ratesByEmployee = new Map<string, SalarySnapshot[]>();
   for (const rate of employeeRates) {
     const list = ratesByEmployee.get(rate.userId) ?? [];
     list.push(rate);
     ratesByEmployee.set(rate.userId, list);
+  }
+  const overridesByEmployee = new Map<string, EmployeeSalaryOverride[]>();
+  for (const override of overrides) {
+    const list = overridesByEmployee.get(override.userId) ?? [];
+    list.push(override);
+    overridesByEmployee.set(override.userId, list);
   }
   const employeeIds = employees.map(({ id }) => id);
   const hasClosedShifts = shifts.length > 0;
@@ -232,7 +263,7 @@ export async function payrollReport(
     return { ...record, amount: Number(record.amount), paidAmount: Number(paid) };
   });
   const staff = employees.map((employee) => {
-    const employeeRates = ratesByEmployee.get(employee.id) ?? [];
+    const employeeRates = effectiveSalaryRates(ratesByEmployee.get(employee.id) ?? [], overridesByEmployee.get(employee.id) ?? []);
     const rate = employeeRates.at(-1);
     const rates = salaryRates(rate);
     const shifts = byEmployee.get(employee.id) ?? [];

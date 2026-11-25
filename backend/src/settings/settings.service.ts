@@ -28,6 +28,7 @@ const SETTINGS_FIELD_LABELS: Record<string, string> = {
   receiptPrintPhone: 'телефон в чеке',
   receiptLogoData: 'логотип чека',
   roundOrderTotal: 'округление суммы заказа',
+  workShiftApprovalRequired: 'подтверждение начала рабочих смен',
   telegramStockAlertsEnabled: 'оповещения о складских остатках',
   telegramStockChatId: 'чат оповещений об остатках',
   serviceChargeAmount: 'обслуживание',

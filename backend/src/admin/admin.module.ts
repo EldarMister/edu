@@ -3,6 +3,7 @@ import { CatalogController } from './catalog.controller';
 import { CatalogService } from './catalog.service';
 import { StaffController } from './staff.controller';
 import { StaffService } from './staff.service';
+import { EmployeeSalaryController } from './employee-salary.controller';
 import { PositionsController } from './positions.controller';
 import { AdminOrdersController } from './admin-orders.controller';
 import { AdminOrdersService } from './admin-orders.service';
@@ -20,6 +21,7 @@ import { MenuEntryService } from './menu-entry.service';
   controllers: [
     CatalogController,
     StaffController,
+    EmployeeSalaryController,
     PositionsController,
     AdminOrdersController,
     StatisticsController,

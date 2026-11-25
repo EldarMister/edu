@@ -67,6 +67,23 @@ test('PostgreSQL: salary history survives reassignment and deletion, final settl
     assert.equal(after.accrued, 650);
     assert.equal(after.paid, 100);
     assert.equal(after.due, 550);
+
+    await db.employeeSalaryOverride.createMany({ data: [
+      { cafeId, userId: worker.id, effectiveDay: currentMonth + '-02', usePosition: false, hourly: 350 },
+      { cafeId, userId: worker.id, effectiveDay: currentMonth + '-04', usePosition: true },
+    ] });
+    // Position changes still record history, but an active personal rate wins.
+    await db.staffPositionSalaryRate.create({ data: { cafeId, positionId: newPosition.id, effectiveDay: currentMonth + '-03', hourly: 250 } });
+    await syncEmployeeSalary(db, cafeId, [worker.id], currentMonth + '-03');
+    for (const day of ['03', '04']) await db.waiterShift.create({ data: {
+      cafeId, waiterId: worker.id, status: 'closed',
+      startedAt: new Date(`${currentMonth}-${day}T09:00:00+06:00`), endedAt: new Date(`${currentMonth}-${day}T10:00:00+06:00`),
+    } });
+    const personal = (await payrollReport(db, cafeId, currentMonth)).staff.find(({ userId }) => userId === worker.id);
+    assert.equal(personal.hourlyPay, 200 + 700 + 350 + 250);
+    assert.equal(personal.accrued, 650);
+    assert.ok(personal.rateIntervals.some((rate) => rate.from === currentMonth + '-03' && rate.personal && rate.rates.hourly === 350));
+    assert.ok(personal.rateIntervals.some((rate) => rate.from === currentMonth + '-04' && !rate.personal && rate.rates.hourly === 250));
   } finally {
     await db.financeEntry.deleteMany({ where: { cafeId } });
     await db.waiterShift.deleteMany({ where: { cafeId } });

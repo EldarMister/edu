@@ -40,6 +40,7 @@ import { TablesPage } from './pages/TablesPage';
 import { MenuPage } from './pages/MenuPage';
 import { MenuCategoryWorkspace } from './pages/MenuCategoryWorkspace';
 import { StaffPage } from './pages/StaffPage';
+import { WorkShiftsPage } from './pages/WorkShiftsPage';
 import { WorkspaceLinks } from '@/components/WorkspaceLinks';
 import { PositionsPage } from './pages/PositionsPage';
 import { FinancePage } from './pages/finance/FinancePage';
@@ -210,7 +211,8 @@ export function AdminApp() {
   const financeNav = FINANCE_NAV.filter(({ key }) => key === 'cashShifts' ? mayUseCashShifts
     : key === 'profitLoss' ? mayViewFinances && canSection('warehouse') && can('actions.warehouseCosts')
     : key === 'transactions' ? mayPostFinances : mayViewFinances);
-  const personnelNav = PERSONNEL_NAV.filter(({ key }) => key !== 'positions' || isOwner);
+  const personnelNav = PERSONNEL_NAV.filter(({ key }) =>
+    (key !== 'positions' || isOwner) && (key !== 'shifts' || can('actions.closeShift')));
 
   const sections = SECTIONS.filter((s) => {
     if (s.key === 'receipts') return canHandlePrintRequests;
@@ -726,6 +728,7 @@ export function AdminApp() {
                 {staffView === 'stations' && <StationsPage />}
                 {staffView === 'positions' && <PositionsPage />}
                 {staffView === 'employees' && <StaffPage key={staffTab} initialTab={staffTab} />}
+                {staffView === 'shifts' && <WorkShiftsPage />}
               </>}
               {section === 'audit' && canSection('journal') && <AuditPage />}
               {section === 'settings' && canSection('settings') && <>

@@ -13,11 +13,14 @@ import { ShiftRequiredScreen } from '@/features/waiter/ShiftRequiredScreen';
 import { ShiftSummaryModal } from '@/features/waiter/ShiftSummaryModal';
 import { ShiftCard } from './ShiftCard';
 import { useT } from '@/lib/i18n';
+import { usePermissions } from '@/hooks/usePermissions';
+import { shiftRequestKey, useShiftStartRequest, type ShiftRequestStatus } from './work-shift-request';
 
 type WorkShift = { id: string; startedAt: string; endedAt: string | null; autoCloseAt: string | null };
 export const workShiftKey = ['staff', 'work-shift'] as const;
 const WorkShiftActions = createContext<{
   startedAt?: string;
+  request?: ShiftRequestStatus;
   busy: boolean;
   loading: boolean;
   error: unknown;
@@ -34,6 +37,7 @@ export function WorkShiftSettingsCard() {
     <p role="alert" className="text-sm text-danger">{apiError(shift.error)}</p>
     <button type="button" className="btn-secondary btn-md" onClick={shift.retry}>{t('Повторить')}</button>
   </section>;
+  if (shift.request === 'pending') return <section className="card p-5" role="status">Ожидается подтверждение начала смены</section>;
   return <ShiftCard startedAt={shift.startedAt} busy={shift.busy} onAction={shift.act} showElapsed />;
 }
 
@@ -50,8 +54,12 @@ function useWorkShift() {
 
 export function WorkShiftGate({ children, adminWorkspace = false }: { children: ReactNode; adminWorkspace?: boolean }) {
   const { enabled, query, queryKey } = useWorkShift();
+  const request = useShiftStartRequest(enabled && query.isSuccess && !query.data);
   const [params] = useSearchParams();
   const profileOpen = adminWorkspace && params.get('section') === 'profile';
+  const permissions = usePermissions();
+  const mayManageShifts = adminWorkspace && permissions.canEditSection('staff') && permissions.canAction('closeShift');
+  const shiftsOpen = mayManageShifts && params.get('section') === 'staff' && params.get('view') === 'shifts';
   const t = useT();
   const qc = useQueryClient();
   const [starting, setStarting] = useState(false);
@@ -62,10 +70,14 @@ export function WorkShiftGate({ children, adminWorkspace = false }: { children: 
   useSocketEvent('waiter:shift_started', refresh);
   useSocketEvent('waiter:shift_ended', refresh);
   const start = useMutation({
-    mutationFn: async () => (await api.post<WorkShift>('/staff/shifts/start')).data,
+    mutationFn: async () => (await api.post<WorkShift | null>('/staff/shifts/start?awaitApproval=true')).data || null,
     onSuccess: async (shift) => {
       await qc.cancelQueries({ queryKey, exact: true });
-      qc.setQueryData(queryKey, shift);
+      if (shift) qc.setQueryData(queryKey, shift);
+      else await Promise.all([
+        qc.invalidateQueries({ queryKey: shiftRequestKey }),
+        qc.invalidateQueries({ queryKey }),
+      ]);
       void qc.invalidateQueries({ queryKey: ['admin', 'staff'] });
     },
     onError: refresh,
@@ -87,9 +99,10 @@ export function WorkShiftGate({ children, adminWorkspace = false }: { children: 
   if (!enabled) return <>{children}</>;
   const current = query.data?.endedAt ? null : query.data;
   // Keep settings mounted while the end request and its summary are on screen.
-  if (!starting && (current || end.isPending || summary || profileOpen)) {
+  if (!starting && (current || end.isPending || summary || profileOpen || shiftsOpen)) {
     return <WorkShiftActions.Provider value={{
       startedAt: current?.startedAt ?? summary?.startedAt,
+      request: current ? undefined : request.data?.status,
       busy: start.isPending || end.isPending || !!summary,
       loading: query.isPending,
       error: query.data === undefined ? query.error : null,
@@ -109,11 +122,13 @@ export function WorkShiftGate({ children, adminWorkspace = false }: { children: 
   return <main className="flex h-full min-h-0 flex-col overflow-y-auto bg-white">
     <div className="flex shrink-0 justify-end gap-2 px-4 pt-3">
       {adminWorkspace && !starting && <Link to="?section=profile" className="btn-secondary btn-md">{t('Личный кабинет')}</Link>}
+      {mayManageShifts && !starting && <Link to="?section=staff&view=shifts" className="btn-secondary btn-md">Смены</Link>}
       <button type="button" className="btn-secondary btn-md" onClick={() => { disconnectSocket(); logout(); }}>{t('Выйти')}</button>
     </div>
     <div className="min-h-[420px] flex-1">
       {starting || (!query.isPending && !query.isError) ? (
-        <ShiftRequiredScreen onBusyChange={setStarting} startShift={() => start.mutateAsync()} idleSubtitle="Начните смену, чтобы приступить к работе." />
+        <ShiftRequiredScreen onBusyChange={setStarting} startShift={() => start.mutateAsync()} request={request.data?.status}
+          idleSubtitle="Начните смену, чтобы приступить к работе." />
       ) : <div className="grid h-full place-content-center justify-items-center gap-4 px-4 text-center">
         {query.isPending ? <Spinner /> : <>
           <p role="alert">{apiError(query.error)}</p>

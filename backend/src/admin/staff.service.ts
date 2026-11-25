@@ -316,6 +316,9 @@ export class StaffService {
         data.prepStation = await staffStation(tx, role, dto.prepStation);
       }
       const updated = await tx.user.update({ where: { id }, data, select: STAFF_SELECT });
+      if (dto.isActive === false || role !== current.role || positionChanged) {
+        await tx.workShiftRequest.deleteMany({ where: { userId: id } });
+      }
       if (actor.cafeId && (role !== current.role || positionChanged)) await syncEmployeeSalary(tx, actor.cafeId, [id]);
       return updated;
     });
@@ -350,6 +353,7 @@ export class StaffService {
       this.assertCanManageRole(actor, user.role);
       this.assertCanManagePositionAccount(actor, user);
       await assertStaffWorkspaceChange(tx, actor.cafeId, [id], 'удалением сотрудника');
+      await tx.workShiftRequest.deleteMany({ where: { userId: id } });
       const scope = actor.cafeId ? { cafeId: actor.cafeId } : {};
       const history = await Promise.all([
         tx.user.findFirst({ where: { id, OR: [

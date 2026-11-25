@@ -63,6 +63,7 @@ test('payroll report clips shifts and sales to a custom period and applies each 
   const db = {
     user: { findMany: async () => [{ id: 'waiter', name: 'Сотрудник', role: 'WAITER', isActive: true,
       position: { id: 'position', name: 'Новая должность' } }] },
+    employeeSalaryOverride: { findMany: async () => [] },
     employeeSalaryRate: { findMany: async ({ where }) => {
       const month = where.effectiveDay.lte.slice(0, 7);
       const november = month === '2026-11';
@@ -111,6 +112,7 @@ test('payroll shows the actual sales bases for fixed-rate staff even when no com
   }));
   const db = {
     user: { findMany: async () => [worker] },
+    employeeSalaryOverride: { findMany: async () => [] },
     employeeSalaryRate: { findMany: async () => worker.position.salaryRates.map((rate) => ({
       ...rate, userId: worker.id, positionId: worker.position.id, positionName: worker.position.name,
     })) },
@@ -134,6 +136,7 @@ test('a departed employee can receive final salary, and a bonus does not consume
   const db = {
     user: { findMany: async () => [{ id: 'departed', name: 'Анна', role: 'WAITER', isActive: false,
       position: { id: 'new-position', name: 'Управляющий' } }] },
+    employeeSalaryOverride: { findMany: async () => [] },
     employeeSalaryRate: { findMany: async () => [rate] },
     salaryAccrual: { findMany: async () => [
       { id: 'base', userId: 'departed', month: '2026-11', amount: new Prisma.Decimal(50), supplemental: false, payments: [] },
@@ -190,6 +193,7 @@ test('payroll applies rates at local midnight and attributes overlapping sales a
   }];
   const db = {
     user: { findMany: async () => employees },
+    employeeSalaryOverride: { findMany: async () => [] },
     employeeSalaryRate: { findMany: async () => rates },
     salaryAccrual: { findMany: async () => [] },
     waiterShift: { findMany: async () => [

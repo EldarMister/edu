@@ -92,6 +92,7 @@ export function useCurrentShift(enabled = true) {
   return useQuery({
     queryKey: ['waiter', 'shift', 'current'],
     enabled,
+    refetchInterval: (query) => query.state.data ? false : 10_000,
     queryFn: async () => (await api.get<WaiterShift | null>('/waiter/shifts/current')).data,
   });
 }
@@ -144,7 +145,7 @@ export function useTransferTable() {
 export function useStartShift() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => (await api.post<WaiterShift>('/waiter/shifts/start')).data,
+    mutationFn: async () => (await api.post<WaiterShift | null>('/waiter/shifts/start?awaitApproval=true')).data || null,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
     },
