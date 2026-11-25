@@ -8,6 +8,7 @@ import { useAuth } from '@/store/auth';
 import type { Role } from '@/types';
 import { financeKey } from './finance/api';
 import { WorkShiftHistory } from './StaffPage';
+import { WorkspaceHeaderActions } from './WorkspaceHeader';
 import { QueryState } from './warehouse/WarehouseUi';
 import { WorkspaceSearch } from './WorkspaceSearch';
 
@@ -60,16 +61,20 @@ export function WorkShiftsPage() {
     .sort((a, b) => Number(!!b.request) - Number(!!a.request));
   const close = () => { if (!change.isPending) setAction(null); };
   return <>
-    <div className="no-scrollbar flex items-center gap-5 overflow-x-auto border-b border-border">
-      <button type="button" onClick={() => setTab('active')}
-        className={`relative -mb-px h-9 shrink-0 px-0.5 text-sm font-medium transition-colors ${tab === 'active' ? 'text-primary' : 'text-text-secondary hover:text-text-primary'}`}>
-        Текущие смены{tab === 'active' && <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-primary" />}
-      </button>
-      <button type="button" onClick={() => { setAction(null); setTab('history'); }}
-        className={`relative -mb-px h-9 shrink-0 px-0.5 text-sm font-medium transition-colors ${tab === 'history' ? 'text-primary' : 'text-text-secondary hover:text-text-primary'}`}>
-        История смен{tab === 'history' && <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-primary" />}
-      </button>
-    </div>
+    <WorkspaceHeaderActions>
+      <div className="flex items-center gap-5" role="tablist" aria-label="Раздел смен">
+        <button type="button" onClick={() => setTab('active')}
+          role="tab" aria-selected={tab === 'active'}
+          className={`relative h-9 shrink-0 px-0.5 text-sm font-medium transition-colors ${tab === 'active' ? 'text-primary' : 'text-text-secondary hover:text-text-primary'}`}>
+          Текущие смены{tab === 'active' && <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-primary" />}
+        </button>
+        <button type="button" onClick={() => { setAction(null); setTab('history'); }}
+          role="tab" aria-selected={tab === 'history'}
+          className={`relative h-9 shrink-0 px-0.5 text-sm font-medium transition-colors ${tab === 'history' ? 'text-primary' : 'text-text-secondary hover:text-text-primary'}`}>
+          История смен{tab === 'history' && <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-primary" />}
+        </button>
+      </div>
+    </WorkspaceHeaderActions>
     {tab === 'history' ? <WorkShiftHistory /> : <>
       <div className="poster-toolbar"><WorkspaceSearch label="Поиск сотрудника" value={search} onChange={setSearch} /></div>
       <QueryState pending={query.isPending} error={query.error} empty={!rows.length}>
