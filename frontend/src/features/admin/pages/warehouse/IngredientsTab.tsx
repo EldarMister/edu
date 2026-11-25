@@ -4,7 +4,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { api, apiError } from '@/lib/api';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { useAuth } from '@/store/auth';
-import { PROCESSING_METHODS, qty, useBalances, useIngredients, type Ingredient } from './api';
+import { PROCESSING_METHODS, qty, useBalances, useIngredientCategories, useIngredientMutations, useIngredients, type Ingredient } from './api';
 import { QueryState } from './WarehouseUi';
 import { useEditorRoute, usePageFilter, usePageFilters } from './workspace-route';
 import { useWarehousePolicy } from './settings-api';
@@ -23,6 +23,9 @@ import { PreparationCost } from './PreparationCost';
 import { IconExport, IconPrinter } from '../../components/icons';
 import { ColumnButton } from '../../components/ColumnControl';
 import { RowIconButton } from '../../components/RowIconButton';
+import { RowActionMenu } from '../../components/RowActionMenu';
+import { NewIngredientCategory } from './NewIngredientCategory';
+import { RemoveDirectoryEntry } from './RemoveDirectoryEntry';
 
 const balanceColumns = {
   name: { label: 'Название', width: 210 },
@@ -96,6 +99,10 @@ export function IngredientsTab({
     catch { return ''; }
   });
   const [columnsOpen, setColumnsOpen] = useState(false);
+  const [creatingCategory, setCreatingCategory] = useState(false);
+  const [removing, setRemoving] = useState<Ingredient | null>(null);
+  const { remove } = useIngredientMutations();
+  const categoryQuery = useIngredientCategories(catalogue === 'ingredients');
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');
   const columnOptions = (Object.keys(balanceColumns) as BalanceColumn[]).filter((key) => costs || !columnSpec(key).costs);
@@ -169,7 +176,10 @@ export function IngredientsTab({
       (!unit || item.displayUnit === unit) &&
       (preparedCatalogue || !filter || (filter === 'empty' ? item.stock <= 0 : item.isLow && item.stock > 0)),
   ).sort((a, b) => a.name.localeCompare(b.name, 'ru') * (catalogueSort === 'desc' ? -1 : 1)) : balances.data?.rows ?? [];
-  const categories = catalogue ? [...new Set(catalogueRows.flatMap((item) => item.category ? [item.category] : []))].sort()
+  const categories = catalogue ? [...new Set([
+    ...(categoryQuery.data ?? []).map(({ name }) => name),
+    ...catalogueRows.flatMap((item) => item.category ? [item.category] : []),
+  ])].sort((a, b) => a.localeCompare(b, 'ru'))
     : balances.data?.categories ?? [];
   const totalRows = balances.data?.totalRows ?? 0;
   const page = balances.data?.page ?? 1;
@@ -208,6 +218,7 @@ export function IngredientsTab({
     </div>
   );
   const canEditItem = can(preparedCatalogue ? 'actions.warehouseRecipes' : 'actions.warehouseSettings');
+  const manageIngredients = catalogue === 'ingredients' && canEditItem && canEditSection('warehouse') && canEditSection('menu');
   const actions = (item: Ingredient) => (
     <div className={`poster-row-actions ${catalogue ? 'justify-end' : 'poster-balance-actions'}`}>
       {preparedCatalogue ? (
@@ -231,6 +242,8 @@ export function IngredientsTab({
       ) : (
         <button type="button" onClick={() => onOpen(item)}>{canEditItem ? 'Изменить' : 'Открыть'}</button>
       )}
+      {manageIngredients && <RowActionMenu label={item.name} action="Удалить"
+        onAction={() => { remove.reset(); setRemoving(item); }} />}
       {preparedCatalogue && can('actions.warehouseRecipes') && <button type="button" title="Копировать полуфабрикат"
         onClick={() => openEditor({ type: 'preparation', id: item.id, action: 'copy' })}>Копировать</button>}
       {production &&
@@ -405,9 +418,18 @@ export function IngredientsTab({
           {!preparedCatalogue && canCreate && <IngredientImportButton />}
           <button type="button" className="supply-header-action" title="Печать" disabled={!query.isSuccess} onClick={() => reportCatalogue(true)}>
             <IconPrinter /><span className="catalogue-action-label">Печать</span></button>
+          {manageIngredients && <button type="button" className="supply-header-action"
+            onClick={() => setCreatingCategory(true)}>Добавить категорию</button>}
           {canCreate && <button type="button" className="catalogue-add" onClick={onCreate}>Добавить</button>}
         </div>
       </WorkspaceHeaderActions>}
+      {creatingCategory && <NewIngredientCategory onClose={() => setCreatingCategory(false)} />}
+      {removing && <RemoveDirectoryEntry title="Удалить ингредиент?" pending={remove.isPending} error={remove.error}
+        onClose={() => setRemoving(null)} onRemove={() => remove.mutate(removing.id, {
+          onSuccess: () => setRemoving(null),
+        })}>
+        Ингредиент «{removing.name}» исчезнет из справочника. Существующие техкарты и складская история сохранятся.
+      </RemoveDirectoryEntry>}
       {showGuide && <aside className="preparation-guide" aria-label="О полуфабрикатах">
         <span className="preparation-guide-symbol" aria-hidden="true">🥟</span>
         <div>
@@ -538,7 +560,7 @@ export function IngredientsTab({
         <div className="hidden overflow-x-auto md:block">
           <table className={`poster-table w-full ${catalogue ? `poster-catalogue-table ${preparedCatalogue ? 'min-w-[680px]' : ''}` : 'poster-balance-table table-fixed'}`}
             style={preparedCatalogue ? undefined : { minWidth: catalogue === 'ingredients'
-              ? selectedIngredientColumns.reduce((width, key) => width + ingredientColumnSpec(key).width, 100)
+              ? selectedIngredientColumns.reduce((width, key) => width + ingredientColumnSpec(key).width, manageIngredients ? 140 : 100)
               : columns.reduce((width, key) => width + columnSpec(key).width, 0) }}>
             {!catalogue && (
               <colgroup>

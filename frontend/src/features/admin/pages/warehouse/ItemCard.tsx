@@ -13,13 +13,14 @@ import {
   type ProcessingMethod,
   qty,
   useIngredient,
-  useIngredients,
+  useIngredientCategories,
   useIngredientMutations,
   useWarehouseLocations,
   type Ingredient,
   type IngredientDetails,
   type ItemKind,
 } from './api';
+import { NewIngredientCategory } from './NewIngredientCategory';
 import { useSuppliers } from './settings-api';
 import { DocumentField } from './WarehouseUi';
 import { UNIT_OPTIONS, unitConversionFactor, unitLabel, unitTypeOf, unitsForType, type UnitCode } from './units';
@@ -126,11 +127,10 @@ function ItemForm({
   const kind: ItemKind = item?.kind ?? defaultKind ?? 'raw';
   const [unit, setUnit] = useState<UnitCode>(item?.displayUnit ?? (defaultKind === 'goods' ? 'pcs' : 'kg'));
   const [category, setCategory] = useState(item?.category ?? '');
-  const catalogue = useIngredients('');
-  const categories = [...new Set((catalogue.data ?? [])
-    .filter(({ kind }) => kind === 'raw' || kind === 'consumable')
-    .flatMap(({ category }) => category ? [category] : []))]
-    .sort((a, b) => a.localeCompare(b, 'ru'));
+  const [creatingCategory, setCreatingCategory] = useState(false);
+  const ingredientKind = kind === 'raw' || kind === 'consumable';
+  const catalogue = useIngredientCategories();
+  const categories = (catalogue.data ?? []).map(({ name }) => name).sort((a, b) => a.localeCompare(b, 'ru'));
   const [supplier, setSupplier] = useState(item?.supplier ?? '');
   const [threshold, setThreshold] = useState(String(item?.lowStockThreshold ?? 0));
   const suppliers = useSuppliers(editable);
@@ -313,6 +313,8 @@ function ItemForm({
             onChange={(e) => setCategory(e.target.value)}
           />
           <datalist id={categoriesId}>{categories.map((entry) => <option key={entry} value={entry} />)}</datalist>
+          {ingredientKind && can('actions.warehouseSettings') && <button type="button" className="mt-2 text-sm text-primary"
+            onClick={() => setCreatingCategory(true)}>Добавить категорию</button>}
             </DocumentField>
             {mass && PROCESSING_METHODS.map((method) => (
               <DocumentField key={method.value} label={lossLabels[method.value]}>
@@ -471,6 +473,7 @@ function ItemForm({
       )}
     </form>
     </ItemFrame>
+    {creatingCategory && <NewIngredientCategory onClose={() => setCreatingCategory(false)} onSaved={setCategory} />}
     {confirmDiscard && createPortal(<Modal open manageFocus title="Есть несохранённые изменения" onClose={() => setConfirmDiscard(false)}
       footer={<div className="flex flex-wrap justify-end gap-2">
         <button type="button" className="btn-secondary btn-md" data-dialog-initial-focus

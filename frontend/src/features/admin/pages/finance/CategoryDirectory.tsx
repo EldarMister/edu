@@ -6,7 +6,7 @@ import { apiError } from '@/lib/api';
 import { WorkspaceHeaderCount } from '../WorkspaceHeader';
 import { QueryState } from '../warehouse/WarehouseUi';
 import { FinanceRegister } from './FinanceRegister';
-import { FinanceRowMenu } from './FinanceRowMenu';
+import { RowActionMenu } from '../../components/RowActionMenu';
 import { useFinanceCategoryRemoval, useFinanceWrites, type FinanceCategory } from './api';
 import { categoryAccepts, categoryAncestors, categoryOptions } from './category-options';
 
@@ -85,7 +85,7 @@ export function CategoryDirectory({ categories, employees, positions, search, ki
           access: { value: access, display: <span className="text-text-secondary">{access}</span> },
         }, action: edit && <div className="flex items-center justify-end gap-2">
           <RowIconButton icon="edit" label={'Редактировать ' + category.name} onClick={() => edit(category.id)} />
-          <FinanceRowMenu label={category.name} action="Удалить" onAction={() => setRemoving(category)} />
+          <RowActionMenu label={category.name} action="Удалить" onAction={() => setRemoving(category)} />
         </div> };
       })} empty="Категории транзакций не найдены" />
     {removing && <CategoryRemovalDialog key={removing.id} category={removing} categories={categories} onClose={() => setRemoving(null)} />}

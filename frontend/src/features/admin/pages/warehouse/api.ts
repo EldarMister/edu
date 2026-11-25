@@ -481,10 +481,46 @@ export function useIngredientMutations() {
     onSuccess: invalidate,
   });
   const remove = useMutation({
-    mutationFn: (id: string) => api.delete(`/admin/warehouse/ingredients/${id}`).then((r) => r.data),
+    mutationFn: (id: string) => api.delete(`/admin/warehouse/ingredients/${id}`, {
+      params: { scope: 'ingredients' },
+    }).then((r) => r.data),
     onSuccess: invalidate,
   });
   return { create, update, remove };
+}
+
+interface IngredientCategory {
+  name: string;
+  count: number;
+}
+
+const ingredientCategoriesUrl = '/admin/warehouse/ingredients/categories';
+
+export function useIngredientCategories(enabled = true) {
+  return useQuery({
+    queryKey: [...KEY, 'ingredient-categories'],
+    queryFn: () => get<IngredientCategory[]>(ingredientCategoriesUrl),
+    enabled,
+  });
+}
+
+export function useIngredientCategoryMutations() {
+  const queryClient = useQueryClient();
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: KEY });
+  const save = useMutation({
+    mutationFn: async ({ name, from }: { name: string; from?: string }) => {
+      const response = from === undefined
+        ? await api.post<IngredientCategory>(ingredientCategoriesUrl, { name })
+        : await api.post<IngredientCategory>(`${ingredientCategoriesUrl}/rename`, { from, to: name });
+      return response.data;
+    },
+    onSuccess: invalidate,
+  });
+  const remove = useMutation({
+    mutationFn: (name: string) => api.delete(`${ingredientCategoriesUrl}/${encodeURIComponent(name)}`),
+    onSuccess: invalidate,
+  });
+  return { save, remove };
 }
 
 // ---------- Техкарта ----------

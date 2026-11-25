@@ -10,7 +10,7 @@ function menuPosition(anchor: HTMLButtonElement | null) {
   };
 }
 
-export function FinanceRowMenu({ label, action, onAction }: { label: string; action: string; onAction: () => void }) {
+export function RowActionMenu({ label, action, onAction }: { label: string; action: string; onAction: () => void }) {
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);

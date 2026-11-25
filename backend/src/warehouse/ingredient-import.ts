@@ -4,6 +4,7 @@ import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsString, MaxLength, Va
 import type { Prisma } from '@prisma/client';
 import { getCafeId } from '../tenant/tenant-context';
 import { lockWarehouseCatalog } from './stock-lock';
+import { lockIngredientCategories, registerIngredientCategories } from './ingredient-categories';
 import { normalizeUnit, unitType, type UnitCode } from './units';
 
 class ImportRow {
@@ -18,7 +19,10 @@ export class IngredientImportDto {
 }
 
 export async function importCatalogue(db: Prisma.TransactionClient, dto: IngredientImportDto) {
-  if (dto.apply) await lockWarehouseCatalog(db);
+  if (dto.apply) {
+    await lockIngredientCategories(db);
+    await lockWarehouseCatalog(db);
+  }
   const existing = await db.ingredient.findMany({ where: { kind: { in: ['raw', 'consumable'] }, isActive: true },
     select: { name: true, category: true, displayUnit: true } });
   const catalogue = new Map(existing.map((item) => [item.name.trim().toLocaleLowerCase('ru'), item]));
@@ -42,6 +46,9 @@ export async function importCatalogue(db: Prisma.TransactionClient, dto: Ingredi
     return { status: 'new', message: 'К добавлению' };
   });
   if (dto.apply && rows.some((row) => row.status === 'error')) throw new BadRequestException('Исправьте строки с ошибками и проверьте таблицу ещё раз.');
-  if (dto.apply && fresh.length) await db.ingredient.createMany({ data: fresh });
+  if (dto.apply && fresh.length) {
+    await db.ingredient.createMany({ data: fresh });
+    await registerIngredientCategories(db, fresh.map(({ category }) => category));
+  }
   return { rows, count: fresh.length };
 }

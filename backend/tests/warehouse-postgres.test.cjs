@@ -15,6 +15,44 @@ if (url && (!['localhost', '127.0.0.1'].includes(new URL(url).hostname) || !new 
   throw new Error('Only a dedicated local test database is allowed');
 }
 
+test('PostgreSQL: ingredient categories survive empty lists and deletion only unassigns the current cafe', { skip: !url }, async () => {
+  const db = new PrismaClient({ datasourceUrl: url });
+  db.$use(tenantPrismaMiddleware);
+  const cafes = [];
+  try {
+    for (const name of ['Catalogue', 'Other catalogue']) cafes.push(await db.cafe.create({ data: { name } }));
+    const ingredients = new IngredientsService(db);
+    const [cafe, other] = cafes;
+    const name = 'Выпечка / тесто';
+    await runWithTenant({ cafeId: other.id }, () => ingredients.saveCategory(name));
+    await runWithTenant({ cafeId: cafe.id }, async () => {
+      assert.deepEqual(await ingredients.saveCategory('  Выпечка  '), { name: 'Выпечка', count: 0 });
+      await assert.rejects(() => ingredients.saveCategory('Выпечка'), /уже существует/);
+      assert.deepEqual(await ingredients.saveCategory(name, 'Выпечка'), { name, count: 0 });
+      const flour = await ingredients.create({ name: 'Мука', unit: 'kg', category: name });
+      assert.deepEqual(await ingredients.categories(), [{ name, count: 1 }]);
+      await ingredients.removeCategory(name);
+      assert.equal((await ingredients.findOne(flour.id)).category, null);
+      assert.deepEqual(await ingredients.categories(), []);
+      assert.equal((await ingredients.remove(flour.id, true)).deactivated, false);
+      const water = await ingredients.create({ name: 'Вода', unit: 'l', stock: 2, avgCost: 10, category: 'Напитки' });
+      await assert.rejects(() => ingredients.remove(water.id, true), /остаток/);
+      assert.equal((await ingredients.findOne(water.id)).stock, 2);
+      assert.deepEqual(await ingredients.categories(), [{ name: 'Напитки', count: 1 }]);
+    });
+    await runWithTenant({ cafeId: other.id }, async () => {
+      assert.deepEqual(await ingredients.categories(), [{ name, count: 0 }]);
+    });
+  } finally {
+    for (const { id: cafeId } of cafes) {
+      await db.stockMovement.deleteMany({ where: { cafeId } });
+      await db.ingredient.deleteMany({ where: { cafeId } });
+      await db.cafe.delete({ where: { id: cafeId } });
+    }
+    await db.$disconnect();
+  }
+});
+
 test('PostgreSQL: ingredient supplies report posted receipts in display units with discounts and warehouse scope', { skip: !url }, async () => {
   const db = new PrismaClient({ datasourceUrl: url });
   db.$use(tenantPrismaMiddleware);

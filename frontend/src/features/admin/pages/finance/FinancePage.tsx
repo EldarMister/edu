@@ -20,7 +20,7 @@ import { FinancePeriod } from './FinancePeriod';
 import { AccountForm, AccrualForm, CategoryForm, PayoutForm, ReverseTransactionDialog, TransactionDetail, TransactionForm } from './FinanceForms';
 import { FinanceRegister } from './FinanceRegister';
 import { ProfitLossPage } from './ProfitLossPage';
-import { FinanceRowMenu } from './FinanceRowMenu';
+import { RowActionMenu } from '../../components/RowActionMenu';
 import { CategoryDirectory } from './CategoryDirectory';
 import { TransactionCell } from './TransactionCell';
 import { categoryAccepts, categoryAncestors, categoryOptions } from './category-options';
@@ -174,7 +174,7 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts' | 'ca
           {data.canManage && <EditButton name={account.name} onClick={() => openEditor({ type: 'financeAccount', id: account.id })} />}
           <Link className="text-primary text-base" title="Движение денег" aria-label={'Движение денег: ' + account.name}
             to={{ search: new URLSearchParams({ section: 'finance', view: 'cashFlow', financeScope: account.id }).toString() }}>→</Link>
-          {data.canManage && !account.isDefault && !account.isCollection && <FinanceRowMenu label={account.name} action="Удалить"
+          {data.canManage && !account.isDefault && !account.isCollection && <RowActionMenu label={account.name} action="Удалить"
             onAction={() => setArchivingAccount(account)} />}
         </div> }))}
         empty="Счета не найдены" />
@@ -312,7 +312,7 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts' | 'ca
               <button type="button" className="text-primary hover:underline" aria-label={'Открыть транзакцию ' + financeDateTime(entry.occurredAt)}
                 onClick={() => openEditor({ type: 'financeTransaction', id: entry.id })}>Открыть</button>
             )}
-            {entry.reversible && <FinanceRowMenu label={entry.note || financeDateTime(entry.occurredAt)}
+            {entry.reversible && <RowActionMenu label={entry.note || financeDateTime(entry.occurredAt)}
               action="Удалить" onAction={() => setReversingEntryId(entry.id)} />}
           </div>,
         };

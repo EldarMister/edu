@@ -57,13 +57,24 @@ test('PostgreSQL: recipe writeoffs retain source lines and immutable ingredient 
         assert.ok((await docs.reasons()).some(({ id, expense }) => id === reason.id && expense));
         await assert.rejects(() => docs.saveWriteoffReason({ name: 'пробная партия', expense: false }), /уже есть/iu);
         const line = source('ingredient', flour.id, 0.1, 'kg');
-        const draft = await docs.create(owner, { warehouseId: main.id, kind: 'writeoff', writeoffReasonId: reason.id,
-          sourceLines: [{ ...line, details: 'Порвана упаковка' }] });
-        const edited = await docs.update(owner, draft.id, { revision: draft.revision, reason: null, sourceLines: [line] });
+        const input = { requestKey: randomUUID(), warehouseId: main.id, kind: 'writeoff', writeoffReasonId: reason.id,
+          sourceLines: [{ ...line, details: 'Порвана упаковка' }] };
+        const draft = await docs.create(owner, input);
+        const retained = await docs.saveWriteoffReason({ name: 'Проверка качества', expense: true }, reason.id);
+        assert.equal(retained.id, reason.id);
+        await docs.removeWriteoffReason(reason.id);
+        assert.ok(!(await docs.reasons()).some(({ id }) => id === reason.id));
+        assert.ok((await docs.reasons(true)).some(({ id, archived }) => id === reason.id && archived));
+        assert.equal((await docs.create(owner, input)).id, draft.id);
+        await assert.rejects(() => docs.create(owner, { ...input, requestKey: randomUUID() }), /недоступна/);
+        const replacement = await docs.saveWriteoffReason({ name: retained.label, expense: false });
+        assert.notEqual(replacement.id, reason.id);
+        const edited = await docs.update(owner, draft.id, { revision: draft.revision, reason: null,
+          writeoffReasonId: reason.id, sourceLines: [line] });
         assert.equal(edited.sourceLines[0].details, 'Порвана упаковка');
         const submitted = await docs.submit(owner, edited.id, edited.revision);
         const result = await docs.approve(owner, edited.id, submitted.revision);
-        assert.equal(result.reasonLabel, 'Пробная партия');
+        assert.equal(result.reasonLabel, retained.label);
         assert.equal(result.sourceLines[0].details, 'Порвана упаковка');
         assert.equal((await docs.list(undefined, 'writeoff', 'Порвана упаковка'))[0].id, result.id);
         const profitLoss = await readProfitLoss(db, cafe.id, { from, to: new Date(Date.now() + 60_000) });

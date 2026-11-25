@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import type { Response } from 'express';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
@@ -27,8 +27,8 @@ export class WarehouseDocumentsController {
   }
 
   @Get('reasons')
-  reasons() {
-    return this.documents.reasons();
+  reasons(@Query('includeArchived') includeArchived?: string) {
+    return this.documents.reasons(includeArchived === 'true');
   }
 
   @Post('reasons')
@@ -41,6 +41,12 @@ export class WarehouseDocumentsController {
   @RequirePermission('sections.warehouse', 'actions.warehouseSettings')
   updateReason(@Param('id') id: string, @Body() dto: WriteoffReasonDto) {
     return this.documents.saveWriteoffReason(dto, id);
+  }
+
+  @Delete('reasons/:id')
+  @RequirePermission('sections.warehouse', 'actions.warehouseSettings')
+  removeReason(@Param('id') id: string) {
+    return this.documents.removeWriteoffReason(id);
   }
 
   @Get('writeoff-options')

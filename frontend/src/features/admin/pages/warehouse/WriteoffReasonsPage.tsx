@@ -1,17 +1,21 @@
 import { useState } from 'react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { RowIconButton } from '../../components/RowIconButton';
+import { RowActionMenu } from '../../components/RowActionMenu';
 import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { useListPeriod } from './ListPeriodFilter';
-import { useStockDocuments, useWriteoffReasons, type WriteoffReasonOption } from './stock-documents-api';
+import { useRemoveWriteoffReason, useStockDocuments, useWriteoffReasons, type WriteoffReasonOption } from './stock-documents-api';
 import { writeoffPostedTotals } from './stock-document-format';
 import { balanceMoney } from './balance-format';
 import { QueryState } from './WarehouseUi';
 import { WriteoffReasonEditor } from './WriteoffReasonField';
+import { RemoveDirectoryEntry } from './RemoveDirectoryEntry';
 
 export function WriteoffReasonsPage({ onSelect, navigation }: { onSelect: (id: string) => void; navigation: React.ReactNode }) {
   const [editor, setEditor] = useState<WriteoffReasonOption | 'new' | null>(null);
+  const [removing, setRemoving] = useState<WriteoffReasonOption | null>(null);
+  const remove = useRemoveWriteoffReason();
   const [search, setSearch] = useState('');
   const period = useListPeriod('writeoffReasons');
   const reasons = useWriteoffReasons();
@@ -53,7 +57,10 @@ export function WriteoffReasonsPage({ onSelect, navigation }: { onSelect: (id: s
               <td>{reason.expense ? 'Расходы' : 'Себестоимость'}</td>
               <td className="text-right tabular-nums">{summary.count}</td>
               {showCost && <td className="text-right tabular-nums">{cost(summary)}</td>}
-              <td>{editable && reason.custom && <RowIconButton icon="edit" label={`Редактировать причину «${reason.label}»`} onClick={() => setEditor(reason)} />}</td>
+              <td>{editable && reason.custom && <div className="poster-row-actions">
+                <RowIconButton icon="edit" label={`Редактировать причину «${reason.label}»`} onClick={() => setEditor(reason)} />
+                <RowActionMenu label={reason.label} action="Удалить" onAction={() => { remove.reset(); setRemoving(reason); }} />
+              </div>}</td>
             </tr>;
           })}</tbody>
           <tfoot><tr className="border-t border-border font-medium"><td colSpan={2}>Итого</td><td className="text-right tabular-nums">{total.count}</td>
@@ -61,5 +68,9 @@ export function WriteoffReasonsPage({ onSelect, navigation }: { onSelect: (id: s
         </table></div>
       </QueryState>
     </div>
+    {removing && <RemoveDirectoryEntry title="Удалить причину списания?" pending={remove.isPending} error={remove.error}
+      onClose={() => setRemoving(null)} onRemove={() => remove.mutate(removing.id, { onSuccess: () => setRemoving(null) })}>
+      Причина «{removing.label}» исчезнет из списка выбора. Она сохранится в списаниях, в которых уже использована.
+    </RemoveDirectoryEntry>}
   </>;
 }

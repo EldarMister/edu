@@ -7,7 +7,7 @@ export type InventoryMode = 'full' | 'partial';
 export type WriteoffReason =
   'spoilage' | 'expired' | 'damage' | 'staff_meal' | 'tasting' | 'household' | 'other';
 export type StockDocumentStatus = 'draft' | 'submitted' | 'posted' | 'reversed';
-export interface WriteoffReasonOption { id: string; label: string; expense: boolean; custom: boolean }
+export interface WriteoffReasonOption { id: string; label: string; expense: boolean; custom: boolean; archived?: boolean }
 export type ExportableStockDocument = 'inventory' | 'transfer';
 
 export interface StockDocumentItem {
@@ -93,9 +93,19 @@ const WAREHOUSE_KEY = ['admin', 'warehouse'] as const;
 const DOCUMENTS_KEY = [...WAREHOUSE_KEY, 'documents'] as const;
 const REASONS_KEY = [...DOCUMENTS_KEY, 'reasons'] as const;
 
-export function useWriteoffReasons(enabled = true) {
-  return useQuery({ queryKey: REASONS_KEY, enabled,
-    queryFn: async () => (await api.get<WriteoffReasonOption[]>(`${BASE_URL}/reasons`)).data });
+export function useWriteoffReasons(enabled = true, includeArchived = false) {
+  return useQuery({ queryKey: includeArchived ? [...REASONS_KEY, 'with-archived'] : REASONS_KEY, enabled,
+    queryFn: async () => (await api.get<WriteoffReasonOption[]>(`${BASE_URL}/reasons`, {
+      params: includeArchived ? { includeArchived: true } : undefined,
+    })).data });
+}
+
+export function useRemoveWriteoffReason() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`${BASE_URL}/reasons/${encodeURIComponent(id)}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: DOCUMENTS_KEY }),
+  });
 }
 
 export function useSaveWriteoffReason() {

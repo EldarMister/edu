@@ -50,16 +50,18 @@ function documentEffectiveAt(kind: WarehouseDocumentKind, value: string | null |
 export class WarehouseDocumentsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async reasons() {
+  async reasons(includeArchived = false) {
     const cafeId = this.cafeId();
     const [custom, settings] = await Promise.all([
-      this.prisma.writeoffReason.findMany({ where: { cafeId }, orderBy: { normalizedName: 'asc' } }),
+      this.prisma.writeoffReason.findMany({
+        where: { cafeId, ...(includeArchived ? {} : { archivedAt: null }) }, orderBy: { normalizedName: 'asc' },
+      }),
       this.prisma.settings.findUnique({ where: { cafeId }, select: { expenseWriteoffReasons: true } }),
     ]);
     const expenses = new Set<string>(settings?.expenseWriteoffReasons);
     return [
       ...Object.entries(warehouseWriteoffReasons).map(([id, label]) => ({ id, label, expense: expenses.has(id), custom: false })),
-      ...custom.map(({ id, name, expense }) => ({ id, label: name, expense, custom: true })),
+      ...custom.map(({ id, name, expense, archivedAt }) => ({ id, label: name, expense, custom: true, archived: !!archivedAt })),
     ];
   }
 
@@ -75,7 +77,7 @@ export class WarehouseDocumentsService {
     const data = { name, normalizedName, expense: dto.expense };
     try {
       const saved = id
-        ? await this.prisma.writeoffReason.update({ where: { cafeId_id: { cafeId, id } }, data })
+        ? await this.prisma.writeoffReason.update({ where: { cafeId_id: { cafeId, id }, archivedAt: null }, data })
         : await this.prisma.writeoffReason.create({ data: { cafeId, ...data } });
       return { id: saved.id, label: saved.name, expense: saved.expense, custom: true };
     } catch (error) {
@@ -85,6 +87,15 @@ export class WarehouseDocumentsService {
       }
       throw error;
     }
+  }
+
+  async removeWriteoffReason(id: string) {
+    const cafeId = this.cafeId();
+    const result = await this.prisma.writeoffReason.updateMany({
+      where: { cafeId, id }, data: { archivedAt: new Date() },
+    });
+    if (!result.count) throw new NotFoundException('Причина списания не найдена');
+    return { ok: true };
   }
 
   async list(warehouseId?: string, kind?: WarehouseDocumentKind, search?: string, ids?: string[]) {
@@ -267,11 +278,11 @@ export class WarehouseDocumentsService {
     const effectiveAt = documentEffectiveAt(dto.kind, dto.effectiveAt);
     if (dto.sourceLines && (dto.kind !== 'writeoff' || dto.items)) throw new BadRequestException('Составные строки доступны только для списания и заменяют список ингредиентов');
     return this.prisma.$transaction(async (tx) => {
-      const reason = await this.reason(tx, dto.kind, dto.reason, dto.writeoffReasonId);
       if (dto.requestKey) {
         await tx.$queryRaw`SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtext(${`warehouse-request:${cafeId}:${dto.requestKey}`}))) AS request_lock`;
         const existing = await tx.warehouseDocument.findUnique({ where: { cafeId_requestKey: { cafeId, requestKey: dto.requestKey } }, include: documentInclude });
         if (existing) {
+          const reason = await this.reason(tx, dto.kind, dto.reason, dto.writeoffReasonId, existing.writeoffReasonId);
           if (existing.kind !== dto.kind || existing.warehouseId !== dto.warehouseId || existing.destinationWarehouseId !== (dto.destinationWarehouseId ?? null) || existing.sourcePurchaseId !== (dto.sourcePurchaseId ?? null)
             || (countedAt !== undefined && existing.countedAt?.getTime() !== countedAt?.getTime())
             || existing.effectiveAt?.getTime() !== effectiveAt?.getTime()
@@ -298,6 +309,7 @@ export class WarehouseDocumentsService {
           return existing.reopenedAt ? this.preview(tx, existing) : this.finalize(tx, actor, existing.id, dto.finalize);
         }
       }
+      const reason = await this.reason(tx, dto.kind, dto.reason, dto.writeoffReasonId);
       const warehouse = await this.warehouse(tx, dto.warehouseId);
       if (dto.kind === 'transfer') {
         if (!dto.destinationWarehouseId || dto.destinationWarehouseId === warehouse.id) throw new BadRequestException('Выберите другой склад-получатель');
@@ -364,7 +376,7 @@ export class WarehouseDocumentsService {
           countedAt,
           effectiveAt,
           note: dto.note === undefined ? undefined : dto.note?.trim() || null,
-          ...(reasonProvided ? await this.reason(tx, document.kind, dto.reason, dto.writeoffReasonId) : {}),
+          ...(reasonProvided ? await this.reason(tx, document.kind, dto.reason, dto.writeoffReasonId, document.writeoffReasonId) : {}),
         },
         include: documentInclude,
       });
@@ -897,14 +909,18 @@ export class WarehouseDocumentsService {
   }
 
   private async reason(tx: Prisma.TransactionClient, kind: WarehouseDocumentKind,
-    reason?: keyof typeof warehouseWriteoffReasons | null, writeoffReasonId?: string | null) {
+    reason?: keyof typeof warehouseWriteoffReasons | null, writeoffReasonId?: string | null, previousReasonId?: string | null) {
     if ((kind !== 'writeoff' && (reason != null || writeoffReasonId != null))
       || (reason != null && (writeoffReasonId != null || !Object.prototype.hasOwnProperty.call(warehouseWriteoffReasons, reason)))) {
       throw new BadRequestException('Выберите допустимую причину списания');
     }
     if (writeoffReasonId != null && !(await tx.writeoffReason.findUnique({
-      where: { cafeId_id: { cafeId: this.cafeId(), id: writeoffReasonId } }, select: { id: true },
-    }))) throw new BadRequestException('Причина списания не найдена');
+      where: {
+        cafeId_id: { cafeId: this.cafeId(), id: writeoffReasonId },
+        ...(writeoffReasonId === previousReasonId ? {} : { archivedAt: null }),
+      },
+      select: { id: true },
+    }))) throw new BadRequestException('Причина списания недоступна');
     return { reason: reason ?? null, writeoffReasonId: writeoffReasonId ?? null };
   }
 

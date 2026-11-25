@@ -15,18 +15,21 @@ export function writeoffReasonInput(value: string) {
   return { reason: builtin?.value ?? null, writeoffReasonId: value && !builtin ? value : null };
 }
 
-export function WriteoffReasonField({ value, disabled, onChange }: {
+export function WriteoffReasonField({ value, disabled, retainedReason, onChange }: {
   value: string; disabled?: boolean; onChange: (value: string) => void;
+  retainedReason?: { value: string; label: string };
 }) {
   const { can } = usePermissions();
   const reasons = useWriteoffReasons();
   const [open, setOpen] = useState(false);
   const options = reasons.data?.map(({ id, label }) => ({ value: id, label })) ?? WRITEOFF_REASONS;
+  const retained = retainedReason && retainedReason.value === value && !options.some((option) => option.value === value);
   const allowCreate = can('actions.warehouseSettings');
   return <div>
     <Select className="h-10 w-full" ariaLabel="Причина списания" disabled={disabled} value={value}
       onChange={(next) => { if (next === addReason) setOpen(true); else onChange(next); }}
-      options={[{ value: '', label: 'Без причины' }, ...options, ...(allowCreate ? [{ value: addReason, label: '+ Добавить причину' }] : [])]} />
+      options={[{ value: '', label: 'Без причины' }, ...options, ...(retained ? [retainedReason] : []),
+        ...(allowCreate ? [{ value: addReason, label: '+ Добавить причину' }] : [])]} />
     {reasons.isError && <button type="button" className="mt-1 text-xs text-danger" onClick={() => void reasons.refetch()}>Повторить загрузку причин</button>}
     {open && <WriteoffReasonEditor onClose={() => setOpen(false)} onSaved={(reason) => { onChange(reason.id); setOpen(false); }} />}
   </div>;

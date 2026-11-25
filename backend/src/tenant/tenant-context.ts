@@ -34,7 +34,7 @@ const TENANT_MODELS = new Set<string>([
   'Order', 'OrderAction', 'OrderRefund', 'OrderItemCancellationRequest', 'WaiterShift', 'ShiftCashReport', 'CashShift', 'OrderItem',
   'OrderItemSetComponent', 'Payment', 'KitchenEvent', 'PenaltyReward', 'Incident',
   'AuditLog', 'Settings', 'MenuTax', 'OrderTax', 'PushSubscription', 'ReceiptPrintRequest',
-  'QrTableSession', 'QrGuest', 'QrSessionItem', 'Ingredient', 'RecipeItem',
+  'QrTableSession', 'QrGuest', 'QrSessionItem', 'Ingredient', 'IngredientCategory', 'RecipeItem',
   'Purchase', 'PurchaseItem', 'StockMovement', 'PreparationStation',
   'FinanceAccount', 'FinanceCategory', 'FinanceEntry', 'SalaryAccrual',
   'Warehouse', 'WarehouseStock', 'StationWarehouse', 'PreparationRecipe', 'PreparationRecipeItem', 'PreparationRecipeRevision',

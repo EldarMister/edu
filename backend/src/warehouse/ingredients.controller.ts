@@ -15,6 +15,11 @@ import { BalanceExportQuery, BalanceListQuery } from './balance-xlsx';
 import { IngredientImportDto } from './ingredient-import';
 import { readImportSpreadsheet } from './read-import-spreadsheet';
 
+class IngredientCategoryDto {
+  @IsString() @IsNotEmpty() @MaxLength(120)
+  name: string;
+}
+
 class RenameIngredientCategoryDto {
   @IsString() @IsNotEmpty() @MaxLength(120)
   from: string;
@@ -66,11 +71,30 @@ export class IngredientsController {
     return this.ingredients.importCatalogue(dto);
   }
 
+  @Get('categories')
+  categories() {
+    return this.ingredients.categories();
+  }
+
+  @Post('categories')
+  @Roles(Role.ADMIN, Role.OWNER)
+  @RequirePermission('actions.warehouseSettings')
+  createCategory(@Body() dto: IngredientCategoryDto) {
+    return this.ingredients.saveCategory(dto.name);
+  }
+
   @Post('categories/rename')
   @Roles(Role.ADMIN, Role.OWNER)
   @RequirePermission('actions.warehouseSettings')
   renameCategory(@Body() dto: RenameIngredientCategoryDto) {
-    return this.ingredients.renameCategory(dto.from, dto.to);
+    return this.ingredients.saveCategory(dto.to, dto.from);
+  }
+
+  @Delete('categories/:name')
+  @Roles(Role.ADMIN, Role.OWNER)
+  @RequirePermission('actions.warehouseSettings')
+  removeCategory(@Param('name') name: string) {
+    return this.ingredients.removeCategory(name);
   }
 
   @Get('overview')
@@ -134,7 +158,7 @@ export class IngredientsController {
   @Delete(':id')
   @Roles(Role.ADMIN, Role.OWNER)
   @RequirePermission('actions.warehouseSettings')
-  remove(@Param('id') id: string) {
-    return this.ingredients.remove(id);
+  remove(@Param('id') id: string, @Query('scope') scope?: string) {
+    return this.ingredients.remove(id, scope === 'ingredients');
   }
 }

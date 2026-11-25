@@ -66,7 +66,7 @@ export function DocumentList({
   const transfer = kind === 'transfer';
   const inventory = kind === 'inventory';
   const writeoff = kind === 'writeoff';
-  const reasons = useWriteoffReasons(writeoff);
+  const reasons = useWriteoffReasons(writeoff, true);
   const [expanded, setExpanded] = useState<string | null>(null);
   const toggle = (id: string) => setExpanded((last) => last === id ? null : id);
   const warehouseSelection = conditions[kind + 'Warehouses'] || warehouseId || '';
@@ -216,7 +216,7 @@ export function DocumentList({
           onChange={(value) => updateConditions({ [kind + 'Category']: value, [kind + 'Page']: '1' })} />}
         {kind === 'writeoff' && <Select ariaLabel="Причина списания" value={reason} onChange={(value) => changeFilter('Reason', value)}
           options={[{ value: '', label: 'Причина' }, { value: noWriteoffReason, label: 'Без причины' },
-            ...(reasons.data?.map(({ id, label }) => ({ value: id, label })) ?? WRITEOFF_REASONS)]} />}
+            ...(reasons.data?.map(({ id, label, archived }) => ({ value: id, label: archived ? `${label} (удалена)` : label })) ?? WRITEOFF_REASONS)]} />}
         <details className="poster-list-filter">
           <summary>+ Фильтр{extraFilterCount ? ' · ' + extraFilterCount : ''}</summary>
           <div className="poster-list-filter-content">

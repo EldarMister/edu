@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateIngredientDto, UpdateIngredientDto } from './dto';
 import { syncIngredientPackages } from './packages';
 import { importCatalogue, type IngredientImportDto } from './ingredient-import';
+import { listIngredientCategories, lockIngredientCategories, registerIngredientCategories, removeIngredientCategory, saveIngredientCategory } from './ingredient-categories';
 import { archivePreparation, lockRecipeGraph, RecipeResolver, type ResolvedRecipePart } from './recipe-resolution';
 import { RecipeCalculator, type RecipeCostRow } from './recipe-calculation';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
@@ -47,19 +48,16 @@ export class IngredientsService {
     return this.prisma.$transaction((db) => importCatalogue(db, dto));
   }
 
-  async renameCategory(from: string, to: string) {
-    const name = to.trim();
-    if (!from.trim() || !name) throw new BadRequestException('Укажите название категории');
-    return this.prisma.$transaction(async (tx) => {
-      await lockWarehouseCatalog(tx);
-      const scope: Prisma.IngredientWhereInput = { isPrepared: false, kind: { notIn: ['goods', 'beverage'] } };
-      if (from !== name && await tx.ingredient.count({ where: { ...scope, category: name } })) {
-        throw new BadRequestException('Категория с таким названием уже существует');
-      }
-      const result = await tx.ingredient.updateMany({ where: { ...scope, category: from }, data: { category: name } });
-      if (!result.count) throw new NotFoundException('Категория не найдена');
-      return { name, count: result.count };
-    });
+  categories() {
+    return listIngredientCategories(this.prisma);
+  }
+
+  saveCategory(name: string, from?: string) {
+    return this.prisma.$transaction((tx) => saveIngredientCategory(tx, name, from));
+  }
+
+  removeCategory(name: string) {
+    return this.prisma.$transaction((tx) => removeIngredientCategory(tx, name));
   }
 
   private serialize(i: IngredientRow) {
@@ -410,6 +408,7 @@ export class IngredientsService {
       valuationKnown: (dto.stock ?? 0) > 0 && (dto.avgCost ?? 0) > 0,
     };
     return this.prisma.$transaction(async (tx) => {
+      await lockIngredientCategories(tx);
       await lockWarehouseCatalog(tx);
       const warehouse = await resolveWarehouse(tx, opening?.warehouseId ?? dto.warehouseId);
       const requestKey = opening ? `ingredient-opening:${opening.requestKey}` : undefined;
@@ -441,6 +440,7 @@ export class IngredientsService {
           lowStockThreshold: new Prisma.Decimal(toBase(dto.lowStockThreshold ?? 0, unit)),
         },
       });
+      if (created.kind === 'raw' || created.kind === 'consumable') await registerIngredientCategories(tx, [created.category]);
       await syncIngredientPackages(tx, created);
       if (opening) {
         await this.purchases.createInTransaction(tx, { requestKey, complete: true, warehouseId: opening.warehouseId,
@@ -462,6 +462,8 @@ export class IngredientsService {
   async update(id: string, dto: UpdateIngredientDto) {
     const warehouse = await resolveWarehouse(this.prisma, dto.warehouseId);
     return this.prisma.$transaction(async (tx) => {
+      const categoryChanged = dto.category !== undefined || dto.kind !== undefined;
+      if (categoryChanged) await lockIngredientCategories(tx);
       if (dto.kind !== undefined || dto.preparationMode !== undefined || dto.roundPieceWriteoff !== undefined) await lockRecipeGraph(tx);
       await lockIngredients(tx, [id]);
       const current = await this.ensure(id, tx);
@@ -503,6 +505,9 @@ export class IngredientsService {
           (data.preparationMode !== undefined && data.preparationMode !== current.preparationMode) ||
           (data.roundPieceWriteoff !== undefined && data.roundPieceWriteoff !== current.roundPieceWriteoff)) await archivePreparation(tx, current);
       const updated = await tx.ingredient.update({ where: { id }, data });
+      if (categoryChanged && (updated.kind === 'raw' || updated.kind === 'consumable')) {
+        await registerIngredientCategories(tx, [updated.category]);
+      }
       await syncIngredientPackages(tx, updated);
       return this.serialize({ ...updated, ...after });
     });
@@ -512,10 +517,14 @@ export class IngredientsService {
    * Если сырьё используется в техкартах/закупках — деактивируем (isActive=false),
    * чтобы не сломать историю. Иначе удаляем физически.
    */
-  async remove(id: string) {
+  async remove(id: string, fromIngredientCatalogue = false) {
     return this.prisma.$transaction(async (tx) => {
+      if (fromIngredientCatalogue) await lockRecipeGraph(tx);
       await lockIngredients(tx, [id]);
       const current = await this.ensure(id, tx);
+      if (fromIngredientCatalogue && (current.kind !== 'raw' && current.kind !== 'consumable')) {
+        throw new BadRequestException('Эта позиция не относится к ингредиентам');
+      }
       const [used, preparationInputs, purchased, movements, balances, documents, directDishes, directVariants, processing, modifiers] = await Promise.all([
         tx.recipeItem.count({ where: { ingredientId: id } }),
         tx.preparationRecipeItem.count({ where: { ingredientId: id } }),
@@ -528,6 +537,21 @@ export class IngredientsService {
         tx.processingLine.count({ where: { ingredientId: id } }),
         tx.menuModifierOption.count({ where: { ingredientId: id } }),
       ]);
+      if (fromIngredientCatalogue && current.isActive) {
+        if (balances || !current.stock.isZero()) {
+          throw new ConflictException('Сначала приведите остаток ингредиента на всех складах к нулю складским документом');
+        }
+        const activeReferences = await Promise.all([
+          used && tx.recipeItem.count({ where: { ingredientId: id, dish: { isActive: true } } }),
+          preparationInputs && tx.preparationRecipeItem.count({ where: { ingredientId: id, recipe: { ingredient: { isActive: true } } } }),
+          directDishes && tx.dish.count({ where: { stockIngredientId: id, isActive: true } }),
+          directVariants && tx.dishVariant.count({ where: { stockIngredientId: id, dish: { isActive: true } } }),
+          modifiers && tx.menuModifierOption.count({ where: { ingredientId: id, isActive: true, group: { dish: { isActive: true } } } }),
+        ]);
+        if (activeReferences.some(Boolean)) {
+          throw new ConflictException('Сначала замените ингредиент в действующих техкартах, полуфабрикатах и модификаторах');
+        }
+      }
       if (used || preparationInputs || purchased || movements || balances || documents || directDishes || directVariants || processing || modifiers || current.isPrepared || !current.stock.isZero()) {
         const ingredient = await tx.ingredient.update({
           where: { id },

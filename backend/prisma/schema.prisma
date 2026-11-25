@@ -235,6 +235,7 @@ model Cafe {
   employeeSalaryRates EmployeeSalaryRate[]
   warehouseSuppliers WarehouseSupplier[]
   warehousePackages WarehousePackage[]
+  ingredientCategories IngredientCategory[]
   writeoffReasons WriteoffReason[]
   processingDocuments ProcessingDocument[]
   id              String     @id @default(uuid())
@@ -1477,17 +1478,26 @@ model WarehouseStock {
   @@map("warehouse_stock")
 }
 
+model IngredientCategory {
+  cafeId String @map("cafe_id")
+  name   String
+  cafe   Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@id([cafeId, name])
+  @@map("ingredient_categories")
+}
+
 model WriteoffReason {
   id             String @id @default(uuid())
   cafeId         String @map("cafe_id")
   name           String
   normalizedName String @map("normalized_name")
   expense        Boolean @default(false)
+  archivedAt     DateTime? @map("archived_at")
   cafe           Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
   documents      WarehouseDocument[]
 
   @@unique([cafeId, id])
-  @@unique([cafeId, normalizedName])
   @@map("writeoff_reasons")
 }
 
