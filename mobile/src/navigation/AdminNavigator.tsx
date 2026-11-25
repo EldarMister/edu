@@ -34,6 +34,7 @@ import { OrdersScreen } from '@/screens/admin/OrdersScreen';
 import { TablesScreen } from '@/screens/admin/TablesScreen';
 import { MenuScreen } from '@/screens/admin/MenuScreen';
 import { StaffScreen } from '@/screens/admin/StaffScreen';
+import { WorkShiftsScreen } from '@/screens/admin/WorkShiftsScreen';
 import { PositionsPanel } from '@/screens/admin/PositionsPanel';
 import { PrepStationsPage } from '@/screens/admin/PrepStationsPage';
 import { AuditScreen } from '@/screens/admin/AuditScreen';
@@ -131,7 +132,9 @@ export function AdminNavigator() {
   [canAction, locations.data?.locations.length, policy.data, warehouseAccess]);
   const currentMenu = menuEntries.find((entry) => entry.key === menuView) ?? menuEntries[0];
   const currentWarehouse = warehouseEntries.find((entry) => entry.key === warehouseView) ?? warehouseEntries[0];
-  const staffEntries = React.useMemo(() => canSection('staff') ? staffNavigation(isOwner) : [], [canSection, isOwner]);
+  const mayManageShifts = canEditSection('staff') && canAction('closeShift');
+  const staffEntries = React.useMemo(() => canSection('staff') ? staffNavigation(isOwner, mayManageShifts) : [],
+    [canSection, isOwner, mayManageShifts]);
   const currentStaff = staffEntries.find((entry) => entry.key === staffView) ?? staffEntries[0];
   const workspaces = React.useMemo(() => ({
     stats: statisticsNavigation,
@@ -281,7 +284,7 @@ export function AdminNavigator() {
         <ScrollView contentContainerStyle={styles.staffPage} keyboardShouldPersistTaps="handled">
           <PositionsPanel />
         </ScrollView>
-      ) : currentStaff?.key === 'stations' ? <PrepStationsPage />
+      ) : currentStaff?.key === 'stations' ? <PrepStationsPage /> : currentStaff?.key === 'shifts' ? <WorkShiftsScreen />
         : <StaffScreen key={staffTab} initialTab={staffTab} onOpenCashHandover={openCashHandover} />
     ) : section === 'audit' ? (
       <AuditScreen />

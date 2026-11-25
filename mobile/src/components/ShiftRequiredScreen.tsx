@@ -7,6 +7,7 @@ import { FastPressable } from '@/components/FastPressable';
 import { ShiftStartAnimation, type ShiftAnimState } from './ShiftStartAnimation';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { useStartShift } from '@/services/api/waiter';
+import { useShiftStartRequest } from '@/services/api/shift-request';
 import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
 
@@ -37,6 +38,7 @@ export function ShiftRequiredScreen({
 }) {
   const [phase, setPhase] = React.useState<ShiftAnimState>('idle');
   const startShift = useStartShift();
+  const request = useShiftStartRequest(true);
   const pushToast = useNotifications((s) => s.push);
 
   const fade = React.useRef(new Animated.Value(1)).current;
@@ -66,7 +68,12 @@ export function ShiftRequiredScreen({
     setPhase('loading');
     const startedAt = Date.now();
     startShift.mutate(undefined, {
-      onSuccess: () => {
+      onSuccess: (shift) => {
+        if (!shift) {
+          setPhase('idle');
+          onBusyChange(false);
+          return;
+        }
         const remaining = Math.max(MIN_LOADING_MS - (Date.now() - startedAt), 0);
         successTimerRef.current = setTimeout(() => {
           successTimerRef.current = null;
@@ -97,7 +104,10 @@ export function ShiftRequiredScreen({
     });
   };
 
-  const { title, subtitle } = TEXT[phase];
+  const waiting = phase === 'idle' && request.data?.status === 'pending';
+  const title = waiting ? 'Ожидается подтверждение' : TEXT[phase].title;
+  const subtitle = waiting ? 'Запрос отправлен ответственному за смены.' : phase === 'idle' && request.data?.status === 'rejected'
+    ? 'Запрос отклонён. Можно отправить его снова.' : TEXT[phase].subtitle;
 
   return (
     <SafeAreaView style={styles.safe} edges={bottomSafe ? ['bottom'] : []}>
@@ -111,7 +121,7 @@ export function ShiftRequiredScreen({
 
         {/* Кнопка в нижней части экрана */}
         <View style={styles.footer}>
-          {phase === 'idle' ? (
+          {phase === 'idle' && !waiting ? (
             <Animated.View style={{ transform: [{ scale: btnScale }] }}>
               <FastPressable style={styles.button} onPress={onStart}>
                 <Text style={styles.buttonText} translate>Начать смену</Text>

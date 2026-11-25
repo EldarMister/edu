@@ -98,6 +98,7 @@ export function useOrderDetails(id: string | null, enabled = true) {
 export function useCurrentShift(enabled = true) {
   return useQuery({
     queryKey: ['waiter', 'shift', 'current'],
+    refetchInterval: (query) => query.state.data ? false : 10_000,
     queryFn: async () => (await api.get<WaiterShift | null>('/waiter/shifts/current')).data,
     enabled,
   });
@@ -106,11 +107,12 @@ export function useCurrentShift(enabled = true) {
 export function useStartShift() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => (await api.post<WaiterShift>('/waiter/shifts/start')).data,
-    onSuccess: (data) => {
+    mutationFn: async () => (await api.post<WaiterShift | null>('/waiter/shifts/start?awaitApproval=true')).data || null,
+    onSuccess: async (data) => {
       // Сразу отражаем активную смену, чтобы оверлей старта закрылся детерминированно.
-      qc.setQueryData(['waiter', 'shift', 'current'], data);
-      qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
+      if (data) qc.setQueryData(['waiter', 'shift', 'current'], data);
+      await Promise.all([qc.invalidateQueries({ queryKey: ['waiter', 'shift'] }),
+        qc.invalidateQueries({ queryKey: ['staff', 'shift-start-request'] })]);
     },
   });
 }

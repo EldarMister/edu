@@ -26,6 +26,7 @@ export interface PublicSettings {
 }
 
 export interface Settings extends Partial<ReceiptPrintSettings> {
+  workShiftApprovalRequired?: boolean;
   receiptLogoData?: string | null;
   receiptPrintRequestsOnly?: boolean;
   roundOrderTotal?: boolean;

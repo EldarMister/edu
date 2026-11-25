@@ -15,6 +15,9 @@ import { useNotifications } from '@/store/notifications';
 import { colors, spacing } from '@/theme';
 import type { WaiterShift } from '@/types';
 import { timeHM } from '@/utils/format';
+import { shiftRequestKey, useShiftStartRequest } from '@/services/api/shift-request';
+import { usePermissions } from '@/hooks/usePermissions';
+import { WorkShiftsScreen } from '@/screens/admin/WorkShiftsScreen';
 
 const key = ['staff', 'work-shift'];
 const StaffShiftContext = React.createContext<{
@@ -27,6 +30,9 @@ export function StaffShiftGate({ children }: React.PropsWithChildren) {
   const user = useAuth((state) => state.user);
   const workspace = useAuth((state) => state.workspace);
   const [summary, setSummary] = React.useState<WaiterShift | null>(null);
+  const [managing, setManaging] = React.useState(false);
+  const { canEditSection, canAction } = usePermissions();
+  const mayManage = workspace === 'admin' && canEditSection('staff') && canAction('closeShift');
   const submitting = React.useRef(false);
   const enabled = !!user && user.role !== 'OWNER' && user.permissions?.workShiftRequired !== false;
   const queryKey = [...key, user?.id];
@@ -40,14 +46,19 @@ export function StaffShiftGate({ children }: React.PropsWithChildren) {
     const auth = useAuth.getState();
     return auth.user?.id === user?.id && auth.workspace === workspace;
   };
+  const request = useShiftStartRequest(enabled && query.isSuccess && !query.data);
   const mutate = useMutation({
-    mutationFn: async (action: 'start' | 'end') => (await api.post<WaiterShift>(`/staff/shifts/${action}`)).data,
+    mutationFn: async (action: 'start' | 'end') =>
+      (await api.post<WaiterShift | null>(`/staff/shifts/${action}${action === 'start' ? '?awaitApproval=true' : ''}`)).data || null,
     onSuccess: async (shift, action) => {
       if (!ownsShift()) return;
       await client.cancelQueries({ queryKey, exact: true });
       if (!ownsShift()) return;
-      if (action === 'end') setSummary(shift);
-      client.setQueryData(queryKey, action === 'start' ? shift : null);
+      if (action === 'end') {
+        setSummary(shift);
+        client.setQueryData(queryKey, null);
+      } else if (shift) client.setQueryData(queryKey, shift);
+      else await Promise.all([client.invalidateQueries({ queryKey: shiftRequestKey }), client.invalidateQueries({ queryKey })]);
       void client.invalidateQueries({ queryKey: ['admin', 'staff'] });
       void client.invalidateQueries({ queryKey: ['admin', 'finance'] });
     },
@@ -68,9 +79,14 @@ export function StaffShiftGate({ children }: React.PropsWithChildren) {
   useSocketEvent('waiter:shift_ended', refresh, [client, enabled]);
 
   if (!enabled) return <>{children}</>;
+  if (managing && mayManage) return <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
+    <AppHeader left={<Button title="Назад" variant="secondary" onPress={() => setManaging(false)} />} />
+    <WorkShiftsScreen />
+  </SafeAreaView>;
   const shift = query.data?.endedAt ? null : query.data;
   const startedAt = shift?.startedAt ?? summary?.startedAt;
   const ending = mutate.isPending && mutate.variables === 'end';
+  const waiting = request.data?.status === 'pending';
   if (shift || ending || summary) return (
     <StaffShiftContext.Provider value={startedAt ? {
       startedAt, ending: ending || !!summary, end: () => changeShift('end'),
@@ -89,12 +105,15 @@ export function StaffShiftGate({ children }: React.PropsWithChildren) {
       }} />} />
       <View style={{ flex: 1, justifyContent: 'center', padding: spacing.lg }}>
         {query.isPending ? <Loading /> : <Card style={{ gap: spacing.md }}>
-          <Text style={{ fontSize: 20, fontWeight: '600' }} translate>Смена не начата</Text>
+          <Text style={{ fontSize: 20, fontWeight: '600' }} translate>{waiting ? 'Ожидается подтверждение' : 'Смена не начата'}</Text>
+          {waiting && <Text>Запрос отправлен ответственному за смены.</Text>}
+          {request.data?.status === 'rejected' && <Text>Запрос отклонён. Можно отправить его снова.</Text>}
           {query.error ? <Text accessibilityRole="alert" style={{ color: colors.danger }}>{apiError(query.error)}</Text> : null}
           {query.error
             ? <Button title="Повторить" variant="secondary" onPress={() => void query.refetch()} />
-            : <Button title="Начать смену" loading={mutate.isPending} onPress={() => changeShift('start')} />}
+            : waiting ? null : <Button title="Начать смену" loading={mutate.isPending} onPress={() => changeShift('start')} />}
           <WorkspaceSwitcher />
+          {mayManage && <Button title="Смены сотрудников" variant="secondary" onPress={() => setManaging(true)} />}
         </Card>}
       </View>
     </SafeAreaView>

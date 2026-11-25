@@ -36,6 +36,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useAuth } from '@/store/auth';
 import { AdminLoadingSkeleton } from './AdminLoadingSkeleton';
 import { WarehouseDirectorySearch } from './WarehouseDirectoryTable';
+import { EmployeeSalarySheet } from './EmployeeSalarySheet';
 import { useAssignableStaffPositions } from '@/services/api/positions';
 import { WaiterOrdersReport } from './WaiterOrdersReport';
 import { shareCsv } from './print';
@@ -768,6 +769,8 @@ function CategoryRow({ cat }: { cat: ShiftReportCategory }) {
 
 function StaffModal({ member, onClose }: { member: StaffMember | null; onClose: () => void }) {
   const isEdit = !!member;
+  const [salaryOpen, setSalaryOpen] = useState(false);
+  const { isOwner } = usePermissions();
   const { create, update } = useStaffMutations();
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState(member?.name ?? '');
@@ -840,6 +843,8 @@ function StaffModal({ member, onClose }: { member: StaffMember | null; onClose: 
             options={positionOptions} title="Должность" placeholder="Выберите должность" disabled={positions.isLoading} />
           {positions.isError ? <Text style={styles.error}>{apiError(positions.error)}</Text> : null}
         </Field> : <Field label="Должность"><Text style={styles.checkLabel}>{member?.positionName ?? ROLE_LABEL[member?.role ?? 'OWNER']}</Text></Field>}
+        {isOwner && member && member.role !== 'OWNER' && <Button title="Настроить личные ставки" size="md"
+          variant="secondary" onPress={() => setSalaryOpen(true)} />}
         {hasStation ? <Field label="Цех приготовления">
           <Select value={prepStation} onChange={setPrepStation} options={stationOptions} title="Цех приготовления" />
         </Field> : null}
@@ -861,6 +866,7 @@ function StaffModal({ member, onClose }: { member: StaffMember | null; onClose: 
         ) : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
+      {salaryOpen && member && <EmployeeSalarySheet id={member.id} name={member.name} onClose={() => setSalaryOpen(false)} />}
     </BottomSheet>
   );
 }

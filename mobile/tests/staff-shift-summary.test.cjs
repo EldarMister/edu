@@ -18,7 +18,7 @@ function harness() {
     react: {
       createElement: (type, props, ...children) => ({ type, props: { ...props, children } }),
       createContext: () => ({ Provider: 'StaffShiftProvider' }),
-      useState: () => [summary, (value) => { summary = value; }],
+      useState: (initial) => initial === false ? [false, () => {}] : [summary, (value) => { summary = value; }],
       useRef: (() => { const ref = { current: false }; return () => ref; })(),
     },
     '@tanstack/react-query': {
@@ -35,6 +35,9 @@ function harness() {
     '@/lib/api': { api: {}, apiError: String },
     '@/services/push': {},
     '@/services/socket': { useSocketEvent() {} },
+    '@/services/api/shift-request': { useShiftStartRequest: () => ({ data: null }), shiftRequestKey: ['staff', 'shift-start-request'] },
+    '@/hooks/usePermissions': { usePermissions: () => ({ canEditSection: () => false, canAction: () => false }) },
+    '@/screens/admin/WorkShiftsScreen': {},
     '@/store/auth': { useAuth: Object.assign((select) => select(auth), { getState: () => auth }) },
     '@/store/notifications': { useNotifications: (select) => select({ push() {} }) },
     '@/theme': { colors: {}, spacing: {} },

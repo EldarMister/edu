@@ -10,7 +10,7 @@ export type StatisticsView = 'overview' | 'sales' | 'products' | 'staff' | 'cate
 
 export type RequestView = 'refunds' | 'cancellations';
 
-export type StaffView = 'employees' | 'positions' | 'stations';
+export type StaffView = 'employees' | 'shifts' | 'positions' | 'stations';
 
 export type FinanceView = 'transactions' | 'cashFlow' | 'cashShifts' | 'cashHandover' | 'payroll' | 'accounts' | 'categories';
 
@@ -81,12 +81,13 @@ export const settingsNavigation: Array<Extract<WorkspaceEntry, { section: 'setti
 
 const staffEntries: Array<Extract<WorkspaceEntry, { section: 'staff' }>> = [
   { section: 'staff', key: 'employees', label: 'Сотрудники' },
+  { section: 'staff', key: 'shifts', label: 'Смены' },
   { section: 'staff', key: 'positions', label: 'Должности' },
   { section: 'staff', key: 'stations', label: 'Станции' },
 ];
 
-export function staffNavigation(isOwner: boolean) {
-  return isOwner ? staffEntries : staffEntries.filter(({ key }) => key !== 'positions');
+export function staffNavigation(isOwner: boolean, mayManageShifts = false) {
+  return staffEntries.filter(({ key }) => (key !== 'positions' || isOwner) && (key !== 'shifts' || mayManageShifts));
 }
 
 export function resolveAdminSection(section: AdminSection | undefined, view: string | undefined): AdminSection | undefined {

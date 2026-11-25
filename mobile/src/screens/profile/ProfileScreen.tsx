@@ -32,6 +32,7 @@ import {
   useWaiterCabinet,
   type CabinetRecentOrder,
 } from '@/services/api/waiter';
+import { useShiftStartRequest } from '@/services/api/shift-request';
 import { useRetryFiscal } from '@/services/api/admin';
 import { WaiterVoiceSettingsSheet } from '@/screens/kitchen/KitchenVoiceSettingsSheet';
 import { ThemeSwitch } from '@/components/ThemeSwitch';
@@ -82,6 +83,7 @@ export function ProfileScreen() {
   const isWaiter = useAuth((state) => state.workspace === 'terminal');
   const trackShift = isWaiter && user?.permissions?.workShiftRequired !== false;
   const shiftQuery = useCurrentShift(trackShift);
+  const shiftRequest = useShiftStartRequest(trackShift && shiftQuery.isSuccess && !shiftQuery.data);
   const startShift = useStartShift();
   const endShift = useEndShift();
   const push = useNotifications((s) => s.push);
@@ -155,8 +157,8 @@ export function ProfileScreen() {
 
   const onStartShift = async () => {
     try {
-      await startShift.mutateAsync();
-      push({ message: 'Смена начата', type: 'success', at: new Date().toISOString() });
+      const shift = await startShift.mutateAsync();
+      push({ message: shift ? 'Смена начата' : 'Запрос на начало смены отправлен', type: 'success', at: new Date().toISOString() });
     } catch (err) {
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
@@ -206,7 +208,7 @@ export function ProfileScreen() {
                   ]}
                 >
                   <Text style={[styles.pillText, { color: shiftActive ? colors.success : colors.textMuted }]} translate>
-                    {shiftActive ? 'Смена активна' : 'Не начата'}
+                    {shiftActive ? 'Смена активна' : shiftRequest.data?.status === 'pending' ? 'Ожидается подтверждение' : 'Не начата'}
                   </Text>
                 </View>
               </View>
@@ -219,10 +221,10 @@ export function ProfileScreen() {
               {shiftActive && shift ? (
                 <FinishShiftButton startedAt={shift.startedAt} loading={endShift.isPending}
                   style={{ marginTop: spacing.lg }} onPress={() => void onEndShift()} />
-              ) : (
+              ) : shiftRequest.data?.status !== 'pending' ? (
                 <Button title="Начать смену" style={{ marginTop: spacing.lg }}
                   loading={startShift.isPending} disabled={shiftQuery.isLoading} onPress={() => void onStartShift()} />
-              )}
+              ) : null}
             </Card>
           ) : null}
 

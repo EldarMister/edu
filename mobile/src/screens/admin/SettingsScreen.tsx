@@ -45,6 +45,7 @@ type Form = ReceiptPrintSettings & {
   receiptLogoData: string;
   receiptPrintRequestsOnly: boolean;
   roundOrderTotal: boolean;
+  workShiftApprovalRequired: boolean;
   taxesEnabled: boolean;
   waiterOrderPermissions: WaiterOrderPermissions;
   cafeName: string;
@@ -109,6 +110,7 @@ function settingsForm(data: Settings): Form {
     receiptPrintRequestsOnly: data.receiptPrintRequestsOnly ?? false,
     taxesEnabled: data.taxesEnabled ?? false,
     roundOrderTotal: data.roundOrderTotal ?? false,
+    workShiftApprovalRequired: data.workShiftApprovalRequired ?? false,
   };
 }
 
@@ -236,6 +238,7 @@ function CafeSettingsScreen({ view, navigationGuard }: SettingsProps) {
     ...(isOwner ? { receiptPrintRequestsOnly: source.receiptPrintRequestsOnly } : {}),
     taxesEnabled: source.taxesEnabled,
     roundOrderTotal: source.roundOrderTotal,
+    workShiftApprovalRequired: source.workShiftApprovalRequired,
     language: source.language,
     payQr: source.payQr,
     payCash: source.payCash,
@@ -418,6 +421,9 @@ function CafeSettingsScreen({ view, navigationGuard }: SettingsProps) {
 
       <View style={[styles.settingsSide, desktop && { width: gridWidth > 0 ? (gridWidth - 32) / 3 : undefined, flex: gridWidth > 0 ? undefined : 1 }]}>
       {isOwner && <CashShiftSettings />}
+      <Card style={styles.card}><ToggleRow title="Подтверждать начало рабочей смены"
+        desc="Запросы сотрудников появятся в разделе «Персонал → Смены»." checked={form.workShiftApprovalRequired}
+        onChange={(value) => set('workShiftApprovalRequired', value)} /></Card>
       <Card style={styles.card}>
         <Text style={styles.sectionTitle} translate>Язык системы</Text>
         <View style={styles.segmented}>{LANG_OPTIONS.map(option => <FastPressable key={option.value} onPress={() => set('language', option.value)} style={[styles.segment, form.language === option.value && styles.segmentActive]}><Text style={[styles.segmentLabel, form.language === option.value && { color: colors.primary }]} translate>{option.label}</Text></FastPressable>)}</View>
