@@ -23,7 +23,7 @@ export function ShiftCard({ startedAt, busy, onAction, showElapsed = false }: {
     </div>}
     {showElapsed && startedAt ? <button type="button" className="btn-primary btn-lg mt-4 w-full gap-3" disabled={busy} onClick={onAction}>
       {busy ? <Spinner /> : <>
-        <span>{t('Закончить')}</span>
+        <span>{t('Завершить смену')}</span>
         <ShiftElapsed startedAt={startedAt} />
       </>}
     </button> : <button type="button" className="btn-primary btn-lg mt-4 w-full" disabled={busy} onClick={onAction}>

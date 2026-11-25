@@ -100,7 +100,7 @@ function toDateTimeLocal(iso: string | null | undefined) {
   return iso ? financeLocalTime(new Date(iso)) : '';
 }
 
-type StaffTab = 'employees' | 'history' | 'waiter-orders';
+type StaffTab = 'employees' | 'waiter-orders';
 
 export function StaffPage({ initialTab = 'employees' }: { initialTab?: StaffTab }) {
   const stations = usePreparationStations().data ?? [];
@@ -111,7 +111,6 @@ export function StaffPage({ initialTab = 'employees' }: { initialTab?: StaffTab 
   const refreshShifts = () => {
     void client.invalidateQueries({ queryKey: ['admin', 'staff', 'list'] });
     void client.invalidateQueries({ queryKey: ['admin', 'staff', 'shift-report'] });
-    void client.invalidateQueries({ queryKey: ['admin', 'staff', 'shift-history'] });
   };
   useSocketEvent('waiter:shift_started', refreshShifts);
   useSocketEvent('waiter:shift_ended', refreshShifts);
@@ -123,29 +122,22 @@ export function StaffPage({ initialTab = 'employees' }: { initialTab?: StaffTab 
     () => Date.now() < WAITER_REPORT_BADGE_EXPIRES_AT,
   );
   const [date, setDate] = useState(todayYmd());
-  const [historyFilters, setHistoryFilters] = useState<ShiftHistoryFilters>({ period: 'today' });
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [historyExpanded, setHistoryExpanded] = useState<string | null>(null);
-  const [editingShift, setEditingShift] = useState<ShiftHistoryRow | null>(null);
-  const [closingShift, setClosingShift] = useState<ShiftHistoryRow | null>(null);
   const { editor, openEditor, closeEditor } = useEditorRoute();
   const staffEditor = editor?.type === 'employee' ? editor : null;
   const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string; confirmation: string } | null>(null);
   const deleteConfirmed = !!pendingDelete && pendingDelete.confirmation.trim() === pendingDelete.name.trim();
 
   const reportQ = useShiftReport(date, tab === 'employees');
-  const historyQ = useShiftHistory(historyFilters, tab === 'history');
-  const shiftActions = useShiftHistoryActions();
   const staffQ = useStaff('', '');
-  const reportEmployees = useReportEmployees(tab === 'history' || tab === 'waiter-orders');
+  const reportEmployees = useReportEmployees(tab === 'waiter-orders');
   const currentShiftLoading = reportQ.isFetching || staffQ.isFetching;
   const { remove } = useStaffMutations();
   const push = useNotifications((s) => s.push);
   const tr = useT();
   const currentUser = useAuth((s) => s.user);
-  const { isOwner, canAction, canEditSection } = usePermissions();
+  const { isOwner, canAction } = usePermissions();
   const canManageStaff = isOwner || canAction('manageStaff');
-  const canCloseWorkShifts = canEditSection('staff') && canAction('closeShift');
   const canEditMember = (member: StaffMember) => canManageStaff && (member.canManage ?? isOwner);
   const positionKey = (member: StaffMember) => member.positionId ?? member.role;
   const positionLabel = (member: StaffMember) => member.positionName ?? tr(ROLE_LABEL[member.role]);
@@ -180,21 +172,6 @@ export function StaffPage({ initialTab = 'employees' }: { initialTab?: StaffTab 
     return () => window.clearTimeout(timer);
   }, [showWaiterReportBadge]);
 
-  const staffOptions = useMemo(
-    () => [
-      { value: '', label: 'Все сотрудники' },
-      ...(reportEmployees.data ?? staffQ.data ?? []).map((m) => ({ value: m.id, label: m.name })),
-    ],
-    [reportEmployees.data, staffQ.data],
-  );
-  const roleOptions = [
-    { value: '', label: 'Все роли' },
-    { value: 'WAITER', label: 'Официант' },
-    { value: 'BAR', label: 'Бар' },
-    { value: 'KITCHEN', label: 'Кухня' },
-    { value: 'ADMIN', label: 'Администратор' },
-  ];
-
   async function confirmDelete() {
     if (!pendingDelete || !deleteConfirmed || remove.isPending) return;
     const playEffect = captureDeletionEffect(`staff-member-${pendingDelete.id}`);
@@ -228,39 +205,6 @@ export function StaffPage({ initialTab = 'employees' }: { initialTab?: StaffTab 
     URL.revokeObjectURL(url);
   }
 
-  function exportHistoryCsv() {
-    const historyRows = historyQ.data?.items ?? [];
-    const head = ['Сотрудник', 'Роль', 'Дата', 'Пришел', 'Ушел', 'Отработал', 'Статус'];
-    const lines = historyRows.map((r) => [
-      r.employeeName,
-      tr(ROLE_LABEL[r.role]),
-      dateDMY(r.startedAt),
-      timeHM(r.startedAt),
-      r.endedAt ? timeHM(r.endedAt) : '—',
-      durationLabel(r.durationMin),
-      shiftStatusLabel(r.status),
-    ].map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';'));
-    const csv = '﻿' + [head.join(';'), ...lines].join('\r\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `shift-history-${historyFilters.period}-${todayYmd()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  async function closeShift() {
-    if (!closingShift) return;
-    try {
-      await shiftActions.close.mutateAsync(closingShift.id);
-      push({ message: 'Смена закрыта', type: 'success', at: new Date().toISOString() });
-      setClosingShift(null);
-    } catch (err) {
-      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
-    }
-  }
-
   function renderStaffEditor() {
     if (!staffEditor) return null;
     if (!canManageStaff || (editorMember && !canEditMember(editorMember))) {
@@ -292,17 +236,6 @@ export function StaffPage({ initialTab = 'employees' }: { initialTab?: StaffTab 
               ]} />
           </div>
         </>}
-        {tab === 'history' && (
-          <HistoryFilters
-            filters={historyFilters}
-            setFilters={setHistoryFilters}
-            staffOptions={staffOptions}
-            roleOptions={roleOptions}
-            loading={historyQ.isFetching}
-            onRefresh={() => historyQ.refetch()}
-            onExport={exportHistoryCsv}
-          />
-        )}
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {tab === 'employees' && (
             <>
@@ -342,9 +275,6 @@ export function StaffPage({ initialTab = 'employees' }: { initialTab?: StaffTab 
       <div className="no-scrollbar flex items-center gap-5 overflow-x-auto border-b border-border">
         <TabButton active={tab === 'employees'} onClick={() => setTab('employees')}>
           Сотрудники
-        </TabButton>
-        <TabButton active={tab === 'history'} onClick={() => setTab('history')}>
-          История смен
         </TabButton>
         <TabButton active={tab === 'waiter-orders'} onClick={() => setTab('waiter-orders')}>
           <span className="flex items-center gap-2">
@@ -437,43 +367,9 @@ export function StaffPage({ initialTab = 'employees' }: { initialTab?: StaffTab 
           </div>
         )}
         </div>
-      ) : tab === 'history' ? (
-        historyQ.isError ? <p role="alert" className="py-6 text-sm text-danger">{apiError(historyQ.error)}{' '}
-          <button type="button" className="underline" onClick={() => void historyQ.refetch()}>Повторить</button></p> : <ShiftHistoryTable
-          data={historyQ.data}
-          isLoading={historyQ.isLoading}
-          expanded={historyExpanded}
-          setExpanded={setHistoryExpanded}
-          onEdit={canEditSection('staff') && canManageStaff ? setEditingShift : undefined}
-          onClose={canCloseWorkShifts ? setClosingShift : undefined}
-        />
       ) : null}
 
       {renderStaffEditor()}
-      {editingShift && (
-        <ShiftEditModal row={editingShift} canChangeStatus={canCloseWorkShifts} onClose={() => setEditingShift(null)} />
-      )}
-      {closingShift && (
-        <Modal
-          open
-          onClose={() => !shiftActions.close.isPending && setClosingShift(null)}
-          title="Закрыть смену вручную"
-          footer={
-            <div className="flex gap-2">
-              <button className="btn-secondary btn-lg flex-1" disabled={shiftActions.close.isPending} onClick={() => setClosingShift(null)}>
-                Отмена
-              </button>
-              <button className="btn-primary btn-lg flex-1 font-semibold" disabled={shiftActions.close.isPending} onClick={closeShift}>
-                {shiftActions.close.isPending ? <Spinner /> : 'Закрыть смену'}
-              </button>
-            </div>
-          }
-        >
-          <p className="text-sm text-text-secondary">
-            Закрыть открытую смену сотрудника «{closingShift.employeeName}» текущим временем?
-          </p>
-        </Modal>
-      )}
       {pendingDelete && (
         <Modal
           open
@@ -511,6 +407,99 @@ export function StaffPage({ initialTab = 'employees' }: { initialTab?: StaffTab 
       )}
     </div>
   );
+}
+
+export function WorkShiftHistory() {
+  const client = useQueryClient();
+  const [filters, setFilters] = useState<ShiftHistoryFilters>({ period: 'today' });
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [editingShift, setEditingShift] = useState<ShiftHistoryRow | null>(null);
+  const [closingShift, setClosingShift] = useState<ShiftHistoryRow | null>(null);
+  const historyQ = useShiftHistory(filters);
+  const shiftActions = useShiftHistoryActions();
+  const staffQ = useStaff('', '');
+  const reportEmployees = useReportEmployees(true);
+  const push = useNotifications((s) => s.push);
+  const { isOwner, canAction, canEditSection } = usePermissions();
+  const canManageStaff = isOwner || canAction('manageStaff');
+  const canCloseWorkShifts = canEditSection('staff') && canAction('closeShift');
+  const staffOptions = useMemo(() => [
+    { value: '', label: 'Все сотрудники' },
+    ...(reportEmployees.data ?? staffQ.data ?? []).map((member) => ({ value: member.id, label: member.name })),
+  ], [reportEmployees.data, staffQ.data]);
+  const roleOptions = [
+    { value: '', label: 'Все роли' },
+    { value: 'WAITER', label: 'Официант' },
+    { value: 'BAR', label: 'Бар' },
+    { value: 'KITCHEN', label: 'Кухня' },
+    { value: 'ADMIN', label: 'Администратор' },
+  ];
+  const refresh = () => {
+    void client.invalidateQueries({ queryKey: ['admin', 'staff', 'shift-history'] });
+  };
+  useSocketEvent('waiter:shift_started', refresh);
+  useSocketEvent('waiter:shift_ended', refresh);
+  useSocketEvent('waiter:shift_updated', refresh);
+
+  function exportHistoryCsv() {
+    const historyRows = historyQ.data?.items ?? [];
+    const head = ['Сотрудник', 'Роль', 'Дата', 'Пришел', 'Ушел', 'Отработал', 'Статус'];
+    const lines = historyRows.map((row) => [
+      row.employeeName,
+      ROLE_LABEL[row.role],
+      dateDMY(row.startedAt),
+      timeHM(row.startedAt),
+      row.endedAt ? timeHM(row.endedAt) : '—',
+      durationLabel(row.durationMin),
+      shiftStatusLabel(row.status),
+    ].map((value) => `"${String(value).replace(/"/g, '""')}"`).join(';'));
+    const csv = '﻿' + [head.join(';'), ...lines].join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `shift-history-${filters.period}-${todayYmd()}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function closeShift() {
+    if (!closingShift) return;
+    try {
+      await shiftActions.close.mutateAsync(closingShift.id);
+      push({ message: 'Смена закрыта', type: 'success', at: new Date().toISOString() });
+      setClosingShift(null);
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
+  }
+
+  return <div className="space-y-3">
+    <HistoryFilters filters={filters} setFilters={setFilters} staffOptions={staffOptions} roleOptions={roleOptions}
+      loading={historyQ.isFetching} onRefresh={() => void historyQ.refetch()} onExport={exportHistoryCsv} />
+    {historyQ.isError ? <p role="alert" className="py-6 text-sm text-danger">{apiError(historyQ.error)}{' '}
+      <button type="button" className="underline" onClick={() => void historyQ.refetch()}>Повторить</button></p> : <ShiftHistoryTable
+      data={historyQ.data}
+      isLoading={historyQ.isLoading}
+      expanded={expanded}
+      setExpanded={setExpanded}
+      onEdit={canEditSection('staff') && canManageStaff ? setEditingShift : undefined}
+      onClose={canCloseWorkShifts ? setClosingShift : undefined}
+    />}
+    {editingShift && <ShiftEditModal row={editingShift} canChangeStatus={canCloseWorkShifts} onClose={() => setEditingShift(null)} />}
+    {closingShift && <Modal
+      open
+      onClose={() => !shiftActions.close.isPending && setClosingShift(null)}
+      title="Завершить смену вручную"
+      footer={<div className="flex gap-2">
+        <button type="button" className="btn-secondary btn-md" disabled={shiftActions.close.isPending} onClick={() => setClosingShift(null)}>Отмена</button>
+        <button type="button" className="btn-primary btn-md" disabled={shiftActions.close.isPending} onClick={closeShift}>
+          {shiftActions.close.isPending ? <Spinner /> : 'Завершить смену'}
+        </button>
+      </div>}
+    >
+      <p className="text-sm text-text-secondary">Завершить открытую смену сотрудника «{closingShift.employeeName}» текущим временем?</p>
+    </Modal>}
+  </div>;
 }
 
 /** Обёртка, чтобы вернуть две <tr> из map без лишнего DOM-узла. */
@@ -666,8 +655,8 @@ function ShiftHistoryTable({
         <IconEdit className="h-4 w-4" />
       </IconBtn>}
       {row.status !== 'closed' && onClose && <button type="button" onClick={() => onClose(row)}
-        className="h-8 rounded-lg border border-warning/30 px-2.5 text-xs font-medium text-warning transition-colors hover:bg-warning/10">
-        Закрыть
+        className="btn-primary btn-sm">
+        Завершить смену
       </button>}
     </div>;
   }

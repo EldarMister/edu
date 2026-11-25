@@ -163,7 +163,7 @@ export function WorkShiftBanner() {
         <p className="text-xs text-text-muted">Время учитывается для табеля и расчёта зарплаты.</p>
         {current.autoCloseAt && <p className="text-xs text-text-muted">Автозавершение через 20 часов после начала: {time(current.autoCloseAt)}.</p>}
       </div>
-      <button type="button" className="btn-secondary btn-md" disabled={change.isPending}
+      <button type="button" className="btn-primary btn-md" disabled={change.isPending}
         onClick={() => { change.reset(); setConfirmEnd(true); }}>Завершить рабочую смену</button>
     </div>
     {confirmEnd && <Modal open title="Завершить рабочую смену?" onClose={() => { if (!change.isPending) setConfirmEnd(false); }}
