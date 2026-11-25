@@ -2,6 +2,7 @@ import { IconExport } from '@/features/admin/components/icons';
 import { Fragment, useState, type ReactNode } from 'react';
 import { ColumnButton } from '../../components/ColumnControl';
 import { RowIconButton } from '../../components/RowIconButton';
+import { RowActionMenu } from '../../components/RowActionMenu';
 import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
@@ -13,7 +14,7 @@ import {
   type ProductionBatch,
   type WarehouseLocation,
 } from './api';
-import { downloadTransferRegister, useStockDocument, useStockDocuments, useWriteoffReasons, type StockDocument, type StockDocumentKind } from './stock-documents-api';
+import { downloadTransferRegister, useRemoveWriteoff, useStockDocument, useStockDocuments, useWriteoffReasons, type StockDocument, type StockDocumentKind } from './stock-documents-api';
 import { documentDisplayStatus, documentStatus, formatDocumentDate, formatVariance, WRITEOFF_REASONS, writeoffPostedTotals, writeoffReasonLabel, type StockDocumentDisplayStatus } from './stock-document-format';
 import { exportCsv } from '@/lib/report-output';
 import { useListPeriod } from './ListPeriodFilter';
@@ -27,6 +28,8 @@ import { warehouseDay } from './warehouse-period';
 import { WarehouseMultiFilter, warehouseMultiFilterValues } from './WarehouseMultiFilter';
 
 import { visibleWarehouseColumns, WarehouseColumnSettings } from './WarehouseColumnSettings';
+import { RemoveDirectoryEntry } from './RemoveDirectoryEntry';
+import { WriteoffReasonBadge } from './WriteoffReasonBadge';
 
 const registerColumnLabels = {
   date: 'Дата', products: 'Товары', note: 'Комментарий', amount: 'Сумма', employee: 'Сотрудник',
@@ -67,6 +70,8 @@ export function DocumentList({
   const inventory = kind === 'inventory';
   const writeoff = kind === 'writeoff';
   const reasons = useWriteoffReasons(writeoff, true);
+  const remove = useRemoveWriteoff();
+  const [removing, setRemoving] = useState<StockDocument | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const toggle = (id: string) => setExpanded((last) => last === id ? null : id);
   const warehouseSelection = conditions[kind + 'Warehouses'] || warehouseId || '';
@@ -98,6 +103,12 @@ export function DocumentList({
   const maxAmount = !inventory && costs ? parseDocumentAmount(conditions[kind + 'MaxAmount']) : null;
   const extraFilterCount = Number(!!status) + Number(!!employeeFilter) + Number(!!comment) + Number(minAmount != null || maxAmount != null);
   const canCreate = can(`actions.${kind === 'inventory' ? 'warehouseCount' : kind === 'writeoff' ? 'warehouseWriteoff' : 'warehouseTransfer'}`);
+  const canApprove = can('actions.warehouseApprove');
+  const removeMenu = (document: StockDocument) => writeoff &&
+    (document.status === 'draft' || document.status === 'submitted' ? canCreate : canApprove) && (
+    <RowActionMenu label={`списание от ${formatDocumentListDate(operationDate(document))}`} action="Удалить"
+      onAction={() => { remove.reset(); setRemoving(document); }} />
+  );
   const statuses: StockDocumentDisplayStatus[] = inventory
     ? ['draft', 'submitted', 'posted', 'reopened', 'reversed'] : ['draft', 'submitted', 'posted', 'reversed'];
   const operationDate = (document: StockDocument) => document.countedAt ?? document.effectiveAt ?? document.postedAt ?? document.createdAt;
@@ -170,12 +181,14 @@ export function DocumentList({
       <button className="line-clamp-2 w-full break-words text-left" onClick={() => onOpen(document.id)}>{products(document)}</button>
     </td>;
     if (key === 'amount') return <td key={key} className="whitespace-nowrap text-right tabular-nums" title={amount(document)}>{amount(document)}</td>;
+    if (key === 'reason') return <td key={key}>
+      <WriteoffReasonBadge id={document.writeoffReasonId ?? document.reason}>{writeoffReasonLabel(document)}</WriteoffReasonBadge>
+    </td>;
     const values = {
       note: document.note || '—',
       employee: employee(document),
       warehouses: warehouses(document),
       categories: document.categories?.join(', ') || '—',
-      reason: writeoffReasonLabel(document),
     };
     const value = values[key];
     return <td key={key} title={value}><span className="line-clamp-2 break-words">{value}</span></td>;
@@ -282,6 +295,7 @@ export function DocumentList({
                   {document.status === 'draft' ? <RowIconButton icon="edit" label="Редактировать документ" onClick={() => onOpen(document.id)} />
                     : <button type="button" onClick={() => onOpen(document.id)}>{inventory ? 'Посмотреть' : 'Открыть'}</button>}
                   {transfer && canCreate && onCopy && <button type="button" onClick={() => onCopy(document.id)}>Копировать</button>}
+                  {removeMenu(document)}
                 </div></td>
               </tr>
               {writeoff && expanded === document.id && <tr><td colSpan={columns.length} className="!bg-background !p-3">
@@ -303,11 +317,16 @@ export function DocumentList({
             <span className="flex justify-between gap-2"><span className="font-medium text-primary">{inventory ? warehouses(document) : products(document)}</span>{costs && (inventory || selectedColumns.includes('amount')) && <span className="whitespace-nowrap">{amount(document)}</span>}</span>
             <span className="block text-xs text-text-muted">{inventory && !countTime(document) ? 'При проведении' : formatDocumentListDate(operationDate(document))} · {inventory ? document.mode === 'full' ? 'Полная' : 'Частичная' : warehouses(document)}</span>
             {!inventory && selectedColumns.includes('note') && document.note && <span className="block text-xs text-text-secondary">{document.note}</span>}
-            {kind === 'writeoff' && selectedColumns.includes('reason') && <span className="block text-xs text-text-secondary">Причина: {writeoffReasonLabel(document)}</span>}
+            {writeoff && selectedColumns.includes('reason') && <span className="block text-xs text-text-secondary">
+              <WriteoffReasonBadge id={document.writeoffReasonId ?? document.reason}>{writeoffReasonLabel(document)}</WriteoffReasonBadge>
+            </span>}
             <span className="flex items-center justify-between gap-2 text-xs">{statusCell(document)}<span>{inventory && document.postedAt && !document.reopenedAt ? 'Проведена ' + formatDocumentDate(document.postedAt) : inventory ? document.createdByName : employee(document)}</span></span>
           </button>{writeoff && <div className="px-4 pb-3">
-            <button type="button" className="text-sm text-primary" aria-expanded={expanded === document.id}
-              onClick={() => toggle(document.id)}>Позиции списания</button>
+            <div className="flex items-center justify-between gap-2">
+              <button type="button" className="text-sm text-primary" aria-expanded={expanded === document.id}
+                onClick={() => toggle(document.id)}>Позиции списания</button>
+              {removeMenu(document)}
+            </div>
             {expanded === document.id && <div className="mt-2 bg-background"><WriteoffRegisterDetails id={document.id} costs={costs} /></div>}
           </div>}</div>)}
         </div>
@@ -324,6 +343,15 @@ export function DocumentList({
           {writeoff && costs && rows.length > 0 && <span className="md:hidden">Итого по проведённым {balanceMoney(postedTotals.amount)}{postedTotals.partial && ' · неполная оценка'}</span>}
         </div>}
       </QueryState>
+      {removing && <RemoveDirectoryEntry title="Удалить списание?" pending={remove.isPending} error={remove.error}
+        onClose={() => setRemoving(null)} onRemove={() => remove.mutate(removing, { onSuccess: () => {
+          if (expanded === removing.id) setExpanded(null);
+          setRemoving(null);
+        } })}>
+        {removing.status === 'posted'
+          ? 'Списание исчезнет из списка. Количество вернётся на склад, а сторно отразится в журнале движения.'
+          : 'Списание исчезнет из списка.'}
+      </RemoveDirectoryEntry>}
     </div>
   );
 }

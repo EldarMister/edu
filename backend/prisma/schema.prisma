@@ -1187,6 +1187,7 @@ model Settings {
   receiptPrintRequestsOnly     Boolean @default(false) @map("receipt_print_requests_only")
   allowNegativeIngredientStock Boolean @default(false) @map("allow_negative_ingredient_stock")
   expenseWriteoffReasons WarehouseWriteoffReason[] @default([]) @map("expense_writeoff_reasons")
+  archivedBuiltinWriteoffReasons WarehouseWriteoffReason[] @default([]) @map("archived_builtin_writeoff_reasons")
   warehouseProductionEnabled Boolean @default(false) @map("warehouse_production_enabled")
   warehouseProcessingEnabled Boolean @default(false) @map("warehouse_processing_enabled")
 
@@ -1521,6 +1522,7 @@ model WarehouseDocument {
   reversalReason String? @map("reversal_reason")
   status          WarehouseDocumentStatus @default(draft)
   revision        Int                     @default(0)
+  deletedAt       DateTime?               @map("deleted_at")
   createdAt       DateTime                @default(now()) @map("created_at")
   submittedAt     DateTime?               @map("submitted_at")
   postedAt        DateTime?               @map("posted_at")

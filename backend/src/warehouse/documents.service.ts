@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, Role, WarehouseDocument, WarehouseDocumentItem, WarehouseDocumentKind } from '@prisma/client';
+import { Prisma, Role, WarehouseDocument, WarehouseDocumentItem, WarehouseDocumentKind, WarehouseWriteoffReason } from '@prisma/client';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { getCafeId } from '../tenant/tenant-context';
 import { PrismaService } from '../prisma/prisma.service';
@@ -14,6 +14,7 @@ import { lockIngredients, lockWarehouseCatalog } from './stock-lock';
 import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, UnitCode, unitLabel } from './units';
 import { getWarehouseBalance, resolveWarehouse, warehouseBalances, warehouseDocumentFilter, WarehouseLocation } from './warehouse-location';
 import { lockRecipeGraph } from './recipe-resolution';
+import { assertWarehousePermission } from './warehouse-permissions';
 import { previewWriteoffSources, readWriteoffSnapshot, resolveWriteoffSources, serializeWriteoffSources, sourceInputs, writeoffDishAvailability, writeoffDishUnit, writeoffStockLines } from './writeoff-resolution';
 import { writeTransferAct } from './transfer-act-xlsx';
 import { writeInventoryWorkbook } from './inventory-xlsx';
@@ -56,11 +57,15 @@ export class WarehouseDocumentsService {
       this.prisma.writeoffReason.findMany({
         where: { cafeId, ...(includeArchived ? {} : { archivedAt: null }) }, orderBy: { normalizedName: 'asc' },
       }),
-      this.prisma.settings.findUnique({ where: { cafeId }, select: { expenseWriteoffReasons: true } }),
+      this.prisma.settings.findUnique({ where: { cafeId }, select: {
+        expenseWriteoffReasons: true, archivedBuiltinWriteoffReasons: true,
+      } }),
     ]);
     const expenses = new Set<string>(settings?.expenseWriteoffReasons);
+    const archived = new Set<string>(settings?.archivedBuiltinWriteoffReasons);
     return [
-      ...Object.entries(warehouseWriteoffReasons).map(([id, label]) => ({ id, label, expense: expenses.has(id), custom: false })),
+      ...Object.entries(warehouseWriteoffReasons).filter(([id]) => includeArchived || !archived.has(id))
+        .map(([id, label]) => ({ id, label, expense: expenses.has(id), custom: false, archived: archived.has(id) })),
       ...custom.map(({ id, name, expense, archivedAt }) => ({ id, label: name, expense, custom: true, archived: !!archivedAt })),
     ];
   }
@@ -71,7 +76,11 @@ export class WarehouseDocumentsService {
     const normalize = (value: string) => value.toLocaleLowerCase('ru');
     const normalizedName = normalize(name);
     if (!name) throw new BadRequestException('Укажите название причины');
-    if (['Без причины', ...Object.values(warehouseWriteoffReasons)].some((label) => normalize(label) === normalizedName)) {
+    const matchingBuiltin = (Object.keys(warehouseWriteoffReasons) as WarehouseWriteoffReason[])
+      .find((key) => normalize(warehouseWriteoffReasons[key]) === normalizedName);
+    if (normalize('Без причины') === normalizedName || (matchingBuiltin && !await this.prisma.settings.findFirst({
+      where: { cafeId, archivedBuiltinWriteoffReasons: { has: matchingBuiltin } }, select: { id: true },
+    }))) {
       throw new ConflictException('Причина с таким названием уже есть');
     }
     const data = { name, normalizedName, expense: dto.expense };
@@ -91,6 +100,17 @@ export class WarehouseDocumentsService {
 
   async removeWriteoffReason(id: string) {
     const cafeId = this.cafeId();
+    if (Object.prototype.hasOwnProperty.call(warehouseWriteoffReasons, id)) {
+      const builtin = id as WarehouseWriteoffReason;
+      await this.prisma.$transaction(async (tx) => {
+        await tx.settings.upsert({ where: { cafeId }, create: { cafeId }, update: {} });
+        await tx.settings.updateMany({
+          where: { cafeId, NOT: { archivedBuiltinWriteoffReasons: { has: builtin } } },
+          data: { archivedBuiltinWriteoffReasons: { push: builtin } },
+        });
+      });
+      return { ok: true };
+    }
     const result = await this.prisma.writeoffReason.updateMany({
       where: { cafeId, id }, data: { archivedAt: new Date() },
     });
@@ -106,7 +126,7 @@ export class WarehouseDocumentsService {
     const sourceMatches = text && (kind === undefined || kind === 'writeoff')
       ? await this.prisma.$queryRaw<Array<{ id: string }>>`
         SELECT d.id FROM warehouse_documents d
-        WHERE d.cafe_id = ${cafeId} AND d.kind = 'writeoff'
+        WHERE d.cafe_id = ${cafeId} AND d.kind = 'writeoff' AND d.deleted_at IS NULL
         ${warehouseId === undefined ? Prisma.empty : Prisma.sql`AND d.warehouse_id = ${warehouseId}`}
         AND EXISTS (
           SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(d.source_lines->'lines') = 'array'
@@ -115,7 +135,7 @@ export class WarehouseDocumentsService {
              OR strpos(lower(source_line->>'details'), lower(${text})) > 0
         )
       ` : [];
-    const where: Prisma.WarehouseDocumentWhereInput = { cafeId, kind, id: ids && { in: ids },
+    const where: Prisma.WarehouseDocumentWhereInput = { cafeId, kind, deletedAt: null, id: ids && { in: ids },
       ...(kind === 'transfer' && warehouseId ? { OR: [{ warehouseId }, { destinationWarehouseId: warehouseId }] } : { warehouseId }),
       ...(text ? { AND: [{ OR: [
         { note: { contains: text, mode: 'insensitive' } },
@@ -139,7 +159,7 @@ export class WarehouseDocumentsService {
             WHEN BOOL_AND(i.cost_known OR i.difference = 0) THEN ROUND(SUM(i.difference * i.unit_cost), 2) ELSE NULL END AS "varianceValue"
         FROM warehouse_documents d
         LEFT JOIN warehouse_document_items i ON i.cafe_id = d.cafe_id AND i.document_id = d.id
-        WHERE d.cafe_id = ${cafeId}
+        WHERE d.cafe_id = ${cafeId} AND d.deleted_at IS NULL
         ${warehouseId === undefined ? Prisma.empty : kind === 'transfer'
           ? Prisma.sql`AND (d.warehouse_id = ${warehouseId} OR d.destination_warehouse_id = ${warehouseId})`
           : Prisma.sql`AND d.warehouse_id = ${warehouseId}`}
@@ -282,7 +302,8 @@ export class WarehouseDocumentsService {
         await tx.$queryRaw`SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtext(${`warehouse-request:${cafeId}:${dto.requestKey}`}))) AS request_lock`;
         const existing = await tx.warehouseDocument.findUnique({ where: { cafeId_requestKey: { cafeId, requestKey: dto.requestKey } }, include: documentInclude });
         if (existing) {
-          const reason = await this.reason(tx, dto.kind, dto.reason, dto.writeoffReasonId, existing.writeoffReasonId);
+          if (existing.deletedAt) throw new ConflictException('Списание уже удалено');
+          const reason = await this.reason(tx, dto.kind, dto.reason, dto.writeoffReasonId, existing);
           if (existing.kind !== dto.kind || existing.warehouseId !== dto.warehouseId || existing.destinationWarehouseId !== (dto.destinationWarehouseId ?? null) || existing.sourcePurchaseId !== (dto.sourcePurchaseId ?? null)
             || (countedAt !== undefined && existing.countedAt?.getTime() !== countedAt?.getTime())
             || existing.effectiveAt?.getTime() !== effectiveAt?.getTime()
@@ -376,7 +397,7 @@ export class WarehouseDocumentsService {
           countedAt,
           effectiveAt,
           note: dto.note === undefined ? undefined : dto.note?.trim() || null,
-          ...(reasonProvided ? await this.reason(tx, document.kind, dto.reason, dto.writeoffReasonId, document.writeoffReasonId) : {}),
+          ...(reasonProvided ? await this.reason(tx, document.kind, dto.reason, dto.writeoffReasonId, document) : {}),
         },
         include: documentInclude,
       });
@@ -581,54 +602,76 @@ export class WarehouseDocumentsService {
     if (!note?.trim()) throw new BadRequestException('Укажите причину сторнирования');
     return this.prisma.$transaction(async (tx) => {
       const document = await this.lockDocument(tx, id, revision, 'posted');
-      await lockIngredients(tx, document.items.map((item) => item.ingredientId));
-      const { blocked, historical } = await this.reversalPeriod(tx, document);
-      if (blocked) throw new ConflictException(blocked);
-      const movements = await tx.stockMovement.findMany({ where: { cafeId: document.cafeId, sourceId: id, sourceType: document.kind }, orderBy: { createdAt: 'desc' } });
-      const recordedAt = new Date();
-      const historicalAt = historical ? movements[0]?.createdAt : undefined;
-      if (historical && !historicalAt) throw new ConflictException('В журнале отсутствуют исходные проводки');
-      const movementAt = historicalAt ?? (document.kind === 'transfer' ? recordedAt : undefined);
-      const insertedMovementIds: string[] = [];
-      // Reverse withdrawals before receipts, so both sides of a transfer remain atomic.
-      for (const movement of movements.sort((a, b) => Number(b.change) - Number(a.change))) {
-        const warehouse = await this.warehouse(tx, movement.warehouseId!);
-        const snapshot = movement.recipeSnapshot;
-        const resetCost = movement.sourceType === 'inventory' && snapshot && typeof snapshot === 'object'
-          && !Array.isArray(snapshot) && snapshot.kind === inventoryCostReset;
-        const restoreCost = resetCost && !await tx.stockMovement.findFirst({
-          where: { cafeId: document.cafeId, ingredientId: movement.ingredientId, ...warehouseDocumentFilter(warehouse),
-            id: { not: movement.id }, createdAt: { gte: movement.createdAt } }, select: { id: true },
-        }) && !await tx.warehouseDocumentItem.findFirst({
-          where: { cafeId: document.cafeId, ingredientId: movement.ingredientId, documentId: { not: id }, quantity: { not: null },
-            document: { kind: 'inventory', status: 'posted', warehouseId: warehouse.id, postedAt: { gte: document.postedAt! } } },
-          select: { ingredientId: true },
-        });
-        // A cost-only count has no physical reversal. A newer operation
-        // already established the warehouse's own carrying average.
-        if (resetCost && movement.change.isZero() && !restoreCost) continue;
-        const { movement: reversal } = await postStockMovement(tx, { ingredientId: movement.ingredientId, warehouse, change: movement.change.negated(),
-          carriedAverage: restoreCost ? movement.costAtMoment : undefined,
-          cost: movement.costAtMoment, costKnown: movement.costKnown,
-          allowNegative: historicalAt ? true : undefined,
-          valuation: historicalAt || movement.change.isZero() ? 'preserve' : movement.change.lt(0) ? 'average' : 'value',
-          movement: { createdAt: movementAt, recordedAt: historicalAt ? recordedAt : undefined,
-            type: 'cancel', sourceType: document.kind, sourceId: id, actorId: actor.id, actorName: actor.name,
-            comment: `Сторно: ${note.trim()}`, reason: 'reversal',
-            ...(movement.recipeSnapshot ? { recipeSnapshot: movement.recipeSnapshot as Prisma.InputJsonValue } : {}) } });
-        if (historicalAt) insertedMovementIds.push(reversal.id);
-      }
-      if (historicalAt) {
-        await replayHistoricalStock(tx, { cafeId: document.cafeId, effectiveAt: historicalAt, insertedMovementIds });
-        await tx.auditLog.create({ data: { cafeId: document.cafeId, userId: actor.id, userName: actor.name, userRole: actor.role,
-          actionType: 'WAREHOUSE_DOCUMENT_REVERSED_RETROSPECTIVELY', entityType: 'WAREHOUSE_DOCUMENT', entityId: id,
-          description: 'Складской документ сторнирован в открытом инвентаризационном периоде',
-          metadata: { effectiveAt: historicalAt.toISOString(), recordedAt: recordedAt.toISOString(), movementIds: insertedMovementIds } } });
-      }
-      return this.serialize(await tx.warehouseDocument.update({ where: { id, cafeId: document.cafeId },
-        data: { status: 'reversed', revision: { increment: 1 }, reversedAt: recordedAt, reversedById: actor.id,
-          reversedByName: actor.name, reversalReason: note.trim() }, include: documentInclude }));
+      return this.reversePosted(tx, actor, document, note.trim());
     }, transactionOptions);
+  }
+
+  async removeWriteoff(actor: Actor, id: string, revision?: number) {
+    const cafeId = this.assertActor(actor);
+    return this.prisma.$transaction(async (tx) => {
+      const document = await this.lockDocument(tx, id, revision, ['draft', 'submitted', 'posted', 'reversed']);
+      if (document.kind !== 'writeoff') throw new NotFoundException('Списание не найдено');
+      assertWarehousePermission(actor, document.status === 'draft' || document.status === 'submitted'
+        ? 'warehouseWriteoff' : 'warehouseApprove');
+      if (document.status === 'posted') await this.reversePosted(tx, actor, document, 'Удаление списания');
+      await tx.warehouseDocument.update({ where: { id, cafeId },
+        data: { deletedAt: new Date(), revision: { increment: 1 } } });
+      await tx.auditLog.create({ data: { cafeId, userId: actor.id, userName: actor.name, userRole: actor.role,
+        actionType: 'WAREHOUSE_WRITEOFF_DELETED', entityType: 'WAREHOUSE_DOCUMENT', entityId: id,
+        description: 'Удалено складское списание', metadata: { previousStatus: document.status } } });
+      return { ok: true };
+    }, transactionOptions);
+  }
+
+  private async reversePosted(tx: Prisma.TransactionClient, actor: Actor, document: Document, note: string) {
+    const { id } = document;
+    await lockIngredients(tx, document.items.map((item) => item.ingredientId));
+    const { blocked, historical } = await this.reversalPeriod(tx, document);
+    if (blocked) throw new ConflictException(blocked);
+    const movements = await tx.stockMovement.findMany({ where: { cafeId: document.cafeId, sourceId: id, sourceType: document.kind }, orderBy: { createdAt: 'desc' } });
+    const recordedAt = new Date();
+    const historicalAt = historical ? movements[0]?.createdAt : undefined;
+    if (historical && !historicalAt) throw new ConflictException('В журнале отсутствуют исходные проводки');
+    const movementAt = historicalAt ?? (document.kind === 'transfer' ? recordedAt : undefined);
+    const insertedMovementIds: string[] = [];
+    // Reverse withdrawals before receipts, so both sides of a transfer remain atomic.
+    for (const movement of movements.sort((a, b) => Number(b.change) - Number(a.change))) {
+      const warehouse = await this.warehouse(tx, movement.warehouseId!);
+      const snapshot = movement.recipeSnapshot;
+      const resetCost = movement.sourceType === 'inventory' && snapshot && typeof snapshot === 'object'
+        && !Array.isArray(snapshot) && snapshot.kind === inventoryCostReset;
+      const restoreCost = resetCost && !await tx.stockMovement.findFirst({
+        where: { cafeId: document.cafeId, ingredientId: movement.ingredientId, ...warehouseDocumentFilter(warehouse),
+          id: { not: movement.id }, createdAt: { gte: movement.createdAt } }, select: { id: true },
+      }) && !await tx.warehouseDocumentItem.findFirst({
+        where: { cafeId: document.cafeId, ingredientId: movement.ingredientId, documentId: { not: id }, quantity: { not: null },
+          document: { kind: 'inventory', status: 'posted', warehouseId: warehouse.id, postedAt: { gte: document.postedAt! } } },
+        select: { ingredientId: true },
+      });
+      // A cost-only count has no physical reversal. A newer operation
+      // already established the warehouse's own carrying average.
+      if (resetCost && movement.change.isZero() && !restoreCost) continue;
+      const { movement: reversal } = await postStockMovement(tx, { ingredientId: movement.ingredientId, warehouse, change: movement.change.negated(),
+        carriedAverage: restoreCost ? movement.costAtMoment : undefined,
+        cost: movement.costAtMoment, costKnown: movement.costKnown,
+        allowNegative: historicalAt ? true : undefined,
+        valuation: historicalAt || movement.change.isZero() ? 'preserve' : movement.change.lt(0) ? 'average' : 'value',
+        movement: { createdAt: movementAt, recordedAt: historicalAt ? recordedAt : undefined,
+          type: 'cancel', sourceType: document.kind, sourceId: id, actorId: actor.id, actorName: actor.name,
+          comment: `Сторно: ${note.trim()}`, reason: 'reversal',
+          ...(movement.recipeSnapshot ? { recipeSnapshot: movement.recipeSnapshot as Prisma.InputJsonValue } : {}) } });
+      if (historicalAt) insertedMovementIds.push(reversal.id);
+    }
+    if (historicalAt) {
+      await replayHistoricalStock(tx, { cafeId: document.cafeId, effectiveAt: historicalAt, insertedMovementIds });
+      await tx.auditLog.create({ data: { cafeId: document.cafeId, userId: actor.id, userName: actor.name, userRole: actor.role,
+        actionType: 'WAREHOUSE_DOCUMENT_REVERSED_RETROSPECTIVELY', entityType: 'WAREHOUSE_DOCUMENT', entityId: id,
+        description: 'Складской документ сторнирован в открытом инвентаризационном периоде',
+        metadata: { effectiveAt: historicalAt.toISOString(), recordedAt: recordedAt.toISOString(), movementIds: insertedMovementIds } } });
+    }
+    return this.serialize(await tx.warehouseDocument.update({ where: { id, cafeId: document.cafeId },
+      data: { status: 'reversed', revision: { increment: 1 }, reversedAt: recordedAt, reversedById: actor.id,
+        reversedByName: actor.name, reversalReason: note.trim() }, include: documentInclude }));
   }
 
   private async finalize(tx: Prisma.TransactionClient, actor: Actor, id: string, action?: 'submit' | 'post') {
@@ -877,7 +920,7 @@ export class WarehouseDocumentsService {
 
   private async load(tx: Prisma.TransactionClient, id: string) {
     const document = await tx.warehouseDocument.findUnique({
-      where: { id, cafeId: this.cafeId() }, include: documentInclude,
+      where: { id, cafeId: this.cafeId(), deletedAt: null }, include: documentInclude,
     });
     if (!document) throw new NotFoundException('Складской документ не найден');
     return document;
@@ -909,15 +952,20 @@ export class WarehouseDocumentsService {
   }
 
   private async reason(tx: Prisma.TransactionClient, kind: WarehouseDocumentKind,
-    reason?: keyof typeof warehouseWriteoffReasons | null, writeoffReasonId?: string | null, previousReasonId?: string | null) {
+    reason?: WarehouseWriteoffReason | null, writeoffReasonId?: string | null,
+    previous?: Pick<WarehouseDocument, 'reason' | 'writeoffReasonId'>) {
     if ((kind !== 'writeoff' && (reason != null || writeoffReasonId != null))
       || (reason != null && (writeoffReasonId != null || !Object.prototype.hasOwnProperty.call(warehouseWriteoffReasons, reason)))) {
       throw new BadRequestException('Выберите допустимую причину списания');
     }
+    if (reason != null && reason !== previous?.reason && await tx.settings.findFirst({
+      where: { cafeId: this.cafeId(), archivedBuiltinWriteoffReasons: { has: reason } },
+      select: { id: true },
+    })) throw new BadRequestException('Причина списания недоступна');
     if (writeoffReasonId != null && !(await tx.writeoffReason.findUnique({
       where: {
         cafeId_id: { cafeId: this.cafeId(), id: writeoffReasonId },
-        ...(writeoffReasonId === previousReasonId ? {} : { archivedAt: null }),
+        ...(writeoffReasonId === previous?.writeoffReasonId ? {} : { archivedAt: null }),
       },
       select: { id: true },
     }))) throw new BadRequestException('Причина списания недоступна');

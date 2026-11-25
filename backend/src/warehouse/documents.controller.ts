@@ -139,6 +139,13 @@ export class WarehouseDocumentsController {
     return document;
   }
 
+  @Delete('writeoffs/:id')
+  async removeWriteoff(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: WarehouseDocumentRevisionDto) {
+    const result = await this.documents.removeWriteoff(user, id, dto?.revision);
+    this.events.emitToCafeAdmins(user.cafeId, SERVER_EVENTS.WAREHOUSE_UPDATED, {});
+    return result;
+  }
+
   @Post(':id/reopen')
   @RequirePermission('actions.warehouseApprove')
   async reopen(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: WarehouseDocumentRevisionDto) {

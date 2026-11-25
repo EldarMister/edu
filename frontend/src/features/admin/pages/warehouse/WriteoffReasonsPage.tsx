@@ -11,6 +11,7 @@ import { balanceMoney } from './balance-format';
 import { QueryState } from './WarehouseUi';
 import { WriteoffReasonEditor } from './WriteoffReasonField';
 import { RemoveDirectoryEntry } from './RemoveDirectoryEntry';
+import { WriteoffReasonBadge } from './WriteoffReasonBadge';
 
 export function WriteoffReasonsPage({ onSelect, navigation }: { onSelect: (id: string) => void; navigation: React.ReactNode }) {
   const [editor, setEditor] = useState<WriteoffReasonOption | 'new' | null>(null);
@@ -53,12 +54,14 @@ export function WriteoffReasonsPage({ onSelect, navigation }: { onSelect: (id: s
           <tbody>{filtered.map((reason) => {
             const summary = writeoffPostedTotals(linked.get(reason.id) ?? []);
             return <tr key={reason.id}>
-              <td><button type="button" className="text-left text-primary" onClick={() => onSelect(reason.id)}>{reason.label}</button></td>
+              <td><button type="button" className="text-left text-primary" onClick={() => onSelect(reason.id)}>
+                <WriteoffReasonBadge id={reason.id}>{reason.label}</WriteoffReasonBadge>
+              </button></td>
               <td>{reason.expense ? 'Расходы' : 'Себестоимость'}</td>
               <td className="text-right tabular-nums">{summary.count}</td>
               {showCost && <td className="text-right tabular-nums">{cost(summary)}</td>}
-              <td>{editable && reason.custom && <div className="poster-row-actions">
-                <RowIconButton icon="edit" label={`Редактировать причину «${reason.label}»`} onClick={() => setEditor(reason)} />
+              <td>{editable && <div className="poster-row-actions">
+                {reason.custom && <RowIconButton icon="edit" label={`Редактировать причину «${reason.label}»`} onClick={() => setEditor(reason)} />}
                 <RowActionMenu label={reason.label} action="Удалить" onAction={() => { remove.reset(); setRemoving(reason); }} />
               </div>}</td>
             </tr>;

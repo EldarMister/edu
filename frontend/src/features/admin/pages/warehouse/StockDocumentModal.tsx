@@ -412,8 +412,8 @@ function StockDocumentDraft({
         {needsReason && (
           <DocumentField label="Причина списания">
             <WriteoffReasonField disabled={pending || stale} value={reason} onChange={setReason}
-              retainedReason={document.writeoffReasonId && document.reasonLabel
-                ? { value: document.writeoffReasonId, label: document.reasonLabel } : undefined} />
+              retainedReason={document.writeoffReasonId || document.reason
+                ? { value: (document.writeoffReasonId ?? document.reason)!, label: writeoffReasonLabel(document) } : undefined} />
           </DocumentField>
         )}
         <DocumentField label={reason === 'other' ? 'Уточните причину' : 'Комментарий'}>

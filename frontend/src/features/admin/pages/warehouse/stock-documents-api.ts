@@ -108,6 +108,20 @@ export function useRemoveWriteoffReason() {
   });
 }
 
+export function useRemoveWriteoff() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, revision }: { id: string; revision: number }) =>
+      api.delete(`${BASE_URL}/writeoffs/${encodeURIComponent(id)}`, { data: { revision } }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: WAREHOUSE_KEY }),
+        queryClient.invalidateQueries({ queryKey: ['admin', 'finance'] }),
+      ]);
+    },
+  });
+}
+
 export function useSaveWriteoffReason() {
   const queryClient = useQueryClient();
   return useMutation({

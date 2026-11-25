@@ -81,6 +81,41 @@ test('PostgreSQL: recipe writeoffs retain source lines and immutable ingredient 
         assert.equal(profitLoss.rows.find(({ label }) => label === 'Списания на расходы').value, 10);
         await docs.reverse(owner, result.id, 'Test balance restored', result.revision);
       });
+      await t.test('deleting a standard reason preserves history and deleting a posted writeoff restores stock once', async () => {
+        await db.settings.upsert({ where: { cafeId: cafe.id },
+          create: { cafeId: cafe.id, expenseWriteoffReasons: ['damage'] }, update: { expenseWriteoffReasons: ['damage'] } });
+        const from = new Date();
+        const initialStock = await stock(flour.id);
+        const input = { requestKey: randomUUID(), warehouseId: main.id, kind: 'writeoff', reason: 'damage',
+          items: [{ ingredientId: flour.id, quantity: 0.3 }] };
+        const draft = await docs.create(owner, input);
+        const submitted = await docs.submit(owner, draft.id, draft.revision);
+        const document = await docs.approve(owner, submitted.id, submitted.revision);
+        await docs.removeWriteoffReason('damage');
+        assert.ok(!(await docs.reasons()).some(({ id }) => id === 'damage'));
+        assert.ok((await docs.reasons(true)).some(({ id, expense, archived }) => id === 'damage' && expense && archived));
+        await assert.rejects(() => docs.create(owner, { ...input, requestKey: randomUUID() }), /недоступна/);
+        assert.equal((await docs.get(document.id)).reasonLabel, 'Брак');
+        const expenseTotal = async () => (await readProfitLoss(db, cafe.id, {
+          from, to: new Date(Date.now() + 60_000),
+        })).rows.find(({ label }) => label === 'Списания на расходы')?.value ?? 0;
+        assert.equal(await expenseTotal(), 30);
+        await assert.rejects(() => docs.removeWriteoff(owner, document.id, draft.revision), /изменился/);
+        await docs.removeWriteoff(owner, document.id, document.revision);
+        assert.equal(await stock(flour.id), initialStock);
+        assert.equal(await expenseTotal(), 0);
+        assert.ok(!(await docs.list(undefined, 'writeoff')).some(({ id }) => id === document.id));
+        await assert.rejects(() => docs.removeWriteoff(owner, document.id), /не найден/);
+        await assert.rejects(() => docs.create(owner, input), /удалено/);
+        assert.equal(await db.stockMovement.count({ where: { sourceType: 'writeoff', sourceId: document.id, type: 'cancel' } }), 1);
+        const replaced = await docs.saveWriteoffReason({ name: 'Брак', expense: false });
+        assert.notEqual(replaced.id, 'damage');
+        const unused = await docs.create(owner, { ...input, reason: null, requestKey: randomUUID() });
+        await docs.removeWriteoff(owner, unused.id, unused.revision);
+        assert.equal(await db.stockMovement.count({ where: { sourceType: 'writeoff', sourceId: unused.id } }), 0);
+        await db.writeoffReason.delete({ where: { id: replaced.id } });
+        await db.settings.delete({ where: { cafeId: cafe.id } });
+      });
       await t.test('backdated writeoff uses the dish, its deleted variant and recursive preparation as of the stock date', async () => {
         const preparations = new PreparationProductionService(db);
         const prep = await preparations.saveCard({ requestKey: randomUUID(), name: 'Old stock recipe', unit: 'kg', mode: 'virtual',
@@ -333,6 +368,7 @@ test('PostgreSQL: recipe writeoffs retain source lines and immutable ingredient 
     await db.ingredient.deleteMany({ where: { cafeId: cafe.id } });
     await db.auditLog.deleteMany({ where: { cafeId: cafe.id } });
     await db.user.deleteMany({ where: { cafeId: cafe.id } });
+    await db.settings.deleteMany({ where: { cafeId: cafe.id } });
     await db.cafe.delete({ where: { id: cafe.id } });
     await db.$disconnect();
   }

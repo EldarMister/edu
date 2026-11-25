@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { IconTrash } from './icons';
 
 function menuPosition(anchor: HTMLButtonElement | null) {
   const rect = anchor?.getBoundingClientRect();
@@ -55,12 +56,12 @@ export function RowActionMenu({ label, action, onAction }: { label: string; acti
     {position && createPortal(
       <div ref={menu} id={id} role="menu" aria-label={label} style={position}
         className="fixed z-[70] w-44 rounded-md border border-border bg-card p-1 text-sm shadow-lg">
-        <button type="button" role="menuitem" className="w-full rounded px-3 py-2.5 text-left text-danger hover:bg-background"
+        <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded px-3 py-2.5 text-left text-danger hover:bg-background"
           onClick={() => {
             setPosition(null);
             trigger.current?.focus({ preventScroll: true });
             onAction();
-          }}>{action}</button>
+          }}>{action === 'Удалить' && <IconTrash className="h-4 w-4 shrink-0" aria-hidden="true" />}{action}</button>
       </div>,
       document.body,
     )}
