@@ -31,7 +31,7 @@ const methods = [cash('cash', 'Наличные'), cash('card', 'Карта'), c
 const columns: Record<Report, Column[]> = {
   sales: [date, orders, cash('paidAmount', 'Продажи до возвратов'), cash('refundedAmount', 'Возвраты'), revenue, avgCheck, cash('discount', 'Скидка')],
   products: [{ key: 'name', label: 'Товар' }, { key: 'category', label: 'Категория' }, { key: 'waiter', label: 'Официант' },
-    quantity, cash('gross', 'Валовый оборот'), cash('discount', 'Скидка'), revenue, cost, profit, foodCost,
+    quantity, cash('discount', 'Скидка'), revenue, cost, profit, foodCost,
     cash('averagePrice', 'Средняя цена продажи'), cash('averageCost', 'Средняя себестоимость'), markup],
   staff: [{ key: 'name', label: 'Официант' }, revenue, profit, orders, avgCheck,
     { key: 'avgSeconds', label: 'Среднее время', format: 'duration' }],
