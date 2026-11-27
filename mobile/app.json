@@ -40,6 +40,7 @@
         ]
       },
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "EDU POS использует камеру для управления кухней жестами.",
         "NSMicrophoneUsageDescription": "EDU POS использует микрофон для внутренней рации Push-to-Talk.",
         "UIBackgroundModes": [
