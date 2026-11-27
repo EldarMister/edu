@@ -183,7 +183,7 @@ export function WaiterOrdersReport({ staff, staffLoading }: {
             disabled={staffLoading} className="min-h-10 w-56 max-w-full"
           />
           <div className="[&_.report-period-trigger]:min-h-10 [&_.report-period-trigger]:rounded-lg">
-            <ReportPeriodFilter label="Период отчёта" confirmSelection includeAll={false}
+            <ReportPeriodFilter label="Период отчёта" includeAll={false}
               preset={period} today={today} range={{ dateFrom: from, dateTo: to }}
               onPreset={setPeriod} onRange={(dateFrom, dateTo) => {
                 setCustomRange({ dateFrom, dateTo });

@@ -1,5 +1,6 @@
 import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { IconEllipsis } from '../../components/icons';
 import { RowIconButton } from '../../components/RowIconButton';
 import { createPortal } from 'react-dom';
 import { usePageFilter, useEditorRoute } from './workspace-route';
@@ -81,7 +82,7 @@ function DirectoryActions({
           <button
             type="button"
             ref={trigger}
-            className="px-2"
+            className="row-action-icon"
             aria-label={`Другие действия: ${label}`}
             aria-haspopup="menu"
             aria-expanded={!!position}
@@ -98,7 +99,7 @@ function DirectoryActions({
               });
             }}
           >
-            •••
+            <IconEllipsis className="h-4 w-4" aria-hidden="true" />
           </button>
           {position &&
             createPortal(

@@ -41,3 +41,24 @@ details[open] > .workspace-tool[data-disclosure]::after,
   .workspace-tool[data-disclosure]:has(> .catalogue-action-label)::after { display: none; }
 }
 @media print { .workspace-tool { display: none; } }
+
+.row-action-icon {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  place-items: center;
+  border-radius: 8px;
+  color: rgb(var(--edu-text-muted));
+  transition: background-color .15s, color .15s;
+}
+.row-action-icon:hover:not(:disabled),
+.row-action-icon[aria-expanded='true'] {
+  color: rgb(var(--edu-text));
+  background: light-dark(#f1f5f9, var(--edu-selected));
+}
+.row-action-icon:focus-visible {
+  outline: 2px solid rgb(var(--edu-text-muted));
+  outline-offset: 1px;
+}
+.row-action-icon:disabled { opacity: .5; }

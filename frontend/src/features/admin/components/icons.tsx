@@ -97,6 +97,11 @@ export const IconEye = (p: P) => (
     <circle cx="12" cy="12" r="3" />
   </S>
 );
+export const IconEllipsis = (p: P) => (
+  <S {...p}>
+    <path d="M5 12h.01M12 12h.01M19 12h.01" strokeWidth="3.5" />
+  </S>
+);
 export const IconEyeOff = (p: P) => (
   <S {...p}>
     <path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 7 10 7a13.2 13.2 0 0 1-1.67 2.4M6.6 6.6A13.3 13.3 0 0 0 2 11s3.5 7 10 7a9 9 0 0 0 4.2-1M1 1l22 22" />

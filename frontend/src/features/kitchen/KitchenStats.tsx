@@ -1,4 +1,5 @@
-import { DatePicker } from '@/components/DatePicker';
+import { REPORT_PERIODS, ReportPeriodFilter } from '@/features/admin/pages/warehouse/ReportPeriodFilter';
+import { calendarDate, warehouseDay, warehousePeriodRange } from '@/features/admin/pages/warehouse/warehouse-period';
 import { RowIconButton } from '@/features/admin/components/RowIconButton';
 import { useMemo, useState } from 'react';
 import type { PrepStation } from '@/types';
@@ -11,13 +12,8 @@ import {
   type KitchenStatsPeriod,
 } from './api';
 
-const PERIODS: { value: KitchenStatsPeriod; label: string }[] = [
-  { value: 'today', label: 'Сегодня' },
-  { value: 'week', label: 'Неделя' },
-  { value: 'month', label: 'Месяц' },
-  { value: 'all', label: 'Всё время' },
-  { value: 'custom', label: 'Период' },
-];
+const PERIODS = REPORT_PERIODS.filter(({ value }) =>
+  value === 'today' || value === 'week' || value === 'month' || value === 'all');
 
 const PERIOD_LABEL: Record<KitchenStatsPeriod, string> = {
   today: 'Сегодня',
@@ -40,67 +36,28 @@ function minutes(n: number) {
   return `${n} мин`;
 }
 
-/** Сегментированный переключатель периода (активный — белая кнопка с синим текстом). */
-function PeriodTabs({
-  period,
-  onChange,
+function KitchenPeriod({
+  period, from, to, today, onPreset, onRange,
 }: {
   period: KitchenStatsPeriod;
-  onChange: (p: KitchenStatsPeriod) => void;
-}) {
-  return (
-    <div className="grid w-full grid-cols-3 gap-1 rounded-xl bg-background p-1 sm:inline-flex sm:w-auto sm:flex-wrap">
-      {PERIODS.map((p) => (
-        <button
-          key={p.value}
-          onClick={() => onChange(p.value)}
-          className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-            period === p.value
-              ? 'bg-white text-primary shadow-sm'
-              : 'text-text-muted hover:text-text-secondary'
-          }`}
-        >
-          {p.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** Поля выбора дат для произвольного периода. */
-function CustomRange({
-  from,
-  to,
-  today,
-  onFrom,
-  onTo,
-}: {
   from: string;
   to: string;
-  today: string;
-  onFrom: (v: string) => void;
-  onTo: (v: string) => void;
+  today: Date;
+  onPreset: (period: KitchenStatsPeriod) => void;
+  onRange: (from: string, to: string) => void;
 }) {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <DatePicker className="input h-10 w-[150px]" value={from} max={to} onChange={(value) => onFrom(value)} />
-      <span className="text-sm text-text-muted">—</span>
-      <DatePicker className="input h-10 w-[150px]" value={to} max={today} onChange={(value) => onTo(value)} />
-    </div>
-  );
+  return <ReportPeriodFilter preset={period} today={today} presets={PERIODS}
+    range={warehousePeriodRange(period, today, from, to)}
+    onPreset={(value) => {
+      if (value === 'today' || value === 'week' || value === 'month' || value === 'all') onPreset(value);
+    }} onRange={onRange} />;
 }
 
 export function KitchenStats({ station = 'kitchen' }: { station?: PrepStation }) {
-  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
-  const weekAgo = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 6);
-    return d.toISOString().slice(0, 10);
-  }, []);
-
+  const today = warehouseDay();
   const [period, setPeriod] = useState<KitchenStatsPeriod>('today');
-  const [from, setFrom] = useState(weekAgo);
-  const [to, setTo] = useState(today);
+  const [from, setFrom] = useState(() => calendarDate(today, -6));
+  const [to, setTo] = useState(() => calendarDate(today));
 
   const [longOpen, setLongOpen] = useState(false);
   const [preparedOpen, setPreparedOpen] = useState(false);
@@ -129,10 +86,12 @@ export function KitchenStats({ station = 'kitchen' }: { station?: PrepStation })
     <div className="space-y-4 overflow-x-hidden p-4 sm:p-5">
       {/* Период */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <PeriodTabs period={period} onChange={setPeriod} />
-        {period === 'custom' && (
-          <CustomRange from={from} to={to} today={today} onFrom={setFrom} onTo={setTo} />
-        )}
+        <KitchenPeriod period={period} from={from} to={to} today={today} onPreset={setPeriod}
+          onRange={(start, end) => {
+            setFrom(start);
+            setTo(end);
+            setPeriod('custom');
+          }} />
       </div>
 
       {statsQ.isLoading || !d ? (
@@ -531,7 +490,7 @@ function HourlyModal({
   initialPeriod: KitchenStatsPeriod;
   initialFrom: string;
   initialTo: string;
-  today: string;
+  today: Date;
   onClose: () => void;
 }) {
   const [period, setPeriod] = useState<KitchenStatsPeriod>(initialPeriod);
@@ -571,10 +530,12 @@ function HourlyModal({
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           {/* Период внутри модалки */}
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <PeriodTabs period={period} onChange={setPeriod} />
-            {period === 'custom' && (
-              <CustomRange from={from} to={to} today={today} onFrom={setFrom} onTo={setTo} />
-            )}
+            <KitchenPeriod period={period} from={from} to={to} today={today} onPreset={setPeriod}
+              onRange={(start, end) => {
+                setFrom(start);
+                setTo(end);
+                setPeriod('custom');
+              }} />
           </div>
 
           {statsQ.isLoading ? (

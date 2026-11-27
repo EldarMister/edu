@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Navigate, useSearchParams } from 'react-router-dom';
 import type { TouchEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/store/auth';
@@ -507,9 +507,7 @@ export function AdminApp() {
                     warehouseViewInUse(item.key, warehouseLocations.data?.locations.length ?? 0, warehousePolicy.data),
                 )
               : s.key === 'menu'
-                ? MENU_NAV.filter((item) => item.key === 'foodCost'
-                  ? canSection('warehouse') && can('actions.warehouseCosts')
-                  : !['preparations', 'ingredients'].includes(item.key) || canSection('warehouse'))
+                ? MENU_NAV.filter((item) => !['preparations', 'ingredients'].includes(item.key) || canSection('warehouse'))
                 : s.key === 'stats' ? STATISTICS_NAV
                   : s.key === 'finance' ? financeNav : s.key === 'staff' ? personnelNav
                     : s.key === 'requests' ? requestsNav : s.key === 'settings' ? SETTINGS_NAV : [];
@@ -714,7 +712,8 @@ export function AdminApp() {
               {section === 'receipts' && canHandlePrintRequests && <ReceiptPrintsPage />}
               {section === 'tables' && canSection('tables') && <TablesPage />}
               {section === 'menu' && canSection('menu') && <>
-                {menuView === 'categories' ? <MenuCategoryWorkspace /> : <MenuPage view={menuView} />}
+                {requestedMenuView === 'foodCost' ? <Navigate replace to="?section=menu&view=goods" />
+                  : menuView === 'categories' ? <MenuCategoryWorkspace /> : <MenuPage view={menuView} />}
               </>}
               {section === 'warehouse' && canSection('warehouse') && (
                 <WarehouseSection

@@ -3,9 +3,10 @@ import { IngredientsTab, type StockFilter } from './IngredientsTab';
 import { ItemCard } from './ItemCard';
 import { PreparationCardPage, PreparationModal, ProductionBatchModal } from './PreparationTab';
 import { WarehouseReportsTab } from './WarehouseReportsTab';
-import { DatePicker } from '@/components/DatePicker';
+import { FinancePeriod } from '../finance/FinancePeriod';
+import { calendarDate, warehouseDay } from './warehouse-period';
 import { EditorPage } from './EditorPage';
-import { useEditorRoute, usePageFilter } from './workspace-route';
+import { useEditorRoute, usePageFilter, usePageFilters } from './workspace-route';
 import { useWarehouseLocations } from './api';
 import { QueryState } from './WarehouseUi';
 
@@ -14,11 +15,8 @@ export function MenuStockCatalogue({ view }: { view: 'ingredients' | 'preparatio
   const { editor, openEditor, closeEditor } = useEditorRoute();
   const locations = useWarehouseLocations();
   const warehouse = locations.data?.locations.find((l) => l.isDefault) ?? locations.data?.locations[0];
-  const today = new Date().toLocaleDateString('en-CA');
-  const start = new Date();
-  start.setDate(start.getDate() - 30);
-  const [dateTo, setDateTo] = usePageFilter('dateTo', today);
-  const [dateFrom, setDateFrom] = usePageFilter('dateFrom', start.toLocaleDateString('en-CA'));
+  const today = warehouseDay();
+  const [{ dateFrom, dateTo }, setDates] = usePageFilters({ dateFrom: calendarDate(today, -30), dateTo: calendarDate(today) });
   if (editor?.type === 'source' && editor.id && editor.action)
     return <SourceDocumentModal type={editor.action} id={editor.id} onClose={closeEditor} />;
   if ((editor?.type === 'productionBatch' || editor?.type === 'batch') && editor.id)
@@ -46,10 +44,7 @@ export function MenuStockCatalogue({ view }: { view: 'ingredients' | 'preparatio
     return (
       <EditorPage title="История позиции" onClose={closeEditor}>
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className="text-sm">Период:</span>
-          <DatePicker value={dateFrom} onChange={setDateFrom} className="input h-10 w-36" />
-          <span>—</span>
-          <DatePicker value={dateTo} onChange={setDateTo} className="input h-10 w-36" />
+          <FinancePeriod from={dateFrom} to={dateTo} onApply={({ from, to }) => setDates({ dateFrom: from, dateTo: to })} />
         </div>
         <WarehouseReportsTab
           range={{ dateFrom, dateTo }}

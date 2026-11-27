@@ -1,4 +1,5 @@
-import { DatePicker } from '@/components/DatePicker';
+import { ReportPeriodFilter, type PeriodPreset } from './warehouse/ReportPeriodFilter';
+import { warehouseDay, warehousePeriodRange } from './warehouse/warehouse-period';
 import { useState } from 'react';
 import { WorkspacePending } from '../components/WorkspacePending';
 import { timeHM } from '@/lib/format';
@@ -69,8 +70,10 @@ const ROLE_LABELS: Record<string, string> = {
 
 export function AuditPage() {
   const tr = useT();
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  const today = warehouseDay();
+  const [period, setPeriod] = useState<PeriodPreset>('all');
+  const [range, setRange] = useState({ from: '', to: '' });
+  const { dateFrom: from = '', dateTo: to = '' } = warehousePeriodRange(period, today, range.from, range.to);
   const [userId, setUserId] = useState('');
   const [actionType, setActionType] = useState('');
   const [page, setPage] = useState(1);
@@ -87,8 +90,8 @@ export function AuditPage() {
   }
 
   function clearFilters() {
-    setFrom('');
-    setTo('');
+    setPeriod('all');
+    setRange({ from: '', to: '' });
     setUserId('');
     setActionType('');
     setPage(1);
@@ -100,19 +103,13 @@ export function AuditPage() {
     <div className="space-y-4">
       {/* Фильтры */}
       <div className="card flex flex-col gap-3 p-4 sm:flex-row sm:flex-wrap sm:items-end">
-        <Field label={tr('С даты')}>
-          <DatePicker
-            className="input h-10"
-            value={from}
-            onChange={(value) => resetTo1(setFrom)(value)}
-          />
-        </Field>
-        <Field label={tr('По дату')}>
-          <DatePicker
-            className="input h-10"
-            value={to}
-            onChange={(value) => resetTo1(setTo)(value)}
-          />
+        <Field label={tr('Период')}>
+          <ReportPeriodFilter preset={period} today={today} label={tr('Период журнала')} range={{ dateFrom: from, dateTo: to }}
+            onPreset={resetTo1(setPeriod)} onRange={(start, end) => {
+              setRange({ from: start, to: end });
+              setPeriod('custom');
+              setPage(1);
+            }} />
         </Field>
         <Field label={tr('Сотрудник')}>
           <select

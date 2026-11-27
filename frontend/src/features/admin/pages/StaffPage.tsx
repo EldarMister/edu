@@ -20,6 +20,8 @@ import { apiError } from '@/lib/api';
 import { displayOrderNumber, money } from '@/lib/format';
 import { useSocketEvent } from '@/lib/socket';
 import { useT } from '@/lib/i18n';
+import { REPORT_PERIODS, ReportPeriodFilter } from './warehouse/ReportPeriodFilter';
+import { warehouseDay, warehousePeriodRange } from './warehouse/warehouse-period';
 import { useAuth } from '@/store/auth';
 import { usePreparationStations, usePreparationStationUpdates } from '@/features/kitchen/stations';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -41,7 +43,6 @@ import {
   type ShiftReportCategory,
   type ShiftReportRow,
   type ShiftHistoryFilters,
-  type ShiftHistoryPeriod,
   type ShiftHistoryResponse,
   type ShiftHistoryRow,
   type StaffMember,
@@ -537,45 +538,18 @@ function HistoryFilters({
   loading: boolean;
   onRefresh: () => void;
 }) {
-  const periodOptions: { value: ShiftHistoryPeriod; label: string }[] = [
-    { value: 'today', label: 'Сегодня' },
-    { value: 'week', label: 'Неделя' },
-    { value: 'month', label: 'Месяц' },
-    { value: 'custom', label: 'Произвольный период' },
-  ];
+  const today = warehouseDay();
+  const presets = REPORT_PERIODS.filter(({ value }) => value === 'today' || value === 'week' || value === 'month');
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2" role="group" aria-label="Фильтры истории смен">
-      <div className="w-full sm:w-44">
-        <Select
-          ariaLabel="Период истории смен"
-          className="h-10 w-full"
-          value={filters.period}
-          onChange={(v) => setFilters((f) => ({ ...f, period: v as ShiftHistoryPeriod }))}
-          options={periodOptions}
-        />
-      </div>
-      {filters.period === 'custom' && (
-        <>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-text-muted">с</span>
-            <DatePicker
-              aria-label="Начало периода"
-              className="h-10 rounded-lg border border-border bg-white px-2.5 text-sm"
-              value={filters.from ?? ''}
-              onChange={(value) => setFilters((f) => ({ ...f, from: value }))}
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-text-muted">по</span>
-            <DatePicker
-              aria-label="Конец периода"
-              className="h-10 rounded-lg border border-border bg-white px-2.5 text-sm"
-              value={filters.to ?? ''}
-              onChange={(value) => setFilters((f) => ({ ...f, to: value }))}
-            />
-          </div>
-        </>
-      )}
+      <ReportPeriodFilter preset={filters.period} presets={presets} today={today} label="Период истории смен"
+        range={warehousePeriodRange(filters.period, today, filters.from ?? '', filters.to ?? '')}
+        onPreset={(value) => {
+          if (value === 'today' || value === 'week' || value === 'month') {
+            setFilters((current) => ({ ...current, period: value }));
+          }
+        }}
+        onRange={(from, to) => setFilters((current) => ({ ...current, period: 'custom', from, to }))} />
       <div className="w-full sm:w-52">
         <Select
           ariaLabel="Сотрудник"
@@ -1197,9 +1171,7 @@ function IconBtn({
       onClick={onClick}
       title={title}
       aria-label={title}
-      className={`rounded-lg p-1.5 transition-colors ${
-        danger ? 'text-text-muted hover:bg-danger/10 hover:text-danger' : 'text-text-muted hover:bg-background hover:text-primary'
-      }`}
+      className={danger ? 'rounded-lg p-1.5 text-text-muted transition-colors hover:bg-danger/10 hover:text-danger' : 'row-action-icon'}
     >
       {children}
     </button>

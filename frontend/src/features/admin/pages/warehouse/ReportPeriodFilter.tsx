@@ -1,6 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { warehousePeriodRange } from './warehouse-period';
 import './report-period-filter.css';
 
 export const REPORT_PERIODS = [
@@ -12,20 +11,16 @@ export const REPORT_PERIODS = [
   { value: 'lastMonth', label: 'Прошлый месяц' },
   { value: 'all', label: 'Всё время' },
 ] as const;
-export const COMPARISON_PERIODS = [
-  { value: 'lastWeek', label: 'Прошлая неделя' },
-  { value: 'lastTwoWeeks', label: 'Прошлые 2 недели' },
-  { value: 'week', label: 'Последние 7 дней' },
-  { value: 'twoWeeks', label: 'Последние 14 дней' },
-  { value: 'lastMonth', label: 'Прошлый месяц' },
-] as const;
-export type PeriodPreset = typeof REPORT_PERIODS[number]['value'] | typeof COMPARISON_PERIODS[number]['value'] | 'custom';
+export type PeriodPreset = typeof REPORT_PERIODS[number]['value'] | 'lastWeek' | 'lastTwoWeeks' | 'twoWeeks' | 'custom';
+
+type PeriodOption = { value: Exclude<PeriodPreset, 'custom'>; label: string };
+const defaultPresets = REPORT_PERIODS.filter(({ value }) => value !== 'month');
+const panelWidth = 480;
 
 const weekdays = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
 const months = Array.from({ length: 12 }, (_, index) =>
   new Intl.DateTimeFormat('ru-RU', { month: 'long', timeZone: 'UTC' }).format(Date.UTC(2024, index, 1)));
 const fullDay = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'long', timeZone: 'UTC' });
-const dayLabel = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeZone: 'UTC' });
 const shortDay = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', timeZone: 'UTC' });
 const keyboardOffsets: Record<string, number> = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
 
@@ -38,7 +33,8 @@ function rangeCaption(from?: string, to?: string) {
   const start = asDate(from);
   const end = asDate(to);
   if (!Number.isFinite(+start) || !Number.isFinite(+end)) return 'Выбрать период';
-  return from === to ? dayLabel.format(start) : `${dayLabel.format(start)} – ${dayLabel.format(end)}`;
+  const formatter = start.getUTCFullYear() === end.getUTCFullYear() ? shortDay : fullDay;
+  return from === to ? formatter.format(start) : formatter.format(start) + ' — ' + formatter.format(end);
 }
 
 interface Props {
@@ -47,33 +43,26 @@ interface Props {
   range: { dateFrom?: string; dateTo?: string };
   label?: string;
   allCaption?: string;
-  confirmSelection?: boolean;
+  presets?: readonly PeriodOption[];
   includeAll?: boolean;
-  comparison?: boolean;
-  allRange?: { dateFrom: string; dateTo: string };
   onPreset: (preset: PeriodPreset) => void;
   onRange: (from: string, to: string) => void;
 }
 
 export function ReportPeriodFilter({ preset, today, range, label: dialogLabel = 'Период отчёта',
-  allCaption = 'Всё время', confirmSelection = false, includeAll = true, comparison = false, allRange, onPreset, onRange }: Props) {
+  allCaption = 'Всё время', presets = defaultPresets, includeAll = true, onPreset, onRange }: Props) {
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
-  const calendar = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<{ top: number; left: number; width: number; maxHeight: number }>();
   const [month, setMonth] = useState(() => today);
   const [start, setStart] = useState('');
   const [hover, setHover] = useState('');
-  const [choosingRange, setChoosingRange] = useState(false);
-  const [pending, setPending] = useState<{ preset: PeriodPreset; range: Props['range'] }>();
   const todayKey = today.toISOString().slice(0, 10);
   const { dateFrom, dateTo } = range;
-  const presets = comparison ? COMPARISON_PERIODS : REPORT_PERIODS;
-  const label = preset === 'all' ? allCaption : confirmSelection && dateFrom && dateTo
-    ? formatFinanceRange(dateFrom, dateTo)
-    : presets.find(({ value }) => value === preset)?.label ?? rangeCaption(dateFrom, dateTo);
+  const label = preset === 'all' ? allCaption
+    : dateFrom && dateTo ? rangeCaption(dateFrom, dateTo) : presets.find(({ value }) => value === preset)?.label ?? 'Выбрать период';
   const yearNumber = month.getUTCFullYear();
   const monthIndex = month.getUTCMonth();
   const atCurrentMonth = yearNumber === today.getUTCFullYear() && monthIndex === today.getUTCMonth();
@@ -81,8 +70,8 @@ export function ReportPeriodFilter({ preset, today, range, label: dialogLabel = 
     const name = months[(index + 12) % 12];
     return name[0].toLocaleUpperCase('ru') + name.slice(1);
   };
-  const rangeStart = start ? (hover && hover < start ? hover : start) : pending ? pending.range.dateFrom : dateFrom;
-  const rangeEnd = start ? (hover && hover > start ? hover : start) : pending ? pending.range.dateTo : dateTo;
+  const rangeStart = start ? (hover && hover < start ? hover : start) : dateFrom;
+  const rangeEnd = start ? (hover && hover > start ? hover : start) : dateTo;
   const yearStart = Math.min(2012, yearNumber, dateFrom ? Number(dateFrom.slice(0, 4)) || 2012 : 2012);
 
   function closeAndFocus() {
@@ -99,48 +88,18 @@ export function ReportPeriodFilter({ preset, today, range, label: dialogLabel = 
     setMonth(Number.isFinite(+anchor) ? anchor : today);
     setStart('');
     setHover('');
-    setPending(undefined);
-    setChoosingRange(preset === 'custom');
     setPosition(undefined);
     setOpen(true);
   }
 
   function chooseDay(day: string) {
-    setChoosingRange(true);
     if (!start) {
       setStart(day);
       setHover('');
       return;
     }
-    const range = { dateFrom: day < start ? day : start, dateTo: day < start ? start : day };
-    if (confirmSelection) {
-      setPending({ preset: 'custom', range });
-      setStart('');
-      setHover('');
-      return;
-    }
-    onRange(range.dateFrom, range.dateTo);
-    closeAndFocus();
-  }
-
-  function choosePreset(value: PeriodPreset) {
-    if (!confirmSelection) {
-      onPreset(value);
-      closeAndFocus();
-      return;
-    }
-    const next = value === 'all' && allRange ? allRange : warehousePeriodRange(value, today, dateFrom ?? todayKey, dateTo ?? todayKey);
-    setPending({ preset: value, range: next });
-    setChoosingRange(false);
-    setStart('');
-    setHover('');
-    setMonth(next.dateTo ? asDate(next.dateTo) : today);
-  }
-
-  function applyPending() {
-    if (start) onRange(start, start);
-    else if (pending?.preset === 'custom' && pending.range.dateFrom && pending.range.dateTo) onRange(pending.range.dateFrom, pending.range.dateTo);
-    else if (pending) onPreset(pending.preset);
+    const [from, to] = day < start ? [day, start] : [start, day];
+    onRange(from, to);
     closeAndFocus();
   }
 
@@ -150,27 +109,32 @@ export function ReportPeriodFilter({ preset, today, range, label: dialogLabel = 
       const rect = trigger.current?.getBoundingClientRect();
       if (!rect || !panel.current) return;
       const edge = 8;
-      const width = Math.min(confirmSelection ? 680 : 432, window.innerWidth - edge * 2);
+      const width = Math.min(panelWidth, window.innerWidth - edge * 2);
       const maxHeight = window.innerHeight - edge * 2;
       const height = Math.min(panel.current.scrollHeight, maxHeight);
       const below = rect.bottom + 6;
       const top = below + height <= window.innerHeight - edge ? below : Math.max(edge, rect.top - height - 6);
-      setPosition({ top, left: Math.max(edge, Math.min(confirmSelection ? rect.right - width : rect.left, window.innerWidth - width - edge)), width, maxHeight });
+      setPosition({ top, left: Math.max(edge, Math.min(rect.left, window.innerWidth - width - edge)), width, maxHeight });
     }
     place();
     window.addEventListener('resize', place);
     return () => window.removeEventListener('resize', place);
-  }, [open, confirmSelection]);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
-    panel.current?.querySelector<HTMLButtonElement>('[aria-pressed="true"], button')?.focus({ preventScroll: true });
+    const first = panel.current?.querySelector<HTMLButtonElement>('.report-period-grid [data-edge="true"]:not(:disabled)')
+      ?? panel.current?.querySelector<HTMLButtonElement>('.report-period-grid [aria-current="date"]')
+      ?? panel.current?.querySelector<HTMLButtonElement>('.report-period-presets [aria-pressed="true"]')
+      ?? panel.current?.querySelector<HTMLButtonElement>('.report-period-grid button:not(:disabled)');
+    first?.focus({ preventScroll: true });
     function outside(event: PointerEvent) {
       const target = event.target as Node;
       if (!panel.current?.contains(target) && !trigger.current?.contains(target)) setOpen(false);
     }
     function escape(event: KeyboardEvent) {
       if (event.key !== 'Escape') return;
+      event.stopPropagation();
       setOpen(false);
       trigger.current?.focus({ preventScroll: true });
     }
@@ -178,20 +142,20 @@ export function ReportPeriodFilter({ preset, today, range, label: dialogLabel = 
       if (!panel.current?.contains(event.target as Node)) setOpen(false);
     }
     document.addEventListener('pointerdown', outside);
-    document.addEventListener('keydown', escape);
+    document.addEventListener('keydown', escape, true);
     window.addEventListener('scroll', scroll, true);
     return () => {
       document.removeEventListener('pointerdown', outside);
-      document.removeEventListener('keydown', escape);
+      document.removeEventListener('keydown', escape, true);
       window.removeEventListener('scroll', scroll, true);
     };
   }, [open]);
 
-  function calendarDays(year: number, index: number, current: boolean) {
+  function calendarDays(year: number, index: number) {
     const firstDay = new Date(Date.UTC(year, index, 1));
     const leading = (firstDay.getUTCDay() + 6) % 7;
     const normalizedMonth = firstDay.getUTCMonth();
-    return <div ref={current ? calendar : undefined} className="report-period-grid" onPointerLeave={() => setHover('')} onKeyDown={(event) => {
+    return <div className="report-period-grid" onPointerLeave={() => setHover('')} onKeyDown={(event) => {
       const delta = keyboardOffsets[event.key];
       if (delta === undefined) return;
       const days = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button')];
@@ -205,20 +169,19 @@ export function ReportPeriodFilter({ preset, today, range, label: dialogLabel = 
         const date = new Date(firstDay);
         date.setUTCDate(index - leading + 1);
         const key = date.toISOString().slice(0, 10);
-        if (confirmSelection && date.getUTCMonth() !== normalizedMonth) return <span aria-hidden="true" key={key} />;
+        if (date.getUTCMonth() !== normalizedMonth) return <span aria-hidden="true" key={key} />;
         const inRange = Boolean(rangeStart && rangeEnd && key >= rangeStart && key <= rangeEnd);
         return <button type="button" key={key} aria-label={fullDay.format(date)} aria-pressed={inRange}
           aria-current={key === todayKey ? 'date' : undefined} disabled={key > todayKey}
-          data-outside={date.getUTCMonth() !== normalizedMonth}
           data-edge={key === rangeStart || key === rangeEnd} onClick={() => chooseDay(key)}
-          onPointerEnter={() => { if (start && key <= todayKey) setHover(key); }}>
+          onPointerEnter={() => { if (start && key <= todayKey) setHover(key); }}
+          onFocus={() => { if (start) setHover(key); }}>
           {date.getUTCDate()}
         </button>;
       })}
     </div>;
   }
 
-  const previousMonth = new Date(Date.UTC(yearNumber, monthIndex - 1, 1));
   return <>
     <button type="button" ref={trigger} className="report-period-trigger" aria-label={`${dialogLabel}: ${label}`}
       aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined} onClick={toggle}>
@@ -226,66 +189,41 @@ export function ReportPeriodFilter({ preset, today, range, label: dialogLabel = 
     </button>
     {open && createPortal(
       <div id={id} ref={panel} role="dialog" aria-label={dialogLabel}
-        className={`report-period-panel ${confirmSelection ? 'report-period-panel--confirm' : ''}`}
-        style={position ?? { width: `min(${confirmSelection ? 680 : 432}px, calc(100vw - 16px))`, visibility: 'hidden' }}>
-        <div className="report-period-presets">
-          {presets.filter(({ value }) => value !== 'month' && (includeAll || value !== 'all')).map(({ value, label: caption }) =>
-            <button type="button" key={value} aria-pressed={!choosingRange && (pending?.preset ?? preset) === value}
-              onClick={() => choosePreset(value)}>{value === 'all' ? allCaption
-                : confirmSelection && value === 'currentMonth' ? monthName(today.getUTCMonth())
-                  : confirmSelection && value === 'lastMonth' ? monthName(today.getUTCMonth() - 1) : caption}</button>)}
-          {!confirmSelection && <button type="button" aria-pressed={choosingRange} onClick={() => {
-            setChoosingRange(true);
-            setStart('');
-            setHover('');
-            calendar.current?.querySelector<HTMLButtonElement>('[data-edge="true"]:not(:disabled), [aria-current="date"]:not(:disabled), button:not(:disabled)')?.focus();
-          }}>Свой период</button>}
-        </div>
+        className="report-period-panel"
+        style={position ?? { width: `min(${panelWidth}px, calc(100vw - 16px))`, visibility: 'hidden' }}>
         <div className="report-period-calendar">
-          <div className={confirmSelection ? 'report-period-months' : undefined}>
-            {confirmSelection && <div className="report-period-previous-grid">
-              <div className="report-period-submonth">{months[previousMonth.getUTCMonth()]} {previousMonth.getUTCFullYear()}</div>
-              {calendarDays(previousMonth.getUTCFullYear(), previousMonth.getUTCMonth(), false)}
-            </div>}
-            <div>
-              <div className="report-period-month">
-                <button type="button" aria-label="Предыдущий месяц"
-                  onClick={() => setMonth(new Date(Date.UTC(yearNumber, monthIndex - 1, 1)))}>‹</button>
-                <select aria-label="Месяц" value={monthIndex}
-                  onChange={(event) => setMonth(new Date(Date.UTC(yearNumber, Number(event.target.value), 1)))}>
-                  {months.map((name, index) => <option key={name} value={index}
-                    disabled={yearNumber === today.getUTCFullYear() && index > today.getUTCMonth()}>{name}</option>)}
-                </select>
-                <select aria-label="Год" value={yearNumber} onChange={(event) => {
-                  const year = Number(event.target.value);
-                  setMonth(new Date(Date.UTC(year, year === today.getUTCFullYear() ? Math.min(monthIndex, today.getUTCMonth()) : monthIndex, 1)));
-                }}>
-                  {Array.from({ length: today.getUTCFullYear() - yearStart + 1 }, (_, i) => yearStart + i)
-                    .map((year) => <option key={year}>{year}</option>)}
-                </select>
-                <button type="button" aria-label="Следующий месяц" disabled={atCurrentMonth}
-                  onClick={() => setMonth(new Date(Date.UTC(yearNumber, monthIndex + 1, 1)))}>›</button>
-              </div>
-              {calendarDays(yearNumber, monthIndex, true)}
-            </div>
+          <div className="report-period-month">
+            <button type="button" aria-label="Предыдущий месяц"
+              onClick={() => setMonth(new Date(Date.UTC(yearNumber, monthIndex - 1, 1)))}>‹</button>
+            <select aria-label="Месяц" value={monthIndex}
+              onChange={(event) => setMonth(new Date(Date.UTC(yearNumber, Number(event.target.value), 1)))}>
+              {months.map((name, index) => <option key={name} value={index}
+                disabled={yearNumber === today.getUTCFullYear() && index > today.getUTCMonth()}>{name}</option>)}
+            </select>
+            <select aria-label="Год" value={yearNumber} onChange={(event) => {
+              const year = Number(event.target.value);
+              setMonth(new Date(Date.UTC(year, year === today.getUTCFullYear() ? Math.min(monthIndex, today.getUTCMonth()) : monthIndex, 1)));
+            }}>
+              {Array.from({ length: today.getUTCFullYear() - yearStart + 1 }, (_, i) => yearStart + i)
+                .map((year) => <option key={year}>{year}</option>)}
+            </select>
+            <button type="button" aria-label="Следующий месяц" disabled={atCurrentMonth}
+              onClick={() => setMonth(new Date(Date.UTC(yearNumber, monthIndex + 1, 1)))}>›</button>
           </div>
-          <p className={confirmSelection ? 'sr-only' : 'report-period-hint'} aria-live="polite">
+          {calendarDays(yearNumber, monthIndex)}
+          <p className="report-period-hint" aria-live="polite">
             {start ? 'Выберите конец периода' : 'Выберите начало и конец периода'}
           </p>
         </div>
-        {confirmSelection && <div className="report-period-confirm">
-          <button className="btn-primary btn-md" type="button" disabled={!pending && !start} onClick={applyPending}>Применить</button>
-          <span>{rangeStart && rangeEnd ? formatFinanceRange(rangeStart, rangeEnd) : allCaption}</span>
-        </div>}
+        <div className="report-period-presets">
+          {presets.filter(({ value }) => includeAll || value !== 'all').map(({ value, label: caption }) =>
+            <button type="button" key={value} aria-pressed={!start && preset === value} onClick={() => {
+              onPreset(value);
+              closeAndFocus();
+            }}>{value === 'all' ? allCaption
+              : value === 'currentMonth' ? monthName(today.getUTCMonth())
+                : value === 'lastMonth' ? monthName(today.getUTCMonth() - 1) : caption}</button>)}
+        </div>
       </div>, document.body)}
   </>;
-}
-
-function formatFinanceRange(from: string, to: string) {
-  const start = asDate(from);
-  const end = asDate(to);
-  if (!Number.isFinite(+start) || !Number.isFinite(+end)) return 'Период';
-  const formatter = start.getUTCFullYear() === end.getUTCFullYear() ? shortDay : fullDay;
-  if (from === to) return formatter.format(start);
-  return formatter.format(start) + ' — ' + formatter.format(end);
 }

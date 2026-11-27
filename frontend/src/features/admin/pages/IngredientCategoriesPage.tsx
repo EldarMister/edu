@@ -16,9 +16,8 @@ import { exportCsv, printReport } from '@/lib/report-output';
 import { NewIngredientCategory } from './warehouse/NewIngredientCategory';
 import { RemoveDirectoryEntry } from './warehouse/RemoveDirectoryEntry';
 import { QueryState } from './warehouse/WarehouseUi';
-import { useEditorRoute, usePageFilter, usePageFilters } from './warehouse/workspace-route';
+import { useEditorRoute, usePageFilters } from './warehouse/workspace-route';
 import { WorkspaceHeaderActions, WorkspaceHeaderCount } from './WorkspaceHeader';
-import { WorkspaceSearch } from './WorkspaceSearch';
 
 const labels = { name: 'Категория', count: 'Кол-во ингредиентов', stock: 'Остатки на всех складах', value: 'Стоимость остатков' };
 type Column = keyof typeof labels;
@@ -37,12 +36,11 @@ function compareValues(a: number | null | undefined, b: number | null | undefine
   return (a - b) * direction;
 }
 
-export function IngredientCategoriesPage() {
+export function IngredientCategoriesPage({ search }: { search: string }) {
   const query = useIngredientCategories(true, true);
   const { save: rename, remove } = useIngredientCategoryMutations();
   const { can } = usePermissions();
   const [, setRoute] = useSearchParams();
-  const [search, setSearch] = usePageFilter('search');
   const [{ sort, sortBy }, setListOptions] = usePageFilters({ sort: 'asc', sortBy: 'name' });
   const [savedColumns, setSavedColumns] = useColumnPreference('ingredient-categories');
   const formId = useId();
@@ -128,9 +126,6 @@ export function IngredientCategoriesPage() {
           {canManage && <button type="button" className="catalogue-add" onClick={() => setCreating(true)}>Добавить</button>}
         </div>
       </WorkspaceHeaderActions>
-      <div className="poster-toolbar">
-        <WorkspaceSearch label="Поиск категории" value={search} onChange={setSearch} />
-      </div>
       {printError && <p className="py-2 text-sm text-danger" role="alert">{printError}</p>}
       <QueryState pending={query.isPending} error={query.error}>
         <div className="overflow-x-auto"><table className="poster-table poster-directory-table w-full min-w-[480px]">

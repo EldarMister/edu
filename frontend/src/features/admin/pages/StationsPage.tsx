@@ -78,9 +78,9 @@ export function StationsPage() {
           <td>{owner && <div className="poster-row-actions">
             <button type="button" title="Редактировать"
               aria-label={`Редактировать станцию: ${station.name}`}
-              className="group inline-flex items-center rounded-lg p-1.5 transition-colors hover:bg-background"
+              className="row-action-icon"
               onClick={() => openEditor({ type: 'station', id: station.id })}>
-              <IconEdit className="h-4 w-4 text-text-muted group-hover:text-primary" />
+              <IconEdit className="h-4 w-4" />
             </button>
             {!station.isBuiltIn && <button type="button" title="Удалить"
               aria-label={`Удалить станцию: ${station.name}`}

@@ -12,7 +12,7 @@ export type WarehouseView =
   | 'locations'
   | 'packages'
   | 'production';
-export type MenuView = 'goods' | 'recipes' | 'preparations' | 'ingredients' | 'foodCost' | 'categories';
+export type MenuView = 'goods' | 'recipes' | 'preparations' | 'ingredients' | 'categories';
 export const WAREHOUSE_NAV: { key: WarehouseView; label: string; permission?: string; costs?: boolean }[] = [
   { key: 'balances', label: 'Остатки' },
   { key: 'supplies', label: 'Поставки', permission: 'warehouseReceive', costs: true },
@@ -36,7 +36,6 @@ export const MENU_NAV: { key: MenuView; label: string }[] = [
   { key: 'recipes', label: 'Техкарты' },
   { key: 'preparations', label: 'Полуфабрикаты' },
   { key: 'ingredients', label: 'Ингредиенты' },
-  { key: 'foodCost', label: 'Фудкост' },
   { key: 'categories', label: 'Категории' },
 ];
 

@@ -12,7 +12,7 @@ export function FinancePeriod({ from, to, allFrom, onApply }: {
     return range.dateFrom === from && range.dateTo === to;
   })?.value ?? 'custom';
   return <ReportPeriodFilter preset={preset} label="Период" today={today} range={getRange('custom')}
-    confirmSelection includeAll={!!allRange} allRange={allRange} allCaption="За всё время" onRange={(start, end) => onApply({ from: start, to: end })}
+    includeAll={!!allRange} allCaption="За всё время" onRange={(start, end) => onApply({ from: start, to: end })}
     onPreset={(selection) => {
       const { dateFrom, dateTo } = getRange(selection);
       if (dateFrom && dateTo) onApply({ from: dateFrom, to: dateTo });

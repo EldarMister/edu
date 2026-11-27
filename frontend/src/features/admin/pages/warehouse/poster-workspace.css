@@ -112,7 +112,7 @@ div.poster-select-menu { border-radius: 8px; padding: 3px; box-shadow: 0 3px 10p
 .poster-workspace table tfoot { background: rgb(var(--edu-background)); }
 .poster-workspace table tfoot td { padding-top: 14px; padding-bottom: 14px; }
 .poster-workspace .poster-row-actions { display: flex; justify-content: flex-end; align-items: center; gap: 16px; white-space: nowrap; }
-.poster-workspace .poster-row-actions button { min-height: 32px; color: rgb(var(--edu-link)); font-size: 13px; }
+.poster-workspace .poster-row-actions button:not(.row-action-icon) { min-height: 32px; color: rgb(var(--edu-link)); font-size: 13px; }
 .poster-workspace table .btn-ghost { height: 30px; min-height: 30px; }
 .poster-workspace .poster-advanced { border: 0; border-radius: 0; background: transparent; padding: 0; }
 .poster-workspace .poster-advanced > summary { color: rgb(var(--edu-link)); cursor: pointer; font-weight: 500; padding: 8px 0; }

@@ -124,7 +124,7 @@ function OrderRowAction({ label, danger = false, onClick, children }: { label: s
   return (
     <button
       type="button"
-      className={`orders-row-action ${danger ? 'orders-row-action-danger' : ''}`}
+      className={danger ? 'orders-row-action orders-row-action-danger' : 'row-action-icon'}
       title={label}
       aria-label={label}
       onClick={(event) => { event.stopPropagation(); onClick(); }}

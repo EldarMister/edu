@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { IconTrash } from './icons';
+import { IconEllipsis, IconTrash } from './icons';
 
 function menuPosition(anchor: HTMLButtonElement | null, count: number) {
   const rect = anchor?.getBoundingClientRect();
@@ -64,9 +64,11 @@ export function RowActionMenu(props: RowActionMenuProps) {
   }, [open, count]);
 
   return <>
-    <button ref={trigger} type="button" className="rounded px-1 text-primary hover:bg-background"
+    <button ref={trigger} type="button" className="row-action-icon"
       aria-label={'Другие действия: ' + label} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined}
-      onClick={() => setPosition(open ? null : menuPosition(trigger.current, count))}>•••</button>
+      onClick={() => setPosition(open ? null : menuPosition(trigger.current, count))}>
+      <IconEllipsis className="h-4 w-4" aria-hidden="true" />
+    </button>
     {position && createPortal(
       <div ref={menu} id={id} role="menu" aria-label={label} style={position}
         className="fixed z-[70] w-44 rounded-md border border-border bg-card p-1 text-sm shadow-lg">

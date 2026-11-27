@@ -1,8 +1,6 @@
-import { DatePicker } from '@/components/DatePicker';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Modal } from '@/components/Modal';
 import { WorkspacePending } from '../components/WorkspacePending';
-import { Select } from '@/components/Select';
 import { apiError } from '@/lib/api';
 import { money } from '@/lib/format';
 import { useT } from '@/lib/i18n';
@@ -11,15 +9,13 @@ import { useStatistics, useStatisticsReports, type StatsPeriod } from '../api';
 import { StatisticsReport } from './StatisticsReport';
 import type { StatisticsView } from './statisticsViews';
 import { usePageFilters } from './warehouse/workspace-route';
+import { REPORT_PERIODS, ReportPeriodFilter } from './warehouse/ReportPeriodFilter';
+import { calendarDate, warehouseDay, warehousePeriodRange } from './warehouse/warehouse-period';
 
-const PERIODS: { value: StatsPeriod; label: string }[] = [
-  { value: 'today', label: 'Сегодня' },
-  { value: 'yesterday', label: 'Вчера' },
-  { value: 'week', label: 'Неделя' },
-  { value: 'month', label: 'Месяц' },
-  { value: 'all', label: 'Всё время' },
-  { value: 'custom', label: 'Период' },
-];
+const PERIODS = REPORT_PERIODS.filter(
+  (option): option is Extract<typeof REPORT_PERIODS[number], { value: StatsPeriod }> =>
+    option.value !== 'currentMonth' && option.value !== 'lastMonth',
+);
 
 // Подпись KPI заказов зависит от выбранного периода вверху.
 const ORDERS_LABEL: Record<StatsPeriod, string> = {
@@ -41,17 +37,15 @@ const PREPARED_LABEL: Record<StatsPeriod, string> = {
   custom: 'Приготовлено за период',
 };
 
-const bishkekDay = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Bishkek', year: 'numeric', month: '2-digit', day: '2-digit' });
 const chartDay = new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', day: 'numeric', month: 'short' });
 
 export function StatisticsPage({ view }: { view: Exclude<StatisticsView, 'taxes'> }) {
   const t = useT();
-  const today = useMemo(() => bishkekDay.format(new Date()), []);
-  const weekAgo = useMemo(() => bishkekDay.format(new Date(Date.now() - 6 * 86_400_000)), []);
+  const today = warehouseDay();
   const [{ statsPeriod, statsFrom: from, statsTo: to }, updatePeriod] = usePageFilters({
-    statsPeriod: 'week', statsFrom: weekAgo, statsTo: today,
+    statsPeriod: 'week', statsFrom: calendarDate(today, -6), statsTo: calendarDate(today),
   });
-  const period = PERIODS.find(({ value }) => value === statsPeriod)?.value ?? 'week';
+  const period: StatsPeriod = statsPeriod === 'custom' ? statsPeriod : PERIODS.find(({ value }) => value === statsPeriod)?.value ?? 'week';
   const [viewAll, setViewAll] = useState<{ title: string; columns: Col[]; rows: string[][] } | null>(null);
   const params = {
     period,
@@ -62,19 +56,12 @@ export function StatisticsPage({ view }: { view: Exclude<StatisticsView, 'taxes'
   const reportsQ = useStatisticsReports(params, view !== 'overview');
   const d = statsQ.data;
   const activeQuery = view === 'overview' ? statsQ : reportsQ;
-  const periodControl = <Select className="h-10" ariaLabel={t('Период')} value={period} onChange={(value) => updatePeriod({ statsPeriod: value })}
-    options={PERIODS.map(({ value, label }) => ({ value, label: t(label) }))} />;
-
   return (
     <div className="space-y-4 overflow-x-hidden">
-      <div className="flex flex-wrap items-center gap-2">
-        {periodControl}
-        {period === 'custom' && <>
-          <DatePicker aria-label={t('С даты')} className="input h-10 w-[150px]" value={from} max={to} onChange={(value) => updatePeriod({ statsFrom: value })} />
-          <span className="text-sm text-text-muted">—</span>
-          <DatePicker aria-label={t('По дату')} className="input h-10 w-[150px]" value={to} min={from} max={today} onChange={(value) => updatePeriod({ statsTo: value })} />
-        </>}
-      </div>
+      <ReportPeriodFilter label={t('Период')} today={today} preset={period} presets={PERIODS}
+        range={warehousePeriodRange(period, today, from, to)}
+        onPreset={(value) => updatePeriod({ statsPeriod: value })}
+        onRange={(statsFrom, statsTo) => updatePeriod({ statsPeriod: 'custom', statsFrom, statsTo })} />
 
       {activeQuery.isError ? <div className="card space-y-3 p-5">
         <p role="alert" className="text-danger">{apiError(activeQuery.error)}</p>

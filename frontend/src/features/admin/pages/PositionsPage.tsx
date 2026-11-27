@@ -78,7 +78,7 @@ export function PositionsPage() {
           employees: { value: position?.employees ?? null, display: position?.employees ?? '—' },
         }, action: position ? <div className="flex items-center justify-end gap-1">
               <button type="button" title="Редактировать" aria-label={`Редактировать должность ${name}`}
-                className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-background hover:text-primary"
+                className="row-action-icon"
                 onClick={() => openEditor({ type: 'position', id })}>
                 <IconEdit className="h-4 w-4" />
               </button>
@@ -93,7 +93,7 @@ export function PositionsPage() {
               </button>
             </div> : <div className="flex justify-end">
               <button type="button" title="Редактировать" aria-label="Редактировать права владельца"
-                className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-background hover:text-primary"
+                className="row-action-icon"
                 onClick={() => setOwnerEditorOpen(true)}><IconEdit className="h-4 w-4" /></button>
             </div> }))}
         empty="Должности не найдены" />

@@ -7,7 +7,7 @@
 .supply-register-table > tfoot { background: light-dark(#f7f8fa, var(--edu-raised)); }
 .supply-register-table > tfoot th { font-size: 14px; font-weight: 600; }
 .supply-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.supply-actions button { min-height: 28px; color: rgb(var(--edu-link)); font-size: 14px; }
+.supply-actions button:not(.row-action-icon) { min-height: 28px; color: rgb(var(--edu-link)); font-size: 14px; }
 .supply-actions button[aria-expanded='true'] { font-weight: 600; }
 .supply-lines-table { background: rgb(var(--edu-card)); table-layout: fixed; }
 .supply-lines-table th:first-child { width: 54%; }

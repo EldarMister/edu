@@ -1,4 +1,4 @@
-import { Fragment, lazy, Suspense, useEffect, useId, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { createPortal } from 'react-dom';
 import { Navigate, useLocation } from 'react-router-dom';
@@ -24,14 +24,14 @@ import {
   usePreparationStationUpdates,
   type PreparationStation,
 } from '@/features/kitchen/stations';
-import { IconEdit, IconPrinter, IconTrash, IconPlus } from '../components/icons';
+import { IconEdit, IconEllipsis, IconPrinter, IconTrash, IconPlus } from '../components/icons';
 import type { MenuView } from './warehouse/navigation';
 import { MenuStockCatalogue } from './warehouse/MenuStockCatalogue';
 import { DishComposition } from './warehouse/CatalogueDetails';
 import { balanceMoney, balanceQuantity } from './warehouse/balance-format';
 import { normalizeUnitLabel } from './warehouse/units';
 import { EditorPage } from './warehouse/EditorPage';
-import { useEditorRoute, usePageFilter, usePageFilters } from './warehouse/workspace-route';
+import { useEditorRoute, usePageFilters } from './warehouse/workspace-route';
 import { WarehouseMultiFilter, warehouseMultiFilterValues } from './warehouse/WarehouseMultiFilter';
 import { visibleWarehouseColumns, WarehouseColumnSettings } from './warehouse/WarehouseColumnSettings';
 import { filterMenuGoods, MenuAdditionalFilters, MenuGoodsActions, menuGoodsColumns, menuListFilters,
@@ -60,20 +60,7 @@ import {
   type AdminCategory,
 } from '../api';
 
-const MenuFoodCostPage = lazy(() => import('./MenuFoodCostPage').then(({ MenuFoodCostPage }) => ({ default: MenuFoodCostPage })));
-
 export function MenuPage({ view }: { view: Exclude<MenuView, 'categories'> }) {
-  const { editor, openEditor } = useEditorRoute();
-  const { can } = usePermissions();
-  if (view === 'foodCost') {
-    if (!can('sections.warehouse') || !can('actions.warehouseCosts'))
-      return <p className="card p-8 text-center text-text-muted">Нет доступа к себестоимости.</p>;
-    if (!editor) return <Suspense fallback={<WorkspacePending />}>
-      <MenuFoodCostPage onOpen={(row) => openEditor({ type: row.isSet ? 'set' : 'entry',
-        id: row.dishId, itemId: row.variantId ?? undefined, action: row.catalogKind === 'goods' ? 'goods' : 'recipe' })} />
-    </Suspense>;
-    return <MenuDishList view={editor.action === 'goods' ? 'goods' : 'recipes'} />;
-  }
   if (view === 'ingredients' || view === 'preparations')
     return <MenuStockCatalogue key={view} view={view} />;
   return <MenuDishList key={view} view={view} />;
@@ -394,14 +381,14 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
                       )}
                       <button
                         type="button"
-                        className={editable ? 'group inline-flex items-center rounded-lg p-1.5 transition-colors hover:bg-background' : 'text-xs text-primary hover:underline'}
+                        className={editable ? 'row-action-icon' : 'text-xs text-primary hover:underline'}
                         title={editable ? t('Редактировать') : undefined}
                         aria-label={editable ? `${t('Редактировать')}: ${dish.name}` : undefined}
                         onClick={() =>
                           openEditor({ type: dish.isSet ? 'set' : 'entry', id: dish.id })
                         }
                       >
-                        {editable ? <IconEdit className="h-4 w-4 text-text-muted group-hover:text-primary" /> : 'Открыть'}
+                        {editable ? <IconEdit className="h-4 w-4" /> : 'Открыть'}
                       </button>
                       {editable && (
                         <MenuActions
@@ -605,11 +592,10 @@ function ExistingSetPage({
     );
   return <SetModal key={id} set={set} stations={stations} onClose={onClose} />;
 }
-export function MenuCategoriesPage() {
+export function MenuCategoriesPage({ search, clearSearch }: { search: string; clearSearch: () => void }) {
   const categoriesQ = useAdminCategories();
   const stations = usePreparationStations().data ?? [];
   usePreparationStationUpdates();
-  const [search, setSearch] = usePageFilter('search');
   const { editor, openEditor, closeEditor } = useEditorRoute();
   const { can } = usePermissions();
   const editable = can('actions.editMenu');
@@ -648,9 +634,6 @@ export function MenuCategoriesPage() {
   return (
     <div className="min-w-0">
       <WorkspaceHeaderCount count={categoriesQ.isSuccess ? rows.length : undefined} />
-      <div className="poster-toolbar">
-        <WorkspaceSearch label="Поиск категорий меню" value={search} onChange={setSearch} />
-      </div>
       {editable && !editor && <WorkspaceHeaderActions>
         <div className="catalogue-header-actions">
           <button type="button" className="workspace-tool" title="Корзина категорий"
@@ -708,7 +691,7 @@ export function MenuCategoriesPage() {
                   <td className="w-px text-right">
                     <div className="poster-row-actions">
                       {editable && <button type="button" title="Изменить" aria-label={`Изменить категорию ${category.name}`}
-                        className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-background hover:text-primary"
+                        className="row-action-icon"
                         onClick={() => openEditor({ type: 'category', id: category.id })}>
                         <IconEdit className="h-4 w-4" />
                       </button>}
@@ -755,7 +738,7 @@ export function MenuCategoriesPage() {
                 <button
                   type="button"
                   className="text-primary hover:underline"
-                  onClick={() => setSearch('')}
+                  onClick={clearSearch}
                 >
                   Сбросить поиск
                 </button>
@@ -1351,7 +1334,7 @@ function MenuActions({
         aria-expanded={!!position}
         aria-controls={position ? menuId : undefined}
         disabled={disabled}
-        className="flex h-8 w-10 items-center justify-center text-lg text-primary hover:bg-background focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+        className="row-action-icon"
         onKeyDown={(event) => {
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault();
@@ -1366,7 +1349,7 @@ function MenuActions({
           openMenu();
         }}
       >
-        •••
+        <IconEllipsis className="h-4 w-4" aria-hidden="true" />
       </button>
       {position &&
         createPortal(
