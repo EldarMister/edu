@@ -332,6 +332,8 @@ export function AdminApp() {
   useSocketEvent('menu:updated', () => {
     qc.invalidateQueries({ queryKey: ['admin', 'menu'] });
     qc.invalidateQueries({ queryKey: ['admin', 'categories'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'category-trash'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'recipe-trash'] });
     qc.invalidateQueries({ queryKey: ['admin', 'dishes'] });
     qc.invalidateQueries({ queryKey: ['admin', 'sets'] });
     qc.invalidateQueries({ queryKey: ['admin', 'warehouse'] });

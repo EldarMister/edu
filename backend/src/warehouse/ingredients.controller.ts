@@ -72,8 +72,8 @@ export class IngredientsController {
   }
 
   @Get('categories')
-  categories() {
-    return this.ingredients.categories();
+  categories(@Query('includeStock') includeStock?: string) {
+    return this.ingredients.categories(includeStock === 'true');
   }
 
   @Post('categories')
@@ -93,8 +93,8 @@ export class IngredientsController {
   @Delete('categories/:name')
   @Roles(Role.ADMIN, Role.OWNER)
   @RequirePermission('actions.warehouseSettings')
-  removeCategory(@Param('name') name: string) {
-    return this.ingredients.removeCategory(name);
+  removeCategory(@Param('name') name: string, @Query('removeIngredients') removeIngredients?: string) {
+    return this.ingredients.removeCategory(name, removeIngredients === 'true');
   }
 
   @Get('overview')

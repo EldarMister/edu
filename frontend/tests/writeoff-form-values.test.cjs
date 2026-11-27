@@ -17,7 +17,7 @@ function loadTypeScript(filename) {
   return module.exports;
 }
 
-const { changeWriteoffPackage, changeWriteoffUnit, emptyWriteoffLine, sameWriteoffSource, writeoffDraftLines, writeoffFormKey, writeoffLineInput, writeoffPreviewPlan } = loadTypeScript(
+const { changeWriteoffPackage, changeWriteoffUnit, emptyWriteoffLine, recordedWriteoffAmounts, sameWriteoffSource, writeoffDraftLines, writeoffFormKey, writeoffLineInput, writeoffPreviewPlan } = loadTypeScript(
   resolve(__dirname, '../src/features/admin/pages/warehouse/writeoff-form-values.ts'),
 );
 
@@ -128,4 +128,23 @@ test('removing a saved package converts its physical amount without reading the 
   assert.equal(unpacked.packageId, undefined);
   assert.equal(unpacked.packageSnapshotLineId, undefined);
   assert.equal(changeWriteoffUnit(row, 'g').quantity, '1500');
+});
+
+test('posted amounts survive detail edits but cannot price new stock inputs or a new operation context', () => {
+  const rows = writeoffDraftLines([snapshot]);
+  const document = { sourceLines: [snapshot], items: [] };
+  assert.equal(recordedWriteoffAmounts(document, rows, false).get('line-1'), 40);
+  assert.equal(recordedWriteoffAmounts(document, [{ ...rows[0], details: 'Уточнили причину' }, emptyWriteoffLine()], false).get('line-1'), 40);
+  assert.equal(recordedWriteoffAmounts(document, [{ ...rows[0], quantity: '3' }], false), null);
+  assert.equal(recordedWriteoffAmounts(document, [{ ...rows[0], sourceId: 'tea' }], false), null);
+  assert.equal(recordedWriteoffAmounts(document, rows, true), null);
+  assert.equal(recordedWriteoffAmounts(document, [], false), null);
+});
+
+test('legacy withdrawals display the saved absolute amount and preserve unknown cost', () => {
+  const item = { ingredientId: 'rice', name: 'Рис', quantity: 0.25, unit: 'кг', value: -25 };
+  const [row] = writeoffDraftLines([], [item]);
+  assert.equal(recordedWriteoffAmounts({ items: [item] }, [row], false).get(row.sourceLineId), 25);
+  assert.equal(recordedWriteoffAmounts({ items: [{ ...item, value: null }] }, [row], false).get(row.sourceLineId), null);
+  assert.equal(recordedWriteoffAmounts({ items: [item] }, [{ ...row, unit: 'g', quantity: '250' }], false), null);
 });

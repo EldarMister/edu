@@ -14,6 +14,7 @@ export function useListPeriod(name: string, defaultPeriod: PeriodPreset = 'all',
   const today = warehouseDay();
   const range = warehousePeriodRange(preset, today, values[fromKey] || calendarDate(today, -29), values[toKey] || calendarDate(today));
   return {
+    preset,
     active: preset !== 'all',
     range,
     includes(value: string) {

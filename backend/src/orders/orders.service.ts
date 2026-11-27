@@ -1,4 +1,5 @@
 import { lockRecipeGraph } from '../warehouse/recipe-resolution';
+import { visibleMenuDish } from '../categories/menu-visibility';
 import { recordOrderReceipts } from '../finance/order-receipts';
 import { receiptTaxes, recordOrderTaxes } from '../settings/order-taxes';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
@@ -2786,7 +2787,7 @@ export class OrdersService {
     const dishIds = [...new Set(items.map((i) => i.dishId))];
     const variantIds = [...new Set(items.map((i) => i.variantId).filter((id): id is string => !!id))];
     const dishes = await client.dish.findMany({
-      where: { id: { in: dishIds }, OR: [{ isActive: true }, { id: { in: existingDishIds } }] },
+      where: { id: { in: dishIds }, OR: [visibleMenuDish, { id: { in: existingDishIds } }] },
       include: {
         variants: { orderBy: { sortOrder: 'asc' } },
         _count: { select: { recipeItems: true } },

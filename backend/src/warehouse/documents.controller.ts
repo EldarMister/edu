@@ -8,7 +8,7 @@ import { hasPermission, resolvePermissions } from '../common/permissions';
 import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
 import {
-  ReverseWarehouseDocumentDto, CreateWarehouseDocumentDto, UpdateWarehouseDocumentDto, WarehouseDocumentRevisionDto,
+  ReverseWarehouseDocumentDto, CreateWarehouseDocumentDto, EditPostedWriteoffDto, UpdateWarehouseDocumentDto, WarehouseDocumentRevisionDto,
   WarehouseDocumentsQueryDto, WriteoffPreviewDto, WriteoffReasonDto,
 } from './documents.dto';
 import { WarehouseDocumentsService } from './documents.service';
@@ -23,7 +23,7 @@ export class WarehouseDocumentsController {
 
   @Get()
   list(@Query() query: WarehouseDocumentsQueryDto) {
-    return this.documents.list(query.warehouseId, query.kind, query.search);
+    return this.documents.list(query.warehouseId, query.kind, query.search, undefined, query.includeDeletedWriteoffs === 'true');
   }
 
   @Get('reasons')
@@ -58,13 +58,13 @@ export class WarehouseDocumentsController {
 
   @Get(':id')
   get(@Param('id') id: string, @Query('includeInventoryContext') includeInventoryContext?: string,
-    @Query('inventoryIngredientId') inventoryIngredientId?: string) {
+    @Query('inventoryIngredientId') inventoryIngredientId?: string, @Query('includeDeletedWriteoffs') includeDeletedWriteoffs?: string) {
     if (includeInventoryContext !== undefined && includeInventoryContext !== 'true' && includeInventoryContext !== 'false') {
       throw new BadRequestException('Параметр includeInventoryContext принимает true или false');
     }
     if (inventoryIngredientId && (typeof inventoryIngredientId !== 'string' || inventoryIngredientId.length > 160))
       throw new BadRequestException('Некорректный идентификатор складской позиции');
-    return this.documents.get(id, includeInventoryContext === 'true', inventoryIngredientId);
+    return this.documents.get(id, includeInventoryContext === 'true', inventoryIngredientId, includeDeletedWriteoffs === 'true');
   }
 
   @Post('transfer-register.xlsx')
@@ -82,6 +82,13 @@ export class WarehouseDocumentsController {
     response.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     response.setHeader('Content-Disposition', 'attachment; filename="transfer-act.xlsx"');
     response.send(workbook);
+  }
+
+  @Post('writeoff-register.xlsx')
+  @RequirePermission('actions.exportReports')
+  async exportWriteoffs(@CurrentUser() user: AuthUser, @Body() dto: WarehouseRegisterExportDto, @Res() response: Response) {
+    const showCosts = hasPermission(resolvePermissions(user.role as Role, user.permissions), 'actions.warehouseCosts');
+    sendWarehouseWorkbook(response, await this.documents.writeoffRegister(dto, showCosts), 'writeoffs.xlsx');
   }
 
   @Get(':id/inventory.xlsx')
@@ -142,6 +149,21 @@ export class WarehouseDocumentsController {
   @Delete('writeoffs/:id')
   async removeWriteoff(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: WarehouseDocumentRevisionDto) {
     const result = await this.documents.removeWriteoff(user, id, dto?.revision);
+    this.events.emitToCafeAdmins(user.cafeId, SERVER_EVENTS.WAREHOUSE_UPDATED, {});
+    return result;
+  }
+
+  @Post('writeoffs/:id/restore')
+  async restoreWriteoff(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: WarehouseDocumentRevisionDto) {
+    const result = await this.documents.restoreWriteoff(user, id, dto?.revision);
+    this.events.emitToCafeAdmins(user.cafeId, SERVER_EVENTS.WAREHOUSE_UPDATED, {});
+    return result;
+  }
+
+  @Patch('writeoffs/:id')
+  @RequirePermission('actions.warehouseWriteoff', 'actions.warehouseApprove')
+  async editPostedWriteoff(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: EditPostedWriteoffDto) {
+    const result = await this.documents.editPostedWriteoff(user, id, dto);
     this.events.emitToCafeAdmins(user.cafeId, SERVER_EVENTS.WAREHOUSE_UPDATED, {});
     return result;
   }

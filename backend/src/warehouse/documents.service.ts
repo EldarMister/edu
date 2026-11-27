@@ -1,9 +1,10 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Role, WarehouseDocument, WarehouseDocumentItem, WarehouseDocumentKind, WarehouseWriteoffReason } from '@prisma/client';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
+import { AuditAction } from '../audit/audit.constants';
 import { getCafeId } from '../tenant/tenant-context';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateWarehouseDocumentDto, UpdateWarehouseDocumentDto, WriteoffPreviewDto, WriteoffReasonDto, warehouseWriteoffReasons } from './documents.dto';
+import { CreateWarehouseDocumentDto, EditPostedWriteoffDto, UpdateWarehouseDocumentDto, WriteoffPreviewDto, WriteoffReasonDto, warehouseWriteoffReasons } from './documents.dto';
 import { assertInventoryCutoff, inventoryHistoricalPlan, parseInventoryCountedAt } from './inventory-historical-plan';
 import { inventoryPeriodContext } from './inventory-period-context';
 import { postStockMovement } from './stock-posting';
@@ -30,6 +31,8 @@ const documentInclude = { items: { orderBy: [{ name: 'asc' }, { ingredientId: 'a
 const maxQuantity = new Prisma.Decimal('99999999999.999');
 const zero = new Prisma.Decimal(0);
 const inventoryCostReset = 'inventory_zero_cost';
+const writeoffDeletionNote = 'Удаление списания';
+const writeoffDeletionMovementReason = 'writeoff_delete';
 const transactionOptions = { timeout: 30_000 };
 const transferRegisterColumns = {
   date: warehouseDateColumn,
@@ -38,6 +41,14 @@ const transferRegisterColumns = {
   amount: { label: 'Сумма', width: 17, format: warehouseMoneyFormat },
   employee: { label: 'Сотрудник', width: 28 },
   warehouses: { label: 'Склады', width: 38 },
+};
+const writeoffRegisterColumns = {
+  ...transferRegisterColumns,
+  products: { label: 'Товары', width: 52 },
+  warehouses: { label: 'Склад', width: 28 },
+  categories: { label: 'Категории', width: 34 },
+  reason: { label: 'Причина', width: 32 },
+  status: { label: 'Статус', width: 24 },
 };
 
 function documentEffectiveAt(kind: WarehouseDocumentKind, value: string | null | undefined) {
@@ -118,15 +129,17 @@ export class WarehouseDocumentsService {
     return { ok: true };
   }
 
-  async list(warehouseId?: string, kind?: WarehouseDocumentKind, search?: string, ids?: string[]) {
+  async list(warehouseId?: string, kind?: WarehouseDocumentKind, search?: string, ids?: string[], includeDeletedWriteoffs = false) {
     if (ids?.length === 0) return [];
     const cafeId = this.cafeId();
     if (warehouseId !== undefined) await this.warehouse(this.prisma, warehouseId);
     const text = search?.trim();
+    const includeDeleted = includeDeletedWriteoffs && kind === 'writeoff';
     const sourceMatches = text && (kind === undefined || kind === 'writeoff')
       ? await this.prisma.$queryRaw<Array<{ id: string }>>`
         SELECT d.id FROM warehouse_documents d
-        WHERE d.cafe_id = ${cafeId} AND d.kind = 'writeoff' AND d.deleted_at IS NULL
+        WHERE d.cafe_id = ${cafeId} AND d.kind = 'writeoff'
+        ${includeDeleted ? Prisma.empty : Prisma.sql`AND d.deleted_at IS NULL`}
         ${warehouseId === undefined ? Prisma.empty : Prisma.sql`AND d.warehouse_id = ${warehouseId}`}
         AND EXISTS (
           SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(d.source_lines->'lines') = 'array'
@@ -135,7 +148,7 @@ export class WarehouseDocumentsService {
              OR strpos(lower(source_line->>'details'), lower(${text})) > 0
         )
       ` : [];
-    const where: Prisma.WarehouseDocumentWhereInput = { cafeId, kind, deletedAt: null, id: ids && { in: ids },
+    const where: Prisma.WarehouseDocumentWhereInput = { cafeId, kind, deletedAt: includeDeleted ? undefined : null, id: ids && { in: ids },
       ...(kind === 'transfer' && warehouseId ? { OR: [{ warehouseId }, { destinationWarehouseId: warehouseId }] } : { warehouseId }),
       ...(text ? { AND: [{ OR: [
         { note: { contains: text, mode: 'insensitive' } },
@@ -159,7 +172,8 @@ export class WarehouseDocumentsService {
             WHEN BOOL_AND(i.cost_known OR i.difference = 0) THEN ROUND(SUM(i.difference * i.unit_cost), 2) ELSE NULL END AS "varianceValue"
         FROM warehouse_documents d
         LEFT JOIN warehouse_document_items i ON i.cafe_id = d.cafe_id AND i.document_id = d.id
-        WHERE d.cafe_id = ${cafeId} AND d.deleted_at IS NULL
+        WHERE d.cafe_id = ${cafeId}
+        ${includeDeleted ? Prisma.empty : Prisma.sql`AND d.deleted_at IS NULL`}
         ${warehouseId === undefined ? Prisma.empty : kind === 'transfer'
           ? Prisma.sql`AND (d.warehouse_id = ${warehouseId} OR d.destination_warehouse_id = ${warehouseId})`
           : Prisma.sql`AND d.warehouse_id = ${warehouseId}`}
@@ -175,20 +189,27 @@ export class WarehouseDocumentsService {
     });
     const [categoryIngredients, categoryDishes] = await Promise.all([
       this.prisma.ingredient.findMany({ where: { cafeId, id: { in: [...new Set(categorySources.filter(({ kind }) => kind === 'ingredient').map(({ sourceId }) => sourceId))] } },
-        select: { id: true, category: true } }),
+        select: { id: true, name: true, category: true } }),
       this.prisma.dish.findMany({ where: { cafeId, id: { in: [...new Set(categorySources.filter(({ kind }) => kind === 'dish').map(({ sourceId }) => sourceId))] } },
-        select: { id: true, category: { select: { name: true } } } }),
+        select: { id: true, name: true, category: { select: { name: true } } } }),
     ]);
-    const ingredientCategories = new Map(categoryIngredients.map(({ id, category }) => [id, category]));
-    const dishCategories = new Map(categoryDishes.map(({ id, category }) => [id, category.name]));
+    const ingredientCatalog = new Map(categoryIngredients.map((ingredient) => [ingredient.id, ingredient]));
+    const dishCatalog = new Map(categoryDishes.map((dish) => [dish.id, dish]));
     const byId = new Map(totals.map(({ id, ...summary }) => [id, summary]));
     return documents.map((document) => {
       const summary = byId.get(document.id);
       const sources = readWriteoffSnapshot(document.sourceLines);
-      const categories = sources
-        ? sources.lines.map(({ kind, sourceId }) => (kind === 'dish' ? dishCategories : ingredientCategories).get(sourceId))
-        : document.items.map(({ ingredientId }) => ingredientCategories.get(ingredientId));
+      const sourceItems = sources?.lines ?? document.items.map(({ ingredientId, name }) => ({
+        kind: 'ingredient' as const, sourceId: ingredientId, name,
+      }));
+      const categories = sourceItems.map(({ kind, sourceId }) => kind === 'dish'
+        ? dishCatalog.get(sourceId)?.category.name : ingredientCatalog.get(sourceId)?.category);
+      const writeoffProducts = document.kind === 'writeoff' ? [...new Map(sourceItems.map(({ kind, sourceId, name }) => {
+        const product = (kind === 'dish' ? dishCatalog : ingredientCatalog).get(sourceId);
+        return [`${kind}:${sourceId}`, { kind, sourceId, name: product?.name ?? name }];
+      })).values()] : undefined;
       return { ...this.summary(document, sources?.lines.length ?? summary?.itemsCount ?? 0, summary?.varianceValue ?? null),
+        writeoffProducts,
         categories: [...new Set(categories.filter((category): category is string => !!category))].sort((a, b) => a.localeCompare(b, 'ru')),
         productNames: (ids ? (sources?.lines ?? document.items) : (sources?.lines ?? document.items).slice(0, 3)).map(({ name }) => name) };
     });
@@ -211,6 +232,33 @@ export class WarehouseDocumentsService {
         amount: row.varianceValue == null ? null : Math.abs(row.varianceValue),
         employee: row.postedByName ?? row.createdByName,
         warehouses: [row.warehouseId, row.destinationWarehouseId].map((id) => id ? names.get(id) ?? 'Склад' : null).filter(Boolean).join(' → '),
+      };
+      return columns.map((key) => cells[key]);
+    }));
+  }
+
+  async writeoffRegister(dto: WarehouseRegisterExportDto, showCosts: boolean) {
+    const columns = warehouseRegisterColumns<keyof typeof writeoffRegisterColumns>(
+      dto.columns, writeoffRegisterColumns, showCosts ? undefined : 'amount', false,
+    );
+    const rows = warehouseRegisterRows(dto.ids, await this.list(undefined, 'writeoff', undefined, dto.ids, true));
+    if (rows.some(({ deletedAt }) => deletedAt) && !columns.includes('status')) columns.push('status');
+    const locations = columns.includes('warehouses') ? await this.prisma.warehouse.findMany({
+      where: { cafeId: this.cafeId(), id: { in: [...new Set(rows.map(({ warehouseId }) => warehouseId))] } },
+      select: { id: true, name: true },
+    }) : [];
+    const names = new Map(locations.map(({ id, name }) => [id, name]));
+    return writeWarehouseRegister('Списания', columns.map((key) => writeoffRegisterColumns[key]), rows.map((row) => {
+      const cells = {
+        date: row.effectiveAt ?? row.postedAt ?? row.createdAt,
+        warehouses: names.get(row.warehouseId) ?? 'Склад',
+        products: row.productNames.join(', '),
+        categories: row.categories.join(', '),
+        note: row.note,
+        amount: row.varianceValue == null ? null : Math.abs(row.varianceValue),
+        employee: row.postedByName ?? row.createdByName,
+        reason: row.reasonLabel ?? 'Без причины',
+        status: row.deletedAt ? 'Удалено' : { draft: 'Черновик', submitted: 'На утверждении', posted: 'Проведено', reversed: 'Сторнировано' }[row.status],
       };
       return columns.map((key) => cells[key]);
     }));
@@ -249,16 +297,20 @@ export class WarehouseDocumentsService {
       await lockRecipeGraph(tx, true);
       const warehouse = await this.warehouse(tx, dto.warehouseId);
       const saved = dto.documentId ? await this.load(tx, dto.documentId) : null;
-      if (saved && (saved.kind !== 'writeoff' || saved.warehouseId !== warehouse.id))
-        throw new BadRequestException('Черновик должен относиться к списанию на выбранном складе');
-      const date = dto.effectiveAt === undefined ? saved?.effectiveAt : documentEffectiveAt('writeoff', dto.effectiveAt);
-      const snapshot = await resolveWriteoffSources(tx, warehouse, dto.sourceLines, false, true, readWriteoffSnapshot(saved?.sourceLines ?? null), date);
+      if (saved && (saved.kind !== 'writeoff' || (saved.status !== 'posted' && saved.warehouseId !== warehouse.id)))
+        throw new BadRequestException('Документ должен относиться к списанию на выбранном складе');
+      const previousDate = saved?.effectiveAt ?? (saved?.status === 'posted' ? saved.postedAt : undefined);
+      const date = dto.effectiveAt === undefined ? previousDate : documentEffectiveAt('writeoff', dto.effectiveAt);
+      const preserveMatching = saved?.status === 'posted' && saved.warehouseId === warehouse.id &&
+        previousDate?.getTime() === date?.getTime();
+      const snapshot = await resolveWriteoffSources(tx, warehouse, dto.sourceLines, false, true,
+        readWriteoffSnapshot(saved?.sourceLines ?? null), date, preserveMatching);
       return previewWriteoffSources(tx, warehouse, snapshot);
     }, { ...transactionOptions, isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
-  async get(id: string, includeInventoryContext = false, inventoryIngredientId?: string) {
-    return this.prisma.$transaction(async (tx) => this.preview(tx, await this.load(tx, id), includeInventoryContext, inventoryIngredientId),
+  async get(id: string, includeInventoryContext = false, inventoryIngredientId?: string, includeDeletedWriteoffs = false) {
+    return this.prisma.$transaction(async (tx) => this.preview(tx, await this.load(tx, id, includeDeletedWriteoffs), includeInventoryContext, inventoryIngredientId),
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
@@ -415,9 +467,6 @@ export class WarehouseDocumentsService {
     if (document.reopenedAt) throw new BadRequestException('Проведите исправленную инвентаризацию повторно');
     await this.validateSourceSnapshot(tx, document);
     await this.validateLines(tx, document);
-    if (document.kind === 'writeoff' && document.reason === 'other' && !document.note) {
-      throw new BadRequestException('Опишите причину списания в комментарии');
-    }
     return this.preview(tx, await tx.warehouseDocument.update({
       where: { id, cafeId: document.cafeId },
       data: {
@@ -613,7 +662,7 @@ export class WarehouseDocumentsService {
       if (document.kind !== 'writeoff') throw new NotFoundException('Списание не найдено');
       assertWarehousePermission(actor, document.status === 'draft' || document.status === 'submitted'
         ? 'warehouseWriteoff' : 'warehouseApprove');
-      if (document.status === 'posted') await this.reversePosted(tx, actor, document, 'Удаление списания');
+      if (document.status === 'posted') await this.reversePosted(tx, actor, document, writeoffDeletionNote, writeoffDeletionMovementReason);
       await tx.warehouseDocument.update({ where: { id, cafeId },
         data: { deletedAt: new Date(), revision: { increment: 1 } } });
       await tx.auditLog.create({ data: { cafeId, userId: actor.id, userName: actor.name, userRole: actor.role,
@@ -623,7 +672,188 @@ export class WarehouseDocumentsService {
     }, transactionOptions);
   }
 
-  private async reversePosted(tx: Prisma.TransactionClient, actor: Actor, document: Document, note: string) {
+  async restoreWriteoff(actor: Actor, id: string, revision?: number) {
+    const cafeId = this.assertActor(actor);
+    if (revision === undefined || revision === null) throw new BadRequestException('Обновите списание перед восстановлением');
+    return this.prisma.$transaction(async (tx) => {
+      const document = await this.lockDocument(tx, id, revision, ['draft', 'submitted', 'reversed'], true);
+      if (document.kind !== 'writeoff') throw new NotFoundException('Списание не найдено');
+      if (!document.deletedAt) throw new ConflictException('Списание уже восстановлено');
+      assertWarehousePermission(actor, document.status === 'reversed' ? 'warehouseApprove' : 'warehouseWriteoff');
+      const restoredMovements = document.status === 'reversed'
+        ? await this.undoWriteoffDeletion(tx, document)
+        : [];
+      const restored = await tx.warehouseDocument.update({
+        where: { id, cafeId }, include: documentInclude,
+        data: { deletedAt: null, revision: { increment: 1 },
+          ...(restoredMovements.length ? { status: 'posted', reversedAt: null, reversedById: null, reversedByName: null, reversalReason: null } : {}) },
+      });
+      await tx.auditLog.create({ data: { cafeId, userId: actor.id, userName: actor.name, userRole: actor.role,
+        actionType: 'WAREHOUSE_WRITEOFF_RESTORED', entityType: 'WAREHOUSE_DOCUMENT', entityId: id,
+        description: 'Восстановлено складское списание',
+        metadata: { deletedAt: document.deletedAt.toISOString(), previousStatus: document.status, status: restored.status,
+          removedReversals: restoredMovements },
+      } });
+      return this.preview(tx, restored);
+    }, transactionOptions);
+  }
+
+  private async undoWriteoffDeletion(tx: Prisma.TransactionClient, document: Document) {
+    const { cafeId, id } = document;
+    await lockIngredients(tx, document.items.map(({ ingredientId }) => ingredientId));
+    const movements = await tx.stockMovement.findMany({ where: { cafeId, sourceType: 'writeoff', sourceId: id },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+    let reversals = movements.filter((movement) => movement.type === 'cancel' && movement.reason === writeoffDeletionMovementReason);
+    if (!reversals.length && document.reversalReason === writeoffDeletionNote) {
+      // Legacy rows used the same reversal marker for a manually reversed document.
+      // Require the audit evidence that deletion actually canceled a posted write-off.
+      const deletion = await tx.auditLog.findFirst({ where: { cafeId, entityId: id, actionType: 'WAREHOUSE_WRITEOFF_DELETED' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { metadata: true } });
+      const previousStatus = (deletion?.metadata as Prisma.JsonObject | null | undefined)?.previousStatus;
+      if (previousStatus === 'posted') {
+        reversals = movements.filter((movement) => movement.type === 'cancel' && movement.reason === 'reversal'
+          && movement.comment === `Сторно: ${writeoffDeletionNote}`);
+        if (!reversals.length) throw new ConflictException('В журнале не найдено сторно удалённого списания');
+      }
+      if (previousStatus !== 'posted' && previousStatus !== 'reversed') {
+        throw new ConflictException('Не удалось подтвердить, было ли это старое списание проведено перед удалением. Сверьте движения по складу перед исправлением остатка.');
+      }
+    }
+    if (!reversals.length) return [];
+    const original = movements.filter((movement) => movement.type === 'writeoff');
+    const byIngredient = new Map(original.map((movement) => [movement.ingredientId, movement]));
+    const matches = reversals.length === document.items.length && movements.length === reversals.length + original.length
+      && original.length === reversals.length && byIngredient.size === original.length
+      && new Set(reversals.map(({ ingredientId }) => ingredientId)).size === reversals.length
+      && reversals.every((reversal) => {
+        const source = byIngredient.get(reversal.ingredientId);
+        return source && source.warehouseKey === reversal.warehouseKey && source.change.lt(0) && source.change.negated().eq(reversal.change);
+      });
+    if (!matches) throw new ConflictException('Журнал не подтверждает сторно удалённого списания');
+    await replayHistoricalStock(tx, {
+      cafeId: this.cafeId(), effectiveAt: reversals[0].createdAt, insertedMovementIds: [],
+      replacedWriteoff: { id, movementIds: reversals.map((movement) => movement.id), removeDeletionReversals: true },
+    });
+    return reversals.map((movement) => ({ id: movement.id, ingredientId: movement.ingredientId,
+      warehouseId: movement.warehouseId, createdAt: movement.createdAt.toISOString(), change: movement.change.toString(),
+      costAtMoment: movement.costAtMoment.toString(), costKnown: movement.costKnown }));
+  }
+
+  async editPostedWriteoff(actor: Actor, id: string, dto: EditPostedWriteoffDto) {
+    const cafeId = this.assertActor(actor);
+    assertWarehousePermission(actor, 'warehouseWriteoff');
+    assertWarehousePermission(actor, 'warehouseApprove');
+    if (dto.revision === undefined || dto.revision === null) throw new BadRequestException('Обновите списание перед редактированием');
+    if (dto.finalize || dto.countedAt != null || dto.recount || (dto.sourceLines && dto.items)) {
+      throw new BadRequestException('Укажите только изменяемые поля проведённого списания');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const document = await this.lockDocument(tx, id, dto.revision, 'posted');
+      if (document.kind !== 'writeoff' || !document.postedAt) throw new NotFoundException('Проведённое списание не найдено');
+      const warehouse = await this.warehouse(tx, dto.warehouseId ?? document.warehouseId);
+      const originalAt = document.effectiveAt ?? document.postedAt;
+      const effectiveAt = documentEffectiveAt('writeoff', dto.effectiveAt) ?? originalAt;
+      const timingChanged = effectiveAt.getTime() !== originalAt.getTime();
+      const moved = timingChanged || warehouse.id !== document.warehouseId;
+      const previous = readWriteoffSnapshot(document.sourceLines);
+      if (previous && dto.items) throw new BadRequestException('Сохраните исходные строки списания, а не рассчитанные ингредиенты');
+      const sources = dto.sourceLines ?? (previous && moved ? sourceInputs(previous).map((line) => ({
+        ...line, recipeSignature: undefined,
+      })) : undefined);
+      if (sources) await lockRecipeGraph(tx, true);
+      const snapshot = sources ? await resolveWriteoffSources(tx, warehouse, sources, dto.sourceLines !== undefined, false,
+        previous, effectiveAt, !moved) : previous;
+      const inputs = sources && snapshot ? await writeoffStockLines(tx, snapshot, document.items) : dto.items;
+      if (inputs && !inputs.length) throw new BadRequestException('Добавьте хотя бы одну позицию');
+      await lockIngredients(tx, [...document.items.map(({ ingredientId }) => ingredientId),
+        ...(inputs ?? []).map(({ ingredientId }) => ingredientId)]);
+      const original = await this.load(tx, id);
+      const blocked = await this.reversalBlockedReason(tx, original);
+      if (blocked) throw new ConflictException('Списание относится к закрытому инвентаризационному периоду. Откройте ближайшую инвентаризацию на редактирование.');
+      const movements = await tx.stockMovement.findMany({
+        where: { cafeId, sourceType: 'writeoff', sourceId: id }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+      const oldItems = new Map(original.items.map((item) => [item.ingredientId, item]));
+      const originalWarehouse = await this.warehouse(tx, original.warehouseId);
+      const warehouseKey = originalWarehouse.isDefault ? 'default' : originalWarehouse.id;
+      if (!movements.length || movements.length !== oldItems.size ||
+        new Set(movements.map(({ ingredientId }) => ingredientId)).size !== movements.length ||
+        movements.some((movement) => movement.type !== 'writeoff' || movement.warehouseKey !== warehouseKey ||
+          !oldItems.get(movement.ingredientId)?.quantity?.negated().eq(movement.change))) {
+        throw new ConflictException('Журнал не подтверждает исходные остатки списания');
+      }
+      const changedItems = inputs != null && (inputs.length !== oldItems.size ||
+        new Set(inputs.map(({ ingredientId }) => ingredientId)).size !== inputs.length ||
+        inputs.some(({ ingredientId, quantity }) => {
+          const old = oldItems.get(ingredientId);
+          return !old || quantity == null || !old.quantity?.eq(this.quantity(quantity, normalizeUnit(old.unit), 'writeoff'));
+        }));
+      const affectsStock = moved || changedItems;
+      if (affectsStock) {
+        const items = inputs ?? original.items.map(({ ingredientId, quantity, unit }) => ({
+          ingredientId, quantity: quantity == null ? null : fromBase(Number(quantity), normalizeUnit(unit)),
+        }));
+        await this.saveLines(tx, warehouse, original, items, false);
+      }
+      const reasonProvided = dto.reason !== undefined || dto.writeoffReasonId !== undefined;
+      const updated = await tx.warehouseDocument.update({
+        where: { cafeId, id }, include: documentInclude,
+        data: {
+          revision: { increment: 1 }, warehouseId: warehouse.id,
+          effectiveAt: timingChanged ? effectiveAt : undefined,
+          note: dto.note === undefined ? undefined : dto.note?.trim() || null,
+          ...(reasonProvided ? await this.reason(tx, 'writeoff', dto.reason, dto.writeoffReasonId, original) : {}),
+          sourceLines: sources && snapshot ? snapshot as unknown as Prisma.InputJsonValue : undefined,
+        },
+      });
+      const reason = updated.writeoffReasonId ?? updated.reason;
+      const comment = [this.reasonLabel(updated), updated.note].filter(Boolean).join(' · ');
+      const recipeSnapshot = updated.sourceLines ? updated.sourceLines as Prisma.InputJsonValue : Prisma.DbNull;
+      const insertedMovementIds: string[] = [];
+      if (affectsStock) {
+        await this.validateLines(tx, updated);
+        const recordedAt = new Date();
+        for (const item of updated.items) {
+          const { movement } = await postStockMovement(tx, {
+            ingredientId: item.ingredientId, warehouse, change: item.quantity!.negated(), allowNegative: true,
+            movement: { createdAt: effectiveAt, recordedAt, type: 'writeoff', sourceType: 'writeoff', sourceId: id,
+              actorId: actor.id, actorName: actor.name, reason, comment, recipeSnapshot },
+          });
+          insertedMovementIds.push(movement.id);
+        }
+        await replayHistoricalStock(tx, {
+          cafeId, effectiveAt, insertedMovementIds, replacedWriteoff: { id, movementIds: movements.map((movement) => movement.id) },
+        });
+      } else {
+        await tx.stockMovement.updateMany({
+          where: { cafeId, id: { in: movements.map((movement) => movement.id) } },
+          data: { reason, comment, recipeSnapshot },
+        });
+      }
+      const saved = affectsStock ? await this.load(tx, id) : updated;
+      const auditValue = (entry: Document) => ({
+        revision: entry.revision, warehouseId: entry.warehouseId, effectiveAt: (entry.effectiveAt ?? entry.postedAt)!.toISOString(),
+        reason: entry.reason, writeoffReasonId: entry.writeoffReasonId, reasonLabel: this.reasonLabel(entry), note: entry.note,
+        sourceLines: entry.sourceLines,
+        items: entry.items.map((item) => ({ ingredientId: item.ingredientId, unit: item.unit,
+          quantity: item.quantity?.toString() ?? null, unitCost: item.unitCost?.toString() ?? null, costKnown: item.costKnown })),
+      });
+      await tx.auditLog.create({ data: { cafeId, userId: actor.id, userName: actor.name, userRole: actor.role,
+        actionType: AuditAction.WAREHOUSE_WRITEOFF_EDITED, entityType: 'WAREHOUSE_DOCUMENT', entityId: id,
+        description: 'Изменено проведённое списание',
+        oldValue: auditValue(original) as Prisma.InputJsonObject, newValue: auditValue(saved) as Prisma.InputJsonObject,
+        metadata: { originalMovements: movements.map((movement) => ({
+          id: movement.id, ingredientId: movement.ingredientId, warehouseId: movement.warehouseId,
+          createdAt: movement.createdAt.toISOString(), change: movement.change.toString(),
+          costAtMoment: movement.costAtMoment.toString(), costKnown: movement.costKnown,
+          beforeStock: movement.beforeStock.toString(), afterStock: movement.afterStock.toString(),
+        })), insertedMovementIds },
+      } });
+      return this.preview(tx, saved);
+    }, transactionOptions);
+  }
+
+  private async reversePosted(tx: Prisma.TransactionClient, actor: Actor, document: Document, note: string, reason = 'reversal') {
     const { id } = document;
     await lockIngredients(tx, document.items.map((item) => item.ingredientId));
     const { blocked, historical } = await this.reversalPeriod(tx, document);
@@ -658,7 +888,7 @@ export class WarehouseDocumentsService {
         valuation: historicalAt || movement.change.isZero() ? 'preserve' : movement.change.lt(0) ? 'average' : 'value',
         movement: { createdAt: movementAt, recordedAt: historicalAt ? recordedAt : undefined,
           type: 'cancel', sourceType: document.kind, sourceId: id, actorId: actor.id, actorName: actor.name,
-          comment: `Сторно: ${note.trim()}`, reason: 'reversal',
+          comment: `Сторно: ${note.trim()}`, reason,
           ...(movement.recipeSnapshot ? { recipeSnapshot: movement.recipeSnapshot as Prisma.InputJsonValue } : {}) } });
       if (historicalAt) insertedMovementIds.push(reversal.id);
     }
@@ -918,18 +1148,21 @@ export class WarehouseDocumentsService {
     return warehouse;
   }
 
-  private async load(tx: Prisma.TransactionClient, id: string) {
+  private async load(tx: Prisma.TransactionClient, id: string, includeDeletedWriteoffs = false) {
     const document = await tx.warehouseDocument.findUnique({
-      where: { id, cafeId: this.cafeId(), deletedAt: null }, include: documentInclude,
+      where: { id, cafeId: this.cafeId(), ...(includeDeletedWriteoffs
+        ? { OR: [{ deletedAt: null }, { kind: 'writeoff' as const }] }
+        : { deletedAt: null }) }, include: documentInclude,
     });
     if (!document) throw new NotFoundException('Складской документ не найден');
     return document;
   }
 
-  private async lockDocument(tx: Prisma.TransactionClient, id: string, revision: number | undefined, status: WarehouseDocument['status'] | WarehouseDocument['status'][]) {
+  private async lockDocument(tx: Prisma.TransactionClient, id: string, revision: number | undefined,
+    status: WarehouseDocument['status'] | WarehouseDocument['status'][], includeDeletedWriteoffs = false) {
     const cafeId = this.cafeId();
     await tx.$queryRaw`SELECT id FROM warehouse_documents WHERE id = ${id} AND cafe_id = ${cafeId} FOR UPDATE`;
-    const document = await this.load(tx, id);
+    const document = await this.load(tx, id, includeDeletedWriteoffs);
     const statuses = Array.isArray(status) ? status : [status];
     if ((revision !== undefined && document.revision !== revision) || !statuses.includes(document.status)) {
       throw new ConflictException('Документ уже изменился. Обновите данные');
@@ -992,7 +1225,7 @@ export class WarehouseDocumentsService {
       note: document.note, status: document.status, revision: document.revision,
       destinationWarehouseId: document.destinationWarehouseId, sourcePurchaseId: document.sourcePurchaseId,
       reversedAt: document.reversedAt, reversedByName: document.reversedByName, reversalReason: document.reversalReason,
-      createdAt: document.createdAt, submittedAt: document.submittedAt, postedAt: document.postedAt, reopenedAt: document.reopenedAt,
+      createdAt: document.createdAt, submittedAt: document.submittedAt, postedAt: document.postedAt, reopenedAt: document.reopenedAt, deletedAt: document.deletedAt,
       countedAt: document.countedAt ?? (document.reopenedAt ? document.postedAt : null), effectiveAt: document.effectiveAt,
       createdByName: document.createdByName, submittedByName: document.submittedByName, postedByName: document.postedByName,
       itemsCount,

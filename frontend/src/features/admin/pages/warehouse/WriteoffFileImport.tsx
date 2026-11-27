@@ -4,11 +4,17 @@ import { exportCsv } from '@/lib/report-output';
 import type { WriteoffFileLine } from './writeoff-api';
 import type { DraftWriteoffLine } from './writeoff-form-values';
 import { unitLabel } from './units';
+import { balanceMoney } from './balance-format';
 
-export function exportWriteoffLines(rows: DraftWriteoffLine[]) {
-  exportCsv('Позиции списания', ['Наименование', 'Количество', 'Единица', 'Детали'], rows
+export function exportWriteoffLines(rows: DraftWriteoffLine[], amounts?: ReadonlyMap<string, number | null>) {
+  exportCsv('Позиции списания', ['Наименование', 'Количество', 'Единица', ...(amounts ? ['Сумма'] : []), 'Детали'], rows
     .filter((row) => row.sourceId)
-    .map((row) => [row.name ?? '', row.quantity, row.packageName ?? unitLabel(row.unit), row.details ?? '']));
+    .map((row) => {
+      const amount = amounts?.get(row.sourceLineId);
+      const unit = row.kind === 'dish' && row.unit === 'pcs' ? 'порц.' : unitLabel(row.unit);
+      return [row.name ?? '', row.quantity, row.packageName ?? unit,
+        ...(amounts ? [amount == null ? '' : balanceMoney(amount)] : []), row.details ?? ''];
+    }));
 }
 
 export function WriteoffFileImport({ disabled, onBusy, onRead }: {

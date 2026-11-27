@@ -27,7 +27,7 @@ export function roundPurchaseQuantity(value: number): number {
   return Math.round((value + Number.EPSILON * Math.abs(value)) * 1000) / 1000;
 }
 
-export function selectPurchaseProduct<T extends PurchaseRowValues & { ingredientId: string; unit: string }>(
+export function selectPurchaseProduct<T extends PurchaseRowValues & { ingredientId: string; unit: string; taxId?: string | null }>(
   row: T,
   product: { id: string; displayUnit: UnitCode; avgCost: number | null },
 ): T {
@@ -40,6 +40,7 @@ export function selectPurchaseProduct<T extends PurchaseRowValues & { ingredient
     // Average stock cost is not the price on a new supplier invoice.
     price: '',
     total: undefined,
+    taxId: null,
   };
 }
 

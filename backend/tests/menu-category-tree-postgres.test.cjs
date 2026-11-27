@@ -84,7 +84,7 @@ test('Menu category hierarchy, photos and receipt taxes', { skip: !url }, async 
         const replacement = await catalog.createCategory({ name: 'Бар', taxId: oldTax.id }, actor);
         await catalog.updateCategory(child.id, { parentId: replacement.id }, actor);
         assert.equal((await lookup(leaf.id)).taxId, oldTax.id);
-        await catalog.deleteCategory(replacement.id, {}, actor);
+        await catalog.deleteCategory(replacement.id, { strategy: 'move', targetCategoryId: parent.id }, actor);
         assert.deepEqual([(await lookup(child.id)).parentId, (await lookup(leaf.id)).taxId, (await lookup(overridden.id)).taxId], [null, null, nextTax.id]);
       });
     });

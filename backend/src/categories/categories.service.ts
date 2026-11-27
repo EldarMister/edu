@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { categoryImageRef } from './category-image';
 import { decodeDishImage } from '../dishes/dish-image';
 import { mainMenuCategoryId } from '../admin/main-menu-category';
+import { visibleMenuCategory } from './menu-visibility';
 
 @Injectable()
 export class CategoriesService {
@@ -10,7 +11,7 @@ export class CategoriesService {
 
   async findAll() {
     const categories = await this.prisma.category.findMany({
-      where: { isActive: true },
+      where: visibleMenuCategory,
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       select: {
         id: true,
@@ -20,7 +21,7 @@ export class CategoriesService {
         sortOrder: true,
         prepStation: true,
         dishes: {
-          where: { isActive: true },
+          where: { isActive: true, archivedAt: null },
           select: { popularityScore: true },
         },
       },
@@ -51,7 +52,7 @@ export class CategoriesService {
 
   async image(id: string, version?: string) {
     if (!version || !/^[0-9a-f-]{36}$/i.test(version)) return null;
-    const category = await this.prisma.category.findFirst({ where: { id, imageKey: version }, select: { imageUrl: true } });
+    const category = await this.prisma.category.findFirst({ where: { id, imageKey: version, archivedAt: null }, select: { imageUrl: true } });
     return decodeDishImage(category?.imageUrl ?? null);
   }
 }

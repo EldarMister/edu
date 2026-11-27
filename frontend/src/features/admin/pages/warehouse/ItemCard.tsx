@@ -130,7 +130,10 @@ function ItemForm({
   const [creatingCategory, setCreatingCategory] = useState(false);
   const ingredientKind = kind === 'raw' || kind === 'consumable';
   const catalogue = useIngredientCategories();
-  const categories = (catalogue.data ?? []).map(({ name }) => name).sort((a, b) => a.localeCompare(b, 'ru'));
+  const categories = [...new Set([
+    ...(catalogue.data ?? []).map(({ name }) => name),
+    ...(category ? [category] : []),
+  ])].sort((a, b) => a.localeCompare(b, 'ru'));
   const [supplier, setSupplier] = useState(item?.supplier ?? '');
   const [threshold, setThreshold] = useState(String(item?.lowStockThreshold ?? 0));
   const suppliers = useSuppliers(editable);
@@ -273,6 +276,18 @@ function ItemForm({
             required
           />
         </DocumentField>
+        {ingredientKind && <DocumentField label="Категория">
+          <div className="flex flex-wrap items-center gap-2">
+            <Select ariaLabel="Категория ингредиента" className="h-10 min-w-[176px] flex-1" searchable
+              value={category} onChange={setCategory} disabled={!editable || pending}
+              options={[{ value: '', label: 'Без категории' }, ...categories.map((name) => ({ value: name, label: name }))]} />
+            {can('actions.warehouseSettings') && <button type="button" className="btn-ghost btn-md"
+              onClick={() => setCreatingCategory(true)}>Добавить категорию</button>}
+          </div>
+          {catalogue.isError && <p role="alert" className="mt-1 text-xs text-danger">
+            Не удалось загрузить категории. <button type="button" className="underline" onClick={() => void catalogue.refetch()}>Повторить</button>
+          </p>}
+        </DocumentField>}
         <DocumentField label="Ед. измерения">
           {unitOptions.length > 1 ? (
             <Select
@@ -304,18 +319,11 @@ function ItemForm({
         <details className="poster-advanced">
           <summary>Дополнительно</summary>
           <div className="space-y-4 pt-5">
-            <DocumentField label="Категория">
-          <input
-            aria-label="Категория ингредиента"
-            className="input w-full"
-            list={categoriesId}
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-          />
-          <datalist id={categoriesId}>{categories.map((entry) => <option key={entry} value={entry} />)}</datalist>
-          {ingredientKind && can('actions.warehouseSettings') && <button type="button" className="mt-2 text-sm text-primary"
-            onClick={() => setCreatingCategory(true)}>Добавить категорию</button>}
-            </DocumentField>
+            {!ingredientKind && <DocumentField label="Категория">
+              <input aria-label="Категория складской позиции" className="input w-full" list={categoriesId}
+                value={category} onChange={(event) => setCategory(event.target.value)} />
+              <datalist id={categoriesId}>{categories.map((entry) => <option key={entry} value={entry} />)}</datalist>
+            </DocumentField>}
             {mass && PROCESSING_METHODS.map((method) => (
               <DocumentField key={method.value} label={lossLabels[method.value]}>
                 <div className="poster-number-unit w-[136px]">

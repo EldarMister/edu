@@ -303,7 +303,13 @@ async function verifyOpening(
 }
 
 type InventoryRepost = { id: string; ingredientIds: string[]; recordedAt: Date; actorId: string; actorName: string; note: string | null };
-type ReplayInput = { cafeId: string; effectiveAt: Date; insertedMovementIds: string[]; inventoryRepost?: InventoryRepost };
+type ReplayInput = {
+  cafeId: string;
+  effectiveAt: Date;
+  insertedMovementIds: string[];
+  inventoryRepost?: InventoryRepost;
+  replacedWriteoff?: { id: string; movementIds: string[]; removeDeletionReversals?: boolean };
+};
 type AppliedCount = {
   ingredientId: string;
   quantity: Prisma.Decimal | null;
@@ -336,8 +342,8 @@ function inventoryPlaceholder(cafeId: string, item: AppliedCount, locations: Map
 /** Caller holds the same sorted ingredient locks as normal postings. All
  * provisional writes and this replay must be part of the same transaction. */
 export async function replayHistoricalStock(tx: Prisma.TransactionClient, input: ReplayInput) {
-  const { cafeId, effectiveAt, insertedMovementIds, inventoryRepost } = input;
-  if (!insertedMovementIds.length && !inventoryRepost) return new Map<string, Replayed>();
+  const { cafeId, effectiveAt, insertedMovementIds, inventoryRepost, replacedWriteoff } = input;
+  if (!insertedMovementIds.length && !inventoryRepost && !replacedWriteoff) return new Map<string, Replayed>();
   const reposted = inventoryRepost && await tx.warehouseDocument.findFirst({
     where: { id: inventoryRepost.id, cafeId, kind: 'inventory', reopenedAt: { not: null } },
     select: { warehouseId: true, items: { where: { ingredientId: { in: inventoryRepost.ingredientIds } },
@@ -350,19 +356,32 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
     throw cannotReplay('новые проводки не соответствуют дате документа');
   }
   const inserted = insertedMovementIds.map((id) => insertedById.get(id)!);
+  const removed = replacedWriteoff ? await tx.stockMovement.findMany({
+    where: { cafeId, id: { in: replacedWriteoff.movementIds }, sourceId: replacedWriteoff.id, sourceType: 'writeoff',
+      type: replacedWriteoff.removeDeletionReversals ? 'cancel' : 'writeoff' },
+  }) : [];
+  if (replacedWriteoff && (!removed.length || removed.length !== replacedWriteoff.movementIds.length)) {
+    throw cannotReplay('в журнале отсутствуют исходные проводки списания');
+  }
+  const removedIds = new Set(removed.map(({ id }) => id));
   const repostedMovements = inventoryRepost ? await tx.stockMovement.findMany({
     where: { cafeId, type: 'inventory', sourceType: 'inventory', sourceId: inventoryRepost.id,
       ingredientId: { in: inventoryRepost.ingredientIds } },
     select: { ingredientId: true, createdAt: true },
   }) : [];
-  const scanAt = new Date(Math.min(effectiveAt.getTime(), ...repostedMovements.map(({ createdAt }) => createdAt.getTime())));
-  const seedIngredients = [...new Set([...inserted.map((row) => row.ingredientId), ...(reposted?.items ?? []).map(({ ingredientId }) => ingredientId)])];
+  const scanAt = new Date(Math.min(effectiveAt.getTime(), ...[...repostedMovements, ...removed].map(({ createdAt }) => createdAt.getTime())));
+  const startingMovements = [...inserted, ...removed];
+  const seedIngredients = [...new Set([...startingMovements, ...(reposted?.items ?? [])].map(({ ingredientId }) => ingredientId))];
   const [locations, settings] = await Promise.all([
     tx.warehouse.findMany({ where: { cafeId }, select: { id: true, cafeId: true, name: true, isDefault: true } }),
     tx.settings.findFirst({ where: { cafeId }, select: { allowNegativeIngredientStock: true } }),
   ]);
   const byLocation = new Map(locations.map((location) => [location.id, location]));
-  const starts = new Map(inserted.map((row) => [scopeKey(row), row.createdAt.getTime()]));
+  const starts = new Map<string, number>();
+  for (const row of startingMovements) {
+    const key = scopeKey(row);
+    starts.set(key, Math.min(row.createdAt.getTime(), starts.get(key) ?? Infinity));
+  }
   if (reposted) {
     const warehouse = byLocation.get(reposted.warehouseId);
     if (!warehouse) throw cannotReplay('не удалось подтвердить склад инвентаризации');
@@ -447,7 +466,7 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
   if (!inventoryRepost && [...earliestCounts.values()].some(({ document }) => !document.reopenedAt)) {
     throw cannotReplay('после выбранной даты проведена инвентаризация на затронутом складе; откройте ближайшую инвентаризацию на редактирование');
   }
-  const replayById = new Map(replayRows.map((row) => [row.id, row]));
+  const replayById = new Map(replayRows.filter((row) => !removedIds.has(row.id)).map((row) => [row.id, row]));
 
   const balances = new Map<string, Balance>();
   const laneRows = new Map<string, Movement[]>();
@@ -494,7 +513,7 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
   };
   const priceForMovement = (row: Movement) => replayed.get(row.id) ?? row;
   const dependencies = new Map<string, Movement[]>();
-  for (const row of replayRows) {
+  for (const row of replayById.values()) {
     const conversion = conversions.byMovement.get(row.id);
     if (conversion) {
       dependencies.set(row.id, conversionDependencies(conversion, row));
@@ -544,9 +563,19 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
     });
     if (!next) throw cannotReplay('связанные складские операции не образуют корректный порядок');
     const { key, row } = next;
+    const index = cursors.get(key)! + 1;
+    cursors.set(key, index);
+    if (index === laneRows.get(key)!.length) pending.delete(key);
     const before = balances.get(key)!;
     const count = countByMovement.get(row.id);
     const chronicle = quantityDifferences.get(key) ?? [];
+    // Unwind used the original entry to recover the opening stock. In the
+    // corrected timeline only the replacement belongs in the movement book.
+    if (removedIds.has(row.id)) {
+      chronicle.push({ at: row.createdAt.getTime(), change: row.change.negated() });
+      quantityDifferences.set(key, chronicle);
+      continue;
+    }
     let result: { balance: Balance; movement: Replayed };
     if (count) {
       if (before.avgCost == null) throw cannotReplay('себестоимость на момент инвентаризации не подтверждена');
@@ -559,7 +588,7 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
         throw cannotReplay('расхождение инвентаризации вне допустимого диапазона');
       }
       const afterStock = before.stock.add(change);
-      const countedWithMovements = cutoff != null && laneRows.get(key)!.some((movement) => movement.id !== row.id
+      const countedWithMovements = cutoff != null && laneRows.get(key)!.some((movement) => movement.id !== row.id && !removedIds.has(movement.id)
         && movement.createdAt.getTime() >= cutoff && movement.createdAt <= row.createdAt);
       const reset = quantity.isZero() && afterStock.isZero() && (cutoff == null
         || isInventoryReset(row) || ((starts.get(key) ?? Infinity) <= cutoff && !countedWithMovements));
@@ -600,9 +629,6 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
     }
     replayed.set(row.id, result.movement);
     balances.set(key, result.balance);
-    const index = cursors.get(key)! + 1;
-    cursors.set(key, index);
-    if (index === laneRows.get(key)!.length) pending.delete(key);
   }
 
   await persistHistoricalConversions(tx, cafeId, conversions.groups, replayed);
@@ -650,5 +676,6 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
     }
     await setWarehouseBalance(tx, laneLocations.get(key) ?? null, ingredientId, { ...balance, avgCost: balance.avgCost });
   }
+  if (removedIds.size) await tx.stockMovement.deleteMany({ where: { cafeId, id: { in: [...removedIds] } } });
   return replayed;
 }

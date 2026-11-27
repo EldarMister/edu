@@ -9,6 +9,7 @@ import { SERVER_EVENTS } from '../realtime/events';
 import { UpdateSettingsDto } from './dto';
 import { normalizeWaiterOrderPermissions, validateWaiterOrderPermissions } from '../orders/order-policy';
 import { getCafeId } from '../tenant/tenant-context';
+import { lockFinance } from '../finance/finance-ledger';
 
 /** Человекочитаемые названия полей настроек для описаний аудита. */
 const SETTINGS_FIELD_LABELS: Record<string, string> = {
@@ -36,6 +37,11 @@ const SETTINGS_FIELD_LABELS: Record<string, string> = {
   payQr: 'оплата QR',
   payCash: 'оплата наличными',
   payCard: 'оплата картой',
+  cardProcessingFeeRate: 'комиссия за оплату картой',
+  qrProcessingFeeRate: 'комиссия за оплату по QR',
+  cardSettlementAccountId: 'счёт для оплаты картой',
+  qrSettlementAccountId: 'счёт для оплаты по QR',
+  cashCollectionAccountId: 'счёт для инкассации',
   allowNegativeIngredientStock: 'минусовой остаток сырья',
   warehouseProductionEnabled: 'производство полуфабрикатов',
   warehouseProcessingEnabled: 'переработки',
@@ -62,6 +68,12 @@ const QR_DATA_URL_RE = /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/;
 
 /** Алфавит кода табло без похожих символов (без 0/O, 1/I/L). */
 const QUEUE_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const processingFeeFields = ['cardProcessingFeeRate', 'qrProcessingFeeRate'] as const;
+const settlementAccountFields = ['cardSettlementAccountId', 'qrSettlementAccountId'] as const;
+
+function isProcessingFeeField(key: keyof UpdateSettingsDto): key is (typeof processingFeeFields)[number] {
+  return key === 'cardProcessingFeeRate' || key === 'qrProcessingFeeRate';
+}
 
 function genQueueCode(): string {
   let code = '';
@@ -100,6 +112,24 @@ export class SettingsService {
     return this.forAdmin(await this.get());
   }
 
+  paymentAccounts(cafeId?: string | null) {
+    if (!cafeId) throw new ForbiddenException('Кафе не выбрано');
+    return this.prisma.financeAccount.findMany({
+      where: { cafeId, type: 'noncash', archivedAt: null },
+      orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
+      select: { id: true, name: true, isDefault: true },
+    });
+  }
+
+  collectionAccounts(cafeId?: string | null) {
+    if (!cafeId) throw new ForbiddenException('Кафе не выбрано');
+    return this.prisma.financeAccount.findMany({
+      where: { cafeId, type: 'cash', archivedAt: null, isDefault: false },
+      orderBy: [{ isCollection: 'desc' }, { name: 'asc' }],
+      select: { id: true, name: true, isCollection: true },
+    });
+  }
+
   /** Никогда не отдаём хеш ключа через обычный API настроек. */
   private forAdmin(s: Settings) {
     const {
@@ -111,6 +141,8 @@ export class SettingsService {
     return {
       ...safe,
       serviceChargeAmount: '0',
+      cardProcessingFeeRate: Number(s.cardProcessingFeeRate ?? 0),
+      qrProcessingFeeRate: Number(s.qrProcessingFeeRate ?? 0),
       waiterOrderPermissions: normalizeWaiterOrderPermissions(s.waiterOrderPermissions),
       deliveryApiKeyConfigured: !!_secretHash,
       telegramStockBotConfigured: !!process.env.TELEGRAM_STOCK_BOT_TOKEN?.trim(),
@@ -192,6 +224,11 @@ export class SettingsService {
     if (dto.receiptPrintRequestsOnly !== undefined && actor.role !== Role.OWNER) {
       throw new ForbiddenException('Режим печати меняет только владелец');
     }
+    const updatesSettlementSettings = dto.cashCollectionAccountId !== undefined
+      || [...settlementAccountFields, ...processingFeeFields].some((key) => dto[key] !== undefined);
+    if (updatesSettlementSettings && actor.role !== Role.OWNER) {
+      throw new ForbiddenException('Счета для оплат, инкассацию и комиссии настраивает владелец');
+    }
     const current = await this.ensure();
 
     // Проверка: хотя бы один способ оплаты должен остаться включённым.
@@ -203,6 +240,14 @@ export class SettingsService {
     }
 
     const data: Prisma.SettingsUpdateInput = { ...dto };
+    for (const key of processingFeeFields) {
+      const rate = dto[key];
+      if (rate === undefined) continue;
+      if (typeof rate !== 'number' || !Number.isFinite(rate) || rate < 0 || rate > 100
+        || new Prisma.Decimal(rate).decimalPlaces() > 4) {
+        throw new BadRequestException('Укажите комиссию от 0 до 100% с точностью до четырёх знаков');
+      }
+    }
     if (dto.receiptLogoData !== undefined) {
       if (dto.receiptLogoData && !QR_DATA_URL_RE.test(dto.receiptLogoData)) {
         throw new BadRequestException('Логотип должен быть файлом PNG, JPG или WEBP');
@@ -250,18 +295,36 @@ export class SettingsService {
       }
     }
 
-    const updated = await this.prisma.settings.update({
-      where: { id: current.id },
-      data,
-    });
+    const update = { where: { id: current.id }, data };
+    const updated = updatesSettlementSettings ? await this.prisma.$transaction(async (db) => {
+      if (!current.cafeId) throw new ForbiddenException('Кафе не выбрано');
+      const cafeId = current.cafeId;
+      await lockFinance(db, cafeId);
+      const ids = [...new Set(settlementAccountFields.flatMap((key) => {
+        const id = dto[key];
+        return id == null ? [] : [id];
+      }))];
+      if (ids.length && await db.financeAccount.count({
+        where: { cafeId, id: { in: ids }, type: 'noncash', archivedAt: null },
+      }) !== ids.length) {
+        throw new BadRequestException('Выберите действующий безналичный счёт этого кафе');
+      }
+      if (dto.cashCollectionAccountId != null && !await db.financeAccount.findFirst({
+        where: { cafeId, id: dto.cashCollectionAccountId, type: 'cash', isDefault: false, archivedAt: null },
+        select: { id: true },
+      })) {
+        throw new BadRequestException('Для инкассации выберите отдельный действующий счёт наличных этого кафе');
+      }
+      return db.settings.update(update);
+    }) : await this.prisma.settings.update(update);
 
     // Считаем, какие именно поля реально изменились.
     const changed: string[] = [];
     const oldValue: Record<string, Prisma.InputJsonValue> = {};
     const newValue: Record<string, Prisma.InputJsonValue> = {};
     for (const key of Object.keys(dto) as (keyof UpdateSettingsDto)[]) {
-      const before = (current as Record<string, unknown>)[key];
-      const after = (updated as Record<string, unknown>)[key];
+      const before = isProcessingFeeField(key) ? Number(current[key] ?? 0) : (current as Record<string, unknown>)[key];
+      const after = isProcessingFeeField(key) ? Number(updated[key] ?? 0) : (updated as Record<string, unknown>)[key];
       if (before === after) continue;
       changed.push(SETTINGS_FIELD_LABELS[key] ?? key);
       // QR-код — это огромный data URL, в журнал пишем только факт изменения.

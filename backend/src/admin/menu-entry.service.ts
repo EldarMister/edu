@@ -169,7 +169,7 @@ export class MenuEntryService {
         }
         if (!dto.dish.name.trim()) throw new BadRequestException('Укажите название');
         const category = dto.dish.categoryId === MAIN_SCREEN ? await ensureMainMenuCategory(tx) : await tx.category.findUnique({
-          where: { id: dto.dish.categoryId },
+          where: { id: dto.dish.categoryId, archivedAt: null },
         });
         if (!category) throw new BadRequestException('Категория не найдена');
         await assertAssignableStation(tx, dto.dish.prepStation);

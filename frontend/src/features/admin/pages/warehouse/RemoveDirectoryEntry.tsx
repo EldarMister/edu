@@ -17,7 +17,7 @@ export function RemoveDirectoryEntry({ title, children, pending, error, onClose,
       {pending ? 'Удаление…' : 'Удалить'}
     </button>
   </div>}>
-    <p className="text-sm text-text-secondary">{children}</p>
+    <div className="text-sm text-text-secondary">{children}</div>
     {!!error && <p role="alert" className="mt-2 text-sm text-danger">{apiError(error)}</p>}
   </Modal>;
 }

@@ -38,6 +38,7 @@ export interface StockDocument {
   createdAt: string;
   submittedAt: string | null;
   postedAt: string | null;
+  deletedAt?: string | null;
   reopenedAt?: string | null;
   countedAt?: string | null;
   effectiveAt?: string | null;
@@ -45,6 +46,7 @@ export interface StockDocument {
   postedByName: string | null;
   itemsCount: number;
   productNames?: string[];
+  writeoffProducts?: { kind: 'ingredient' | 'dish'; sourceId: string; name: string }[];
   categories?: string[];
   varianceValue: number | null;
 }
@@ -122,6 +124,21 @@ export function useRemoveWriteoff() {
   });
 }
 
+export function useRestoreWriteoff() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, revision }: { id: string; revision: number }) =>
+      (await api.post<StockDocumentDetails>(`${BASE_URL}/writeoffs/${encodeURIComponent(id)}/restore`, { revision })).data,
+    onSuccess: async (document) => {
+      queryClient.setQueryData([...DOCUMENTS_KEY, 'detail', document.id], document);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: WAREHOUSE_KEY }),
+        queryClient.invalidateQueries({ queryKey: ['admin', 'finance'] }),
+      ]);
+    },
+  });
+}
+
 export function useSaveWriteoffReason() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -134,21 +151,26 @@ export function useSaveWriteoffReason() {
       queryClient.setQueryData<WriteoffReasonOption[]>(REASONS_KEY, (existing) =>
         [...(existing ?? []).filter(({ id }) => id !== reason.id), reason]);
       void queryClient.invalidateQueries({ queryKey: DOCUMENTS_KEY });
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'finance', 'profit-loss'] });
     },
   });
 }
 
-export function useStockDocuments(warehouseId?: string, kind?: StockDocumentKind, search?: string) {
+export function useStockDocuments(warehouseId?: string, kind?: StockDocumentKind, search?: string, includeDeletedWriteoffs = false) {
   return useQuery({
-    queryKey: [...DOCUMENTS_KEY, 'list', warehouseId, kind, search],
-    queryFn: async () => (await api.get<StockDocument[]>(BASE_URL, { params: { warehouseId, kind, search } })).data,
+    queryKey: [...DOCUMENTS_KEY, 'list', warehouseId, kind, search, includeDeletedWriteoffs],
+    queryFn: async () => (await api.get<StockDocument[]>(BASE_URL, {
+      params: { warehouseId, kind, search, includeDeletedWriteoffs: includeDeletedWriteoffs || undefined },
+    })).data,
   });
 }
 
 export function useStockDocument(id: string) {
   return useQuery({
     queryKey: [...DOCUMENTS_KEY, 'detail', id],
-    queryFn: async () => (await api.get<StockDocumentDetails>(`${BASE_URL}/${encodeURIComponent(id)}`)).data,
+    queryFn: async () => (await api.get<StockDocumentDetails>(`${BASE_URL}/${encodeURIComponent(id)}`, {
+      params: { includeDeletedWriteoffs: true },
+    })).data,
   });
 }
 
@@ -162,6 +184,11 @@ export async function downloadStockDocument(id: string, kind: ExportableStockDoc
 export async function downloadTransferRegister(ids: string[], columns: string[]) {
   const response = await api.post<Blob>(`${BASE_URL}/transfer-register.xlsx`, { ids, columns }, { responseType: 'blob' });
   downloadWarehouseWorkbook(response.data, 'Перемещения.xlsx');
+}
+
+export async function downloadWriteoffRegister(ids: string[], columns: string[]) {
+  const response = await api.post<Blob>(`${BASE_URL}/writeoff-register.xlsx`, { ids, columns }, { responseType: 'blob' });
+  downloadWarehouseWorkbook(response.data, 'Списания.xlsx');
 }
 
 export function downloadWarehouseWorkbook(blob: Blob, filename: string) {
@@ -204,6 +231,14 @@ export function useStockDocumentMutations() {
       (await api.patch<StockDocumentDetails>(`${BASE_URL}/${encodeURIComponent(id)}`, body)).data,
     onSuccess: saved,
   });
+  const editPostedWriteoff = useMutation({
+    mutationFn: async ({ id, ...body }: DocumentInput & { id: string; revision: number; warehouseId: string }) =>
+      (await api.patch<StockDocumentDetails>(`${BASE_URL}/writeoffs/${encodeURIComponent(id)}`, body)).data,
+    onSuccess: (document) => {
+      saved(document);
+      void qc.invalidateQueries({ queryKey: ['admin', 'finance'] });
+    },
+  });
   const transition = useMutation({
     mutationFn: async ({
       id,
@@ -228,5 +263,5 @@ export function useStockDocumentMutations() {
         void qc.invalidateQueries({ queryKey: WAREHOUSE_KEY });
     },
   });
-  return { create, update, transition };
+  return { create, update, transition, editPostedWriteoff };
 }

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'react-router-dom';
 import { Modal } from '@/components/Modal';
 import { Toggle } from '@/components/Toggle';
+import { Select } from '@/components/Select';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { usePermissions } from '@/hooks/usePermissions';
 import { api, apiError } from '@/lib/api';
@@ -10,8 +11,9 @@ import { money } from '@/lib/format';
 import { useNotifications } from '@/store/notifications';
 import { cashShiftKey, financeKey, type CashShift } from '@/features/admin/pages/finance/api';
 import { CashOperationDialog } from '@/features/admin/pages/finance/CashOperationDialog';
+import { useCashCollectionAccounts } from './api';
 
-type CurrentShift = Pick<CashShift, 'id' | 'expectedAmount'>;
+type CurrentShift = Pick<CashShift, 'id' | 'expectedAmount' | 'collectionAccountName'>;
 type CashShiftState = { enabled: boolean; requireClosedOrders: boolean; current: CurrentShift | null };
 const key = cashShiftKey;
 export function useCashShiftAccess() {
@@ -27,10 +29,14 @@ export function useCashShiftState(enabled = true) {
   });
 }
 
-export function CashShiftSettings() {
+export function CashShiftSettings({ collectionAccountId, onCollectionAccountChange }: {
+  collectionAccountId: string;
+  onCollectionAccountChange: (accountId: string) => void;
+}) {
   const section = useRef<HTMLElement>(null);
   const { hash } = useLocation();
   const query = useCashShiftState();
+  const accounts = useCashCollectionAccounts();
   const qc = useQueryClient();
   const change = useMutation({
     mutationFn: async (setting: Partial<Pick<CashShiftState, 'enabled' | 'requireClosedOrders'>>) =>
@@ -40,6 +46,11 @@ export function CashShiftSettings() {
   useEffect(() => {
     if (hash === '#cash-shift-settings') section.current?.scrollIntoView({ block: 'nearest' });
   }, [hash]);
+  const safe = accounts.data?.find(({ isCollection }) => isCollection);
+  const collectionOptions = [
+    { value: '', label: safe ? `По умолчанию: ${safe.name}` : 'Сейф по умолчанию' },
+    ...(accounts.data ?? []).map(({ id, name }) => ({ value: id, label: name })),
+  ];
   return <section ref={section} id="cash-shift-settings" className="card space-y-2 p-5">
     <div className="flex items-center justify-between gap-4">
       <h3 className="font-semibold text-text-primary">Использовать кассовые смены</h3>
@@ -52,6 +63,15 @@ export function CashShiftSettings() {
       <Toggle ariaLabel="Требовать закрытия всех заказов" checked={query.data.requireClosedOrders}
         disabled={change.isPending} onChange={(requireClosedOrders) => change.mutate({ requireClosedOrders })} />
     </div>}
+    <div className="grid gap-1.5 border-t border-border pt-3 text-sm">
+      <span>Счёт для инкассации</span>
+      <Select ariaLabel="Счёт для инкассации" className="h-9 w-full" disabled={!accounts.isSuccess || change.isPending}
+        options={collectionOptions} value={collectionAccountId} onChange={onCollectionAccountChange} />
+      <p className="text-xs text-text-muted">На этот счёт поступают наличные при инкассации. Счёт фиксируется при открытии смены.</p>
+      {accounts.isError && <p role="alert" className="text-xs text-danger">
+        Не удалось загрузить счета. <button type="button" className="underline" onClick={() => void accounts.refetch()}>Повторить</button>
+      </p>}
+    </div>
     {(change.error || query.error) && <p role="alert" className="text-sm text-danger">{apiError(change.error ?? query.error)}</p>}
   </section>;
 }
@@ -78,7 +98,8 @@ export function CashShiftBanner({ promptOnEntry = false }: { promptOnEntry?: boo
         </button>
       </div>}
     </div>
-    {canManage && editor === 'operation' && current && <CashOperationDialog shiftId={current.id} cashier onClose={() => setEditor(null)} />}
+    {canManage && editor === 'operation' && current && <CashOperationDialog shiftId={current.id} cashier
+      collectionAccountName={current.collectionAccountName} onClose={() => setEditor(null)} />}
     {showOpening && <CashShiftForm current={null} onClose={closeEditor} />}
     {canManage && editor === 'close' && current && <CashShiftForm key={current.id} current={current} onClose={closeEditor} />}
   </>;

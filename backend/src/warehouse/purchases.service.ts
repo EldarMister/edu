@@ -275,17 +275,18 @@ export class PurchasesService {
       ? Prisma.sql`AND (p.warehouse_id = ${warehouse.id} OR p.warehouse_id IS NULL)` : Prisma.sql`AND p.warehouse_id = ${warehouse.id}`;
     const excludeSql = params.excludePurchaseId ? Prisma.sql`AND p.id <> ${params.excludePurchaseId}` : Prisma.empty;
     const before = parseStockEffectiveAt(params.before);
-    const dateSql = before ? Prisma.sql`AND COALESCE(p.effective_at, p.date) <= (${before} AT TIME ZONE 'UTC')` : Prisma.empty;
+    const priceDate = Prisma.sql`COALESCE(p.effective_at, p.date)`;
+    const dateSql = before ? Prisma.sql`AND ${priceDate} <= (${before} AT TIME ZONE 'UTC')` : Prisma.empty;
     const prices = await this.prisma.$queryRaw<Array<{ ingredientId: string; unitCode: string; quantity: Prisma.Decimal;
       grossTotal: Prisma.Decimal; date: Date; purchaseId: string; supplier: string }>>(Prisma.sql`
       SELECT DISTINCT ON (pi.ingredient_id) pi.ingredient_id AS "ingredientId", i.display_unit AS "unitCode",
         SUM(pi.quantity_base) AS quantity, SUM(pi.quantity * pi.purchase_price) AS "grossTotal",
-        COALESCE(p.effective_at, p.date) AS date, p.id AS "purchaseId", p.supplier
+        ${priceDate} AS date, p.id AS "purchaseId", p.supplier
       FROM purchase_items pi JOIN purchases p ON p.id = pi.purchase_id JOIN ingredients i ON i.id = pi.ingredient_id
       WHERE p.cafe_id = ${cafeId} AND i.cafe_id = ${cafeId} AND p.status = 'completed'
         AND pi.ingredient_id IN (${Prisma.join(ids)}) ${warehouseSql} ${excludeSql} ${dateSql}
       GROUP BY pi.ingredient_id, i.display_unit, p.id, p.date, p.effective_at, p.supplier, p.created_at
-      ORDER BY pi.ingredient_id, COALESCE(p.effective_at, p.date) DESC, p.created_at DESC, p.id DESC
+      ORDER BY pi.ingredient_id, ${priceDate} DESC, p.created_at DESC, p.id DESC
     `);
     return prices.map((row) => {
       const unitCode = normalizeUnit(row.unitCode);

@@ -19,6 +19,7 @@ import { usePurchases, usePurchase, useIngredients, purchaseNumber, type Warehou
 import {
   useStockDocumentMutations,
   useStockDocument,
+  useWriteoffReasons,
   type StockDocumentKind,
   type InventoryMode,
 } from './stock-documents-api';
@@ -29,6 +30,8 @@ import { documentQuantityError, documentQuantityInUnit, documentStockShortages, 
 import { DocumentStockWarnings } from './DocumentStockWarnings';
 import { WriteoffLines, useWriteoffLines } from './WriteoffLines';
 import { exportWriteoffLines, WriteoffFileImport } from './WriteoffFileImport';
+import { useWriteoffPackages } from './writeoff-api';
+import { changeWriteoffUnit, writeoffDraftLines, type DraftWriteoffLine } from './writeoff-form-values';
 type DraftRow = { key: string; id: string; quantity: string };
 const emptyRow = (): DraftRow => ({ key: crypto.randomUUID(), id: '', quantity: '' });
 
@@ -39,15 +42,18 @@ interface StartDocumentProps {
   onClose: () => void;
   onCreated: (id: string) => void;
   sourcePurchaseId?: string;
-  copyTransferId?: string;
+  copyDocumentId?: string;
 }
 
 type TransferFields = { destination: string; note: string; rows: Omit<DraftRow, 'key'>[] };
 type ReturnFields = { number: number; supplier: string; rows: Omit<DraftRow, 'key'>[] };
+type WriteoffFields = { note: string; reason: string; rows: DraftWriteoffLine[] };
 
-export function StartDocumentModal({ copyTransferId, ...props }: StartDocumentProps) {
+export function StartDocumentModal({ copyDocumentId, ...props }: StartDocumentProps) {
   if (props.kind === 'supplier_return' && props.sourcePurchaseId) return <PurchaseReturn {...props} sourcePurchaseId={props.sourcePurchaseId} />;
-  return copyTransferId && props.kind === 'transfer' ? <CopyTransfer id={copyTransferId} {...props} /> : <CreateDocument {...props} />;
+  if (copyDocumentId && props.kind === 'transfer') return <CopyTransfer id={copyDocumentId} {...props} />;
+  if (copyDocumentId && props.kind === 'writeoff') return <CopyWriteoff id={copyDocumentId} {...props} />;
+  return <CreateDocument {...props} />;
 }
 
 function PurchaseReturn(props: StartDocumentProps & { sourcePurchaseId: string }) {
@@ -104,9 +110,47 @@ function CopyTransfer({ id, ...props }: StartDocumentProps & { id: string }) {
   </EditorPage>;
 }
 
-function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sourcePurchaseId, initialTransfer, initialReturn }: StartDocumentProps & {
+function CopyWriteoff({ id, ...props }: StartDocumentProps & { id: string }) {
+  const query = useStockDocument(id);
+  const source = query.data?.kind === 'writeoff' && !query.data.deletedAt ? query.data : undefined;
+  const reasonId = source?.writeoffReasonId ?? source?.reason;
+  const usesPackages = source?.sourceLines?.some((line) => !!line.packageId) ?? false;
+  const reasons = useWriteoffReasons(!!reasonId);
+  const packages = useWriteoffPackages(usesPackages);
+  const pending = query.isPending || (!!reasonId && reasons.isPending) || (usesPackages && packages.isPending);
+  const error = (query.data ? null : query.error)
+    ?? (reasonId && !reasons.data ? reasons.error : null)
+    ?? (usesPackages && !packages.data ? packages.error : null);
+  if (source && !pending && !error) {
+    const usablePackages = new Map(packages.data?.filter((pack) => pack.isActive).map((pack) => [pack.id, pack]));
+    const rows = writeoffDraftLines(source.sourceLines, source.items).map((row) => {
+      const pack = row.packageId ? usablePackages.get(row.packageId) : undefined;
+      const sameSize = pack && pack.unit === row.packageUnit && pack.quantity === row.packageQuantity;
+      const line = row.packageId && !sameSize ? changeWriteoffUnit(row, row.unit) : row;
+      return { ...line, sourceLineId: crypto.randomUUID(), packageSnapshotLineId: undefined };
+    });
+    const location = props.locations.some((warehouse) => warehouse.id === source.warehouseId) ? source.warehouseId : '';
+    return <CreateDocument key={id} {...props} warehouseId={location} initialWriteoff={{
+      note: source.note ?? '', reason: reasonId && reasons.data?.some(({ id }) => id === reasonId) ? reasonId : '', rows,
+    }} />;
+  }
+  return <EditorPage open title="Копирование списания" onClose={props.onClose}>
+    {pending ? <div className="flex justify-center p-6"><Spinner /></div> :
+      <p role="alert" className="p-4 text-sm text-danger">
+        {error ? apiError(error) : 'Исходное списание не найдено.'}
+        {error && <button type="button" className="ml-2 text-primary" onClick={() => {
+          if (query.isError) void query.refetch();
+          if (reasonId && reasons.isError) void reasons.refetch();
+          if (usesPackages && packages.isError) void packages.refetch();
+        }}>Повторить</button>}
+      </p>}
+  </EditorPage>;
+}
+
+function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sourcePurchaseId, initialTransfer, initialReturn, initialWriteoff }: StartDocumentProps & {
   initialTransfer?: TransferFields;
   initialReturn?: ReturnFields;
+  initialWriteoff?: WriteoffFields;
 }) {
   const [location, setLocation] = useState(warehouseId);
   const [destination, setDestination] = useState(initialTransfer?.destination ?? '');
@@ -119,8 +163,10 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
   const historical = supportsStockDate && timing.mode === 'past' && timing.local !== inventoryTimingFor(initialOperationAt).local;
   const timingReady = timingValid && !inventoryTimingError(timing);
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
-  const [note, setNote] = useState(initialTransfer?.note ?? '');
-  const [reason, setReason] = useState('');
+  const initialNote = initialTransfer?.note ?? initialWriteoff?.note ?? '';
+  const initialReason = initialWriteoff?.reason ?? '';
+  const [note, setNote] = useState(initialNote);
+  const [reason, setReason] = useState(initialReason);
   const initialRows = initialReturn?.rows ?? initialTransfer?.rows ?? [];
   const [rows, setRows] = useState<DraftRow[]>(() => initialReturn || initialRows.length
     ? initialRows.map((row) => ({ ...row, key: crypto.randomUUID() })) : [emptyRow()]);
@@ -131,11 +177,11 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
   const formRef = useRef<HTMLDivElement>(null);
   const formId = useId();
   const [requestKey] = useState(() => crypto.randomUUID());
-  const writeoffLines = useWriteoffLines(kind === 'writeoff', location, undefined, inventoryTimingValue(timing, initialOperationAt));
+  const writeoffLines = useWriteoffLines(kind === 'writeoff', location, undefined, inventoryTimingValue(timing, initialOperationAt), initialWriteoff?.rows);
   const changedItems = JSON.stringify(rows.filter(({ id, quantity }) => id || quantity).map(({ id, quantity }) => [id, quantity])) !==
     JSON.stringify(initialRows.map(({ id, quantity }) => [id, quantity]));
   const { markSaved } = useEditorDirty(location !== warehouseId || destination !== (initialTransfer?.destination ?? '') || source !== (sourcePurchaseId ?? '') ||
-    mode !== 'full' || note !== (initialTransfer?.note ?? '') || reason !== '' ||
+    mode !== 'full' || note !== initialNote || reason !== initialReason ||
     (kind === 'inventory' && (timing.mode === 'past' || !timingValid)) || (supportsStockDate && (inventoryTimingValue(timing, initialOperationAt) !== initialOperationAt || !timingValid)) || (kind === 'writeoff' ? writeoffLines.dirty : changedItems));
   const mutations = useStockDocumentMutations();
   const push = useNotifications((state) => state.push);
@@ -205,7 +251,6 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
       location: location ? '' : 'Выберите склад.',
       destination: kind === 'transfer' && !destination ? 'Выберите склад, на который перемещаете продукты.' : '',
       source: kind === 'supplier_return' && !source ? 'Выберите исходную поставку.' : '',
-      note: post && kind === 'writeoff' && reason === 'other' && !note.trim() ? 'Уточните причину списания.' : '',
       scope: inventory && mode === 'partial' && !selectedProducts.length ? 'Выберите продукты, которые нужно посчитать.' : '',
       rows: new Map<string, { product?: string; quantity?: string }>(),
     };
@@ -238,7 +283,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
     setPostAttempt(post);
     setValidationAttempt((attempt) => attempt + 1);
     const issues = validationFor(post);
-    if (issues.location || issues.destination || issues.source || issues.note || issues.scope || issues.rows.size) return;
+    if (issues.location || issues.destination || issues.source || issues.scope || issues.rows.size) return;
     if (kind === 'writeoff' && !writeoffLines.ready) {
       setError('Дождитесь расчёта состава или обновите предварительный расчёт.');
       return;
@@ -390,18 +435,15 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
               </p>
             </DocumentField>
           )}
-          <DocumentField label={kind === 'writeoff' && reason === 'other' ? 'Уточните причину' : 'Комментарий'}>
+          <DocumentField label="Комментарий">
             <textarea
               className="input h-14 w-full"
               value={note}
-              aria-label={kind === 'writeoff' && reason === 'other' ? 'Уточните причину' : 'Комментарий'}
-              aria-invalid={!!validationAttempt && !!fieldErrors.note || undefined}
-              aria-describedby={validationAttempt && fieldErrors.note ? `${formId}-note-error` : undefined}
+              aria-label="Комментарий"
               maxLength={1000}
               disabled={busy}
               onChange={(e) => setNote(e.target.value)}
             />
-            {!!validationAttempt && fieldErrors.note && <p id={`${formId}-note-error`} className="mt-1 text-xs text-danger">{fieldErrors.note}</p>}
           </DocumentField>
         </div>
         {inventory ? (

@@ -54,6 +54,7 @@ export function WarehouseSection({
     movementWarehouses: '',
     balanceWarehouses: '',
     supplyPage: '1', supplyExpanded: '', transferPage: '1', writeoffPage: '1', writeoffTab: 'list', writeoffReason: '',
+    writeoffPeriod: 'all', writeoffFrom: '', writeoffTo: '',
     inventoryPage: '1', productionPage: '1', balancePage: '1', balanceExpanded: '',
   });
   const {
@@ -195,7 +196,11 @@ export function WarehouseSection({
                     />
                   )}
                   {view === 'writeoffs' && (reasonTab
-                    ? <WriteoffReasonsPage navigation={writeoffNavigation} onSelect={(id) => updateConditions({ writeoffTab: 'list', writeoffReason: id, writeoffPage: '1' })} />
+                    ? <WriteoffReasonsPage navigation={writeoffNavigation} onSelect={(id, period) => updateConditions({
+                      writeoffTab: 'list', writeoffReason: id, writeoffPage: '1', writeoffPeriod: period.preset,
+                      writeoffFrom: period.preset === 'custom' ? period.range.dateFrom ?? '' : '',
+                      writeoffTo: period.preset === 'custom' ? period.range.dateTo ?? '' : '',
+                    })} />
                     : writeoffNavigation)}
                   {!reasonTab && ['transfers', 'writeoffs', 'inventory'].includes(view) && (
                     <DocumentList
@@ -206,7 +211,9 @@ export function WarehouseSection({
                       warehouseId={scopedWarehouse}
                       locations={locations}
                       onOpen={(id) => setActive({ type: 'document', id })}
-                      onCopy={view === 'transfers' ? (id) => setActive({ type: 'start', action: 'transfer', id }) : undefined}
+                      onCopy={view === 'inventory' ? undefined : (id) => setActive({
+                        type: 'start', action: view === 'writeoffs' ? 'writeoff' : 'transfer', id,
+                      })}
                       onCreate={() =>
                         setActive({
                           type: 'start',
@@ -331,7 +338,7 @@ export function WarehouseSection({
                 locations={locations}
                 onClose={close}
                 sourcePurchaseId={active.action === 'supplier_return' ? active.id : undefined}
-                copyTransferId={active.action === 'transfer' ? active.id : undefined}
+                copyDocumentId={active.action === 'transfer' || active.action === 'writeoff' ? active.id : undefined}
                 onCreated={(id) => setActive({ type: 'document', id }, true)}
               />
             )}

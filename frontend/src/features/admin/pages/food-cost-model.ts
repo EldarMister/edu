@@ -36,15 +36,19 @@ function inclusiveDays({ from, to }: FoodCostReport['current']) {
 }
 
 export type FoodCostProjection = Pick<FoodCostMetric, 'revenue' | 'cost' | 'tax' | 'margin' | 'foodCostPercent'> & {
+  baselineFoodCostPercent: number | null;
+  baselineMonthlyMargin: number | null;
   monthlyMargin: number | null;
   monthlyMarginChange: number | null;
 };
 
 type PriceChange = { revenue: number; tax: number | null };
+type PriceScenario = { before: PriceChange; after: PriceChange };
 
 export type FoodCostPriceProjection = { position: FoodCostProjection; category: FoodCostProjection; business: FoodCostProjection };
 
 const unchanged: PriceChange = { revenue: 0, tax: 0 };
+const unmodified: PriceScenario = { before: unchanged, after: unchanged };
 
 function priceSensitivity({ current }: FoodCostPosition) {
   if (current.quantity <= 0) return 0;
@@ -52,11 +56,10 @@ function priceSensitivity({ current }: FoodCostPosition) {
   return current.quantity * netShare;
 }
 
-function positionChange(row: FoodCostPosition, newPrice: number): PriceChange | null {
-  if (row.price == null || !Number.isFinite(newPrice) || newPrice < 0 || newPrice > MAX_MENU_PRICE || row.current.quantity <= 0) return null;
+function changeFromHistoricalSales(row: FoodCostPosition, price: number): PriceChange | null {
+  if (!Number.isFinite(price) || price < 0 || price > MAX_MENU_PRICE || row.current.quantity <= 0) return null;
   const { current } = row;
-  // Reprice the observed sales at the scenario price and retain the observed discount share.
-  const revenue = newPrice * priceSensitivity(row) - current.revenue;
+  const revenue = price * priceSensitivity(row) - current.revenue;
   if (revenue === 0) return unchanged;
   const tax = current.tax == null || current.revenue <= 0 ? null : revenue * current.tax / current.revenue;
   return { revenue, tax };
@@ -66,49 +69,63 @@ function addPriceChange(a: PriceChange, b: PriceChange): PriceChange {
   return { revenue: a.revenue + b.revenue, tax: addKnown(a.tax, b.tax) };
 }
 
-function project(base: FoodCostMetric, change: PriceChange, days: number): FoodCostProjection {
-  const revenue = base.revenue + change.revenue;
-  const marginChange = change.tax == null ? null : change.revenue - change.tax;
-  const margin = addKnown(base.margin, marginChange);
-  return { revenue, cost: base.cost, tax: addKnown(base.tax, change.tax), margin,
+function priceScenario(row: FoodCostPosition, newPrice: number): PriceScenario | null {
+  if (row.price == null) return null;
+  // Reprice the same observed sales at each menu price so historical price changes do not affect the comparison.
+  const before = changeFromHistoricalSales(row, row.price);
+  const after = changeFromHistoricalSales(row, newPrice);
+  return before && after ? { before, after } : null;
+}
+
+function addScenarios(a: PriceScenario, b: PriceScenario): PriceScenario {
+  return { before: addPriceChange(a.before, b.before), after: addPriceChange(a.after, b.after) };
+}
+
+function project(base: FoodCostMetric, { before, after }: PriceScenario, days: number): FoodCostProjection {
+  const revenue = base.revenue + after.revenue;
+  const baselineMargin = addKnown(base.margin, before.tax == null ? null : before.revenue - before.tax);
+  const margin = addKnown(base.margin, after.tax == null ? null : after.revenue - after.tax);
+  return { revenue, cost: base.cost, tax: addKnown(base.tax, after.tax), margin,
+    baselineFoodCostPercent: foodCostPercent(base.cost, base.revenue + before.revenue),
+    baselineMonthlyMargin: baselineMargin == null ? null : baselineMargin * projectionDays / days,
     foodCostPercent: foodCostPercent(base.cost, revenue),
     monthlyMargin: margin == null ? null : margin * projectionDays / days,
-    monthlyMarginChange: margin == null || marginChange == null ? null : marginChange * projectionDays / days };
+    monthlyMarginChange: margin == null || baselineMargin == null ? null : (margin - baselineMargin) * projectionDays / days };
 }
 
 export function projectFoodCostBasket(report: FoodCostReport, changes: Readonly<Record<string, number>>) {
   const days = inclusiveDays(report.current);
   const positions: Record<string, FoodCostProjection> = Object.create(null);
   const categories: Record<string, FoodCostProjection> = Object.create(null);
-  const groups = new Map<string, { metrics: FoodCostMetric[]; change: PriceChange }>();
-  let totalChange = unchanged;
+  const groups = new Map<string, { metrics: FoodCostMetric[]; scenario: PriceScenario }>();
+  let totalScenario = unmodified;
   for (const row of report.positions) {
-    const group = groups.get(row.categoryId) ?? { metrics: [], change: unchanged };
+    const group = groups.get(row.categoryId) ?? { metrics: [], scenario: unmodified };
     group.metrics.push(row.current);
     groups.set(row.categoryId, group);
     if (!Object.prototype.hasOwnProperty.call(changes, row.id)) continue;
-    const change = positionChange(row, changes[row.id]);
-    if (!change) continue;
-    positions[row.id] = project(row.current, change, days);
-    group.change = addPriceChange(group.change, change);
-    totalChange = addPriceChange(totalChange, change);
+    const scenario = priceScenario(row, changes[row.id]);
+    if (!scenario) continue;
+    positions[row.id] = project(row.current, scenario, days);
+    group.scenario = addScenarios(group.scenario, scenario);
+    totalScenario = addScenarios(totalScenario, scenario);
   }
   for (const [key, group] of groups) {
-    categories[key] = project(aggregateFoodCostMetrics(group.metrics), group.change, days);
+    categories[key] = project(aggregateFoodCostMetrics(group.metrics), group.scenario, days);
   }
-  return { positions, categories, business: project(report.current.totals, totalChange, days) };
+  return { positions, categories, business: project(report.current.totals, totalScenario, days) };
 }
 
 export function projectFoodCostPrice(report: FoodCostReport, positionId: string, newPrice: number): FoodCostPriceProjection | null {
   const row = report.positions.find(({ id }) => id === positionId);
-  const change = row && positionChange(row, newPrice);
-  if (!row || !change) return null;
+  const scenario = row && priceScenario(row, newPrice);
+  if (!row || !scenario) return null;
   const days = inclusiveDays(report.current);
   const categoryMetrics = report.positions.filter(({ categoryId }) => categoryId === row.categoryId).map(({ current }) => current);
   return {
-    position: project(row.current, change, days),
-    category: project(aggregateFoodCostMetrics(categoryMetrics), change, days),
-    business: project(report.current.totals, change, days),
+    position: project(row.current, scenario, days),
+    category: project(aggregateFoodCostMetrics(categoryMetrics), scenario, days),
+    business: project(report.current.totals, scenario, days),
   };
 }
 
@@ -195,9 +212,9 @@ function priceRecommendation(row: FoodCostPosition, target: number, days: number
       current.cost == null || current.foodCostPercent == null || current.foodCostPercent <= target) return null;
   const targetRevenue = 100 * current.cost / target;
   const newPrice = Math.ceil(targetRevenue / sensitivity);
-  const change = positionChange(row, newPrice);
-  if (!change || newPrice <= row.price) return null;
-  const projected = project(current, change, days);
+  const scenario = priceScenario(row, newPrice);
+  if (!scenario || newPrice <= row.price) return null;
+  const projected = project(current, scenario, days);
   return { id: 'price:' + row.id, kind: 'price', priority: current.margin != null && current.margin <= 0 ? 'critical' : 'important',
     title: `Проверить цену «${row.name}»`,
     text: `Фудкост за период — ${percent(current.foodCostPercent)}. Цена ${som(newPrice)} приблизит его к цели ${percent(target)} при том же объёме продаж и себестоимости.`,

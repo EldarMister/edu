@@ -12,12 +12,16 @@ import { QueryState } from './WarehouseUi';
 import { WriteoffReasonEditor } from './WriteoffReasonField';
 import { RemoveDirectoryEntry } from './RemoveDirectoryEntry';
 import { WriteoffReasonBadge } from './WriteoffReasonBadge';
+import { usePageFilter } from './workspace-route';
 
-export function WriteoffReasonsPage({ onSelect, navigation }: { onSelect: (id: string) => void; navigation: React.ReactNode }) {
+export function WriteoffReasonsPage({ onSelect, navigation }: {
+  onSelect: (id: string, period: Pick<ReturnType<typeof useListPeriod>, 'preset' | 'range'>) => void;
+  navigation: React.ReactNode;
+}) {
   const [editor, setEditor] = useState<WriteoffReasonOption | 'new' | null>(null);
   const [removing, setRemoving] = useState<WriteoffReasonOption | null>(null);
   const remove = useRemoveWriteoffReason();
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = usePageFilter('writeoffReasonsSearch');
   const period = useListPeriod('writeoffReasons');
   const reasons = useWriteoffReasons();
   const documents = useStockDocuments(undefined, 'writeoff');
@@ -54,7 +58,7 @@ export function WriteoffReasonsPage({ onSelect, navigation }: { onSelect: (id: s
           <tbody>{filtered.map((reason) => {
             const summary = writeoffPostedTotals(linked.get(reason.id) ?? []);
             return <tr key={reason.id}>
-              <td><button type="button" className="text-left text-primary" onClick={() => onSelect(reason.id)}>
+              <td><button type="button" className="text-left text-primary" onClick={() => onSelect(reason.id, period)}>
                 <WriteoffReasonBadge id={reason.id}>{reason.label}</WriteoffReasonBadge>
               </button></td>
               <td>{reason.expense ? 'Расходы' : 'Себестоимость'}</td>

@@ -137,6 +137,18 @@ export class CatalogController {
     return this.catalog.categoriesAll();
   }
 
+  @Get('categories/trash')
+  @RequirePermission('sections.menu', 'actions.editMenu')
+  trashedCategories() {
+    return this.catalog.trashedCategories();
+  }
+
+  @Post('categories/:id/restore')
+  @RequirePermission('sections.menu', 'actions.editMenu')
+  restoreCategory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.catalog.restoreCategory(id, user);
+  }
+
   @Post('categories')
   @RequirePermission('sections.menu', 'actions.editMenu')
   createCategory(@Body() dto: CreateCategoryDto, @CurrentUser() user: AuthUser) {

@@ -5,6 +5,7 @@ import { Prisma, Role } from '@prisma/client';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
+import { visibleMenuDish } from '../categories/menu-visibility';
 import { CurrentUser, type AuthUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
@@ -135,7 +136,8 @@ export async function resolveMenuSelections(tx: Prisma.TransactionClient, dishId
 export class MenuModifiersService {
   constructor(private prisma: PrismaService, @Optional() private events?: EventsGateway) {}
   async get(dishId: string, publicView = false, variantId?: string) {
-    const dish = await this.prisma.dish.findUnique({ where: { id: dishId }, include: { modifierGroups: { orderBy: { sortOrder: 'asc' }, include: { options: { orderBy: { sortOrder: 'asc' } } } },
+    const where = { id: dishId, ...(publicView ? visibleMenuDish : { archivedAt: null }) };
+    const dish = await this.prisma.dish.findUnique({ where, include: { modifierGroups: { orderBy: { sortOrder: 'asc' }, include: { options: { orderBy: { sortOrder: 'asc' } } } },
       variants: { select: { id: true, stockIngredientId: true, recipeMetadata: true } }, recipeItems: { include: { ingredient: { select: { id: true, name: true } } } } } });
     if (!dish) throw new NotFoundException('Блюдо не найдено');
     const ingredients = servingIngredients(dish, variantId);

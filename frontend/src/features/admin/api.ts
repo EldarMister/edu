@@ -601,13 +601,27 @@ export function useAdminGoods(enabled: boolean) {
   });
 }
 
+const menuCategoryQueries = [
+  ['admin', 'categories'], ['admin', 'menu', 'overview'], ['admin', 'dishes'], ['admin', 'sets'],
+  ['admin', 'category-trash'], ['admin', 'recipe-trash'], ['admin', 'warehouse'], ['categories'], ['dishes'],
+];
+
+export function useCategoryTrash() {
+  const invalidate = useInvalidate(menuCategoryQueries);
+  const list = useQuery({
+    queryKey: ['admin', 'category-trash'],
+    queryFn: () => get<Array<{ id: string; name: string; archivedAt: string; itemCount: number; parentInTrash: string | null }>>('/admin/categories/trash'),
+  });
+  const restore = useMutation({
+    mutationFn: (id: string) => api.post(`/admin/categories/${encodeURIComponent(id)}/restore`),
+    onSuccess: invalidate,
+  });
+  return { list, restore };
+}
+
 export function useCategoryMutations() {
   const qc = useQueryClient();
-  const invalidate = useInvalidate([
-    ['admin', 'categories'],
-    ['admin', 'menu', 'overview'],
-    ['admin', 'dishes'],
-  ]);
+  const invalidate = useInvalidate(menuCategoryQueries);
   const create = useMutation({
     mutationFn: (b: MenuCategoryInput) =>
       api.post<Omit<AdminCategory, '_count'>>('/admin/categories', b).then((r) => r.data),
@@ -627,10 +641,7 @@ export function useCategoryMutations() {
   const remove = useMutation({
     mutationFn: ({ id, strategy, targetCategoryId }: { id: string; strategy?: 'move' | 'delete'; targetCategoryId?: string }) =>
       api.delete(`/admin/categories/${id}`, { data: { strategy, targetCategoryId } }).then((r) => r.data),
-    onSuccess: (_result, { id }) => {
-      qc.setQueryData<AdminCategory[]>(['admin', 'categories'], (categories) => categories?.filter((category) => category.id !== id));
-      invalidate();
-    },
+    onSuccess: invalidate,
   });
   const reorder = useMutation({
     mutationFn: (ids: string[]) => api.patch('/admin/categories/reorder', { ids }).then((r) => r.data),
@@ -692,7 +703,8 @@ export function useRecipeTrash() {
   const qc = useQueryClient();
   const list = useQuery({
     queryKey: ['admin', 'recipe-trash'],
-    queryFn: () => get<{ id: string; name: string; archivedAt: string; category: { name: string } }[]>('/admin/menu/recipes/trash'),
+    queryFn: () => get<Array<{ id: string; name: string; archivedAt: string; prepStation: string;
+      category: { id: string; name: string } }>>('/admin/menu/recipes/trash'),
   });
   const restore = useMutation({
     mutationFn: (id: string) => api.post('/admin/menu/recipes/' + id + '/restore'),

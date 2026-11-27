@@ -13,6 +13,7 @@ import {
 import { ensureFinanceAccounts, findAccount, lockFinance, shiftForEntry } from './finance-ledger';
 import { cashHandoverKey } from './cash-custody';
 import { readProfitLoss } from './profit-loss';
+import { processingFeeCategoryKey } from './payment-processing-fees';
 import { currentPayrollMonth, payrollPeriodReport, payrollReport } from './payroll';
 import { canReverseEntry, type AccountShift } from './entry-reversal';
 import { editSalaryAccrual, salaryAccrualDetails, reverseSalaryPayment } from './salary-corrections';
@@ -26,6 +27,23 @@ const zero = new Prisma.Decimal(0);
 const note = (value?: string | null) => value?.trim() || null;
 const money = (value: number) => new Prisma.Decimal(value);
 const monthOf = (date: Date) => warehouseDay(date).slice(0, 7);
+
+async function isSettlementAccountSelected(db: Db, cafeId: string, id: string) {
+  const routes = { cafeId, OR: [{ cardSettlementAccountId: id }, { qrSettlementAccountId: id }] };
+  const [settings, openShift] = await Promise.all([
+    db.settings.findFirst({ where: routes, select: { id: true } }),
+    db.cashShift.findFirst({ where: { ...routes, closedAt: null }, select: { id: true } }),
+  ]);
+  return !!(settings || openShift);
+}
+
+async function isCollectionAccountSelected(db: Db, cafeId: string, id: string) {
+  const [settings, shift] = await Promise.all([
+    db.settings.findFirst({ where: { cafeId, cashCollectionAccountId: id }, select: { id: true } }),
+    db.cashShift.findFirst({ where: { cafeId, collectionAccountId: id }, select: { id: true } }),
+  ]);
+  return !!(settings || shift);
+}
 
 function businessMidnight(day: string) {
   const date = new Date(day + 'T00:00:00+06:00');
@@ -346,13 +364,20 @@ export class FinanceService {
       const name = input.name == null ? account.name : title(input.name);
       const type = input.type ?? account.type;
       await this.accountName(db, cafeId, name, id);
+      const collectionAccount = account.isCollection || (account.type === 'cash' && (type !== account.type || input.isDefault === true)
+        && await isCollectionAccountSelected(db, cafeId, id));
       if (type !== account.type) {
         const linkedShift = await db.cashShift.findFirst({ where: { cafeId, accountId: id }, select: { id: true } });
-        if (account.isDefault || account.isCollection || linkedShift) {
+        const linkedNoncashPayments = account.type === 'noncash' && (
+          await isSettlementAccountSelected(db, cafeId, id) || await db.financeEntry.findFirst({
+            where: { cafeId, accountId: id, kind: { in: ['sale', 'refund'] } }, select: { id: true },
+          })
+        );
+        if (account.isDefault || collectionAccount || linkedShift || linkedNoncashPayments) {
           throw new ConflictException('Нельзя изменить тип счёта, связанного с оплатами, инкассацией или кассовыми сменами');
         }
       }
-      if (input.isDefault && account.isCollection) throw new BadRequestException('Сейф для инкассаций нельзя использовать как счёт для оплат');
+      if (input.isDefault && collectionAccount) throw new BadRequestException('Счёт инкассации нельзя использовать как основную кассу');
       if (input.isDefault === false && account.isDefault) throw new BadRequestException('Назначьте другой счёт этого типа основным');
       if (input.isDefault && !account.isDefault) await this.clearDefault(db, cafeId, type);
       const openingBalance = input.openingBalance == null ? account.openingBalance : money(input.openingBalance);
@@ -410,6 +435,12 @@ export class FinanceService {
       if (account.archivedAt) return null;
       if (account.isDefault || account.isCollection) {
         throw new ConflictException('Счёт используется для оплат или инкассации');
+      }
+      if (account.type === 'noncash' && await isSettlementAccountSelected(db, cafeId, id)) {
+        throw new ConflictException('Счёт выбран для безналичных оплат или используется в открытой кассовой смене');
+      }
+      if (account.type === 'cash' && await isCollectionAccountSelected(db, cafeId, id)) {
+        throw new ConflictException('Счёт выбран для инкассации или используется в кассовой смене');
       }
       const linkedShift = await db.cashShift.findFirst({ where: { cafeId, accountId: id }, select: { id: true } });
       const linkedEntry = await db.financeEntry.findFirst({
@@ -512,9 +543,12 @@ export class FinanceService {
 
   private async categoryRemovalPlan(db: Db, cafeId: string, id: string) {
     const category = await db.financeCategory.findFirst({
-      where: { cafeId, id }, select: { id: true, name: true, kind: true, parentId: true },
+      where: { cafeId, id }, select: { id: true, name: true, kind: true, parentId: true, systemKey: true },
     });
     if (!category) throw new NotFoundException('Категория не найдена');
+    if (category.systemKey === processingFeeCategoryKey) {
+      throw new ConflictException('Категория используется для автоматического учёта комиссии');
+    }
     const [usage, childCount] = await Promise.all([
       db.financeEntry.groupBy({ by: ['kind'], where: { cafeId, categoryId: id }, _count: { _all: true } }),
       db.financeCategory.count({ where: { cafeId, parentId: id } }),
@@ -536,6 +570,9 @@ export class FinanceService {
       if (id && !previous) throw new NotFoundException('Категория не найдена');
       const kind = input.kind ?? previous?.kind;
       if (!kind) throw new BadRequestException('Выберите тип категории');
+      if (previous?.systemKey === processingFeeCategoryKey && (kind !== 'expense' || input.showInProfitLoss === false)) {
+        throw new ConflictException('Комиссия за безналичную оплату учитывается в расходах P&L');
+      }
       const name = title(input.name ?? previous?.name ?? '');
       const parentId = input.parentId === undefined ? previous?.parentId ?? null : input.parentId;
       if (parentId && parentId !== previous?.parentId) {

@@ -58,8 +58,8 @@ export function useSupplierMutations() {
       taxId?: string;
     }) =>
       (id
-        ? await api.patch(`/admin/warehouse/suppliers/${id}`, body)
-        : await api.post('/admin/warehouse/suppliers', body)
+        ? await api.patch<Supplier>(`/admin/warehouse/suppliers/${id}`, body)
+        : await api.post<Supplier>('/admin/warehouse/suppliers', body)
       ).data,
     onSuccess: invalidate,
   });

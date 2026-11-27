@@ -34,6 +34,11 @@ export interface Settings extends Partial<ReceiptPrintSettings> {
   payQr: boolean;
   payCash: boolean;
   payCard: boolean;
+  cardProcessingFeeRate: number;
+  qrProcessingFeeRate: number;
+  cardSettlementAccountId: string | null;
+  qrSettlementAccountId: string | null;
+  cashCollectionAccountId: string | null;
   qrImageUrl: string | null;
   printerConnected: boolean;
   // Интеграция сайта/приложения доставки
@@ -94,6 +99,21 @@ export function useAdminSettings() {
   return useQuery({
     queryKey: ['settings', 'admin'],
     queryFn: async () => (await api.get<Settings>('/admin/settings')).data,
+  });
+}
+
+export function usePaymentSettlementAccounts(enabled: boolean) {
+  return useQuery({
+    queryKey: ['settings', 'payment-accounts'],
+    queryFn: async () => (await api.get<{ id: string; name: string; isDefault: boolean }[]>('/admin/settings/payment-accounts')).data,
+    enabled,
+  });
+}
+
+export function useCashCollectionAccounts() {
+  return useQuery({
+    queryKey: ['settings', 'collection-accounts'],
+    queryFn: async () => (await api.get<{ id: string; name: string; isCollection: boolean }[]>('/admin/settings/collection-accounts')).data,
   });
 }
 

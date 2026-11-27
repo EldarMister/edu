@@ -105,6 +105,8 @@ div.poster-select-menu { border-radius: 8px; padding: 3px; box-shadow: 0 3px 10p
 .poster-workspace .document-status { display: inline-flex; align-items: center; border: 1px solid rgb(var(--edu-border)); border-radius: 2px; padding: 1px 6px; color: rgb(var(--edu-text-muted)); font-size: 12px; white-space: nowrap; }
 .poster-workspace .document-status:is([data-status='completed'],[data-status='posted']) { color: rgb(var(--edu-success)); border-color: rgb(22 163 74 / .25); }
 .poster-workspace .document-status[data-status='cancelled'] { color: rgb(var(--edu-text-light)); }
+.poster-workspace .document-status[data-status='deleted'] { color: light-dark(#b91c1c, rgb(var(--edu-danger))); border-color: rgb(var(--edu-danger) / .35); }
+.poster-workspace .poster-register-surface [data-writeoff-deleted='true'] { background: rgb(var(--edu-danger) / .06); }
 .poster-workspace table { border-collapse: collapse; font-size: 14px; }
 .poster-workspace table thead { background: rgb(var(--edu-card)); font-size: 12px; font-weight: 400; color: rgb(var(--edu-text-muted)); }
 .poster-workspace table th { font-weight: 400; padding: 12px 10px; border-bottom: 1px solid light-dark(#e5e7eb, rgb(var(--edu-border))); }

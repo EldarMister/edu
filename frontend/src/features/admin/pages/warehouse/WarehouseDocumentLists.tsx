@@ -4,6 +4,7 @@ import { ColumnButton } from '../../components/ColumnControl';
 import { RowIconButton } from '../../components/RowIconButton';
 import { RowActionMenu } from '../../components/RowActionMenu';
 import { Select } from '@/components/Select';
+import { Modal } from '@/components/Modal';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { useNotifications } from '@/store/notifications';
@@ -14,14 +15,14 @@ import {
   type ProductionBatch,
   type WarehouseLocation,
 } from './api';
-import { downloadTransferRegister, useRemoveWriteoff, useStockDocument, useStockDocuments, useWriteoffReasons, type StockDocument, type StockDocumentKind } from './stock-documents-api';
+import { downloadTransferRegister, downloadWriteoffRegister, useRemoveWriteoff, useRestoreWriteoff, useStockDocument, useStockDocuments, useWriteoffReasons, type StockDocument, type StockDocumentKind } from './stock-documents-api';
 import { documentDisplayStatus, documentStatus, formatDocumentDate, formatVariance, WRITEOFF_REASONS, writeoffPostedTotals, writeoffReasonLabel, type StockDocumentDisplayStatus } from './stock-document-format';
-import { exportCsv } from '@/lib/report-output';
 import { useListPeriod } from './ListPeriodFilter';
 import { balanceMoney } from './balance-format';
 import { QueryState } from './WarehouseUi';
 import { unitLabel } from './units';
 import { usePageFilters } from './workspace-route';
+import { useWriteoffOptions } from './writeoff-api';
 import { WorkspaceHeaderActions, WorkspaceHeaderCount } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { warehouseDay } from './warehouse-period';
@@ -39,6 +40,7 @@ type RegisterColumn = keyof typeof registerColumnLabels;
 const transferColumns: RegisterColumn[] = ['date', 'products', 'note', 'amount', 'employee', 'warehouses'];
 const writeoffColumns: RegisterColumn[] = ['date', 'warehouses', 'products', 'amount', 'employee', 'reason', 'categories', 'note'];
 export const noWriteoffReason = '__none';
+const writeoffProductKey = ({ kind, sourceId }: { kind: 'ingredient' | 'dish'; sourceId: string }) => `${kind}:${sourceId}`;
 
 function parseDocumentAmount(value: string) {
   const parsed = Number(value.trim().replace(',', '.'));
@@ -58,32 +60,47 @@ export function DocumentList({
 }) {
   const [conditions, updateConditions] = usePageFilters({
     [kind + 'Search']: '', [kind + 'Status']: '', [kind + 'Reason']: '', [kind + 'Category']: '', [kind + 'Employee']: '',
-    [kind + 'Warehouses']: '', [kind + 'Comment']: '', [kind + 'MinAmount']: '', [kind + 'MaxAmount']: '',
+    [kind + 'Warehouses']: '', [kind + 'Products']: '', [kind + 'Comment']: '', [kind + 'MinAmount']: '', [kind + 'MaxAmount']: '',
     [kind + 'Page']: '1', [kind + 'Sort']: 'desc', warehouse: '',
     [kind + 'Period']: kind === 'transfer' ? 'month' : 'all', [kind + 'From']: '', [kind + 'To']: '',
   });
   const search = conditions[kind + 'Search'];
   const status = conditions[kind + 'Status'];
-  const reason = conditions[kind + 'Reason'];
+  const reasonValue = conditions[kind + 'Reason'];
   const employeeFilter = conditions[kind + 'Employee'];
   const transfer = kind === 'transfer';
   const inventory = kind === 'inventory';
   const writeoff = kind === 'writeoff';
+  const selectedReasons = writeoff ? warehouseMultiFilterValues(reasonValue) : [];
+  const selectedProducts = new Set(writeoff ? warehouseMultiFilterValues(conditions.writeoffProducts) : []);
   const reasons = useWriteoffReasons(writeoff, true);
+  const writeoffOptions = useWriteoffOptions(writeoff);
   const remove = useRemoveWriteoff();
+  const restore = useRestoreWriteoff();
   const [removing, setRemoving] = useState<StockDocument | null>(null);
+  const [restoring, setRestoring] = useState<StockDocument | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const toggle = (id: string) => setExpanded((last) => last === id ? null : id);
   const warehouseSelection = conditions[kind + 'Warehouses'] || warehouseId || '';
   const selectedWarehouses = inventory ? [] : warehouseMultiFilterValues(warehouseSelection);
   const categories = kind === 'writeoff' ? warehouseMultiFilterValues(conditions.writeoffCategory) : [];
   const ascending = conditions[kind + 'Sort'] === 'asc';
-  const changeFilter = (name: 'Search' | 'Status' | 'Reason' | 'Employee' | 'Comment' | 'MinAmount' | 'MaxAmount', value: string) =>
+  const changeFilter = (name: 'Search' | 'Status' | 'Reason' | 'Products' | 'Employee' | 'Comment' | 'MinAmount' | 'MaxAmount', value: string) =>
     updateConditions({ [kind + name]: value, [kind + 'Page']: '1' });
   const period = useListPeriod(kind, transfer ? 'month' : 'all');
-  const query = useStockDocuments(inventory ? warehouseId : undefined, kind, search);
+  const query = useStockDocuments(inventory ? warehouseId : undefined, kind, search, writeoff);
   const categoryOptions = [...new Set([...categories, ...(query.data ?? []).flatMap((document) => document.categories ?? [])])]
     .sort((a, b) => a.localeCompare(b, 'ru'));
+  const productOptions = new Map<string, string>();
+  for (const document of query.data ?? []) {
+    for (const product of document.writeoffProducts ?? []) productOptions.set(writeoffProductKey(product), product.name);
+  }
+  for (const product of writeoffOptions.data?.ingredients ?? []) {
+    productOptions.set(writeoffProductKey({ kind: 'ingredient', sourceId: product.id }), product.name);
+  }
+  for (const product of writeoffOptions.data?.dishes ?? []) {
+    productOptions.set(writeoffProductKey({ kind: 'dish', sourceId: product.id }), product.name);
+  }
   const { can } = usePermissions();
   const costs = can('actions.warehouseCosts');
   const [columnPreference, saveColumns] = useColumnPreference(transfer ? 'warehouse-transfers' : 'warehouse-writeoffs');
@@ -101,16 +118,27 @@ export function DocumentList({
   const comment = inventory ? '' : conditions[kind + 'Comment'].trim().toLocaleLowerCase('ru');
   const minAmount = !inventory && costs ? parseDocumentAmount(conditions[kind + 'MinAmount']) : null;
   const maxAmount = !inventory && costs ? parseDocumentAmount(conditions[kind + 'MaxAmount']) : null;
-  const extraFilterCount = Number(!!status) + Number(!!employeeFilter) + Number(!!comment) + Number(minAmount != null || maxAmount != null);
+  const extraFilterCount = Number(!!status) + Number(!!employeeFilter) + Number(!!comment) + Number(minAmount != null || maxAmount != null)
+    + Number(selectedProducts.size > 0);
   const canCreate = can(`actions.${kind === 'inventory' ? 'warehouseCount' : kind === 'writeoff' ? 'warehouseWriteoff' : 'warehouseTransfer'}`);
   const canApprove = can('actions.warehouseApprove');
-  const removeMenu = (document: StockDocument) => writeoff &&
-    (document.status === 'draft' || document.status === 'submitted' ? canCreate : canApprove) && (
-    <RowActionMenu label={`списание от ${formatDocumentListDate(operationDate(document))}`} action="Удалить"
-      onAction={() => { remove.reset(); setRemoving(document); }} />
-  );
+  function writeoffMenu(document: StockDocument) {
+    if (!writeoff) return null;
+    const canManage = document.status === 'draft' || document.status === 'submitted' ? canCreate : canApprove;
+    const label = `списание от ${formatDocumentListDate(operationDate(document))}`;
+    if (document.deletedAt) return canManage ? <RowActionMenu label={label} actions={[{ label: 'Восстановить',
+      onAction: () => { restore.reset(); setRestoring(document); } }]} /> : null;
+    const actions = [
+      ...(canCreate && onCopy ? [{ label: 'Копировать', onAction: () => onCopy(document.id) }] : []),
+      ...(canManage ? [{ label: 'Удалить', danger: true, onAction: () => { remove.reset(); setRemoving(document); } }] : []),
+    ];
+    return actions.length > 0
+      ? <RowActionMenu label={label} actions={actions} />
+      : null;
+  }
   const statuses: StockDocumentDisplayStatus[] = inventory
-    ? ['draft', 'submitted', 'posted', 'reopened', 'reversed'] : ['draft', 'submitted', 'posted', 'reversed'];
+    ? ['draft', 'submitted', 'posted', 'reopened', 'reversed']
+    : ['draft', 'submitted', 'posted', 'reversed', ...(writeoff ? ['deleted'] as const : [])];
   const operationDate = (document: StockDocument) => document.countedAt ?? document.effectiveAt ?? document.postedAt ?? document.createdAt;
   const documentEmployee = (document: StockDocument) => document.postedByName ?? document.createdByName;
   const employees = !inventory ? [...new Set((query.data ?? []).map(documentEmployee).filter((name): name is string => !!name))]
@@ -118,7 +146,8 @@ export function DocumentList({
   const names = new Map(locations.map((location) => [location.id, location.name]));
   const rows = (query.data ?? []).filter((document) =>
     (!status || documentDisplayStatus(document) === status) &&
-    (!reason || (document.writeoffReasonId ?? document.reason ?? noWriteoffReason) === reason) &&
+    (!selectedReasons.length || selectedReasons.includes(document.writeoffReasonId ?? document.reason ?? noWriteoffReason)) &&
+    (!selectedProducts.size || document.writeoffProducts?.some((product) => selectedProducts.has(writeoffProductKey(product)))) &&
     (inventory || !employeeFilter || documentEmployee(document) === employeeFilter) &&
     (!comment || document.note?.toLocaleLowerCase('ru').includes(comment)) &&
     (minAmount == null || (document.varianceValue != null && Math.abs(document.varianceValue) >= minAmount)) &&
@@ -135,10 +164,10 @@ export function DocumentList({
   const columns = inventory
     ? ['Склад', 'Проверка остатков на', 'Дата и время проведения', 'Тип', ...(costs ? ['Результат'] : []), 'Статус', '']
     : [...selectedColumns.map(columnLabel), ''];
-  const filtered = !!(search || reason || extraFilterCount || categories.length || period.active || warehouseId || selectedWarehouses.length);
+  const filtered = !!(search || selectedReasons.length || extraFilterCount || categories.length || period.active || warehouseId || selectedWarehouses.length);
   const resetFilters = () => updateConditions({ [kind + 'Search']: '', [kind + 'Status']: '', [kind + 'Reason']: '',
     [kind + 'Page']: '1', [kind + 'Period']: 'all', [kind + 'From']: '', [kind + 'To']: '', [kind + 'Category']: '',
-    [kind + 'Employee']: '', [kind + 'Warehouses']: '', [kind + 'Comment']: '', [kind + 'MinAmount']: '', [kind + 'MaxAmount']: '', warehouse: '' });
+    [kind + 'Employee']: '', [kind + 'Warehouses']: '', [kind + 'Products']: '', [kind + 'Comment']: '', [kind + 'MinAmount']: '', [kind + 'MaxAmount']: '', warehouse: '' });
   const products = (document: StockDocument) => document.productNames?.length
     ? document.productNames.join(', ') + (document.itemsCount > document.productNames.length ? '…' : '')
     : document.itemsCount ? document.itemsCount + ' позиций' : 'Без продуктов';
@@ -153,10 +182,11 @@ export function DocumentList({
     : <span className="text-text-muted">—</span>;
   const dateColumn = inventory ? 1 : selectedColumns.indexOf('date');
   const countTime = (document: StockDocument) => document.countedAt ?? document.postedAt;
-  async function exportTransfers() {
+  async function exportRegister() {
     setExporting(true);
     try {
-      await downloadTransferRegister(rows.map(({ id }) => id), selectedColumns);
+      const download = writeoff ? downloadWriteoffRegister : downloadTransferRegister;
+      await download(rows.map(({ id }) => id), selectedColumns);
     } catch (error) {
       notify({ message: apiError(error), at: new Date().toISOString() });
     } finally {
@@ -173,7 +203,7 @@ export function DocumentList({
       {writeoff && <span aria-hidden>{expanded === document.id ? '⌄' : '›'}</span>}
       {dateCell(operationDate(document))}
     </button>
-    {document.status !== 'posted' && <div className="mt-1 whitespace-normal">{statusCell(document)}</div>}
+    {(document.status !== 'posted' || document.deletedAt) && <div className="mt-1 whitespace-normal">{statusCell(document)}</div>}
   </>;
   function registerCell(key: RegisterColumn, document: StockDocument) {
     if (key === 'date') return <td key={key}>{registerDate(document)}</td>;
@@ -194,14 +224,6 @@ export function DocumentList({
     return <td key={key} title={value}><span className="line-clamp-2 break-words">{value}</span></td>;
   }
   const postedTotals = writeoffPostedTotals(rows);
-  function exportWriteoffs() {
-    exportCsv('Списания', selectedColumns.map(columnLabel), rows.map((document) => {
-      const cells = { date: formatDocumentDate(operationDate(document)), warehouses: warehouses(document),
-        products: products(document), note: document.note ?? '', amount: amount(document), employee: employee(document),
-        categories: document.categories?.join(', ') ?? '', reason: writeoffReasonLabel(document) };
-      return selectedColumns.map((column) => cells[column]);
-    }));
-  }
   const empty = <div className="poster-list-empty">
     <svg aria-hidden viewBox="0 0 40 40" fill="none"><path d="M11 11h18l6 16v6H5v-6l6-16Z" stroke="currentColor" strokeWidth="2.5"/><path d="M6 26h8l3 5h6l3-5h8" stroke="currentColor" strokeWidth="2.5"/></svg>
     <h3>{filtered ? 'Ничего не найдено' : inventory ? 'Здесь будут инвентаризации' : transfer ? 'Здесь будут перемещения' : 'Здесь будут списания'}</h3>
@@ -213,8 +235,8 @@ export function DocumentList({
       {inventory && <WorkspaceHeaderCount count={query.isSuccess ? rows.length : undefined} />}
       {inventory && <WorkspaceHeaderActions>{period.filter}</WorkspaceHeaderActions>}
       {writeoff && <WorkspaceHeaderActions>
-        {can('actions.exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!rows.length}
-          onClick={exportWriteoffs}><IconExport />Экспорт CSV</button>}
+        {can('actions.exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!rows.length || exporting}
+          onClick={exportRegister}><IconExport />Экспорт Excel</button>}
         {canCreate && <button type="button" className="btn-primary btn-md" onClick={onCreate}>Добавить</button>}
       </WorkspaceHeaderActions>}
       <div className="poster-toolbar">
@@ -227,8 +249,8 @@ export function DocumentList({
         {kind === 'writeoff' && <WarehouseMultiFilter label="Категории" value={conditions[kind + 'Category']}
           options={categoryOptions.map((category) => ({ value: category, label: category }))}
           onChange={(value) => updateConditions({ [kind + 'Category']: value, [kind + 'Page']: '1' })} />}
-        {kind === 'writeoff' && <Select ariaLabel="Причина списания" value={reason} onChange={(value) => changeFilter('Reason', value)}
-          options={[{ value: '', label: 'Причина' }, { value: noWriteoffReason, label: 'Без причины' },
+        {writeoff && <WarehouseMultiFilter label="Причина" value={reasonValue} onChange={(value) => changeFilter('Reason', value)}
+          options={[{ value: noWriteoffReason, label: 'Без причины' },
             ...(reasons.data?.map(({ id, label, archived }) => ({ value: id, label: archived ? `${label} (удалена)` : label })) ?? WRITEOFF_REASONS)]} />}
         <details className="poster-list-filter">
           <summary>+ Фильтр{extraFilterCount ? ' · ' + extraFilterCount : ''}</summary>
@@ -237,6 +259,11 @@ export function DocumentList({
               options={[{ value: '', label: 'Все статусы' }, ...statuses.map((value) => ({
                 value, label: documentStatus(value),
               }))]} />
+            {writeoff && <div className="mt-2">
+              <WarehouseMultiFilter label="Товары" value={conditions.writeoffProducts}
+                options={[...productOptions].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'ru'))}
+                onChange={(value) => changeFilter('Products', value)} />
+            </div>}
             {!inventory && <Select ariaLabel="Сотрудник" value={employeeFilter} className="mt-2 w-48"
               onChange={(value) => changeFilter('Employee', value)} options={[
                 { value: '', label: 'Все сотрудники' }, ...employees.map((name) => ({ value: name, label: name })),
@@ -260,7 +287,7 @@ export function DocumentList({
         {filtered && <button type="button" className="text-sm text-text-muted" onClick={resetFilters}>Сбросить всё</button>}
         {!inventory && <ColumnButton onClick={() => setEditingColumns(true)} />}
         {transfer && can('actions.exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!rows.length || exporting}
-          onClick={exportTransfers}><IconExport />Экспорт Excel</button>}
+          onClick={exportRegister}><IconExport />Экспорт Excel</button>}
         {!writeoff && canCreate && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
       </div>
       {!inventory && editingColumns && <WarehouseColumnSettings columns={selectedColumns} defaults={availableColumns} resetColumns={defaultColumns}
@@ -281,7 +308,7 @@ export function DocumentList({
             </th>)}</tr></thead>
             <tbody>
               {!rows.length && <tr><td colSpan={columns.length}>{empty}</td></tr>}
-              {visibleRows.map((document) => <Fragment key={document.id}><tr>
+              {visibleRows.map((document) => <Fragment key={document.id}><tr data-writeoff-deleted={!!document.deletedAt || undefined}>
                 {inventory ? <>
                   <td><button className="text-primary" onClick={() => onOpen(document.id)}>{warehouses(document)}</button></td>
                   <td className="whitespace-nowrap">{countTime(document) ? dateCell(countTime(document)) : 'При проведении'}</td>
@@ -291,11 +318,13 @@ export function DocumentList({
                   <td>{statusCell(document)}</td>
                 </> : selectedColumns.map((key) => registerCell(key, document))}
                 <td><div className="poster-row-actions">
+                  {document.deletedAt && dateColumn < 0 && statusCell(document)}
                   {writeoff && dateColumn < 0 && <button type="button" aria-expanded={expanded === document.id} onClick={() => toggle(document.id)}>Состав</button>}
-                  {document.status === 'draft' ? <RowIconButton icon="edit" label="Редактировать документ" onClick={() => onOpen(document.id)} />
+                  {!document.deletedAt && (document.status === 'draft' || (writeoff && document.status === 'posted' && canCreate && canApprove))
+                    ? <RowIconButton icon="edit" label="Редактировать документ" onClick={() => onOpen(document.id)} />
                     : <button type="button" onClick={() => onOpen(document.id)}>{inventory ? 'Посмотреть' : 'Открыть'}</button>}
                   {transfer && canCreate && onCopy && <button type="button" onClick={() => onCopy(document.id)}>Копировать</button>}
-                  {removeMenu(document)}
+                  {writeoffMenu(document)}
                 </div></td>
               </tr>
               {writeoff && expanded === document.id && <tr><td colSpan={columns.length} className="!bg-background !p-3">
@@ -313,7 +342,8 @@ export function DocumentList({
         </div>
         <div className="divide-y divide-border md:hidden">
           {!rows.length && empty}
-          {visibleRows.map((document) => <div key={document.id}><button className="block w-full space-y-2 p-4 text-left" onClick={() => onOpen(document.id)}>
+          {visibleRows.map((document) => <div key={document.id} data-writeoff-deleted={!!document.deletedAt || undefined}>
+            <button className="block w-full space-y-2 p-4 text-left" onClick={() => onOpen(document.id)}>
             <span className="flex justify-between gap-2"><span className="font-medium text-primary">{inventory ? warehouses(document) : products(document)}</span>{costs && (inventory || selectedColumns.includes('amount')) && <span className="whitespace-nowrap">{amount(document)}</span>}</span>
             <span className="block text-xs text-text-muted">{inventory && !countTime(document) ? 'При проведении' : formatDocumentListDate(operationDate(document))} · {inventory ? document.mode === 'full' ? 'Полная' : 'Частичная' : warehouses(document)}</span>
             {!inventory && selectedColumns.includes('note') && document.note && <span className="block text-xs text-text-secondary">{document.note}</span>}
@@ -325,7 +355,7 @@ export function DocumentList({
             <div className="flex items-center justify-between gap-2">
               <button type="button" className="text-sm text-primary" aria-expanded={expanded === document.id}
                 onClick={() => toggle(document.id)}>Позиции списания</button>
-              {removeMenu(document)}
+              {writeoffMenu(document)}
             </div>
             {expanded === document.id && <div className="mt-2 bg-background"><WriteoffRegisterDetails id={document.id} costs={costs} /></div>}
           </div>}</div>)}
@@ -349,9 +379,23 @@ export function DocumentList({
           setRemoving(null);
         } })}>
         {removing.status === 'posted'
-          ? 'Списание исчезнет из списка. Количество вернётся на склад, а сторно отразится в журнале движения.'
-          : 'Списание исчезнет из списка.'}
+          ? 'Позиции вернутся на склад. Документ останется в списке со статусом «Удалено», его можно восстановить.'
+          : 'Документ останется в списке со статусом «Удалено», его можно восстановить.'}
       </RemoveDirectoryEntry>}
+      {restoring && <Modal open manageFocus title="Восстановить списание?" onClose={() => { if (!restore.isPending) setRestoring(null); }}
+        footer={<div className="flex justify-end gap-2">
+          <button type="button" className="btn-secondary btn-md" disabled={restore.isPending} onClick={() => setRestoring(null)}>Отмена</button>
+          <button type="button" className="btn-primary btn-md" disabled={restore.isPending}
+            onClick={() => restore.mutate(restoring, { onSuccess: (saved) => {
+              const message = saved.status === 'posted' ? 'Списание восстановлено, остатки обновлены.'
+                : saved.status === 'reversed' ? 'Документ восстановлен со статусом «Сторнирован».' : 'Документ восстановлен.';
+              notify({ message, at: new Date().toISOString() });
+              setRestoring(null);
+            } })}>Восстановить</button>
+        </div>}>
+        <p className="text-sm text-text-secondary">Документ вернётся в работу. Если удаление отменило складское проведение, позиции снова будут списаны.</p>
+        {restore.error && <p role="alert" className="mt-3 text-sm text-danger">{apiError(restore.error)}</p>}
+      </Modal>}
     </div>
   );
 }

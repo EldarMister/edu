@@ -73,7 +73,7 @@ export async function prepareMenuImport(tx: Prisma.TransactionClient, cafeId: st
   rows: ReturnType<typeof readMenuImport>, canEditRecipe: boolean) {
   const ingredientNames = rows.some(row => row.ingredient) && kind === 'recipe' && canEditRecipe;
   const [categories, existing, ingredients] = await Promise.all([
-    tx.category.findMany({ where: { cafeId }, select: { id: true, name: true, parentId: true } }),
+    tx.category.findMany({ where: { cafeId, archivedAt: null }, select: { id: true, name: true, parentId: true } }),
     tx.dish.findMany({ where: { cafeId, catalogKind: kind }, select: { name: true, categoryId: true } }),
     ingredientNames ? tx.ingredient.findMany({ where: { cafeId, isActive: true }, select: { id: true, name: true, displayUnit: true, unitType: true } })
       : Promise.resolve<IngredientOption[]>([]),

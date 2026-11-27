@@ -134,9 +134,9 @@ test('PostgreSQL: inventory confirms current physical stock and owner approval i
       assert.deepEqual(listedWriteoffs[0].productNames, ['Кола']);
       assert.equal(listedWriteoffs[0].items, undefined, 'list preview must not include full document lines');
       assert.equal(listedWriteoffs[0].varianceValue, -24, 'preview does not change the signed ledger result');
-      const missingReason = await docs.create(admin, { warehouseId: bar.id, kind: 'writeoff', reason: 'other',
+      const otherWithoutComment = await docs.create(admin, { warehouseId: bar.id, kind: 'writeoff', reason: 'other',
         items: [{ ingredientId: cola.id, quantity: 1 }] });
-      await assert.rejects(docs.submit(admin, missingReason.id, missingReason.revision));
+      assert.equal((await docs.submit(admin, otherWithoutComment.id, otherWithoutComment.revision)).status, 'submitted');
       const excessive = await docs.create(admin, { warehouseId: bar.id, kind: 'writeoff', reason: 'damage',
         items: [{ ingredientId: cola.id, quantity: 99 }] });
       const excessiveSubmitted = await docs.submit(admin, excessive.id, excessive.revision).catch(() => null);

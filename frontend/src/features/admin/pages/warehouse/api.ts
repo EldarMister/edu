@@ -489,17 +489,19 @@ export function useIngredientMutations() {
   return { create, update, remove };
 }
 
-interface IngredientCategory {
+export interface IngredientCategory {
   name: string;
   count: number;
+  stockByUnit?: { kg: number; l: number; pcs: number };
+  stockValue?: number | null;
 }
 
 const ingredientCategoriesUrl = '/admin/warehouse/ingredients/categories';
 
-export function useIngredientCategories(enabled = true) {
+export function useIngredientCategories(enabled = true, includeStock = false) {
   return useQuery({
-    queryKey: [...KEY, 'ingredient-categories'],
-    queryFn: () => get<IngredientCategory[]>(ingredientCategoriesUrl),
+    queryKey: [...KEY, 'ingredient-categories', includeStock],
+    queryFn: () => get<IngredientCategory[]>(includeStock ? `${ingredientCategoriesUrl}?includeStock=true` : ingredientCategoriesUrl),
     enabled,
   });
 }
@@ -517,7 +519,8 @@ export function useIngredientCategoryMutations() {
     onSuccess: invalidate,
   });
   const remove = useMutation({
-    mutationFn: (name: string) => api.delete(`${ingredientCategoriesUrl}/${encodeURIComponent(name)}`),
+    mutationFn: ({ name, removeIngredients }: { name: string; removeIngredients: boolean }) =>
+      api.delete(`${ingredientCategoriesUrl}/${encodeURIComponent(name)}`, { params: { removeIngredients } }),
     onSuccess: invalidate,
   });
   return { save, remove };

@@ -5,7 +5,7 @@ import { useAuth } from '@/store/auth';
 import { useNotifications } from '@/store/notifications';
 import { useApplyFoodCostPrices, type FoodCostPosition, type FoodCostPriceChange, type FoodCostReport } from './food-cost-api';
 import { MAX_MENU_PRICE, projectFoodCostBasket } from './food-cost-model';
-import { formatFoodCost, priceCaption } from './FoodCostReportTables';
+import { formatFoodCost, formatMarginChange, priceCaption } from './FoodCostReportTables';
 import { financeMoney } from './finance/finance-format';
 
 type PlannedPrice = FoodCostPriceChange & { id: string; name: string };
@@ -69,7 +69,7 @@ export function FoodCostPriceBasket({ basket, report, close }: {
   const push = useNotifications((state) => state.push);
   const positions = new Map(report.positions.map((row) => [row.id, row]));
   const projection = projectFoodCostBasket(report, basket.prices);
-  const allInPeriod = basket.entries.every(({ id }) => positions.has(id));
+  const hasCompleteProjection = basket.entries.every(({ id }) => projection.positions[id] != null);
   const stale = basket.entries.some(({ id, expectedPrice, price, expectedPriceBase, expectedUnit }) => {
     const current = positions.get(id);
     return current != null && (!current.active || (current.price !== expectedPrice && current.price !== price)
@@ -103,22 +103,29 @@ export function FoodCostPriceBasket({ basket, report, close }: {
     <p className="mb-3 text-sm text-text-secondary">После подтверждения новые цены сразу появятся в меню.</p>
     {!basket.entries.length ? <p className="text-sm text-text-muted">План пока пуст.</p> : <>
       <ul className="food-cost-basket-list">
-        {basket.entries.map(({ id, name, expectedPrice, price }) => {
-          const row = positions.get(id);
+        {basket.entries.map(({ id, name, expectedPrice, expectedPriceBase, expectedUnit, price }) => {
+          const caption = priceCaption({ priceBasis: expectedPriceBase, priceUnit: expectedUnit });
+          const forecast = projection.positions[id];
           return <li key={id}>
             <div className="min-w-0">
               <strong>{name}</strong>
-              <div className="text-sm text-text-secondary">{financeMoney(expectedPrice)} → {financeMoney(price)}{row && priceCaption(row)}</div>
+              <div className="text-sm text-text-secondary">{financeMoney(expectedPrice)} → {financeMoney(price)}{caption}</div>
             </div>
-            <span className="text-sm text-text-secondary">Фудкост {formatFoodCost(projection.positions[id]?.foodCostPercent ?? null)}</span>
+            <div className="text-sm text-text-secondary">
+              {forecast ? <>
+                <p>Фудкост {formatFoodCost(forecast.baselineFoodCostPercent)} → {formatFoodCost(forecast.foodCostPercent)}</p>
+                <p>Изменение маржи за 30 дней {formatMarginChange(forecast.monthlyMarginChange)}</p>
+              </> : <p>Прогноз недоступен за выбранный период</p>}
+            </div>
             <button type="button" className="text-sm text-danger" aria-label={`Убрать из плана — ${name}`}
               disabled={apply.isPending} onClick={() => basket.remove(id)}>Убрать</button>
           </li>;
         })}
       </ul>
-      {allInPeriod ? <p className="mt-3 text-sm">Фудкост заведения {formatFoodCost(projection.business.foodCostPercent)}
-        {' · Изменение маржи за 30 дней '}{financeMoney(projection.business.monthlyMarginChange)}</p> :
-        <p className="mt-3 text-sm text-text-muted">Часть позиций отсутствует в этом периоде. Для них прогноз недоступен.</p>}
+      {hasCompleteProjection ? <p className="mt-3 text-sm">Фудкост заведения {formatFoodCost(projection.business.baselineFoodCostPercent)}
+        {' → '}{formatFoodCost(projection.business.foodCostPercent)}
+        {' · Изменение маржи за 30 дней '}{formatMarginChange(projection.business.monthlyMarginChange)}</p> :
+        <p className="mt-3 text-sm text-text-muted">Для общего прогноза выберите период с продажами всех позиций из плана.</p>}
     </>}
     {(error || stale) && <p className="mt-3 text-sm text-danger" role="alert">
       {error || 'Цена или единица продажи изменилась. Уберите устаревшую строку и заново запланируйте цену.'}

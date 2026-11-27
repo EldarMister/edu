@@ -91,6 +91,8 @@ test('PostgreSQL: recipe writeoffs retain source lines and immutable ingredient 
         const draft = await docs.create(owner, input);
         const submitted = await docs.submit(owner, draft.id, draft.revision);
         const document = await docs.approve(owner, submitted.id, submitted.revision);
+        const legacyRow = (await docs.list(main.id, 'writeoff')).find(({ id }) => id === document.id);
+        assert.deepEqual(legacyRow.writeoffProducts, [{ kind: 'ingredient', sourceId: flour.id, name: 'Flour' }]);
         await docs.removeWriteoffReason('damage');
         assert.ok(!(await docs.reasons()).some(({ id }) => id === 'damage'));
         assert.ok((await docs.reasons(true)).some(({ id, expense, archived }) => id === 'damage' && expense && archived));
@@ -149,6 +151,9 @@ test('PostgreSQL: recipe writeoffs retain source lines and immutable ingredient 
         const posted = await docs.approve(owner, draft.id, submitted.revision);
         assert.equal(posted.sourceLines[0].name, 'Dumplings · Small');
         assert.equal(posted.items[0].ingredientId, flour.id);
+        const row = (await docs.list(main.id, 'writeoff', 'Flour')).find(({ id }) => id === posted.id);
+        assert.deepEqual(row.writeoffProducts, [{ kind: 'dish', sourceId: historicalDish.id, name: 'New dumplings' }],
+          'free-text results can contain a recipe ingredient but the product filter only matches the dish');
         const movement = await db.stockMovement.findFirstOrThrow({ where: { sourceId: posted.id } });
         assert.equal(movement.ingredientId, flour.id);
         assert.equal(Number(movement.change), -100);
@@ -197,7 +202,15 @@ test('PostgreSQL: recipe writeoffs retain source lines and immutable ingredient 
         assert.deepEqual([await stock(flour.id), await stock(water.id), await stock(batch.id)], [9.45, 9.55, 1.5]);
         assert.equal(Number((await db.warehouseStock.findUnique({ where: { warehouseId_ingredientId: { warehouseId: bar.id, ingredientId: flour.id } } })).stock), 2000);
         assert.equal(await db.stockMovement.count({ where: { sourceId: posted.id } }), 3, 'duplicate requests do not post twice');
-        assert.equal((await docs.list(main.id, 'writeoff')).find((entry) => entry.id === posted.id).productNames[0], 'Soup · Large');
+        const registerRow = (await docs.list(main.id, 'writeoff')).find((entry) => entry.id === posted.id);
+        assert.equal(registerRow.productNames[0], 'Soup · Large');
+        assert.equal(registerRow.productNames.length, 3);
+        assert.deepEqual(registerRow.writeoffProducts, [
+          { kind: 'dish', sourceId: dish.id, name: 'Soup' },
+          { kind: 'ingredient', sourceId: virtual.id, name: 'Virtual preparation' },
+          { kind: 'ingredient', sourceId: batch.id, name: 'Stocked preparation' },
+          { kind: 'ingredient', sourceId: flour.id, name: 'Flour' },
+        ], 'filterable products include every direct source without the underlying water');
         assert.deepEqual((await docs.list(main.id, 'writeoff', 'sOuP')).map((entry) => entry.id), [posted.id], 'search finds the visible dish name');
         assert.deepEqual((await docs.list(main.id, 'writeoff', 'lArGe')).map((entry) => entry.id), [posted.id], 'search finds the saved variant');
         assert.deepEqual(await docs.list(bar.id, 'writeoff', 'Soup'), [], 'source search respects the warehouse');

@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { decodeDishImage, dishImageRef } from './dish-image';
 import { MenuModifiersService } from '../warehouse/menu-modifiers';
 import { projectDishStock } from '../warehouse/dish-stock-projection';
+import { visibleMenuDish } from '../categories/menu-visibility';
 
 @Injectable()
 export class DishesService {
@@ -14,7 +15,7 @@ export class DishesService {
   /** Активные блюда для меню официанта. Можно фильтровать по категории и поиску. */
   async findAll(params: { categoryId?: string; search?: string }) {
     const where: Prisma.DishWhereInput = {
-      isActive: true,
+      ...visibleMenuDish,
       ...(params.categoryId ? { categoryId: params.categoryId } : {}),
       ...(params.search
         ? { name: { contains: params.search, mode: 'insensitive' } }

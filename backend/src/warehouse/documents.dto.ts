@@ -103,6 +103,11 @@ export class ReverseWarehouseDocumentDto extends WarehouseDocumentRevisionDto {
   note: string;
 }
 
+export class EditPostedWriteoffDto extends UpdateWarehouseDocumentDto {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  warehouseId?: string;
+}
+
 export class CreateWarehouseDocumentDto extends UpdateWarehouseDocumentDto {
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
   destinationWarehouseId?: string;
@@ -129,4 +134,7 @@ export class WarehouseDocumentsQueryDto {
 
   @IsOptional() @IsEnum(WarehouseDocumentKind)
   kind?: WarehouseDocumentKind;
+
+  @IsOptional() @IsIn(['true', 'false'])
+  includeDeletedWriteoffs?: string;
 }

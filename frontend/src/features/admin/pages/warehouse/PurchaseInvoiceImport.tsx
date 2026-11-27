@@ -8,7 +8,7 @@ export function PurchaseInvoiceImport({ initialOpen, disabled, onBusy, onRead }:
   onBusy: (busy: boolean) => void;
   onRead: (preview: InvoicePreview, filename: string) => void;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(initialOpen);
   const [reading, setReading] = useState(false);
   const [error, setError] = useState('');
   const input = useRef<HTMLInputElement>(null);

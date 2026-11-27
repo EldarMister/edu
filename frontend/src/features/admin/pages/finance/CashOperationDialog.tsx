@@ -20,6 +20,7 @@ export type CashOperation = {
   dealDate?: string | null;
   actorId?: string | null;
   actorName: string | null;
+  counterpartyName?: string | null;
 };
 
 const kinds = [{ kind: 'expense', label: 'Расход' }, { kind: 'income', label: 'Внесение' },
@@ -33,9 +34,10 @@ function localTime(value: string) {
   return financeDay(date) + 'T' + time.format(date);
 }
 
-export function CashOperationDialog({ shiftId, operation, cashier = false, onClose }: {
+export function CashOperationDialog({ shiftId, operation, collectionAccountName, cashier = false, onClose }: {
   shiftId: string;
   operation?: CashOperation;
+  collectionAccountName?: string | null;
   cashier?: boolean;
   onClose: () => void;
 }) {
@@ -43,6 +45,7 @@ export function CashOperationDialog({ shiftId, operation, cashier = false, onClo
   const cache = useQueryClient();
   const [requestKey] = useState(clientId);
   const [kind, setKind] = useState<CashOperationKind>(operation?.kind ?? 'expense');
+  const collectionDestination = operation?.kind === 'collection' ? operation.counterpartyName ?? collectionAccountName : collectionAccountName;
   const [amount, setAmount] = useState(operation ? String(Math.abs(operation.amount)) : '');
   const [categoryId, setCategoryId] = useState(operation?.categoryId ?? '');
   const [note, setNote] = useState(operation?.note ?? '');
@@ -121,7 +124,9 @@ export function CashOperationDialog({ shiftId, operation, cashier = false, onClo
           <input inputMode="decimal" data-dialog-initial-focus className="input w-full" value={amount} placeholder="0,00" maxLength={17}
             onChange={(event) => setAmount(event.target.value)} />
         </label>
-        {kind === 'collection' ? <p className="text-sm text-text-muted">Наличные будут переведены из кассы в сейф.</p>
+        {kind === 'collection' ? <p className="text-sm text-text-muted">
+          Наличные будут переведены из кассы на {collectionDestination ? `счёт «${collectionDestination}»` : 'счёт инкассации'}.
+        </p>
           : <label className="grid gap-1.5 text-sm">Категория
             <select className="input w-full" aria-label="Категория" value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
               <option value="">Кассовые смены</option>

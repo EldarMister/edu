@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { WorkspacePending } from '../admin/components/WorkspacePending';
 import { Toggle } from '@/components/Toggle';
+import { Select } from '@/components/Select';
 import { CashShiftSettings } from './CashShiftControls';
 import { API_URL, apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
@@ -15,6 +16,7 @@ import {
 import {
   useAdminSettings,
   useGenerateDeliveryApiKey,
+  usePaymentSettlementAccounts,
   useUpdateSettings,
 } from './api';
 import { OrderPermissionsSettings } from './OrderPermissionsSettings';
@@ -37,6 +39,11 @@ interface Form {
   payQr: boolean;
   payCash: boolean;
   payCard: boolean;
+  cardProcessingFeeRate: string;
+  qrProcessingFeeRate: string;
+  cardSettlementAccountId: string;
+  qrSettlementAccountId: string;
+  cashCollectionAccountId: string;
   deliveryEnabled: boolean;
   qrGeoEnabled: boolean;
   qrGeoLat: number | null;
@@ -45,6 +52,19 @@ interface Form {
   queueDisplayEnabled: boolean;
   queueDisplayMode: 'table' | 'number';
 }
+
+function parseProcessingFeeRate(text: string) {
+  const normalized = text.trim().replace(',', '.');
+  if (!normalized) return 0;
+  if (!/^\d{1,3}(?:\.\d{1,4})?$/.test(normalized)) return null;
+  const rate = Number(normalized);
+  return rate <= 100 ? rate : null;
+}
+
+const settlementMethods = [
+  { label: 'Карта', account: 'cardSettlementAccountId', rate: 'cardProcessingFeeRate' },
+  { label: 'QR', account: 'qrSettlementAccountId', rate: 'qrProcessingFeeRate' },
+] as const;
 
 export function SettingsPage() {
   const { canSection, canEditSection } = usePermissions();
@@ -61,6 +81,7 @@ function CafeSettings() {
   const generateDeliveryKey = useGenerateDeliveryApiKey();
   const push = useNotifications((s) => s.push);
   const isOwner = useAuth((s) => s.user?.role === 'OWNER');
+  const settlementAccounts = usePaymentSettlementAccounts(isOwner);
   const t = useT();
   const [generatedDeliveryKey, setGeneratedDeliveryKey] = useState<string | null>(null);
 
@@ -80,6 +101,11 @@ function CafeSettings() {
     payQr: data.payQr,
     payCash: data.payCash,
     payCard: data.payCard,
+    cardProcessingFeeRate: String(data.cardProcessingFeeRate ?? 0),
+    qrProcessingFeeRate: String(data.qrProcessingFeeRate ?? 0),
+    cardSettlementAccountId: data.cardSettlementAccountId ?? '',
+    qrSettlementAccountId: data.qrSettlementAccountId ?? '',
+    cashCollectionAccountId: data.cashCollectionAccountId ?? '',
     deliveryEnabled: data.deliveryEnabled,
     qrGeoEnabled: data.qrGeoEnabled,
     qrGeoLat: data.qrGeoLat,
@@ -90,6 +116,9 @@ function CafeSettings() {
   } : null;
   const form = draft ?? baseline;
   const dirty = draft !== null && (update.isPending || JSON.stringify(draft) !== JSON.stringify(baseline));
+  const cardFee = parseProcessingFeeRate(form?.cardProcessingFeeRate ?? '');
+  const qrFee = parseProcessingFeeRate(form?.qrProcessingFeeRate ?? '');
+  const validFees = cardFee !== null && qrFee !== null;
   useEditorDirty(permissions.canEditSection('settings') && dirty, saveSettings);
 
   if (isLoading) return <WorkspacePending />;
@@ -106,9 +135,19 @@ function CafeSettings() {
 
   async function saveSettings() {
     if (!permissions.canEditSection('settings') || !dirty || !draft || update.isPending) return false;
+    if (!validFees) return false;
     const version = draftVersion.current;
     try {
-      await update.mutateAsync(draft);
+      const { cardProcessingFeeRate: _card, qrProcessingFeeRate: _qr,
+        cardSettlementAccountId, qrSettlementAccountId, cashCollectionAccountId, ...changes } = draft;
+      await update.mutateAsync({
+        ...changes,
+        ...(isOwner && cardFee !== (data?.cardProcessingFeeRate ?? 0) ? { cardProcessingFeeRate: cardFee } : {}),
+        ...(isOwner && qrFee !== (data?.qrProcessingFeeRate ?? 0) ? { qrProcessingFeeRate: qrFee } : {}),
+        ...(isOwner && cardSettlementAccountId !== (data?.cardSettlementAccountId ?? '') ? { cardSettlementAccountId: cardSettlementAccountId || null } : {}),
+        ...(isOwner && qrSettlementAccountId !== (data?.qrSettlementAccountId ?? '') ? { qrSettlementAccountId: qrSettlementAccountId || null } : {}),
+        ...(isOwner && cashCollectionAccountId !== (data?.cashCollectionAccountId ?? '') ? { cashCollectionAccountId: cashCollectionAccountId || null } : {}),
+      });
       if (draftVersion.current !== version) return false;
       setDraft((current) => current === draft ? null : current);
       push({ message: t('Настройки сохранены'), type: 'success', at: new Date().toISOString() });
@@ -135,6 +174,11 @@ function CafeSettings() {
   };
 
   const noMethod = !form.payQr && !form.payCash && !form.payCard;
+  const defaultSettlementName = settlementAccounts.data?.find(({ isDefault }) => isDefault)?.name;
+  const settlementOptions = [
+    { value: '', label: defaultSettlementName ? 'Основной: ' + defaultSettlementName : 'Основной расчётный счёт' },
+    ...(settlementAccounts.data ?? []).map(({ id, name }) => ({ value: id, label: name })),
+  ];
   const queueUrl = data.queueDisplayCode ? `${window.location.origin}/q/${data.queueDisplayCode}` : '';
 
   // Зафиксировать координаты кафе из геолокации устройства владельца (нужен HTTPS).
@@ -250,7 +294,8 @@ function CafeSettings() {
                 placeholder="edu-cafe.kg"
               />
             </Field>
-            {isOwner && <CashShiftSettings />}
+            {isOwner && <CashShiftSettings collectionAccountId={form.cashCollectionAccountId}
+              onCollectionAccountChange={(value) => set('cashCollectionAccountId', value)} />}
             <div className="space-y-1 py-2">
               <label className="flex items-center gap-2 font-medium">
                 <input type="checkbox" checked={form.workShiftApprovalRequired}
@@ -351,6 +396,33 @@ function CafeSettings() {
                 {t('QR-оплата включена, но QR-код не загружен — официанты не смогут принять оплату по QR.')}
               </p>
             )}
+            {isOwner && <fieldset className="mt-4 space-y-3 border-t border-border pt-4">
+              <legend className="sr-only">Расчётные счета и комиссия</legend>
+              <h4 className="text-sm font-semibold text-text-primary">Расчётные счета и комиссия</h4>
+              {settlementMethods.map(({ label, account, rate }) => <div key={account} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_96px]">
+                <div className="grid min-w-0 gap-1 text-sm text-text-secondary">
+                  <span>{label} · счёт</span>
+                  <Select className="h-9 w-full" disabled={!settlementAccounts.isSuccess || update.isPending}
+                    value={form[account]} onChange={(value) => set(account, value)} options={settlementOptions}
+                    ariaLabel={label + ' · счёт'} placeholder={settlementAccounts.isPending ? 'Загрузка счетов…' : 'Выберите счёт'} />
+                </div>
+                <label className="grid gap-1 text-sm text-text-secondary">
+                  Комиссия, %
+                  <input className="input h-9 w-full" inputMode="decimal" maxLength={8} aria-label={label + ' · комиссия, %'}
+                    aria-invalid={(rate === 'cardProcessingFeeRate' ? cardFee === null : qrFee === null) || undefined}
+                    aria-describedby="payment-processing-fee-help"
+                    value={form[rate]} onChange={(event) => set(rate, event.target.value)} />
+                </label>
+              </div>)}
+              {settlementAccounts.isError && <p role="alert" className="text-xs text-danger">
+                Не удалось загрузить счета. <button type="button" className="underline" onClick={() => void settlementAccounts.refetch()}>Повторить</button>
+              </p>}
+              <p id="payment-processing-fee-help" className={validFees ? 'text-xs text-text-muted' : 'text-xs text-danger'}>
+                {validFees
+                  ? 'Счёт и ставка фиксируются при открытии смены. При закрытии комиссия с оплат за вычетом возвратов этой смены учитывается как расход по счёту оплаты. 0% отключает комиссию.'
+                  : 'Введите ставку от 0 до 100% с точностью до четырёх знаков после запятой.'}
+              </p>
+            </fieldset>}
           </div>
 
           {/* QR-оплата */}
@@ -527,7 +599,7 @@ function CafeSettings() {
         <button
           type="button"
           onClick={() => void saveSettings()}
-          disabled={!dirty || update.isPending}
+          disabled={!dirty || !validFees || update.isPending}
           className="btn-primary h-10 rounded-lg px-5 text-sm font-semibold disabled:opacity-50"
         >
           {update.isPending ? t('Сохраняем…') : t('Сохранить изменения')}

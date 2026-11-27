@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { OrderItemStatus, OrderStatus, Prisma } from '@prisma/client';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { defaultCategoryStation, lockStationRouting } from '../kitchen/preparation-stations';
 import { OrdersService } from '../orders/orders.service';
+import { visibleMenuCategory, visibleMenuDish } from '../categories/menu-visibility';
 import { orderInclude } from '../orders/order.helpers';
 import { setCafeId } from '../tenant/tenant-context';
 import { assertCafeActive } from '../platform/cafe-status';
@@ -73,7 +74,7 @@ export class DeliveryIntegrationService {
   /** Меню с POS-id: внешний клиент обязан отправлять именно эти dishId/variantId. */
   async getMenu() {
     const categories = await this.prisma.category.findMany({
-      where: { isActive: true },
+      where: visibleMenuCategory,
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       select: {
         id: true,
@@ -81,7 +82,7 @@ export class DeliveryIntegrationService {
         sortOrder: true,
         prepStation: true,
         dishes: {
-          where: { isActive: true },
+          where: { isActive: true, archivedAt: null },
           orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
           select: {
             id: true,
@@ -152,18 +153,18 @@ export class DeliveryIntegrationService {
       const prepStation = await defaultCategoryStation(tx);
       for (const incomingCategory of dto.categories) {
         const categoryName = incomingCategory.name.trim();
-        const existingCategory = await tx.category.findFirst({
-          where: {
-            OR: [
-              { id: incomingCategory.id },
-              { name: { equals: categoryName, mode: 'insensitive' } },
-            ],
-          },
+        const categoryById = await tx.category.findUnique({ where: { id: incomingCategory.id } });
+        const existingCategory = categoryById ?? await tx.category.findFirst({
+          where: { name: { equals: categoryName, mode: 'insensitive' } },
+          orderBy: [{ archivedAt: { sort: 'desc', nulls: 'first' } }, { id: 'asc' }],
         });
+        if (existingCategory?.archivedAt) {
+          throw new ConflictException(`Сначала восстановите категорию «${existingCategory.name}» из корзины`);
+        }
         const category = existingCategory
           ? await tx.category.update({
               where: { id: existingCategory.id },
-              data: { name: categoryName, sortOrder: incomingCategory.sortOrder, isActive: true },
+              data: { name: categoryName, sortOrder: incomingCategory.sortOrder },
             })
           : await tx.category.create({
               data: {
@@ -179,14 +180,14 @@ export class DeliveryIntegrationService {
 
         for (const incomingProduct of incomingCategory.products) {
           const productName = incomingProduct.name.trim();
-          const existingProduct = await tx.dish.findFirst({
-            where: {
-              OR: [
-                { id: incomingProduct.id },
-                { name: { equals: productName, mode: 'insensitive' } },
-              ],
-            },
+          const productById = await tx.dish.findUnique({ where: { id: incomingProduct.id } });
+          const existingProduct = productById ?? await tx.dish.findFirst({
+            where: { name: { equals: productName, mode: 'insensitive' } },
+            orderBy: [{ archivedAt: { sort: 'desc', nulls: 'first' } }, { id: 'asc' }],
           });
+          if (existingProduct?.archivedAt) {
+            throw new ConflictException(`Сначала восстановите позицию «${existingProduct.name}» из корзины`);
+          }
           const description = [
             incomingProduct.description.trim(),
             incomingProduct.composition.trim()
@@ -200,7 +201,6 @@ export class DeliveryIntegrationService {
             imageUrl: incomingProduct.imageUrl.trim() || null,
             price: new Prisma.Decimal(incomingProduct.price),
             isAvailable: incomingProduct.available,
-            isActive: true,
             sortOrder: incomingProduct.sortOrder,
             isWeighted: incomingProduct.soldByWeight,
             weightedMeasure: 'weight',
@@ -242,7 +242,7 @@ export class DeliveryIntegrationService {
 
   async getStopList() {
     const dishes = await this.prisma.dish.findMany({
-      where: { isActive: true, isAvailable: false },
+      where: { ...visibleMenuDish, isAvailable: false },
       orderBy: { name: 'asc' },
       select: { id: true, categoryId: true, name: true, updatedAt: true },
     });

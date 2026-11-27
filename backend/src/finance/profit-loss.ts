@@ -20,6 +20,7 @@ export async function readProfitLoss(db: Prisma.TransactionClient, cafeId: strin
       LEFT JOIN writeoff_reasons r ON r.cafe_id = d.cafe_id AND r.id = d.writeoff_reason_id
       LEFT JOIN settings s ON s.cafe_id = m.cafe_id
       WHERE m.cafe_id = ${cafeId} AND m.source_type IN ('inventory', 'writeoff') AND m.change <> 0
+        AND (m.source_type <> 'writeoff' OR d.deleted_at IS NULL)
         AND m.created_at >= (${bounds.from} AT TIME ZONE 'UTC') AND m.created_at < (${bounds.to} AT TIME ZONE 'UTC')
       GROUP BY 1`,
     db.$queryRaw<{ kind: string; category: string; amount: Prisma.Decimal }[]>`

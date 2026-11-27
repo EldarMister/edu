@@ -61,6 +61,7 @@ export function CategoryDirectory({ categories, employees, positions, search, ki
       { key: 'access', label: 'Дополнительный доступ' },
     ]} reportActions={false} filters={filters} tools={add}
       rows={flatten(null, 0).map(({ category, depth, hasChildren, open }) => {
+        const automaticFee = category.systemKey === 'payment-processing-fees';
         const delegates = [
           ...category.positionIds.map((id) => positionNames.get(id)), ...category.userIds.map((id) => employeeNames.get(id)),
         ].filter(Boolean);
@@ -74,7 +75,7 @@ export function CategoryDirectory({ categories, employees, positions, search, ki
               : <span className="finance-category-expander" aria-hidden="true">{hasChildren && '⌄'}</span>}{category.name}
           </span> },
           type: { value: categoryType[category.kind] },
-          pnl: { value: category.showInProfitLoss !== false ? 'Да' : 'Нет', display: edit && <button type="button" role="switch"
+          pnl: { value: category.showInProfitLoss !== false ? 'Да' : 'Нет', display: edit && !automaticFee && <button type="button" role="switch"
             aria-label={'Отображать в P&L — ' + category.name} aria-checked={category.showInProfitLoss !== false}
             disabled={setCategoryVisibility.isPending} className="finance-category-switch"
             onClick={() => setCategoryVisibility.mutate({ id: category.id, showInProfitLoss: category.showInProfitLoss === false })}><span /></button> },
@@ -85,7 +86,7 @@ export function CategoryDirectory({ categories, employees, positions, search, ki
           access: { value: access, display: <span className="text-text-secondary">{access}</span> },
         }, action: edit && <div className="flex items-center justify-end gap-2">
           <RowIconButton icon="edit" label={'Редактировать ' + category.name} onClick={() => edit(category.id)} />
-          <RowActionMenu label={category.name} action="Удалить" onAction={() => setRemoving(category)} />
+          {!automaticFee && <RowActionMenu label={category.name} action="Удалить" onAction={() => setRemoving(category)} />}
         </div> };
       })} empty="Категории транзакций не найдены" />
     {removing && <CategoryRemovalDialog key={removing.id} category={removing} categories={categories} onClose={() => setRemoving(null)} />}

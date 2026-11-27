@@ -30,7 +30,7 @@ export async function recordRefundReceipts(
     const custody = cash ? await refundCashCustody(tx, sale, amount, remainingByDay) : new Prisma.Decimal(0);
     const ledgerAmount = amount.sub(custody);
     const base = {
-      cafeId, actorId, kind: 'refund' as const, sourceKey: 'refund:' + refundId + ':' + index,
+      cafeId, actorId, kind: 'refund' as const, sourceKey: 'refund:' + refundId + ':' + index, paymentMethod: part.method,
       occurredAt: shift && now < shift.openedAt ? shift.openedAt : now, note: 'Возврат по заказу ' + orderNumber,
     };
     if (!ledgerAmount.isZero()) {

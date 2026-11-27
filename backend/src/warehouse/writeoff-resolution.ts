@@ -34,7 +34,8 @@ export function readWriteoffSnapshot(value: Prisma.JsonValue | null): WriteoffSn
 
 /** Caller holds the shared recipe graph lock before any ingredient locks. */
 export async function resolveWriteoffSources(tx: Prisma.TransactionClient, warehouse: WarehouseLocation,
-  inputs: WriteoffSourceLineDto[], requireSignatures = false, allowEmpty = false, savedSnapshot?: WriteoffSnapshot | null, effectiveAt?: Date | null): Promise<WriteoffSnapshot> {
+  inputs: WriteoffSourceLineDto[], requireSignatures = false, allowEmpty = false, savedSnapshot?: WriteoffSnapshot | null,
+  effectiveAt?: Date | null, preserveMatching = false): Promise<WriteoffSnapshot> {
   if (!Array.isArray(inputs) || (!allowEmpty && !inputs.length) || inputs.length > 200) throw new BadRequestException('Добавьте продукты для списания');
   if (new Set(inputs.map((line) => line.sourceLineId)).size !== inputs.length) throw new BadRequestException('Строка списания указана несколько раз');
   const resolver = new RecipeResolver(tx, { effectiveAt, allowInactive: !!effectiveAt });
@@ -44,6 +45,18 @@ export async function resolveWriteoffSources(tx: Prisma.TransactionClient, wareh
   const lines: WriteoffSourceLine[] = [];
   for (const input of inputs) {
     if (!input.sourceLineId?.trim() || !Number.isFinite(input.quantity) || input.quantity <= 0) throw new BadRequestException('Укажите продукт и количество больше нуля');
+    const previousLine = previousLines.get(input.sourceLineId);
+    if (preserveMatching && previousLine && previousLine.kind === input.kind && previousLine.sourceId === input.sourceId &&
+      previousLine.variantId === input.variantId && previousLine.quantity === input.quantity &&
+      previousLine.unit === normalizeUnit(input.unit ?? previousLine.unit) && previousLine.packageId === input.packageId &&
+      (!input.packageId || input.packageSnapshotLineId === input.sourceLineId)) {
+      if ((requireSignatures && !input.recipeSignature) || (input.recipeSignature && input.recipeSignature !== previousLine.recipeSignature)) {
+        throw new ConflictException('Состав изменился. Обновите предварительный расчёт');
+      }
+      const details = input.details === undefined ? previousLine.details : input.details?.trim() || undefined;
+      lines.push({ ...previousLine, details });
+      continue;
+    }
     let name: string, unit: UnitCode, recipe: Prisma.InputJsonObject;
     let pack: WriteoffPackageSnapshot | undefined;
     if (input.packageSnapshotLineId) {
@@ -119,7 +132,6 @@ export async function resolveWriteoffSources(tx: Prisma.TransactionClient, wareh
     if ((requireSignatures && !input.recipeSignature) || (input.recipeSignature && input.recipeSignature !== signature)) {
       throw new ConflictException('Состав изменился. Обновите предварительный расчёт');
     }
-    const previousLine = previousLines.get(input.sourceLineId);
     const details = input.details === undefined && previousLine?.kind === input.kind && previousLine.sourceId === input.sourceId &&
       previousLine.variantId === input.variantId ? previousLine.details : input.details?.trim();
     lines.push({ sourceLineId: input.sourceLineId, kind: input.kind, sourceId: input.sourceId, variantId: input.variantId,

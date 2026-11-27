@@ -197,6 +197,7 @@ test('PostgreSQL: shift settlement posts sales and both collection legs once and
     const { summary } = await shifts.details(cafeId, arithmetic.id);
     assert.deepEqual(summary, {
       openingAmount: 1000, openingExpectedAmount: 0, openingDifference: 1000, cashSales: 5000, cashRefunds: 500, noncashSales: 300, noncashRefunds: 0,
+      processingFees: 0,
       deposits: 200, expenses: 700, collections: 4000, otherTransfers: 0, adjustments: 0,
       expectedAmount: 1000, actualAmount: null, difference: null,
     });

@@ -21,6 +21,7 @@ export interface FinanceCategory {
   id: string;
   name: string;
   kind: CategoryKind;
+  systemKey?: string | null;
   parentId: string | null;
   showOnPos?: boolean;
   showInProfitLoss?: boolean;
@@ -103,6 +104,7 @@ export interface CashShift {
   actualAmount: number | null;
   difference: number | null;
   collectionAmount: number;
+  collectionAccountName?: string | null;
   openingDifference: number;
   number: number;
 }

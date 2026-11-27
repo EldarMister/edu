@@ -1,5 +1,5 @@
 import { ALL_UNITS, type UnitCode } from './units';
-import type { StockDocumentItem } from './stock-documents-api';
+import type { StockDocumentDetails, StockDocumentItem } from './stock-documents-api';
 import type { WriteoffSourceInput, WriteoffSourceLine } from './writeoff-api';
 import type { PackageUnit } from './extended-api';
 
@@ -80,6 +80,42 @@ export function writeoffDraftLines(sourceLines: WriteoffSourceLine[] = [], items
     ...(line.packageId ? { packageId: line.packageId, packageSnapshotLineId: line.sourceLineId, packageName: line.packageName,
       packageQuantity: line.packageQuantity, packageUnit: line.packageUnit, packageFactor: line.packageFactor } : {}) }));
   if (items.length) return items.map((item) => ({ sourceLineId: crypto.randomUUID(), kind: 'ingredient', sourceId: item.ingredientId,
-    quantity: item.quantity == null ? '' : String(item.quantity), unit: ALL_UNITS.find((unit) => unit.label === item.unit || unit.code === item.unit)?.code ?? 'pcs', name: item.name }));
+    quantity: item.quantity == null ? '' : String(item.quantity), unit: stockItemUnit(item.unit), name: item.name }));
   return [emptyWriteoffLine()];
+}
+
+function stockItemUnit(value: string) {
+  return ALL_UNITS.find((unit) => unit.label === value || unit.code === value)?.code ?? 'pcs';
+}
+
+/** A historical amount belongs to the stored rows. A comment does not change
+ * stock, but the current warehouse balances cannot price a changed document. */
+export function recordedWriteoffAmounts(
+  document: Pick<StockDocumentDetails, 'sourceLines' | 'items'>,
+  rows: DraftWriteoffLine[],
+  stockContextChanged: boolean,
+) {
+  if (stockContextChanged) return null;
+  const entered = rows.filter((row) => row.sourceId || row.quantity || row.imported);
+  if (document.sourceLines?.length) {
+    const saved = new Map(document.sourceLines.map((line) => [line.sourceLineId, line]));
+    if (entered.length !== saved.size || new Set(entered.map((row) => row.sourceLineId)).size !== entered.length) return null;
+    const amounts = new Map<string, number | null>();
+    for (const row of entered) {
+      const line = saved.get(row.sourceLineId);
+      if (!line || !sameWriteoffSource(row, line)) return null;
+      amounts.set(row.sourceLineId, line.total);
+    }
+    return amounts;
+  }
+  const saved = new Map(document.items.map((item) => [item.ingredientId, item]));
+  if (entered.length !== saved.size || new Set(entered.map((row) => row.sourceId)).size !== entered.length) return null;
+  const amounts = new Map<string, number | null>();
+  for (const row of entered) {
+    const item = saved.get(row.sourceId);
+    if (!item || row.kind !== 'ingredient' || row.packageId || !row.quantity.trim() ||
+      row.unit !== stockItemUnit(item.unit) || Number(row.quantity) !== item.quantity) return null;
+    amounts.set(row.sourceLineId, item.value == null ? null : Math.abs(item.value));
+  }
+  return amounts;
 }

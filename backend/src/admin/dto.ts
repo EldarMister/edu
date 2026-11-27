@@ -122,7 +122,7 @@ export class UpdateCategoryDto extends CategorySettingsDto {
 /** Удаление категории: что сделать с блюдами внутри. */
 export class DeleteCategoryDto {
   // move — перенести блюда в другую категорию; delete — удалить вместе с блюдами.
-  @IsOptional() @IsString()
+  @IsOptional() @IsIn(['move', 'delete'])
   strategy?: 'move' | 'delete';
 
   @IsOptional() @IsString()

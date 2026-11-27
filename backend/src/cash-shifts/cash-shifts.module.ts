@@ -10,6 +10,7 @@ import { hasPermission, resolvePermissions } from '../common/permissions';
 import { projectWorkspaceUser, type Workspace } from '../common/workspace-access';
 import { canManageFinance, canViewFinance } from '../finance/finance-access';
 import { assertDrawerBalance, ensureCollectionAccount, ensureFinanceAccounts, lockFinance } from '../finance/finance-ledger';
+import { postPaymentProcessingFees, processingFeeSourcePrefix } from '../finance/payment-processing-fees';
 import { PrismaService } from '../prisma/prisma.service';
 import { SERVER_EVENTS } from '../realtime/events';
 import { EventsGateway } from '../realtime/events.gateway';
@@ -119,7 +120,10 @@ const openKey = 'cash-open:';
 const closeKey = 'cash-close:';
 
 export function cashShiftEnabled(tx: Prisma.TransactionClient, cafeId: string) {
-  return tx.settings.findFirst({ where: { cafeId }, select: { cashShiftsEnabled: true, cashShiftRequireClosedOrders: true } });
+  return tx.settings.findFirst({ where: { cafeId }, select: {
+    cashShiftsEnabled: true, cashShiftRequireClosedOrders: true, cardProcessingFeeRate: true, qrProcessingFeeRate: true,
+    cardSettlementAccountId: true, qrSettlementAccountId: true, cashCollectionAccountId: true,
+  } });
 }
 
 async function drawerDelta(tx: Prisma.TransactionClient, shift: CashShift) {
@@ -131,8 +135,10 @@ async function drawerDelta(tx: Prisma.TransactionClient, shift: CashShift) {
 }
 
 function serialize(shift: CashShift, expected = shift.expectedAmount ?? shift.openingAmount) {
+  const { cardProcessingFeeRate: _cardRate, qrProcessingFeeRate: _qrRate,
+    cardSettlementAccountId: _cardAccount, qrSettlementAccountId: _qrAccount, collectionAccountId: _collectionAccount, ...visible } = shift;
   return {
-    ...shift,
+    ...visible,
     openingAmount: shift.openingAmount.toNumber(),
     expectedAmount: expected.toNumber(),
     actualAmount: shift.actualAmount?.toNumber() ?? null,
@@ -237,7 +243,8 @@ async function storeOperation(db: Db, shift: CashShift, actorId: string, input: 
   const { cafeId, id: cashShiftId, accountId } = shift;
   const transfer = input.kind === 'collection';
   const destination = transfer
-    ? previous?.counterpartyAccountId ?? (await ensureCollectionAccount(db, cafeId)).id : null;
+    ? previous?.counterpartyAccountId ?? shift.collectionAccountId ?? (await ensureCollectionAccount(db, cafeId)).id : null;
+  if (destination === accountId) throw new ConflictException('Счёт инкассации должен отличаться от кассы');
   const amount = new Prisma.Decimal(input.amount).mul(input.kind === 'income' ? 1 : -1);
   const data = { kind: transfer ? 'transfer' as const : input.kind as 'income' | 'expense',
     actorId: authorId, amount, categoryId, counterpartyAccountId: destination, occurredAt, dealDate, note: input.note?.trim() || null };
@@ -276,22 +283,34 @@ export class CashShiftsService {
         }) : [],
       ]);
       const shifts = [...(current ? [current] : []), ...history];
-      const staff = await tx.user.findMany({ where: { cafeId, id: { in: [...new Set(shifts.flatMap((shift) =>
-        [shift.openedById, ...(shift.closedById ? [shift.closedById] : [])]))] } }, select: { id: true, name: true } });
+      const [staff, collectionAccounts] = await Promise.all([
+        tx.user.findMany({ where: { cafeId, id: { in: [...new Set(shifts.flatMap((shift) =>
+          [shift.openedById, ...(shift.closedById ? [shift.closedById] : [])]))] } }, select: { id: true, name: true } }),
+        tx.financeAccount.findMany({
+          where: { cafeId, OR: [{ id: { in: shifts.flatMap(({ collectionAccountId }) => collectionAccountId ? [collectionAccountId] : []) } },
+            { isCollection: true }] },
+          select: { id: true, name: true, isCollection: true },
+        }),
+      ]);
       const names = new Map(staff.map(({ id, name }) => [id, name]));
+      const collectionNames = new Map(collectionAccounts.map(({ id, name }) => [id, name]));
+      const legacyCollectionName = collectionAccounts.find(({ isCollection }) => isCollection)?.name ?? null;
       const shiftsById = new Map(shifts.map((shift) => [shift.id, shift]));
       const reconciliations = await tx.financeEntry.findMany({
         where: { cafeId, OR: [{ cashShiftId: { in: [...shiftsById.keys()] }, kind: 'transfer' },
           { sourceKey: { in: shifts.map(({ id }) => openKey + id) } }] },
-        select: { id: true, accountId: true, kind: true, cashShiftId: true, sourceKey: true, amount: true,
+        select: { id: true, accountId: true, counterpartyAccountId: true, kind: true, cashShiftId: true, sourceKey: true, amount: true,
           counterparty: { select: { isCollection: true } } },
       });
       const reversed = new Set(reconciliations.flatMap(({ sourceKey }) => sourceKey?.startsWith('void:') ? [sourceKey.slice(5)] : []));
       const collected = new Map<string, Prisma.Decimal>();
       const openings = new Map<string, Prisma.Decimal>();
-      for (const { id, accountId, cashShiftId, sourceKey, kind, amount, counterparty } of reconciliations) {
+      for (const { id, accountId, counterpartyAccountId, cashShiftId, sourceKey, kind, amount, counterparty } of reconciliations) {
         if (sourceKey?.startsWith(openKey)) openings.set(sourceKey.slice(openKey.length), amount);
-        if (kind === 'transfer' && counterparty?.isCollection && cashShiftId && shiftsById.get(cashShiftId)?.accountId === accountId
+        const shift = cashShiftId ? shiftsById.get(cashShiftId) : undefined;
+        const isCollection = counterparty?.isCollection || sourceKey?.startsWith(posKey)
+          || (counterpartyAccountId && counterpartyAccountId === shift?.collectionAccountId);
+        if (kind === 'transfer' && isCollection && cashShiftId && shift?.accountId === accountId
           && amount.lt(0) && !sourceKey?.startsWith('void:') && !reversed.has(id)) {
           collected.set(cashShiftId, (collected.get(cashShiftId) ?? new Prisma.Decimal(0)).sub(amount));
         }
@@ -304,6 +323,7 @@ export class CashShiftsService {
         ...shift, openedByName: names.get(shift.openedById) ?? null,
         closedByName: shift.closedById ? names.get(shift.closedById) ?? null : null,
         collectionAmount: collected.get(shift.id)?.toNumber() ?? 0,
+        collectionAccountName: collectionNames.get(shiftsById.get(shift.id)?.collectionAccountId ?? '') ?? legacyCollectionName,
         ...openingReconciliation(shift.openingAmount, openings.get(shift.id)),
         number,
       });
@@ -330,9 +350,10 @@ export class CashShiftsService {
             { cashShiftId: null, account: { type: 'noncash' }, kind: { in: ['sale', 'refund'] },
               occurredAt: { gte: shift.openedAt, lte: shift.closedAt ?? new Date() } },
           ] },
-          select: { id: true, accountId: true, actorId: true, occurredAt: true, dealDate: true, kind: true, sourceKey: true,
+          select: { id: true, accountId: true, counterpartyAccountId: true, actorId: true, occurredAt: true, dealDate: true, kind: true, sourceKey: true,
             note: true, amount: true, category: { select: { id: true, name: true } },
-            counterparty: { select: { isCollection: true } } },
+            account: { select: { name: true } },
+            counterparty: { select: { name: true, isCollection: true } } },
         }),
         db.cashShiftDeletedOperation.findMany({
           where: { cafeId, cashShiftId: id },
@@ -346,12 +367,17 @@ export class CashShiftsService {
       }, select: { id: true, name: true } })).map(({ id, name }) => [id, name]));
       const active = rows.filter(({ id: entryId, accountId, kind, sourceKey }) =>
         !sourceKey?.startsWith('void:') && !reversed.has(entryId)
-        && (accountId === shift.accountId || kind === 'sale' || kind === 'refund'))
-        .map(({ category, counterparty, accountId, actorId, sourceKey, ...row }) => ({
+        && (accountId === shift.accountId || kind === 'sale' || kind === 'refund' || sourceKey?.startsWith(processingFeeSourcePrefix)))
+        .map(({ category, counterparty, account, accountId, counterpartyAccountId, actorId, sourceKey, ...row }) => ({
           ...row, category: category?.name ?? null, categoryId: category?.id ?? null,
+          accountName: account.name,
+          counterpartyName: counterparty?.name ?? null,
           actorId, actorName: actorId ? names.get(actorId) ?? null : null,
           cash: accountId === shift.accountId, editable: !!sourceKey?.startsWith(posKey),
-          collection: row.kind === 'transfer' && row.amount.lt(0) && counterparty?.isCollection === true,
+          processingFee: !!sourceKey?.startsWith(processingFeeSourcePrefix),
+          collection: row.kind === 'transfer' && accountId === shift.accountId && row.amount.lt(0)
+            && (counterparty?.isCollection === true || sourceKey?.startsWith(posKey) === true
+              || (!!counterpartyAccountId && counterpartyAccountId === shift.collectionAccountId)),
           reconciliation: sourceKey?.startsWith(openKey) ? 'open' : sourceKey?.startsWith(closeKey) ? 'close' : null,
         }));
       const journal = active.filter(({ reconciliation }) => !reconciliation);
@@ -367,6 +393,7 @@ export class CashShiftsService {
         cashRefunds: sum((row) => row.cash && row.kind === 'refund', true),
         noncashSales: sum((row) => !row.cash && row.kind === 'sale'),
         noncashRefunds: sum((row) => !row.cash && row.kind === 'refund', true),
+        processingFees: sum((row) => row.processingFee, true),
         deposits: sum((row) => row.cash && row.kind === 'income'),
         expenses: sum((row) => row.cash && (row.kind === 'expense' || row.kind === 'salary'), true),
         collections: sum((row) => row.collection, true),
@@ -378,7 +405,7 @@ export class CashShiftsService {
       };
       const movements = [...active.map((row) => ({ ...row, amount: row.amount.toNumber() })), ...deleted.map((row) => ({
         ...row, amount: row.amount.toNumber(), categoryId: null, cash: true, editable: false,
-        collection: row.kind === 'transfer', reconciliation: null,
+        accountName: null, counterpartyName: null, collection: row.kind === 'transfer', reconciliation: null,
       }))].sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime() || a.id.localeCompare(b.id));
       return { summary, movements };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
@@ -540,16 +567,30 @@ export class CashShiftsService {
       if (!canWriteCashShifts(projected)) {
         throw new ForbiddenException('Нет доступа к кассовым сменам');
       }
-      if (!(await cashShiftEnabled(tx, cafeId))?.cashShiftsEnabled) throw new BadRequestException('Кассовые смены выключены');
+      const policy = await cashShiftEnabled(tx, cafeId);
+      if (!policy?.cashShiftsEnabled) throw new BadRequestException('Кассовые смены выключены');
       if (await tx.cashShift.findFirst({ where: { cafeId, closedAt: null } })) {
         throw new ConflictException('Кассовая смена уже открыта');
       }
-      const { cash } = await ensureFinanceAccounts(tx, cafeId);
-      await ensureCollectionAccount(tx, cafeId);
+      const { cash, noncash } = await ensureFinanceAccounts(tx, cafeId);
+      const configuredCollection = policy.cashCollectionAccountId ? await tx.financeAccount.findFirst({
+        where: { cafeId, id: policy.cashCollectionAccountId, type: 'cash', isDefault: false, archivedAt: null },
+        select: { id: true },
+      }) : null;
+      if (policy.cashCollectionAccountId && !configuredCollection) {
+        throw new ConflictException('Выберите действующий счёт для инкассации в настройках');
+      }
+      const collectionAccount = configuredCollection ?? await ensureCollectionAccount(tx, cafeId);
       const movement = await tx.financeEntry.aggregate({ where: { cafeId, accountId: cash.id, pendingCashShift: false, cashCustodianId: null }, _sum: { amount: true } });
       const bookBalance = cash.openingBalance.add(movement._sum.amount ?? 0);
       const openingAmount = new Prisma.Decimal(amount);
-      const shift = await tx.cashShift.create({ data: { cafeId, accountId: cash.id, openedById: actorId, openingAmount, openedAt: new Date() } });
+      const shift = await tx.cashShift.create({ data: {
+        cafeId, accountId: cash.id, openedById: actorId, openingAmount, openedAt: new Date(),
+        cardProcessingFeeRate: policy.cardProcessingFeeRate, qrProcessingFeeRate: policy.qrProcessingFeeRate,
+        cardSettlementAccountId: policy.cardSettlementAccountId ?? noncash.id,
+        qrSettlementAccountId: policy.qrSettlementAccountId ?? noncash.id,
+        collectionAccountId: collectionAccount.id,
+      } });
       const difference = openingAmount.sub(bookBalance);
       await saveAdjustment(tx, shift, actorId, 'open', difference);
       return serialize(shift);
@@ -587,6 +628,7 @@ export class CashShiftsService {
       const updated = await tx.cashShift.update({ where: { id: shift.id },
         data: { closedAt, closedById: actorId, expectedAmount, actualAmount, difference, closingComment, closeEmployeeShifts } });
       await saveAdjustment(tx, updated, actorId, 'close', difference);
+      await postPaymentProcessingFees(tx, updated, actorId, closedAt);
       await tx.financeEntry.updateMany({ where: { cafeId, cashShiftId: shift.id, pendingCashShift: true }, data: { pendingCashShift: false } });
       return { shift: serialize(updated), closedShifts };
     });

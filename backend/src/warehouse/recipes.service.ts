@@ -93,14 +93,14 @@ export class RecipesService {
   async preview(dto: RecipePreviewDto) {
     return this.prisma.$transaction(async (tx) => {
       const cafeId = getCafeId() ?? null;
-      const dish = dto.dishId ? await tx.dish.findUnique({ where: { id: dto.dishId, cafeId }, include: {
+      const dish = dto.dishId ? await tx.dish.findUnique({ where: { id: dto.dishId, cafeId, archivedAt: null }, include: {
         variants: true, tax: true, recipeItems: true,
       } }) : null;
       if (dto.dishId && !dish) throw new NotFoundException('Блюдо не найдено');
       const categoryId = dto.categoryId ?? dish?.categoryId;
       if (!categoryId) throw new BadRequestException('Выберите категорию блюда');
       const category = categoryId === MAIN_SCREEN ? { prepStation: 'none', tax: null }
-        : await tx.category.findUnique({ where: { id: categoryId, cafeId }, include: { tax: true } });
+        : await tx.category.findUnique({ where: { id: categoryId, cafeId, archivedAt: null }, include: { tax: true } });
       if (!category) throw new NotFoundException('Категория не найдена');
       if (dto.prepStation != null) await assertAssignableStation(tx, dto.prepStation);
       const station = (dto.prepStation === undefined ? dish?.prepStation : dto.prepStation) ?? category.prepStation;

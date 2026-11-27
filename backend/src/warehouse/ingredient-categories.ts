@@ -1,7 +1,8 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { getCafeId } from '../tenant/tenant-context';
 import { lockIngredients } from './stock-lock';
+import { warehouseBalances } from './warehouse-location';
 
 const ingredientScope = { isPrepared: false, kind: { in: ['raw', 'consumable'] } } satisfies Prisma.IngredientWhereInput;
 
@@ -39,6 +40,39 @@ export async function listIngredientCategories(db: Prisma.TransactionClient) {
   return Array.from(categories, ([name, count]) => ({ name, count }));
 }
 
+export async function listIngredientCategoriesWithStock(db: Prisma.TransactionClient) {
+  const scope = categoryScope();
+  const [categories, ingredients] = await Promise.all([
+    listIngredientCategories(db),
+    db.ingredient.findMany({
+      where: { ...scope, isActive: true, category: { not: null } },
+      select: { id: true, category: true, unitType: true, stock: true, avgCost: true, valuationKnown: true },
+    }),
+  ]);
+  const balances = await warehouseBalances(db, null, ingredients);
+  const totals = new Map(categories.map(({ name }) => [name, {
+    stock: { mass: new Prisma.Decimal(0), volume: new Prisma.Decimal(0), count: new Prisma.Decimal(0) },
+    value: new Prisma.Decimal(0),
+    complete: true,
+  }]));
+  for (const { id, category, unitType } of ingredients) {
+    const total = category == null ? undefined : totals.get(category);
+    if (!total) continue;
+    const balance = balances.get(id)!;
+    total.stock[unitType] = total.stock[unitType].add(balance.stock);
+    total.value = total.value.add(balance.knownStockValue);
+    total.complete &&= balance.stockValueKnown;
+  }
+  return categories.map((category) => {
+    const total = totals.get(category.name)!;
+    return {
+      ...category,
+      stockByUnit: { kg: total.stock.mass.div(1000).toNumber(), l: total.stock.volume.div(1000).toNumber(), pcs: total.stock.count.toNumber() },
+      stockValue: total.complete ? total.value.toNumber() : null,
+    };
+  });
+}
+
 export async function saveIngredientCategory(db: Prisma.TransactionClient, input: string, from?: string) {
   const name = input.trim();
   if (!name) throw new BadRequestException('Укажите название категории');
@@ -58,9 +92,15 @@ export async function saveIngredientCategory(db: Prisma.TransactionClient, input
   return { name, count: current?.count ?? 0 };
 }
 
+export function activeIngredientCategoryMembers(db: Prisma.TransactionClient, name: string) {
+  return db.ingredient.findMany({
+    where: { ...categoryScope(), category: name, isActive: true },
+    select: { id: true },
+  });
+}
+
 export async function removeIngredientCategory(db: Prisma.TransactionClient, name: string) {
   const scope = categoryScope();
-  await lockIngredientCategories(db);
   await updateIngredientCategory(db, { ...scope, category: name }, null);
   await db.ingredientCategory.deleteMany({ where: { cafeId: scope.cafeId, name } });
   return { ok: true };

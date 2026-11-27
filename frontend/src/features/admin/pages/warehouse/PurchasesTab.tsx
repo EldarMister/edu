@@ -4,8 +4,11 @@ import { EditorPage, useEditorDirty } from './EditorPage';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
+import { printReport } from '@/lib/report-output';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
+import { IconPrinter } from '../../components/icons';
+import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { useStockDocuments } from './stock-documents-api';
 import { useSuppliers } from './settings-api';
 import { usePackages } from './extended-api';
@@ -14,6 +17,7 @@ import { DocumentProductPicker } from './DocumentProductPicker';
 import { focusDocumentInput } from './document-focus';
 import { StockOperationDateField } from './StockOperationDateField';
 import { PurchaseSettlementPanel } from './PurchaseSettlementPanel';
+import { SupplierForm } from './SupplierForm';
 import { PurchaseInvoiceImport } from './PurchaseInvoiceImport';
 import { invoiceRows, invoiceUnit, type InvoiceLine, type InvoicePreview } from './invoice-import-values';
 import { inventoryLocalTime, inventoryTimeDisplay, inventoryTimingError, inventoryTimingFor, inventoryTimingValue } from './inventory-time';
@@ -154,12 +158,18 @@ function PurchaseForm({
   const { can, canEditSection } = usePermissions();
   const costs = can('actions.warehouseCosts');
   const canReceive = canEditSection('warehouse') && can('actions.warehouseReceive') && costs;
+  const canCreateSupplier = canEditSection('warehouse') && can('actions.warehouseSettings');
   const [requestKey] = useState(() => crypto.randomUUID());
   const [location, setLocation] = useState(purchase?.warehouseId ?? warehouseId);
   const suppliers = useSuppliers();
-  const [supplier, setSupplier] = useState(
-    purchase && (purchase.supplierId || purchase.supplier !== 'Без поставщика') ? purchase.supplier : '',
-  );
+  const noSupplier = { id: '', name: 'Без поставщика' };
+  const originalSupplier = purchase && (purchase.supplierId || (purchase.supplier && purchase.supplier !== noSupplier.name))
+    ? { id: purchase.supplierId ?? 'legacy-supplier', name: purchase.supplier }
+    : noSupplier;
+  const [supplier, setSupplier] = useState(originalSupplier);
+  const [newSupplierName, setNewSupplierName] = useState<string>();
+  const supplierOptions = [noSupplier, ...(suppliers.data ?? [])];
+  if (!supplierOptions.some(({ id }) => id === originalSupplier.id)) supplierOptions.push(originalSupplier);
   const [initialOperationAt] = useState(() => purchase?.effectiveAt ?? purchase?.postedAt ?? new Date().toISOString());
   const [date, setDate] = useState(() => inventoryLocalTime(purchase?.date ?? initialOperationAt));
   const [separateInvoiceDate, setSeparateInvoiceDate] = useState(() => !!purchase && inventoryLocalTime(purchase.date) !== inventoryLocalTime(initialOperationAt));
@@ -209,7 +219,8 @@ function PurchaseForm({
   const signature = JSON.stringify({ location, supplier, date, separateInvoiceDate, timing, rows, discount, note });
   const initialSignature = useRef(signature);
   const { markSaved } = useEditorDirty(editable && (signature !== initialSignature.current || !dateValid || !timingReady));
-  const previousPriceBefore = correcting ? purchase?.effectiveAt ?? purchase?.date : effectiveAt ?? undefined;
+  const previousPriceBefore = correcting ? purchase?.effectiveAt ?? purchase?.date : effectiveAt ??
+    (separateInvoiceDate ? inventoryTimingValue({ mode: 'past', local: date }, purchase?.date ?? initialOperationAt) ?? undefined : undefined);
   const previousPriceItems = stockEditable && timingReady && location ? rows.map((row) => row.ingredientId) : [];
   const lastPrices = useLastPurchasePrices(previousPriceItems, location, purchase?.id, previousPriceBefore);
   const returns = useStockDocuments(purchase?.warehouseId ?? undefined, 'supplier_return');
@@ -282,21 +293,32 @@ function PurchaseForm({
     }
     const item = byId.get(row.ingredientId);
     const original = purchase?.items?.find((entry) => entry.id === row.key && entry.ingredientId === row.ingredientId);
-    update(row.key, {
-      unit,
-      price: convertPurchasePrice(
-        row.price,
-        purchaseUnitFactor(row.unit, item, packages.data, original),
-        purchaseUnitFactor(unit, item, packages.data, original),
-      ),
-      total: undefined,
-    });
+    const fromFactor = purchaseUnitFactor(row.unit, item, packages.data, original);
+    const toFactor = purchaseUnitFactor(unit, item, packages.data, original);
+    const price = convertPurchasePrice(row.price, fromFactor, toFactor);
+    const count = Number(row.quantity);
+    if (row.sourceName && fromFactor && toFactor && Number.isFinite(count) && count > 0) {
+      // A different unit for a recognized invoice line must keep the amount of stock unchanged.
+      const exact = count * fromFactor / toFactor;
+      const converted = roundPurchaseQuantity(exact);
+      if (!(converted > 0) || Math.abs(exact - converted) > 1e-9) {
+        setError('Для этой фасовки количество из накладной пришлось бы округлить. Выберите другую единицу.');
+        return;
+      }
+      const amount = (row.total ?? row.price).trim() && Number(row.total ?? row.price) >= 0
+        ? purchaseRowTotalText(row) : undefined;
+      const quantity = String(converted);
+      setError('');
+      update(row.key, { unit, quantity, price: amount == null ? price : purchasePriceFromTotal(quantity, amount), total: amount });
+      return;
+    }
+    update(row.key, { unit, price, total: undefined });
   }
   function addInvoice(preview: InvoicePreview, filename: string) {
     const added = invoiceRows(preview.lines, ingredients.data ?? [], taxOptions.data);
     setRows(current => [...current.filter(row => row.ingredientId || row.quantity || row.price || row.total || row.sourceName), ...added]);
     const knownSupplier = suppliers.data?.find(s => s.name.trim().toLocaleLowerCase() === preview.supplier.trim().toLocaleLowerCase());
-    if (!supplier.trim() && knownSupplier) setSupplier(knownSupplier.name);
+    if (!supplier.id && knownSupplier) setSupplier({ id: knownSupplier.id, name: knownSupplier.name });
     if (!separateInvoiceDate && preview.invoiceDate) {
       setSeparateInvoiceDate(true);
       setDate(preview.invoiceDate + 'T' + date.slice(11));
@@ -304,6 +326,45 @@ function PurchaseForm({
     }
     setImported({ filename, preview, entireInvoice: enteredRows.length === 0 });
     setError('');
+  }
+  function printSupply() {
+    const title = purchase ? `Поставка ${purchaseNumber(purchase.number)}${editable ? ' · черновик печати' : ''}` : 'Новая поставка · черновик печати';
+    const operationDate = effectiveAt ?? purchase?.effectiveAt ?? purchase?.postedAt ?? purchase?.date ?? initialOperationAt;
+    const locationName = locations.find((entry) => entry.id === location)?.name ?? '—';
+    const caption = `${inventoryTimeDisplay(operationDate)} · ${locationName} · ${supplier.name}`;
+    const previewHasDiscount = stockEditable && discountAmount > 0;
+    const headings = ['Наименование', 'Фасовка', 'Количество', 'Цена за единицу',
+      previewHasDiscount ? 'Сумма до скидки без налога' : 'Сумма без налога',
+      ...(showTax ? ['Налог', ...(!previewHasDiscount ? ['Сумма с налогом'] : [])] : [])];
+    const data = enteredRows.map((row) => {
+      const item = byId.get(row.ingredientId);
+      const original = purchase?.items?.find((entry) => entry.id === row.key && entry.ingredientId === row.ingredientId);
+      const pack = packages.data?.find((entry) => row.unit === `package:${entry.id}`);
+      const customPack = row.unit.startsWith('pack:') ? item?.purchaseUnits?.[Number(row.unit.slice(5))]?.name ?? item?.purchaseUnit : undefined;
+      const savedPack = original?.packageId && row.unit === `package:${original.packageId}` ? original.packageName : undefined;
+      const unit = savedPack || pack?.name || customPack || (row.unit ? unitLabel(row.unit as UnitCode) : '—');
+      const amount = !stockEditable && original ? original.total : purchaseRowTotal(row);
+      const rate = rateFor(row);
+      const tax = !stockEditable && original ? original.taxAmount ?? 0 : roundPurchaseMoney(amount * rate / 100);
+      const taxName = original?.taxId === row.taxId ? original?.taxName : taxOptions.data?.find((entry) => entry.id === row.taxId)?.name;
+      return [
+        original?.ingredientName ?? item?.name ?? row.sourceName ?? '—', unit,
+        Number(row.quantity).toLocaleString('ru-RU', { maximumFractionDigits: 3 }),
+        formatPurchaseUnitPrice(row.price), balanceMoney(amount),
+        ...(showTax ? [row.taxId ? `${rate}%${taxName ? ` (${taxName})` : ''}` : 'Без налога',
+          ...(!previewHasDiscount ? [balanceMoney(roundPurchaseMoney(amount + tax))] : [])] : []),
+      ];
+    });
+    const summary = [
+      discountAmount > 0 ? `Скидка — ${balanceMoney(discountAmount)}` : '',
+      showTax ? `Налог — ${balanceMoney(taxTotal)}` : '',
+      `Итого — ${balanceMoney(total)}`,
+      !editable && purchase?.debtAmount != null ? `К оплате — ${balanceMoney(purchase.debtAmount)}` : '',
+      note.trim(),
+    ].filter(Boolean).join('\n');
+    if (!printReport(title, caption, headings, data, { title: 'Итого по поставке', text: summary })) {
+      push({ message: 'Разрешите открытие окна печати в браузере.', at: new Date().toISOString() });
+    }
   }
   async function save(complete: boolean, processPayment = false) {
     if (busy || !editable || (stockEditable && !catalogReady) || !dateValid || !date || !timingReady) return;
@@ -320,10 +381,12 @@ function PurchaseForm({
       return;
     }
     try {
+      // Keep the original link and label when editing other fields, even if the supplier is archived.
+      const supplierChange = purchase && supplier.id === originalSupplier.id ? {}
+        : { supplier: supplier.id ? supplier.name : '', supplierId: supplier.id || undefined };
       const body = {
         warehouseId: location,
-        supplier: supplier.trim(),
-        supplierId: suppliers.data?.find((s) => s.name === supplier.trim())?.id,
+        ...supplierChange,
         date: inventoryTimingValue({ mode: 'past', local: date }, purchase?.date ?? initialOperationAt)!,
         ...(timingEditable ? { effectiveAt } : {}),
         note: note.trim(),
@@ -367,9 +430,9 @@ function PurchaseForm({
       };
       const saved = purchase
         ? await mutations.update.mutateAsync({ id: purchase.id,
-          ...(purchase.status === 'completed' && !stockEditable ? { date: body.date, supplier: body.supplier, supplierId: body.supplierId, note: body.note } : body),
+          ...(purchase.status === 'completed' && !stockEditable ? { date: body.date, ...supplierChange, note: body.note } : body),
           expectedUpdatedAt: purchase.updatedAt, complete: purchase.status === 'completed' ? false : complete })
-        : await mutations.create.mutateAsync({ ...body, complete, requestKey });
+        : await mutations.create.mutateAsync({ ...body, supplier: supplier.id ? supplier.name : '', complete, requestKey });
       markSaved();
       push({ type: 'success', at: new Date().toISOString(), message: correcting ? 'Исправления поставки сохранены' : complete ? 'Поставка проведена. Остатки обновлены.' : 'Черновик сохранён. Остатки не изменились.' });
       if (processPayment && onProcessPayment) onProcessPayment(saved.id);
@@ -380,6 +443,11 @@ function PurchaseForm({
   }
   return (
     <div ref={formRef} className="poster-form poster-form--document poster-purchase-form space-y-6">
+      {costs && can('actions.exportReports') && <WorkspaceHeaderActions>
+        <button type="button" className="btn-ghost btn-md text-primary"
+          disabled={busy || !enteredRows.length || (stockEditable && (!catalogReady || !dateValid || !timingReady || !!locationError || !!discountError || !!rowErrors.size))}
+          onClick={printSupply}><IconPrinter />Печать</button>
+      </WorkspaceHeaderActions>}
       {!costs && (
         <p role="alert" className="rounded-lg bg-warning/10 p-3 text-sm">
           Для приёмки товара с закупочными ценами нужен доступ к себестоимости. Обратитесь к владельцу.
@@ -403,23 +471,29 @@ function PurchaseForm({
         </DocumentField>}
         <DocumentField label="Поставщик">
           {editable ? (
-            <>
-              <DocumentProductPicker
-                label="Поставщик"
-                placeholder="Без поставщика"
-                allowCustomValue
-                value={supplier}
-                options={(suppliers.data ?? []).map((entry) => ({ id: entry.name, name: entry.name }))}
-                onChange={setSupplier}
-                disabled={busy}
-              />
-              {suppliers.isPending && <p role="status" className="mt-1 text-xs text-text-muted">Загрузка поставщиков. Можно ввести название вручную.</p>}
-              {suppliers.isError && <p role="alert" className="mt-1 text-xs text-text-muted">Список поставщиков не загрузился. Введите название или <button type="button" className="text-primary" onClick={() => void suppliers.refetch()}>повторите загрузку</button>.</p>}
-            </>
+            <DocumentProductPicker
+              label="Поставщик"
+              value={supplier.id}
+              options={supplierOptions}
+              fallbackName={supplier.name}
+              onChange={(id) => {
+                const selected = supplierOptions.find((option) => option.id === id);
+                if (selected) setSupplier({ id: selected.id, name: selected.name });
+              }}
+              onCreate={canCreateSupplier ? setNewSupplierName : undefined}
+              createLabel={(name) => name ? '+ Добавить поставщика «' + name + '»' : '+ Добавить нового поставщика'}
+              disabled={busy}
+            />
           ) : (
-            <span className="poster-readonly">{supplier || 'Без поставщика'}</span>
+            <span className="poster-readonly">{supplier.name}</span>
           )}
+          {editable && suppliers.isPending && <p role="status" className="mt-1 text-xs text-text-muted">Загрузка поставщиков…</p>}
+          {editable && suppliers.isError && <p role="alert" className="mt-1 text-xs text-text-muted">
+            Список поставщиков не загрузился. <button type="button" className="text-primary" onClick={() => void suppliers.refetch()}>Повторить загрузку</button>
+          </p>}
         </DocumentField>
+        {newSupplierName !== undefined && <SupplierForm initialName={newSupplierName}
+          onSaved={({ id, name }) => setSupplier({ id, name })} onClose={() => setNewSupplierName(undefined)} />}
         <DocumentField label="Склад">
           {compositionEditable ? (
             <div data-invalid={!!validationAttempt && !!locationError || undefined}>
@@ -455,11 +529,12 @@ function PurchaseForm({
         </DocumentField>
       </div>
       <div className="poster-purchase-products">
-        {compositionEditable && !correcting && <div className="mb-4">
+        {compositionEditable && !purchase && <div className="mb-4">
           <PurchaseInvoiceImport initialOpen={importInvoice} disabled={busy || !catalogReady || taxOptions.isPending} onBusy={setReadingInvoice} onRead={addInvoice} />
           {imported && <div role="status" className="mt-2 rounded-lg border border-border p-3 text-sm">
             <p>Проверьте позиции из файла «{imported.filename}» перед сохранением. Распознано строк — {imported.preview.lines.length}.</p>
-            {imported.preview.supplier && <p>Поставщик в накладной — {imported.preview.supplier}{!supplier.trim() ? '. Его можно указать в форме.' : ''}</p>}
+            {imported.preview.supplier && <p>Поставщик в накладной — {imported.preview.supplier}.
+              {!supplier.id && ' Выберите поставщика или оставьте поставку без него.'}</p>}
             {imported.preview.total != null && <p>Итого в накладной — {balanceMoney(imported.preview.total)}</p>}
             {imported.entireInvoice && imported.preview.total != null && Math.abs(total - imported.preview.total) >= 0.009 &&
               <p className="text-warning">Разница с итогом поставки — {balanceMoney(Math.abs(total - imported.preview.total))}. Проверьте строки, скидку и налог.</p>}
@@ -662,7 +737,9 @@ function PurchaseForm({
                               <span className="poster-value-unit__suffix">с</span>
                             </div>
                             {previousPriceAmount && <div className="mt-1 space-y-1 text-right text-xs">
-                              <p className="text-text-muted" title={previousPriceDetails}>Прошлая цена — {previousPriceAmount}</p>
+                              <p className="text-text-muted" title={previousPriceDetails}>Прошлая цена — {previousPriceAmount}
+                                {previousPrice && <><br />{formatDocumentDate(previousPrice.date)}</>}
+                              </p>
                               {previousPriceDelta && previousPriceDelta.difference !== 0 && <p className={previousPriceDelta.difference > 0 ? 'text-warning' : 'text-success'}>
                                 Цена {previousPriceDelta.difference > 0 ? 'выросла' : 'снизилась'} на {formatPurchaseUnitPrice(String(Math.abs(previousPriceDelta.difference)))}
                                 {previousPriceDelta.ratio != null && <> ({priceChangeFormatter.format(previousPriceDelta.ratio)})</>}

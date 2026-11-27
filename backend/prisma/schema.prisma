@@ -316,6 +316,7 @@ model FinanceCategory {
   cafeId      String              @map("cafe_id")
   name        String
   kind        FinanceCategoryKind
+  systemKey   String?             @map("system_key")
   parentId    String?             @map("parent_id")
   showOnPos   Boolean             @default(false) @map("show_on_pos")
   showInProfitLoss Boolean        @default(true) @map("show_in_profit_loss")
@@ -329,6 +330,7 @@ model FinanceCategory {
 
   @@unique([cafeId, id])
   @@unique([cafeId, kind, name])
+  @@unique([cafeId, systemKey])
   @@index([cafeId, parentId])
   @@map("finance_categories")
 }
@@ -365,6 +367,7 @@ model FinanceEntry {
   accountId             String           @map("account_id")
   kind                  FinanceEntryKind
   amount                Decimal          @db.Decimal(18, 2)
+  paymentMethod         PaymentMethod?   @map("payment_method")
   categoryId            String?          @map("category_id")
   counterpartyAccountId String?          @map("counterparty_account_id")
   salaryAccrualId       String?          @map("salary_accrual_id")
@@ -567,6 +570,9 @@ model Category {
   name        String
   sortOrder   Int         @default(0) @map("sort_order")
   isActive    Boolean     @default(true) @map("is_active")
+  archivedAt  DateTime?   @map("archived_at")
+  activeBeforeArchive Boolean? @map("active_before_archive")
+  archiveRootId String?   @map("archive_root_id")
   prepStation String @default("kitchen") @map("prep_station")
   createdAt   DateTime    @default(now()) @map("created_at")
   updatedAt   DateTime    @updatedAt @map("updated_at")
@@ -583,6 +589,7 @@ model Category {
 
   @@unique([cafeId, id])
   @@index([cafeId, parentId])
+  @@index([cafeId, archiveRootId])
   @@index([taxId])
   @@map("categories")
 }
@@ -620,6 +627,7 @@ model Dish {
   isActive          Boolean      @default(true) @map("is_active")
   archivedAt        DateTime?    @map("archived_at")
   activeBeforeArchive Boolean?   @map("active_before_archive")
+  archivedWithCategoryId String? @map("archived_with_category_id")
   sortOrder         Int          @default(0) @map("sort_order")
   trackInventory    Boolean      @default(false) @map("track_inventory")
   stock             Int?
@@ -670,6 +678,7 @@ model Dish {
   tax                MenuTax? @relation(fields: [taxId], references: [id], onDelete: NoAction)
 
   @@index([taxId])
+  @@index([cafeId, archivedWithCategoryId])
   @@map("dishes")
 }
 
@@ -853,6 +862,11 @@ model CashShift {
   difference     Decimal?  @db.Decimal(14, 2)
   closingComment String?   @map("closing_comment") @db.VarChar(500)
   closeEmployeeShifts Boolean @default(false) @map("close_employee_shifts")
+  cardProcessingFeeRate Decimal @default(0) @map("card_processing_fee_rate") @db.Decimal(7, 4)
+  qrProcessingFeeRate   Decimal @default(0) @map("qr_processing_fee_rate") @db.Decimal(7, 4)
+  cardSettlementAccountId String? @map("card_settlement_account_id")
+  qrSettlementAccountId   String? @map("qr_settlement_account_id")
+  collectionAccountId     String? @map("collection_account_id")
 
   deletedOperations CashShiftDeletedOperation[]
 
@@ -1214,6 +1228,11 @@ model Settings {
   payQr                        Boolean @default(true) @map("pay_qr")
   payCash                      Boolean @default(true) @map("pay_cash")
   payCard                      Boolean @default(true) @map("pay_card")
+  cardProcessingFeeRate        Decimal @default(0) @map("card_processing_fee_rate") @db.Decimal(7, 4)
+  qrProcessingFeeRate          Decimal @default(0) @map("qr_processing_fee_rate") @db.Decimal(7, 4)
+  cardSettlementAccountId      String? @map("card_settlement_account_id")
+  qrSettlementAccountId        String? @map("qr_settlement_account_id")
+  cashCollectionAccountId      String? @map("cash_collection_account_id")
   qrImageUrl                   String? @map("qr_image_url") // data URL загруженного QR-кода (один на заведение)
   printerConnected             Boolean @default(false) @map("printer_connected")
   receiptPrintRequestsOnly     Boolean @default(false) @map("receipt_print_requests_only")

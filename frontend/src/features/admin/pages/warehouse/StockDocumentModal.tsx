@@ -28,7 +28,7 @@ import { StockDocumentExportButton } from './StockDocumentExportButton';
 import { WriteoffLines, useWriteoffLines } from './WriteoffLines';
 import { WriteoffReasonField, writeoffReasonInput } from './WriteoffReasonField';
 import { exportWriteoffLines, WriteoffFileImport } from './WriteoffFileImport';
-import { writeoffDraftLines } from './writeoff-form-values';
+import { recordedWriteoffAmounts, writeoffDraftLines } from './writeoff-form-values';
 import {
   useStockDocument,
   useStockDocumentMutations,
@@ -61,10 +61,14 @@ export function StockDocumentModal({
   const locations = useWarehouseLocations();
   const { can } = usePermissions();
   const document = query.data;
+  const [viewOnlyId, setViewOnlyId] = useState<string>();
   const reopened = document && documentDisplayStatus(document) === 'reopened';
   const canApproveInventory = can('actions.warehouseApprove');
   const canEditDocument = !!document && can(`actions.${document.kind === 'inventory' ? 'warehouseCount' : document.kind === 'writeoff' ? 'warehouseWriteoff' : document.kind === 'transfer' ? 'warehouseTransfer' : 'warehouseReceive'}`);
-  const canEditDraft = canEditDocument && (!reopened || canApproveInventory);
+  const canEditDraft = canEditDocument && !document?.deletedAt && (!reopened || canApproveInventory);
+  const canEditPostedWriteoff = document?.kind === 'writeoff' && document.status === 'posted' && !document.deletedAt &&
+    canEditDocument && canApproveInventory && !document.reversalBlockedReason;
+  const editingPostedWriteoff = canEditPostedWriteoff && viewOnlyId !== id;
   const documentWarehouse =
     locations.data?.locations.find((l) => l.id === document?.warehouseId) ?? warehouse;
   const canApprove =
@@ -76,7 +80,7 @@ export function StockDocumentModal({
   return (
     <EditorPage
       open
-      title={document ? documentLabel(document) : 'Складской документ'}
+      title={editingPostedWriteoff ? 'Редактирование списания' : document ? documentLabel(document) : 'Складской документ'}
       panelClassName="max-w-4xl"
       onClose={onClose}
     >
@@ -106,12 +110,144 @@ export function StockDocumentModal({
           onClose={onClose}
         />
       )}
-      {document && (document.status !== 'draft' || !canEditDraft) && (
+      {document && editingPostedWriteoff && (
+        <PostedWriteoffEditor key={document.id} document={document}
+          locations={locations.data?.locations ?? [documentWarehouse]} onReview={() => setViewOnlyId(id)}
+          onReload={() => query.refetch({ throwOnError: true })} onClose={onClose} />
+      )}
+      {document && !editingPostedWriteoff && (document.status !== 'draft' || !canEditDraft) && (
         <StockDocumentReview document={document} warehouse={documentWarehouse} canApprove={canApprove}
-          canReopenInventory={canEditDocument && canApproveInventory} onReload={() => { void query.refetch(); }} />
+          canReopenInventory={canEditDocument && canApproveInventory} onReload={() => { void query.refetch(); }}
+          onEditWriteoff={canEditPostedWriteoff ? () => setViewOnlyId(undefined) : undefined} />
       )}
     </EditorPage>
   );
+}
+
+function PostedWriteoffEditor({ document, locations, onClose, onReview, onReload }: {
+  document: StockDocumentDetails;
+  locations: WarehouseLocation[];
+  onClose: () => void;
+  onReview: () => void;
+  onReload: () => Promise<{ data?: StockDocumentDetails }>;
+}) {
+  const { editPostedWriteoff } = useStockDocumentMutations();
+  const { can } = usePermissions();
+  const push = useNotifications((state) => state.push);
+  const [original, setOriginal] = useState(document);
+  const originalAt = original.effectiveAt ?? original.postedAt ?? original.createdAt;
+  const [warehouseId, setWarehouseId] = useState(original.warehouseId);
+  const originalReason = original.writeoffReasonId ?? original.reason ?? '';
+  const [reason, setReason] = useState(originalReason);
+  const [note, setNote] = useState(original.note ?? '');
+  const [timing, setTiming] = useState(() => inventoryTimingFor(originalAt));
+  const [dateValid, setDateValid] = useState(true);
+  const [showErrors, setShowErrors] = useState(false);
+  const [error, setError] = useState('');
+  const [reloading, setReloading] = useState(false);
+  const saving = useRef(false);
+  const effectiveAt = inventoryTimingValue(timing, originalAt);
+  const lines = useWriteoffLines(true, warehouseId, original, effectiveAt);
+  const stale = original.revision !== document.revision;
+  const pending = editPostedWriteoff.isPending || reloading;
+  const stockContextChanged = warehouseId !== original.warehouseId || effectiveAt !== originalAt;
+  const recalculateSources = lines.dirty || (stockContextChanged && !!original.sourceLines?.length);
+  const savedAmounts = recordedWriteoffAmounts(original, lines.rows, stockContextChanged);
+  const displayAmounts = savedAmounts ?? new Map<string, number | null>();
+  const canSeeCosts = can('actions.warehouseCosts');
+  const recordedTotal = original.sourceTotal ?? (original.varianceValue == null ? null : Math.abs(original.varianceValue));
+  const dirty = stockContextChanged || reason !== originalReason || note.trim() !== (original.note ?? '') ||
+    !dateValid || lines.dirty;
+  const { markSaved } = useEditorDirty(dirty);
+
+  function showReview() {
+    if (pending || (dirty && !window.confirm('Отменить несохранённые изменения списания?'))) return;
+    markSaved();
+    onReview();
+  }
+
+  async function reload() {
+    setReloading(true);
+    try {
+      const { data } = await onReload();
+      if (!data) return;
+      setOriginal(data);
+      setWarehouseId(data.warehouseId);
+      setReason(data.writeoffReasonId ?? data.reason ?? '');
+      setNote(data.note ?? '');
+      setTiming(inventoryTimingFor(data.effectiveAt ?? data.postedAt ?? data.createdAt));
+      lines.adopt(data);
+      setShowErrors(false);
+      setError('');
+    } catch (err) {
+      setError(apiError(err));
+    } finally {
+      setReloading(false);
+    }
+  }
+
+  async function save() {
+    if (pending || saving.current || stale || !dirty || !dateValid || !effectiveAt) return;
+    setShowErrors(true);
+    if (recalculateSources && (!lines.ready || !lines.enteredCount)) return;
+    saving.current = true;
+    setError('');
+    try {
+      await editPostedWriteoff.mutateAsync({
+        id: original.id, revision: original.revision, warehouseId,
+        effectiveAt: effectiveAt === originalAt ? undefined : effectiveAt,
+        ...writeoffReasonInput(reason), note: note.trim(), sourceLines: recalculateSources ? lines.input() : undefined,
+      });
+      markSaved();
+      push({ message: 'Изменения списания сохранены. Остатки обновлены.', at: new Date().toISOString() });
+      onClose();
+    } catch (err) {
+      setError(apiError(err));
+    } finally {
+      saving.current = false;
+    }
+  }
+
+  return <div className="poster-form poster-form--document poster-document--modern space-y-6">
+    <WorkspaceHeaderActions>
+      {can('actions.exportReports') && <button type="button" className="btn-secondary btn-md"
+        disabled={pending || !lines.enteredCount} onClick={() => exportWriteoffLines(lines.rows, canSeeCosts ? displayAmounts : undefined)}>
+        <IconExport />Экспорт CSV
+      </button>}
+      <button type="button" className="btn-ghost btn-md text-primary" disabled={pending} onClick={showReview}>Посмотреть документ</button>
+    </WorkspaceHeaderActions>
+    <div className="poster-document-panel poster-document-fields space-y-3">
+      <StockOperationDateField label="Дата и время списания" value={timing} disabled={pending || stale}
+        onChange={setTiming} onValidityChange={setDateValid} />
+      <DocumentField label="Склад">
+        <Select ariaLabel="Склад списания" className="h-10 w-full" disabled={pending || stale} value={warehouseId}
+          options={locations.map(({ id, name }) => ({ value: id, label: name }))} onChange={setWarehouseId} />
+      </DocumentField>
+      <DocumentField label="Причина">
+        <WriteoffReasonField value={reason} onChange={setReason} disabled={pending || stale}
+          retainedReason={original.reasonLabel ? { value: originalReason, label: original.reasonLabel } : undefined} />
+      </DocumentField>
+      <DocumentField label="Комментарий">
+        <textarea className="input h-14 w-full" value={note} maxLength={1000} disabled={pending || stale}
+          onChange={(event) => setNote(event.target.value)} />
+      </DocumentField>
+    </div>
+    <WriteoffLines editor={lines} disabled={pending || stale} showErrors={showErrors} requireRows recordedAmounts={displayAmounts} />
+    {(error || stale) && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-danger">
+      {error || 'Документ изменился. Загрузите актуальные данные.'}
+      {(stale || error.includes('Документ уже изменился')) && <button type="button" className="btn-secondary btn-md"
+        disabled={pending} onClick={() => void reload()}>Загрузить изменения</button>}
+    </div>}
+    {!savedAmounts && <p role="status" className="text-sm text-text-muted">После сохранения остатки и себестоимость пересчитаются с даты списания.</p>}
+    <DocumentFooter total={canSeeCosts
+      ? !savedAmounts ? 'Сумма появится после сохранения' : `Итого: ${recordedTotal == null ? 'стоимость неполная' : balanceMoney(recordedTotal)}`
+      : undefined}>
+      <button type="button" className="btn-primary btn-md"
+        disabled={pending || stale || !dirty || !dateValid || !effectiveAt ||
+          (recalculateSources && (lines.calculating || !lines.options.isSuccess))}
+        onClick={() => void save()}>Сохранить</button>
+    </DocumentFooter>
+  </div>;
 }
 
 interface DraftItem {
@@ -183,7 +319,6 @@ function StockDocumentDraft({
   const [validationAttempt, setValidationAttempt] = useState(0);
   const [submitAttempt, setSubmitAttempt] = useState(false);
   const formRef = useRef<HTMLDivElement>(null);
-  const formId = useId();
   const writeoff = document.kind !== 'inventory';
   const needsReason = document.kind === 'writeoff';
   const full = document.mode === 'full';
@@ -205,10 +340,7 @@ function StockDocumentDraft({
   const quantityError = document.kind === 'writeoff' ? writeoffLines.firstError : items.map(({ item, input }) => documentQuantityError(input, !writeoff, remainingFor(item))).find(Boolean);
   const invalidCount = !!quantityError;
   const allCounted = counted.length === items.length;
-  const canSubmit =
-    (document.kind === 'writeoff' ? writeoffLines.enteredCount > 0 && writeoffLines.ready : counted.length > 0 && allCounted) &&
-    (!needsReason || reason !== 'other' || !!note.trim());
-  const noteError = validationAttempt && submitAttempt && needsReason && reason === 'other' && !note.trim() ? 'Уточните причину списания.' : '';
+  const canSubmit = document.kind === 'writeoff' ? writeoffLines.enteredCount > 0 && writeoffLines.ready : counted.length > 0 && allCounted;
   useEffect(() => {
     if (validationAttempt) formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
   }, [validationAttempt]);
@@ -369,9 +501,7 @@ function StockDocumentDraft({
       ? writeoff ? 'Добавьте продукт и укажите количество.' : 'Внесите фактический остаток хотя бы одного продукта.'
       : !allCounted
         ? `Осталось посчитать: ${items.length - counted.length}. Для отсутствующего продукта укажите 0.`
-        : needsReason && reason === 'other' && !note.trim()
-            ? 'Уточните причину списания в комментарии.'
-            : '';
+        : '';
 
   return (
     <div
@@ -416,18 +546,15 @@ function StockDocumentDraft({
                 ? { value: (document.writeoffReasonId ?? document.reason)!, label: writeoffReasonLabel(document) } : undefined} />
           </DocumentField>
         )}
-        <DocumentField label={reason === 'other' ? 'Уточните причину' : 'Комментарий'}>
+        <DocumentField label="Комментарий">
           <textarea
             className="input h-14 w-full"
-            aria-label={reason === 'other' ? 'Уточните причину' : 'Комментарий'}
-            aria-invalid={!!noteError || undefined}
-            aria-describedby={noteError ? `${formId}-note-error` : undefined}
+            aria-label="Комментарий"
             value={note}
             maxLength={1000}
             disabled={pending || stale}
             onChange={(event) => setNote(event.target.value)}
           />
-          {noteError && <p id={`${formId}-note-error`} className="mt-1 text-xs text-danger">{noteError}</p>}
         </DocumentField>
       </div>
       {!writeoff && (previewNeedsSave || timingApplied) && <div role="status" className="inventory-timing-notice">
@@ -558,12 +685,14 @@ function StockDocumentReview({
   canApprove,
   canReopenInventory,
   onReload,
+  onEditWriteoff,
 }: {
   document: StockDocumentDetails;
   warehouse: WarehouseLocation;
   canApprove: boolean;
   canReopenInventory: boolean;
   onReload: () => void;
+  onEditWriteoff?: () => void;
 }) {
   const { transition } = useStockDocumentMutations();
   const { can } = usePermissions();
@@ -571,9 +700,9 @@ function StockDocumentReview({
   const [confirmReopen, setConfirmReopen] = useState(false);
   const push = useNotifications((state) => state.push);
   const pending = transition.isPending;
-  const needsApproval = document.status === 'submitted';
+  const needsApproval = document.status === 'submitted' && !document.deletedAt;
   const canReopenPosted = document.kind === 'inventory' && document.status === 'posted' && canReopenInventory;
-  const canReverse = document.status === 'posted' && can('actions.warehouseApprove');
+  const canReverse = document.status === 'posted' && !document.deletedAt && can('actions.warehouseApprove');
   const pendingHistorical = !!document.effectiveAt && document.status === 'submitted';
   const showAvailability = needsApproval && document.kind !== 'inventory' && !pendingHistorical;
   const approvalCatalog = useIngredients('', warehouse.id, showAvailability);
@@ -662,8 +791,10 @@ function StockDocumentReview({
           <IconPrinter />Печать
         </button>
       </WorkspaceHeaderActions>
-      {((needsApproval && canApprove) || canReverse || canReopenPosted) && (
+      {((needsApproval && canApprove) || canReverse || canReopenPosted || onEditWriteoff) && (
         <DocumentFooter>
+          {onEditWriteoff && <button type="button" className="btn-primary btn-md" disabled={pending}
+            onClick={onEditWriteoff}>Редактировать</button>}
           {needsApproval && canApprove && (
             <>
               <button
@@ -756,6 +887,7 @@ function DocumentHeader({
           {documentStatus(status)}
         </span>
       </Meta>
+      {document.deletedAt && <Meta label="Дата удаления">{formatDocumentDate(document.deletedAt)} · Бишкек</Meta>}
       {document.postedAt && (inventory || document.effectiveAt) ? (
         <Meta label={inventory ? 'Проведена' : 'Проведён'}>
           {inventoryTimeDisplay(document.postedAt)} · Бишкек

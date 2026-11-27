@@ -48,7 +48,10 @@ export class AuditService {
   private async purgeExpired() {
     const cutoff = new Date(Date.now() - AUDIT_LOG_TTL_MS);
     const { count } = await this.prisma.auditLog.deleteMany({
-      where: { createdAt: { lt: cutoff }, actionType: { notIn: [AuditAction.PURCHASE_SETTLEMENT_RECONCILED, AuditAction.STAFF_SHIFT_CHANGED] } },
+      where: { createdAt: { lt: cutoff }, actionType: { notIn: [
+        AuditAction.PURCHASE_SETTLEMENT_RECONCILED, AuditAction.STAFF_SHIFT_CHANGED, AuditAction.WAREHOUSE_WRITEOFF_EDITED,
+        AuditAction.WAREHOUSE_WRITEOFF_DELETED, AuditAction.WAREHOUSE_WRITEOFF_RESTORED,
+      ] } },
     });
 
     if (count > 0) {

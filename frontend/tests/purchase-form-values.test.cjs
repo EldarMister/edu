@@ -137,11 +137,11 @@ test('a saved 5 kg package is not reinterpreted after the directory package beco
   assert.equal(values.purchaseUnitFactor('package:rice-bag', undefined, packages), 10000);
 });
 
-test('reselecting the same product preserves the entered package, quantity, price, and exact invoice total', () => {
-  const row = { key: 'line', ingredientId: 'rice', quantity: '2', unit: 'package:rice-bag', price: '125', total: '250' };
+test('reselecting preserves invoice values and switching products clears the old tax', () => {
+  const row = { key: 'line', ingredientId: 'rice', quantity: '2', unit: 'package:rice-bag', price: '125', total: '250', taxId: 'rice-tax' };
   assert.equal(values.selectPurchaseProduct(row, { id: 'rice', displayUnit: 'kg', avgCost: 20 }), row);
   const switched = values.selectPurchaseProduct(row, { id: 'water', displayUnit: 'l', avgCost: 30 });
-  assert.deepEqual(switched, { key: 'line', ingredientId: 'water', quantity: '1', unit: 'l', price: '', total: undefined });
+  assert.deepEqual(switched, { key: 'line', ingredientId: 'water', quantity: '1', unit: 'l', price: '', total: undefined, taxId: null });
 });
 
 test('a stock average never silently becomes a supplier invoice price', () => {

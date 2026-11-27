@@ -8,8 +8,13 @@ const decimal = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
 const compactDate = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 export const formatFoodCost = (value: number | null) => value == null ? '—' : decimal.format(value) + ' %';
 export const formatPercent = (value: number, points = false) => (value > 0 ? '+' : '') + decimal.format(value) + (points ? ' п.п.' : ' %');
+export function formatMarginChange(value: number | null) {
+  if (value == null) return financeMoney(null);
+  const shown = Math.abs(value) < 0.005 ? 0 : value;
+  return (shown > 0 ? '+' : '') + financeMoney(shown);
+}
 
-export function priceCaption(row: FoodCostPosition) {
+export function priceCaption(row: Pick<FoodCostPosition, 'priceBasis' | 'priceUnit'>) {
   return row.priceUnit === 'pcs' ? '' : ' / ' + decimal.format(row.priceBasis) + ' ' + unitLabel(row.priceUnit);
 }
 
@@ -41,10 +46,11 @@ export function FoodCostPositions({ report, rows, search, canApply, draft, onPla
   onPlan: (row: FoodCostPosition, price: number) => void; onOpen: (row: FoodCostPosition) => void;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
-  const metricsByCategory = new Map<string, FoodCostPosition['current'][]>();
+  const metricsByCategory = new Map<string, { current: FoodCostPosition['current'][]; previous: FoodCostPosition['previous'][] }>();
   for (const row of report.positions) {
-    const category = metricsByCategory.get(row.categoryId) ?? [];
-    category.push(row.current);
+    const category = metricsByCategory.get(row.categoryId) ?? { current: [], previous: [] };
+    category.current.push(row.current);
+    category.previous.push(row.previous);
     metricsByCategory.set(row.categoryId, category);
   }
   const groups = new Map<string, { name: string; positions: FoodCostPosition[] }>();
@@ -56,13 +62,17 @@ export function FoodCostPositions({ report, rows, search, canApply, draft, onPla
   if (!rows.length) return <ReportEmpty searched={search} noun="За выбранный период нет продаж по позициям" />;
   return <div className="space-y-2">
     {[...groups].map(([id, group], index) => {
-      const { margin, foodCostPercent } = aggregateFoodCostMetrics(metricsByCategory.get(id) ?? []);
+      const metrics = metricsByCategory.get(id);
+      const current = aggregateFoodCostMetrics(metrics?.current ?? []);
+      const previous = aggregateFoodCostMetrics(metrics?.previous ?? []);
       return <details className="food-cost-panel food-cost-group" key={id} open={index === 0}>
         <summary>
           <strong>{group.name || 'Без категории'}</strong>
           <span>{group.positions.length} поз.</span>
-          <span className="ml-auto">Фудкост <strong>{formatFoodCost(foodCostPercent)}</strong></span>
-          <span>Маржа <strong>{financeMoney(margin)}</strong></span>
+          <span className="ml-auto">Фудкост <strong>{formatFoodCost(current.foodCostPercent)}</strong>
+            {' '}{compare(current.foodCostPercent, previous.foodCostPercent, true, true)}</span>
+          <span>Маржа <strong>{financeMoney(current.margin)}</strong>
+            {' '}{compare(current.margin, previous.margin, false)}</span>
         </summary>
         <div className="food-cost-table-scroll food-cost-position-table" role="region" tabIndex={0} aria-label={group.name || 'Без категории'}>
           <table className="food-cost-table">
@@ -119,8 +129,6 @@ function PositionDetails({ report, row, price, canApply, onPlan, onOpen }: {
   const newPrice = parseMoney(input);
   const validPrice = newPrice != null && newPrice >= 0 && newPrice <= MAX_MENU_PRICE;
   const projected = validPrice && row.price !== newPrice ? projectFoodCostPrice(report, row.id, newPrice) : null;
-  const category = projected ? aggregateFoodCostMetrics(report.positions.filter((position) => position.categoryId === row.categoryId)
-    .map((position) => position.current)) : null;
   const canModel = row.active && row.price != null && row.current.quantity > 0;
   const caption = priceCaption(row);
   const actualPrice = row.current.quantity > 0 ? row.current.revenue / row.current.quantity : null;
@@ -152,7 +160,7 @@ function PositionDetails({ report, row, price, canApply, onPlan, onOpen }: {
         <div className="food-cost-model-inputs">
           <div><span className="text-text-muted">Цена меню</span><strong>{financeMoney(row.price)}{caption}</strong></div>
           <label><span className="text-text-muted">Новая цена{caption}</span>
-            <input className="input" inputMode="decimal" value={input} aria-label={`Новая цена — ${row.name}`}
+            <input className="input" inputMode="decimal" value={input} aria-invalid={!validPrice} aria-label={`Новая цена — ${row.name}`}
               onChange={(event) => setInput(event.target.value)} />
           </label>
         </div>
@@ -162,15 +170,17 @@ function PositionDetails({ report, row, price, canApply, onPlan, onOpen }: {
         </p>}
         {projected ? <>
           <dl className="food-cost-project-metrics">
-            <Projection label="Фудкост позиции" before={formatFoodCost(row.current.foodCostPercent)}
+            <Projection label="Фудкост позиции" before={formatFoodCost(projected.position.baselineFoodCostPercent)}
               value={formatFoodCost(projected.position.foodCostPercent)} />
-            <Projection label="Изменение маржи за 30 дней" value={financeMoney(projected.position.monthlyMarginChange)} />
-            <Projection label="Фудкост категории" before={formatFoodCost(category?.foodCostPercent ?? null)}
+            <Projection label="Маржа за 30 дней" before={financeMoney(projected.position.baselineMonthlyMargin)}
+              value={financeMoney(projected.position.monthlyMargin)} />
+            <Projection label="Фудкост категории" before={formatFoodCost(projected.category.baselineFoodCostPercent)}
               value={formatFoodCost(projected.category.foodCostPercent)} />
-            <Projection label="Фудкост заведения" before={formatFoodCost(report.current.totals.foodCostPercent)}
+            <Projection label="Фудкост заведения" before={formatFoodCost(projected.business.baselineFoodCostPercent)}
               value={formatFoodCost(projected.business.foodCostPercent)} />
           </dl>
-          <p className="text-xs text-text-muted">Сценарий использует объём продаж, себестоимость и долю скидок за выбранный период. Изменение маржи показано за 30 дней.</p>
+          <p className="text-xs text-text-muted">Изменение маржи за 30 дней {formatMarginChange(projected.position.monthlyMarginChange)}.
+            {' '}Для обеих цен использованы объём продаж, себестоимость, доля скидок и налога за выбранный период.</p>
           {canApply && newPrice != null && row.price !== newPrice && <button type="button" className="btn-primary btn-md mt-3"
             disabled={price === newPrice} onClick={() => onPlan(row, newPrice)}>{price === newPrice ? 'В плане цен' : 'Запланировать изменение'}</button>}
         </> : <p className="text-sm text-text-muted">{!validPrice

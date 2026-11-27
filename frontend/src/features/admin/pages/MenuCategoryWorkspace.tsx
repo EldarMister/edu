@@ -16,7 +16,8 @@ export function MenuCategoryWorkspace() {
     if (canViewIngredients) next.set('categoryType', 'ingredients');
     return <Navigate replace to={{ search: next.toString() }} />;
   }
-  const showIngredients = canViewIngredients && (categoryType === 'ingredients' || editor?.type === 'ingredientCategory');
+  const showIngredients = canViewIngredients && editor?.type !== 'categoryTrash'
+    && (categoryType === 'ingredients' || editor?.type === 'ingredientCategory');
   return <>
     {canViewIngredients && !editor && <nav aria-label="Типы категорий" className="mb-4 flex flex-wrap gap-2">
       <button type="button" aria-pressed={!showIngredients} className={!showIngredients ? 'btn-primary btn-md' : 'btn-secondary btn-md'}

@@ -15,10 +15,10 @@ import { changeWriteoffPackage, changeWriteoffUnit, emptyWriteoffLine, sameWrite
 type Choice = { id: string; name: string; group: string; detail?: string; unit: string; unitCode: UnitCode; kind: 'ingredient' | 'dish'; sourceId: string; variantId?: string };
 const choiceId = (row: Pick<DraftWriteoffLine, 'kind' | 'sourceId' | 'variantId'>) => `${row.kind}:${row.sourceId}:${row.variantId ?? ''}`;
 
-export function useWriteoffLines(enabled: boolean, warehouseId: string, document?: StockDocumentDetails, effectiveAt?: string | null) {
+export function useWriteoffLines(enabled: boolean, warehouseId: string, document?: StockDocumentDetails, effectiveAt?: string | null, initialRows?: DraftWriteoffLine[]) {
   const options = useWriteoffOptions(enabled, effectiveAt);
   const packages = useWriteoffPackages(enabled);
-  const [rows, setRows] = useState(() => writeoffDraftLines(enabled ? document?.sourceLines : undefined, enabled ? document?.items : undefined));
+  const [rows, setRows] = useState(() => initialRows ?? writeoffDraftLines(enabled ? document?.sourceLines : undefined, enabled ? document?.items : undefined));
   const [snapshots, setSnapshots] = useState(enabled ? document?.sourceLines ?? [] : []);
   const [savedKey, setSavedKey] = useState(() => writeoffFormKey(rows));
   const [refreshVersion, setRefreshVersion] = useState(0);
@@ -29,9 +29,13 @@ export function useWriteoffLines(enabled: boolean, warehouseId: string, document
     quantity: row.sourceId || row.quantity ? documentQuantityError(row.quantity, false) || (Number(row.quantity) < 0.000001 ? 'Минимальное количество — 0,000001.' : undefined) : undefined,
   }]));
   const firstError = [...issues.values()].flatMap((issue) => [issue.product, issue.quantity]).find(Boolean);
-  const forcePreview = refreshVersion > 0 || (effectiveAt ?? null) !== (document?.effectiveAt ?? null);
+  const originalAt = document?.effectiveAt ?? (document?.status === 'posted' ? document.postedAt : null);
+  const forcePreview = refreshVersion > 0 || (effectiveAt ?? null) !== (originalAt ?? null) ||
+    (!!document && warehouseId !== document.warehouseId);
+  const editedRows = writeoffFormKey(rows) !== savedKey;
+  const legacyUnchanged = document?.status === 'posted' && !snapshots.length && !editedRows;
   const plan = writeoffPreviewPlan(rows, snapshots, forcePreview);
-  const needsPreview = plan.needed;
+  const needsPreview = !legacyUnchanged && plan.needed;
   const serialized = JSON.stringify(plan.inputs);
   const [settled, setSettled] = useState(serialized);
   useEffect(() => {
@@ -97,7 +101,7 @@ export function useWriteoffLines(enabled: boolean, warehouseId: string, document
     return true;
   }
   return { rows, setRows, options, packages, choices, issues, firstError, enteredCount: entered.length, ready, calculating, total, lines, preview, snapshots, choose, adopt, importRows,
-    dirty: writeoffFormKey(rows) !== savedKey || lines.some((line) => snapshotById.has(line.sourceLineId) && snapshotById.get(line.sourceLineId)?.recipeSignature !== line.recipeSignature),
+    dirty: editedRows || lines.some((line) => snapshotById.has(line.sourceLineId) && snapshotById.get(line.sourceLineId)?.recipeSignature !== line.recipeSignature),
     refresh: () => setRefreshVersion((value) => value + 1),
     input: () => entered.map((row) => ({ ...writeoffLineInput(row), recipeSignature: lines.find((line) => line.sourceLineId === row.sourceLineId)?.recipeSignature })),
   };
@@ -105,13 +109,14 @@ export function useWriteoffLines(enabled: boolean, warehouseId: string, document
 
 type WriteoffEditor = ReturnType<typeof useWriteoffLines>;
 
-export function WriteoffLines({ editor, sourceLines = [], total, disabled = false, showErrors = false, requireRows = false, showCost = true }: {
+export function WriteoffLines({ editor, sourceLines = [], total, disabled = false, showErrors = false, requireRows = false, showCost = true, recordedAmounts }: {
   editor?: WriteoffEditor;
   sourceLines?: WriteoffSourceLine[];
   total?: number | null;
   disabled?: boolean;
   showErrors?: boolean;
   showCost?: boolean;
+  recordedAmounts?: ReadonlyMap<string, number | null>;
   requireRows?: boolean;
 }) {
   const { can } = usePermissions();
@@ -131,7 +136,7 @@ export function WriteoffLines({ editor, sourceLines = [], total, disabled = fals
     {editor?.packages.isError && <p role="alert" className="mb-3 px-4 text-sm text-danger">Не удалось загрузить фасовки. <button type="button" className="text-primary" onClick={() => void editor.packages.refetch()}>Повторить загрузку</button></p>}
     {editor?.calculating && <p role="status" className="mb-3 px-4 text-sm text-text-muted">Расчёт состава…</p>}
     {editor?.preview.isError && <p role="alert" className="mb-3 px-4 text-sm text-danger">{apiError(editor.preview.error)} <button type="button" className="text-primary" onClick={editor.refresh}>Обновить расчёт</button></p>}
-    {updatedRecipe && <p role="status" className="mb-3 px-4 text-sm text-text-secondary">Состав пересчитан по текущему рецепту. Проверьте продукты ниже перед сохранением.</p>}
+    {updatedRecipe && <p role="status" className="mb-3 px-4 text-sm text-text-secondary">Состав пересчитан на дату списания. Проверьте продукты ниже перед сохранением.</p>}
     <div className="overflow-x-auto"><table className="poster-table poster-document-table poster-document-table--compact poster-writeoff-table w-full min-w-[740px] table-fixed text-sm">
       <colgroup><col /><col style={{ width: 112 }} /><col style={{ width: 130 }} />{costs && <col style={{ width: 105 }} />}<col style={{ width: '26%' }} />{editor && <col style={{ width: 40 }} />}</colgroup>
       <thead><tr><th className="text-left">Наименование</th><th className="text-right">Количество</th><th className="text-left">Ед. / фасовка</th>
@@ -139,6 +144,9 @@ export function WriteoffLines({ editor, sourceLines = [], total, disabled = fals
       <tbody>{rows.map((row, index) => {
         const line = lines.get(row.sourceLineId);
         const oldLine = oldLines.get(row.sourceLineId);
+        const historicalAmount = recordedAmounts?.get(row.sourceLineId);
+        const amount = recordedAmounts ? historicalAmount : line?.total;
+        const savedParts = recordedAmounts?.has(row.sourceLineId) ? oldLine?.parts : undefined;
         const unit = row.kind === 'dish' && row.unit === 'pcs' ? 'порц.' : unitLabel(row.unit);
         const issue = showErrors ? editor?.issues.get(row.sourceLineId) : undefined;
         const productError = issue?.product ?? (showErrors && requireRows && !editor?.enteredCount && index === 0 ? 'Добавьте хотя бы один продукт.' : undefined);
@@ -191,7 +199,7 @@ export function WriteoffLines({ editor, sourceLines = [], total, disabled = fals
             <td>{unitControl}
               {row.packageId && line?.physicalQuantity != null && <span className="mt-1 block text-xs text-text-muted">= {line.physicalQuantity.toLocaleString('ru-RU', { maximumFractionDigits: 6 })} {unit}</span>}
             </td>
-            {costs && <td className="whitespace-nowrap text-right tabular-nums">{line?.total == null ? '—' : balanceMoney(line.total)}</td>}
+            {costs && <td className="whitespace-nowrap text-right tabular-nums">{amount == null ? '—' : balanceMoney(amount)}</td>}
             <td>{editor ? <input type="text" className="input h-9 w-full" maxLength={300}
               aria-label={`Детали · строка ${index + 1}`} value={row.details ?? ''} disabled={disabled || !row.sourceId}
               onChange={(event) => editor.setRows((current) => current.map((entry) => entry.sourceLineId === row.sourceLineId
@@ -200,7 +208,12 @@ export function WriteoffLines({ editor, sourceLines = [], total, disabled = fals
           </tr>
           {hasRecipe && expanded && <tr id={`${quantityErrorId}-composition`} className="poster-recipe-row"><td colSpan={columnCount} className="!bg-background !p-4">
             <p className="mb-2 text-xs text-text-secondary">{editor ? 'Будет списано со склада' : 'Состав списания'}</p>
-            <table className="w-full bg-white text-sm"><thead><tr><th className="text-left">Ингредиент</th><th className="text-right">Количество</th>{costs && <th className="text-right">Сумма</th>}</tr></thead><tbody>{line.parts.map((part, partIndex) => <tr key={`${part.ingredientId}:${partIndex}`}><td>{part.name}</td><td className="text-right">{part.quantity.toLocaleString('ru-RU', { maximumFractionDigits: 6 })} {part.unit}</td>{costs && <td className="text-right">{part.total == null ? '—' : balanceMoney(part.total)}</td>}</tr>)}</tbody></table>
+            <table className="w-full bg-card text-sm"><thead><tr><th className="text-left">Ингредиент</th><th className="text-right">Количество</th>{costs && <th className="text-right">Сумма</th>}</tr></thead><tbody>{line.parts.map((part, partIndex) => {
+              const partAmount = recordedAmounts
+                ? savedParts?.find(({ ingredientId }) => ingredientId === part.ingredientId)?.total
+                : part.total;
+              return <tr key={`${part.ingredientId}:${partIndex}`}><td>{part.name}</td><td className="text-right">{part.quantity.toLocaleString('ru-RU', { maximumFractionDigits: 6 })} {part.unit}</td>{costs && <td className="text-right">{partAmount == null ? '—' : balanceMoney(partAmount)}</td>}</tr>;
+            })}</tbody></table>
           </td></tr>}
         </Fragment>;
       })}</tbody>

@@ -17,21 +17,26 @@ export async function recordOrderReceipts(
   const accounts = await ensureFinanceAccounts(tx, cafeId);
   const shift = await tx.cashShift.findFirst({ where: { cafeId, closedAt: null } });
   const settings = await tx.settings.findFirst({
-    where: { cafeId }, select: { cashShiftsEnabled: true, cashHandoverEnabled: true },
+    where: { cafeId }, select: {
+      cashShiftsEnabled: true, cashHandoverEnabled: true, cardSettlementAccountId: true, qrSettlementAccountId: true,
+    },
   });
   if (!shift && settings?.cashShiftsEnabled) throw new ConflictException('Откройте кассовую смену перед оплатой');
+  const routing = shift ?? settings;
   const data = received.map(({ id, amount, method, cashierId, cashier }) => {
     const cash = method === PaymentMethod.cash;
     if (cash && settings?.cashHandoverEnabled && cashier.role === Role.WAITER) {
       return {
-        cafeId, actorId, amount, kind: 'sale' as const, sourceKey: 'sale:' + id,
+        cafeId, actorId, amount, kind: 'sale' as const, sourceKey: 'sale:' + id, paymentMethod: method,
         accountId: accounts.cash.id, cashCustodianId: cashierId, cashCustodyDay: cashCustodyDate(warehouseDay(now)),
         occurredAt: now, note: 'Наличные у сотрудника',
       };
     }
+    const bankAccountId = method === PaymentMethod.card ? routing?.cardSettlementAccountId
+      : method === PaymentMethod.qr ? routing?.qrSettlementAccountId : undefined;
     return {
-      cafeId, actorId, amount, kind: 'sale' as const, sourceKey: 'sale:' + id,
-      accountId: cash ? shift?.accountId ?? accounts.cash.id : accounts.noncash.id,
+      cafeId, actorId, amount, kind: 'sale' as const, sourceKey: 'sale:' + id, paymentMethod: method,
+      accountId: cash ? shift?.accountId ?? accounts.cash.id : bankAccountId ?? accounts.noncash.id,
       cashShiftId: shift?.id, pendingCashShift: !!shift, occurredAt: shift && now < shift.openedAt ? shift.openedAt : now, note: 'Оплата заказа',
     };
   });
@@ -43,7 +48,7 @@ export async function reverseOrderReceipts(
 ) {
   await lockFinance(tx, cafeId);
   const payments = await tx.payment.findMany({
-    where: { cafeId, orderId, status: PaymentStatus.paid }, select: { id: true },
+    where: { cafeId, orderId, status: PaymentStatus.paid }, select: { id: true, method: true },
   });
   if (!payments.length) return;
   const sales = await tx.financeEntry.findMany({
@@ -51,6 +56,7 @@ export async function reverseOrderReceipts(
     include: { account: { select: { type: true } } },
   });
   if (!sales.length) return;
+  const methodBySource = new Map(payments.map(({ id, method }) => ['sale:' + id, method]));
   const settings = await tx.settings.findFirst({ where: { cafeId }, select: { cashShiftsEnabled: true } });
   const shift = await tx.cashShift.findFirst({ where: { cafeId, closedAt: null } });
   const drawerSales = sales.filter(({ cashCustodianId }) => !cashCustodianId);
@@ -63,7 +69,8 @@ export async function reverseOrderReceipts(
   for (const sale of sales) {
     const sourceKey = 'refund:' + sale.sourceKey;
     if (await tx.financeEntry.findUnique({ where: { cafeId_sourceKey: { cafeId, sourceKey } }, select: { id: true } })) continue;
-    const refund = { cafeId, actorId, kind: 'refund' as const, occurredAt, note: 'Отмена оплаты заказа' };
+    const paymentMethod = sale.paymentMethod ?? methodBySource.get(sale.sourceKey ?? '');
+    const refund = { cafeId, actorId, kind: 'refund' as const, occurredAt, paymentMethod, note: 'Отмена оплаты заказа' };
     const custody = await refundCashCustody(tx, sale, sale.amount, remainingByDay);
     const drawerAmount = sale.amount.sub(custody);
     if (drawerAmount.gt(0)) {

@@ -7,7 +7,7 @@ export class WarehouseRegisterExportDto {
   @IsArray() @ArrayMinSize(1) @ArrayMaxSize(10000) @ArrayUnique()
   @IsString({ each: true }) @IsNotEmpty({ each: true }) @MaxLength(160, { each: true }) ids: string[];
 
-  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(7) @ArrayUnique()
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(8) @ArrayUnique()
   @IsString({ each: true }) @MaxLength(24, { each: true }) columns: string[];
 }
 
@@ -17,13 +17,15 @@ export const warehouseDateColumn = { label: 'Дата', width: 20, format: 'dd.m
 export const warehouseMoneyFormat = '#,##0.00 "с"';
 
 export function warehouseRegisterColumns<Key extends string>(
-  requested: string[], columns: Record<Key, Column>, hidden?: Key,
+  requested: string[], columns: Record<Key, Column>, hidden?: Key, requireDate = true,
 ): Key[] {
   const valid = requested.filter((key): key is Key => Object.prototype.hasOwnProperty.call(columns, key));
-  if (valid.length !== requested.length || !requested.includes('date')) {
-    throw new BadRequestException('Укажите дату и допустимые столбцы');
+  if (valid.length !== requested.length || (requireDate && !requested.includes('date'))) {
+    throw new BadRequestException(requireDate ? 'Укажите дату и допустимые столбцы' : 'Укажите допустимые столбцы');
   }
-  return valid.filter((key) => key !== hidden);
+  const visible = valid.filter((key) => key !== hidden);
+  if (visible.length === 0) throw new BadRequestException('Выберите доступные столбцы для экспорта');
+  return visible;
 }
 
 export function warehouseRegisterRows<Row extends { id: string }>(ids: string[], rows: Row[]): Row[] {

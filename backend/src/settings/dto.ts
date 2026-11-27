@@ -1,4 +1,4 @@
-import { Equals, IsBoolean, IsIn, IsNumber, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import { Equals, IsBoolean, IsIn, IsNumber, IsObject, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import { WaiterOrderPermissions } from '../orders/order-policy';
 
 export class UpdateSettingsDto {
@@ -77,6 +77,23 @@ export class UpdateSettingsDto {
 
   @IsOptional() @IsBoolean()
   payCard?: boolean;
+
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsNumber({ maxDecimalPlaces: 4 }) @Min(0) @Max(100)
+  cardProcessingFeeRate?: number;
+
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsNumber({ maxDecimalPlaces: 4 }) @Min(0) @Max(100)
+  qrProcessingFeeRate?: number;
+
+  @IsOptional() @IsUUID()
+  cardSettlementAccountId?: string | null;
+
+  @IsOptional() @IsUUID()
+  qrSettlementAccountId?: string | null;
+
+  @IsOptional() @IsUUID()
+  cashCollectionAccountId?: string | null;
 
   @IsOptional() @IsBoolean()
   allowNegativeIngredientStock?: boolean;

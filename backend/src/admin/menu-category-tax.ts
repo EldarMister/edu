@@ -18,7 +18,7 @@ export async function categorySettings(tx: Prisma.TransactionClient, input: Cate
   const parentId = requested === MAIN_SCREEN || requested === mainMenuCategoryId() ? null : requested;
   let parentTax: string | null = null;
   if (parentId !== null) {
-    const nodes = await tx.category.findMany({ where: { cafeId: getCafeId() ?? null }, select: { id: true, parentId: true, taxId: true } });
+    const nodes = await tx.category.findMany({ where: { cafeId: getCafeId() ?? null, archivedAt: null }, select: { id: true, parentId: true, taxId: true } });
     const byId = new Map(nodes.map((c) => [c.id, c]));
     const parent = byId.get(parentId);
     if (!parent) throw new BadRequestException('Родительская категория не найдена');

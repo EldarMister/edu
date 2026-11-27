@@ -40,6 +40,20 @@ export class SettingsController {
     return this.settings.getForAdmin();
   }
 
+  @Get('admin/settings/payment-accounts')
+  @Roles(Role.OWNER)
+  @RequirePermission('sections.settings')
+  paymentAccounts(@CurrentUser() user: AuthUser) {
+    return this.settings.paymentAccounts(user.cafeId);
+  }
+
+  @Get('admin/settings/collection-accounts')
+  @Roles(Role.OWNER)
+  @RequirePermission('sections.settings')
+  collectionAccounts(@CurrentUser() user: AuthUser) {
+    return this.settings.collectionAccounts(user.cafeId);
+  }
+
   @Patch('admin/settings')
   @Roles(Role.ADMIN, Role.OWNER)
   @RequirePermission('sections.settings')

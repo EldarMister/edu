@@ -5,7 +5,7 @@ import { apiError } from '@/lib/api';
 import { exportCsv } from '@/lib/report-output';
 import { WorkspacePending } from '../components/WorkspacePending';
 import { MenuFoodCostCalculation } from './MenuFoodCostCalculation';
-import { FoodCostPositions, FoodCostIngredients, foodCostExportRows, formatFoodCost, formatPercent, priceCaption } from './FoodCostReportTables';
+import { FoodCostPositions, FoodCostIngredients, foodCostExportRows, formatFoodCost, formatMarginChange, formatPercent, priceCaption } from './FoodCostReportTables';
 import { FoodCostPriceBasket, usePriceBasket } from './FoodCostPriceBasket';
 import { downloadFoodCostExcel, useFoodCostAnalysis, useFoodCostReport, type FoodCostMetric, type FoodCostPosition, type FoodCostRange, type FoodCostReport, type FoodCostTab } from './food-cost-api';
 import { foodCostInsights, MAX_MENU_PRICE, percentChange, projectFoodCostPrice } from './food-cost-model';
@@ -131,7 +131,7 @@ function FoodCostControl({ onOpen }: { onOpen: (row: MenuLink) => void }) {
                 </span>
                 <span className="min-w-0 flex-1 font-medium">{item.title}</span>
                 {item.monthlyMarginChange != null && <span className="food-cost-recommendation-impact">
-                  {item.monthlyMarginChange > 0 ? '+' : ''}{financeMoney(item.monthlyMarginChange)} / 30 дн.
+                  {formatMarginChange(item.monthlyMarginChange)} / 30 дн.
                 </span>}
               </summary>
               <div className="food-cost-recommendation-body">
@@ -194,8 +194,8 @@ function RecommendationPrice({ report, row, suggested, planned, onPlan }: {
       {price === planned ? 'В плане цен' : 'Добавить в план'}
     </button>}
     <output className="basis-full text-sm">{!valid ? 'Введите неотрицательную цену с точностью до двух знаков.' :
-      projection ? 'Фудкост ' + formatFoodCost(projection.foodCostPercent) + ' · Изменение маржи за 30 дней ' +
-        financeMoney(projection.monthlyMarginChange) : 'Цена совпадает с ценой меню.'}</output>
+      projection ? 'Фудкост ' + formatFoodCost(projection.baselineFoodCostPercent) + ' → ' + formatFoodCost(projection.foodCostPercent) +
+        ' · Изменение маржи за 30 дней ' + formatMarginChange(projection.monthlyMarginChange) : 'Цена совпадает с ценой меню.'}</output>
   </form>;
 }
 

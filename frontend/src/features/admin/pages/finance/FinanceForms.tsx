@@ -194,6 +194,7 @@ export function CategoryForm({ category, categories, employees, positions, canEd
   const [showInProfitLoss, setShowInProfitLoss] = useState(category?.showInProfitLoss ?? true);
   const [userIds, setUserIds] = useState(category?.userIds ?? []);
   const [positionIds, setPositionIds] = useState(category?.positionIds ?? []);
+  const automaticFee = category?.systemKey === 'payment-processing-fees';
   const kind: CategoryKind = income ? (expense ? 'both' : 'income') : 'expense';
   const byId = new Map(categories.map((entry) => [entry.id, entry]));
   const parentOptions = categoryOptions(categories, (entry) => !category || (entry.id !== category.id
@@ -205,15 +206,17 @@ export function CategoryForm({ category, categories, employees, positions, canEd
     <Choice label="Родительская категория" value={parentId} onChange={setParent} options={parentOptions} empty="Главный уровень" />
     <DocumentField label="Допустимые транзакции">
       <div className="grid gap-2 py-2">
-        <label className="flex items-center gap-2"><input type="checkbox" checked={income} onChange={(event) => setIncome(event.target.checked)} />Доходы</label>
-        <label className="flex items-center gap-2"><input type="checkbox" checked={expense} onChange={(event) => setExpense(event.target.checked)} />Расходы</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={income} disabled={automaticFee} onChange={(event) => setIncome(event.target.checked)} />Доходы</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={expense} disabled={automaticFee} onChange={(event) => setExpense(event.target.checked)} />Расходы</label>
       </div>
     </DocumentField>
     <OperationKind label="Показывать на кассе" value={showOnPos ? 'yes' : 'no'} onChange={(value) => setShowOnPos(value === 'yes')}
       options={[{ value: 'yes', label: 'Да' }, { value: 'no', label: 'Нет' }]}
       hint="При выборе «Да» кассир сможет выбрать эту категорию при внесении или расходе наличных в кассовой смене." />
-    <OperationKind label="Отображать в P&L" value={showInProfitLoss ? 'yes' : 'no'} onChange={(value) => setShowInProfitLoss(value === 'yes')}
-      options={[{ value: 'yes', label: 'Да' }, { value: 'no', label: 'Нет' }]} />
+    {automaticFee ? <DocumentField label="Отображать в P&L">
+      <p className="py-2 text-sm text-text-secondary">Да. Сюда попадает комиссия при закрытии кассовой смены.</p>
+    </DocumentField> : <OperationKind label="Отображать в P&L" value={showInProfitLoss ? 'yes' : 'no'} onChange={(value) => setShowInProfitLoss(value === 'yes')}
+      options={[{ value: 'yes', label: 'Да' }, { value: 'no', label: 'Нет' }]} />}
     {canEditPermissions && <div className="border-t border-border pt-4">
       <h2 className="mb-3 font-semibold text-text-primary">Ограниченный доступ к категории</h2>
       <div className="grid gap-4">

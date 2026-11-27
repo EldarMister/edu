@@ -1,4 +1,4 @@
-import { IconExport, IconImport } from '@/features/admin/components/icons';
+import { IconExport, IconImport, IconPrinter } from '@/features/admin/components/icons';
 import { Fragment, useState, type ReactNode } from 'react';
 import { ColumnButton } from '../../components/ColumnControl';
 import { RowIconButton } from '../../components/RowIconButton';
@@ -6,6 +6,7 @@ import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { api, apiError } from '@/lib/api';
+import { printReport } from '@/lib/report-output';
 import { WorkspaceHeaderActions, WorkspaceHeaderCount } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { purchaseListQuery, purchaseNumber, useIngredients, usePurchase, usePurchases, useWarehouseLocations, type Purchase } from './api';
@@ -121,35 +122,59 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
     else expanded.add(id);
     update({ supplyExpanded: [...expanded].join(',') });
   }
-  function cell(purchase: Purchase, key: SupplyColumn): ReactNode {
+  function cellText(purchase: Purchase, key: SupplyColumn): string {
     switch (key) {
-      case 'number': return <button type="button" aria-label={`Открыть поставку ${purchase.number}`} className="font-medium text-primary"
-        onClick={() => onOpen(purchase.id)}>{purchase.number}</button>;
-      case 'date': {
-        const operationDate = purchase.effectiveAt ?? purchase.postedAt ?? purchase.date;
-        return <time dateTime={operationDate} title={`${inventoryTimeDisplay(operationDate)} (Бишкек)`}>{formatDocumentListDate(operationDate)}</time>;
-      }
-      case 'supplier': return <span title={purchase.supplier}>{purchase.supplier}</span>;
+      case 'number': return String(purchase.number);
+      case 'date': return formatDocumentListDate(purchase.effectiveAt ?? purchase.postedAt ?? purchase.date);
+      case 'supplier': return purchase.supplier;
       case 'warehouse': return warehouseNames.get(purchase.warehouseId ?? defaultWarehouseId) ?? '—';
-      case 'fundingAccounts': {
-        const accountNames = purchase.fundingAccounts?.join(', ');
-        return <span title={accountNames}>{accountNames || '—'}</span>;
+      case 'fundingAccounts': return purchase.fundingAccounts?.join(', ') || '—';
+      case 'products': {
+        const names = purchase.productNames ?? [];
+        return names.length ? names.join(', ') + (purchase.itemsCount > names.length ? '…' : '') : '—';
       }
-      case 'products': return <span title={purchase.productNames?.join(', ')}>{purchase.productNames?.join(', ') || '—'}
-        {purchase.itemsCount > (purchase.productNames?.length ?? 0) && purchase.productNames?.length ? '…' : ''}</span>;
-      case 'note': return <span title={purchase.note ?? undefined}>{purchase.note || '—'}</span>;
-      case 'status': return <span className="document-status" data-status={purchase.status}>{purchaseStatus(purchase.status)}</span>;
+      case 'note': return purchase.note || '—';
+      case 'status': return purchaseStatus(purchase.status);
       case 'totalAmount': return balanceMoney(purchase.totalAmount);
       case 'paymentStatus': return purchase.paymentStatus ? purchasePaymentLabels[purchase.paymentStatus] : '—';
       case 'paidAmount': return purchase.paidAmount == null ? '—' : balanceMoney(purchase.paidAmount);
       case 'debtAmount': return purchase.debtAmount == null ? '—' : balanceMoney(purchase.debtAmount);
     }
   }
-  function footer(key: SupplyColumn) {
+  function cell(purchase: Purchase, key: SupplyColumn): ReactNode {
+    const value = cellText(purchase, key);
+    switch (key) {
+      case 'number': return <button type="button" aria-label={`Открыть поставку ${purchase.number}`} className="font-medium text-primary"
+        onClick={() => onOpen(purchase.id)}>{value}</button>;
+      case 'date': {
+        const operationDate = purchase.effectiveAt ?? purchase.postedAt ?? purchase.date;
+        return <time dateTime={operationDate} title={`${inventoryTimeDisplay(operationDate)} (Бишкек)`}>{value}</time>;
+      }
+      case 'status': return <span className="document-status" data-status={purchase.status}>{value}</span>;
+      case 'supplier':
+      case 'fundingAccounts':
+      case 'products':
+      case 'note': return <span title={value}>{value}</span>;
+      default: return value;
+    }
+  }
+  function footerText(key: SupplyColumn) {
     if (key === 'totalAmount') return balanceMoney(totals.totalAmount);
-    if (key !== 'paidAmount' && key !== 'debtAmount') return null;
+    if (key !== 'paidAmount' && key !== 'debtAmount') return '';
     if (!hasRecordedSettlement) return '—';
-    return <>{balanceMoney(totals[key])}{incomplete && <span className="block text-xs font-normal text-text-muted">По сверенным</span>}</>;
+    return balanceMoney(totals[key]);
+  }
+  function footer(key: SupplyColumn) {
+    return <>{footerText(key)}{incomplete && hasRecordedSettlement && (key === 'paidAmount' || key === 'debtAmount') &&
+      <span className="block text-xs font-normal text-text-muted">По сверенным</span>}</>;
+  }
+  function printList() {
+    setExportError('');
+    const data = rows.map((purchase) => columns.map((key) => cellText(purchase, key)));
+    const totalsLabel = columns.filter((key) => moneyColumns.includes(key)).map((key) =>
+      `${supplyColumns[key].label} — ${footerText(key)}${incomplete && hasRecordedSettlement && key !== 'totalAmount' ? ' (по сверенным)' : ''}`);
+    if (!printReport('Поставки', `Документов — ${rows.length}`, columns.map((key) => supplyColumns[key].label), data,
+      { title: 'Итого', text: totalsLabel.join('\n') })) setExportError('Разрешите открытие окна печати в браузере.');
   }
   function rowActions(purchase: Purchase) {
     return <div className="supply-actions">
@@ -184,6 +209,8 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
         <ColumnButton onClick={() => setSettingsOpen(true)} />
         {canExport && <button type="button" className="supply-header-action" disabled={exporting}
           onClick={() => void exportWorkbook()}><IconExport />{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
+        {canExport && <button type="button" className="supply-header-action" disabled={!query.isSuccess || !rows.length}
+          onClick={printList}><IconPrinter />Печать</button>}
         {period.filter}
         {canEdit && <button type="button" className="supply-header-action" onClick={() => onCreate(true)}><IconImport />Импорт с ИИ</button>}
         {canEdit && <button type="button" className="btn-primary btn-md" onClick={() => onCreate()}>Добавить</button>}

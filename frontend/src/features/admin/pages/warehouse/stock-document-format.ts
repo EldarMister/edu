@@ -16,13 +16,13 @@ export function writeoffReasonLabel(document: StockDocument) {
 }
 
 export function writeoffPostedTotals(documents: StockDocument[]) {
-  const posted = documents.filter(({ status }) => status === 'posted');
+  const posted = documents.filter(({ status, deletedAt }) => status === 'posted' && !deletedAt);
   const known = posted.filter(({ varianceValue }) => varianceValue != null);
   return { count: posted.length, amount: known.reduce((sum, { varianceValue }) => sum + Math.abs(varianceValue!), 0),
     partial: known.length !== posted.length };
 }
 
-export type StockDocumentDisplayStatus = StockDocumentStatus | 'reopened';
+export type StockDocumentDisplayStatus = StockDocumentStatus | 'reopened' | 'deleted';
 
 const STATUS_LABEL: Record<StockDocumentDisplayStatus, string> = {
   draft: 'Черновик',
@@ -30,11 +30,13 @@ const STATUS_LABEL: Record<StockDocumentDisplayStatus, string> = {
   posted: 'Проведён',
   reopened: 'Открыта для редактирования',
   reversed: 'Сторнирован',
+  deleted: 'Удалено',
 };
 
 const DOCUMENT_DATE = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Bishkek' });
 
 export function documentDisplayStatus(document: StockDocument): StockDocumentDisplayStatus {
+  if (document.deletedAt) return 'deleted';
   return document.status === 'draft' && document.reopenedAt ? 'reopened' : document.status;
 }
 

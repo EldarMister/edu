@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { DishesService } from '../dishes/dishes.service';
 import { CategoriesService } from '../categories/categories.service';
+import { visibleMenuDish } from '../categories/menu-visibility';
 import { OrdersService } from '../orders/orders.service';
 import { round2, unitPricing } from '../orders/order.helpers';
 import { EventsGateway } from '../realtime/events.gateway';
@@ -195,7 +196,7 @@ export class QrService {
     const { session, guest } = ensured;
 
     const dish = await this.prisma.dish.findFirst({
-      where: { id: dto.dishId, isActive: true },
+      where: { id: dto.dishId, ...visibleMenuDish },
       select: { id: true, name: true, price: true, _count: { select: { variants: true } } },
     });
     if (!dish) throw new NotFoundException('Блюдо не найдено');

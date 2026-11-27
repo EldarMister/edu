@@ -3,7 +3,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { createPortal } from 'react-dom';
 import { Navigate, useLocation } from 'react-router-dom';
 import { Modal } from '@/components/Modal';
-import { DeleteNameField } from '../components/DeleteNameField';
 import { captureDeletionEffect } from '../components/deletion-effect';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
@@ -52,6 +51,7 @@ import {
   useAdminGoods,
   useAdminSets,
   useCategoryMutations,
+  useCategoryTrash,
   useDishMutations,
   useRecipeTrash,
   useSetMutations,
@@ -468,16 +468,46 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
 function RecipeTrashPage({ onClose }: { onClose: () => void }) {
   const { list, restore } = useRecipeTrash();
   const push = useNotifications((state) => state.push);
+  const stations = usePreparationStations().data ?? [];
+  const categories = useAdminCategories().data ?? [];
+  const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [stationFilter, setStationFilter] = useState('');
+  const categoryNames = new Map(menuCategoryOptions(categories, { includeMain: true }).map(({ value, label }) => [value, label]));
+  const stationNames = new Map(routingOptions(stations).map(({ value, label }) => [value, label]));
+  for (const station of stations) stationNames.set(station.id, station.name);
+  const recipes = list.data ?? [];
+  const categoryOptions = Array.from(new Map(recipes.map(({ category }) =>
+    [category.id, { value: category.id, label: categoryNames.get(category.id) ?? category.name }],
+  )).values()).sort((a, b) => a.label.localeCompare(b.label, 'ru'));
+  const stationOptions = [...new Set(recipes.map(({ prepStation }) => prepStation))].map((value) => ({
+    value, label: stationNames.get(value) ?? value,
+  })).sort((a, b) => a.label.localeCompare(b.label, 'ru'));
+  const selectedCategories = warehouseMultiFilterValues(categoryFilter);
+  const selectedStations = warehouseMultiFilterValues(stationFilter);
+  const query = search.trim().toLocaleLowerCase('ru');
+  const rows = recipes.filter(({ name, category, prepStation }) =>
+    (!query || name.toLocaleLowerCase('ru').includes(query))
+    && (!selectedCategories.length || selectedCategories.includes(category.id))
+    && (!selectedStations.length || selectedStations.includes(prepStation)));
   return <EditorPage title="Корзина техкарт" onClose={onClose}>
     <p className="py-3 text-sm text-text-secondary">Техкарту с её вариантами и модификаторами можно восстановить в течение 30 дней после удаления.</p>
+    <div className="poster-toolbar">
+      <WorkspaceSearch label="Поиск техкарт в корзине" value={search} onChange={setSearch} />
+      <WarehouseMultiFilter label="Категория" value={categoryFilter} options={categoryOptions} onChange={setCategoryFilter} />
+      <WarehouseMultiFilter label="Цех" value={stationFilter} options={stationOptions} onChange={setStationFilter} />
+    </div>
     {list.isPending ? <WorkspacePending /> : list.isError ? <ListLoadError error={list.error}
-      pending={list.isFetching} onRetry={() => void list.refetch()} /> : !list.data.length ? <p className="py-6">Корзина пуста</p> :
-      <div className="overflow-x-auto"><table className="poster-table w-full min-w-[520px] text-sm">
+      pending={list.isFetching} onRetry={() => void list.refetch()} /> : !rows.length ?
+      <p className="py-6">{recipes.length ? 'Техкарты по этим фильтрам не найдены' : 'Корзина пуста'}</p> :
+      <div className="overflow-x-auto"><table className="poster-table w-full min-w-[620px] text-sm">
         <thead><tr className="border-b border-border text-left text-text-secondary">
-          <th className="p-3">Название</th><th className="p-3">Категория</th><th className="p-3">Дата удаления</th><th aria-label="Действия" />
+          <th className="p-3">Название</th><th className="p-3">Категория</th><th className="p-3">Цех</th>
+          <th className="p-3">Дата удаления</th><th aria-label="Действия" />
         </tr></thead>
-        <tbody>{list.data.map((row) => <tr key={row.id} className="border-b border-border">
-          <td className="p-3">{row.name}</td><td className="p-3">{row.category.name}</td>
+        <tbody>{rows.map((row) => <tr key={row.id} className="border-b border-border">
+          <td className="p-3">{row.name}</td><td className="p-3">{categoryNames.get(row.category.id) ?? row.category.name}</td>
+          <td className="p-3">{stationNames.get(row.prepStation) ?? row.prepStation}</td>
           <td className="p-3">{new Date(row.archivedAt).toLocaleString('ru-RU', { timeZone: 'Asia/Bishkek', dateStyle: 'short', timeStyle: 'short' })}</td>
           <td className="p-3 text-right"><button type="button" className="text-primary hover:underline" disabled={restore.isPending}
             aria-label={'Восстановить ' + row.name} onClick={() => restore.mutate(row.id, { onSuccess: () =>
@@ -583,7 +613,7 @@ export function MenuCategoriesPage() {
   const { editor, openEditor, closeEditor } = useEditorRoute();
   const { can } = usePermissions();
   const editable = can('actions.editMenu');
-  const { reorder } = useCategoryMutations();
+  const { reorder, update } = useCategoryMutations();
   const push = useNotifications((state) => state.push);
   const [deleteTarget, setDeleteTarget] = useState<AdminCategory | null>(null);
   const sorted = (categoriesQ.data ?? []).filter((category) => !category.id.startsWith('menu-root:')).sort((a, b) => a.sortOrder - b.sortOrder);
@@ -610,6 +640,11 @@ export function MenuCategoriesPage() {
   const editingCategory = editor?.type === 'category' && !!editor.id;
   const categoryIndex = editingCategory ? sorted.findIndex((category) => category.id === editor.id) : -1;
   const creatingCategory = editor?.type === 'category' && !editor.id && editable;
+  if (editor?.type === 'categoryTrash') {
+    return editable ? <CategoryTrashPage onClose={closeEditor} /> : <EditorPage title="Корзина категорий" onClose={closeEditor}>
+      <p role="alert" className="text-text-secondary">У вас нет доступа к восстановлению категорий.</p>
+    </EditorPage>;
+  }
   return (
     <div className="min-w-0">
       <WorkspaceHeaderCount count={categoriesQ.isSuccess ? rows.length : undefined} />
@@ -618,6 +653,10 @@ export function MenuCategoriesPage() {
       </div>
       {editable && !editor && <WorkspaceHeaderActions>
         <div className="catalogue-header-actions">
+          <button type="button" className="supply-header-action" title="Корзина категорий"
+            onClick={() => openEditor({ type: 'categoryTrash' })}>
+            <IconTrash aria-hidden="true" /><span className="catalogue-action-label">Корзина</span>
+          </button>
           <button type="button"
             aria-label="Добавить категорию"
             className="catalogue-add"
@@ -659,6 +698,7 @@ export function MenuCategoriesPage() {
                     >
                       {category.imageUrl && <img src={resolveApiImage(category.imageUrl) ?? undefined} loading="lazy" alt="" className="h-8 w-10 rounded object-cover" />}
                       {categoryPaths.get(category.id) ?? category.name}
+                      {!category.isActive && <span className="text-xs text-text-muted">Скрыта</span>}
                     </button>
                   </td>
                   <td className="text-text-secondary">
@@ -675,11 +715,14 @@ export function MenuCategoriesPage() {
                       {editable && (
                         <MenuActions
                           ariaLabel={`Действия категории ${category.name}`}
-                          disabled={reorder.isPending}
+                          disabled={reorder.isPending || update.isPending}
                           onChange={(action) => {
                             if (action === 'delete') setDeleteTarget(category);
                             else if (action === 'up') void move(category.id, -1);
                             else if (action === 'down') void move(category.id, 1);
+                            else if (action === 'visibility') update.mutate({ id: category.id, isActive: !category.isActive }, {
+                              onError: (error) => push({ message: apiError(error), at: new Date().toISOString() }),
+                            });
                           }}
                           options={[
                             ...(sorted[0]?.id === category.id
@@ -688,6 +731,7 @@ export function MenuCategoriesPage() {
                             ...(sorted.at(-1)?.id === category.id
                               ? []
                               : [{ value: 'down', label: 'Опустить ниже' }]),
+                            { value: 'visibility', label: category.isActive ? 'Скрыть с кассы' : 'Показать на кассе' },
                             { value: 'delete', label: 'Удалить' },
                           ]}
                         />
@@ -741,6 +785,39 @@ export function MenuCategoriesPage() {
     </div>
   );
 }
+
+function CategoryTrashPage({ onClose }: { onClose: () => void }) {
+  const { list, restore } = useCategoryTrash();
+  const push = useNotifications((state) => state.push);
+
+  return <EditorPage title="Корзина категорий" onClose={onClose}>
+    <p className="py-3 text-sm text-text-secondary">Категории со вложенными разделами и позициями можно восстановить в течение 30 дней после удаления.</p>
+    {list.isPending ? <WorkspacePending /> : list.isError ? <ListLoadError error={list.error}
+      pending={list.isFetching} onRetry={() => void list.refetch()} /> : !list.data.length ? <p className="py-6">Корзина пуста</p> :
+      <div className="overflow-x-auto">
+        <table className="poster-table poster-directory-table w-full min-w-[520px] text-sm">
+          <thead><tr>
+            <th scope="col">Категория</th>
+            <th scope="col" className="text-right">Позиций меню</th>
+            <th scope="col">Дата удаления</th>
+            <th scope="col"><span className="sr-only">Действия</span></th>
+          </tr></thead>
+          <tbody>{list.data.map((row) => <tr key={row.id}>
+            <td>{row.name}</td>
+            <td className="text-right tabular-nums">{row.itemCount}</td>
+            <td>{new Date(row.archivedAt).toLocaleString('ru-RU', { timeZone: 'Asia/Bishkek', dateStyle: 'short', timeStyle: 'short' })}</td>
+            <td className="text-right">{row.parentInTrash ? (
+              <span className="text-text-muted">Сначала восстановите «{row.parentInTrash}»</span>
+            ) : <button type="button" className="text-primary hover:underline" disabled={restore.isPending}
+              aria-label={`Восстановить категорию ${row.name}`} onClick={() => restore.mutate(row.id, { onSuccess: () =>
+                push({ message: `Категория «${row.name}» восстановлена`, at: new Date().toISOString() }) })}>Восстановить</button>}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>}
+    {restore.isError && <p role="alert" className="py-2 text-danger">{apiError(restore.error)}</p>}
+  </EditorPage>;
+}
+
 function MenuCategoryForm({
   category,
   position = 1,
@@ -849,15 +926,29 @@ function DeleteCategorySheet({
 }) {
   const { remove } = useCategoryMutations();
   const push = useNotifications((state) => state.push);
-  const others = categories.filter((item) => item.id !== category.id);
+  const moveOptions = menuCategoryOptions(categories).filter(({ value }) => value !== category.id);
   const strategyName = useId();
-  const [strategy, setStrategy] = useState<'move' | 'delete'>();
+  const [strategy, setStrategy] = useState<'move' | 'delete'>('delete');
   const [targetId, setTargetId] = useState('');
-  const [confirmation, setConfirmation] = useState('');
   const [error, setError] = useState('');
+  const childrenByParent = new Map<string, AdminCategory[]>();
+  for (const item of categories) {
+    if (!item.parentId) continue;
+    const children = childrenByParent.get(item.parentId);
+    if (children) children.push(item);
+    else childrenByParent.set(item.parentId, [item]);
+  }
+  const archivedIds = new Set([category.id]);
+  let archivedPositions = category._count.dishes;
+  for (const id of archivedIds) {
+    for (const child of childrenByParent.get(id) ?? []) {
+      if (archivedIds.has(child.id)) continue;
+      archivedIds.add(child.id);
+      archivedPositions += child._count.dishes;
+    }
+  }
   const hasDishes = category._count.dishes > 0;
-  const canDelete = confirmation.trim() === category.name.trim() &&
-    (!hasDishes || strategy === 'delete' || (strategy === 'move' && !!targetId));
+  const canDelete = strategy === 'delete' || !!targetId;
 
   async function run() {
     if (!canDelete || remove.isPending) return;
@@ -866,7 +957,7 @@ function DeleteCategorySheet({
     try {
       await remove.mutateAsync({ id: category.id, strategy, targetCategoryId: strategy === 'move' ? targetId : undefined });
       playEffect?.();
-      push({ message: 'Категория удалена', at: new Date().toISOString() });
+      push({ message: 'Категория перемещена в корзину', at: new Date().toISOString() });
       onDone();
     } catch (failure) {
       setError(apiError(failure));
@@ -874,44 +965,43 @@ function DeleteCategorySheet({
   }
 
   return (
-    <Modal open title="Удалить категорию" onClose={() => !remove.isPending && onDone()} footer={
+    <Modal open manageFocus title="Удалить категорию" onClose={() => !remove.isPending && onDone()} footer={
       <div className="flex gap-2">
-        <button type="button" className="btn-secondary btn-lg flex-1" disabled={remove.isPending} onClick={onDone}>
+        <button type="button" className="btn-secondary btn-lg flex-1" data-dialog-initial-focus disabled={remove.isPending} onClick={onDone}>
           Отмена
         </button>
         <button type="button" className="btn-danger btn-lg flex-1 font-semibold"
           disabled={remove.isPending || !canDelete} onClick={() => void run()}>
-          {remove.isPending ? <Spinner /> : strategy === 'move' ? 'Перенести и удалить' : 'Удалить'}
+          {remove.isPending ? <Spinner /> : strategy === 'move' ? 'Перенести и удалить категорию' : 'Переместить в корзину'}
         </button>
       </div>
     }>
       <p className="text-sm text-text-secondary">Удалить категорию «{category.name}»?</p>
-      {categories.some((item) => item.parentId === category.id) && <p className="mt-2 text-sm text-text-secondary">
-        Вложенные категории переместятся в «{categories.find((item) => item.id === category.parentId)?.name ?? 'Главный экран'}».
+      <p className="mt-2 text-sm text-text-muted">Восстановить категорию из корзины можно в течение 30 дней.</p>
+      <p className="mt-2 text-sm text-text-secondary">
+        {strategy === 'delete' ? `Позиций в корзину: ${archivedPositions}. Подкатегорий: ${archivedIds.size - 1}.`
+          : `Позиций для переноса: ${category._count.dishes}. В корзину попадёт только выбранная категория.`}
+      </p>
+      {strategy === 'move' && archivedIds.size > 1 && <p className="mt-2 text-sm text-text-secondary">
+        Подкатегории со своими позициями переместятся в «{categories.find((item) => item.id === category.parentId)?.name ?? 'Главный экран'}».
       </p>}
       {hasDishes && <>
-        <p className="mt-2 text-sm text-text-muted">
-          Позиций в категории: {category._count.dishes}. История заказов и чеки сохранятся.
-        </p>
+        <p className="mt-2 text-sm text-text-muted">История заказов и чеки сохранятся.</p>
         <fieldset disabled={remove.isPending} className="mt-3 space-y-2.5 text-sm">
           <legend className="mb-1 font-medium">Что сделать с позициями?</legend>
-          {others.length > 0 && <label className="flex items-center gap-2">
+          <label className="flex items-center gap-2">
             <input type="radio" name={strategyName} checked={strategy === 'move'} onChange={() => setStrategy('move')} />
             Перенести в другую категорию
-          </label>}
+          </label>
           {strategy === 'move' && <Select ariaLabel="Категория для переноса" className="h-10 w-full"
             value={targetId} onChange={setTargetId} disabled={remove.isPending}
-            options={[{ value: '', label: 'Выберите категорию' }, ...others.map((item) => ({ value: item.id, label: item.name }))]} />}
+            options={[{ value: '', label: 'Выберите категорию' }, { value: '__main_screen__', label: 'Главный экран' }, ...moveOptions]} />}
           <label className="flex items-center gap-2">
             <input type="radio" name={strategyName} checked={strategy === 'delete'} onChange={() => setStrategy('delete')} />
-            Удалить все позиции вместе с категорией
+            Переместить категорию и её позиции в корзину
           </label>
         </fieldset>
       </>}
-      <div className="mt-3">
-        <DeleteNameField label="Введите название категории для подтверждения"
-          value={confirmation} disabled={remove.isPending} onChange={setConfirmation} />
-      </div>
       {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
     </Modal>
   );

@@ -50,7 +50,8 @@ test('Recipe trash preserves identities, closed orders, safety of open orders an
         assert.equal((await catalog.dishesAll({})).length, 0);
         assert.equal((await docs.writeoffOptions()).dishes.length, 0);
         assert.equal((await docs.writeoffOptions(asOf)).dishes[0].id, dish.id);
-        assert.equal((await catalog.trashedRecipes())[0].id, dish.id);
+        const archived = (await catalog.trashedRecipes())[0];
+        assert.deepEqual([archived.id, archived.category.id, archived.prepStation], [dish.id, category.id, category.prepStation]);
         await assert.rejects(menu.get(dish.id), /не найдена/);
         await assert.rejects(catalog.updateDish(dish.id, { isActive: true }, actor), /не найдено/);
         await assert.rejects(recipes.removeItem(recipeItem.id), /отсутствует в меню/);
@@ -68,8 +69,10 @@ test('Recipe trash preserves identities, closed orders, safety of open orders an
       await t.test('deleting the original category preserves the trash; restoring preserves disabled state', async () => {
         await db.dish.update({ where: { id: dish.id }, data: { isActive: false } });
         await catalog.deleteCategory(category.id, { strategy: 'delete' }, actor);
-        assert.equal((await catalog.trashedRecipes())[0].category.name, 'Главный экран');
-        await catalog.restoreRecipe(dish.id, actor);
+        assert.deepEqual(await catalog.trashedRecipes(), []);
+        await assert.rejects(catalog.restoreRecipe(dish.id, actor), /отсутствует/);
+        assert.equal((await catalog.trashedCategories())[0].id, category.id);
+        await catalog.restoreCategory(category.id, actor);
         assert.equal((await db.dish.findUniqueOrThrow({ where: { id: dish.id } })).isActive, false);
         assert.equal((await catalog.dishesAll({}))[0].id, dish.id);
         await catalog.deleteDish(dish.id, actor);

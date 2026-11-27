@@ -152,9 +152,12 @@ const shiftEntryLabel: Record<EntryKind, string> = {
 type ShiftEntry = {
   id: string; occurredAt: string; kind: EntryKind; category: string | null; categoryId: string | null;
   dealDate?: string | null;
+  accountName?: string | null;
+  counterpartyName?: string | null;
   note: string | null; actorName: string | null; amount: number; cash: boolean; editable: boolean;
   actorId?: string | null;
   collection?: boolean;
+  processingFee?: boolean;
   deletedAt?: string;
   deletedByName?: string | null;
   reconciliation: 'open' | 'close' | null;
@@ -170,6 +173,7 @@ type CashShiftDetail = {
     cashRefunds: number;
     noncashSales: number;
     noncashRefunds: number;
+    processingFees: number;
     deposits: number;
     expenses: number;
     collections: number;
@@ -206,6 +210,7 @@ function CashShiftDetails({ shift, canManage }: { shift: CashShift; canManage: b
     { label: 'Возвраты наличными', amount: summary.cashRefunds },
     { label: 'Безналичные продажи', amount: summary.noncashSales },
     { label: 'Безналичные возвраты', amount: summary.noncashRefunds },
+    ...(summary.processingFees ? [{ label: 'Комиссия за безналичную оплату', amount: summary.processingFees }] : []),
     { label: 'Внесения', amount: summary.deposits },
     { label: 'Расходы', amount: summary.expenses },
     { label: 'Инкассация', amount: summary.collections },
@@ -240,13 +245,16 @@ function CashShiftDetails({ shift, canManage }: { shift: CashShift; canManage: b
             <h2 className="font-semibold">Транзакции смены</h2>
             {canManage && <button type="button" className="text-sm text-primary hover:underline" onClick={() => setOperation('create')}>+ Добавить транзакцию</button>}
           </div>
-          <FinanceTable headers={['Дата и время', 'Тип', 'Категория', 'Сотрудник', 'Комментарий', 'Сумма', '']} amounts={[5]}
+          <FinanceTable headers={['Дата и время', 'Тип', 'Категория', 'Счёт', 'Сотрудник', 'Комментарий', 'Сумма', '']} amounts={[6]}
         rows={(entries.data?.movements ?? []).map((entry) => ({ key: entry.id, deleted: !!entry.deletedAt, cells: [
           financeDateTime(entry.occurredAt), entry.reconciliation === 'open' ? 'Сверка при открытии'
             : entry.reconciliation === 'close' ? 'Сверка при закрытии'
               : entry.collection ? 'Инкассация'
-                : revenue(entry) ? shiftEntryLabel[entry.kind] + (entry.cash ? ' наличными' : ' безналично') : shiftEntryLabel[entry.kind],
-          entry.category ?? (entry.editable ? 'Кассовые смены' : '—'), entry.actorName ?? '—', entry.note ?? '—',
+                : entry.processingFee ? 'Комиссия за оплату'
+                  : revenue(entry) ? shiftEntryLabel[entry.kind] + (entry.cash ? ' наличными' : ' безналично') : shiftEntryLabel[entry.kind],
+          entry.category ?? (entry.editable ? 'Кассовые смены' : '—'),
+          entry.accountName && entry.counterpartyName ? `${entry.accountName} → ${entry.counterpartyName}` : entry.accountName ?? '—',
+          entry.actorName ?? '—', entry.note ?? '—',
           <span className={entry.deletedAt ? undefined : entry.kind === 'income' ? 'text-success' : entry.kind === 'expense' ? 'text-danger' : undefined}>
             {financeMoney(entry.amount)}
           </span>,
@@ -264,6 +272,7 @@ function CashShiftDetails({ shift, canManage }: { shift: CashShift; canManage: b
       </div>
     </QueryState>
     {canManage && operation && <CashOperationDialog shiftId={shift.id} operation={operation === 'create' ? undefined : operation}
+      collectionAccountName={shift.collectionAccountName}
       onClose={() => setOperation(null)} />}
     {canManage && editCount && summary && <CountDialog endpoint={endpoint} field={editCount} amount={summary[editCount] ?? 0}
       onClose={() => setEditCount(null)} onSuccess={refresh} />}
