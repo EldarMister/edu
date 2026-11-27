@@ -51,7 +51,8 @@
   margin: 14px 0 17px;
 }
 
-.orders-filter-control {
+.orders-filter-control,
+.orders-period-filter > .report-period-trigger {
   height: 46px;
   border: 1px solid light-dark(#dce5f2, rgb(var(--edu-border)));
   border-radius: 11px;
@@ -64,14 +65,21 @@
   transition: border-color .18s, box-shadow .18s, background-color .18s;
 }
 
-.orders-filter-control:hover {
+.orders-period-filter > .report-period-trigger {
+  width: 100%;
+  padding-inline: 14px;
+}
+
+.orders-filter-control:hover,
+.orders-period-filter > .report-period-trigger:hover {
   border-color: light-dark(#b9c9df, #595959);
   background: rgb(var(--edu-card));
 }
 
 .orders-filter-control:focus,
 .orders-filter-control:focus-visible,
-.orders-filter-control.is-open {
+.orders-filter-control.is-open,
+.orders-period-filter > .report-period-trigger:is(:focus-visible, [aria-expanded="true"]) {
   border-color: light-dark(#397eff, rgb(var(--edu-link)));
   box-shadow: 0 0 0 3px rgba(0, 91, 255, .11);
 }
@@ -221,5 +229,6 @@
 }
 @media (max-width: 480px) {
   .orders-filters > .orders-filter-control,
+  .orders-period-filter,
   .orders-search-wrap { width: 100%; max-width: none; }
 }

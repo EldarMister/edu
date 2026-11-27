@@ -34,7 +34,7 @@ import {
   IconMoney,
 } from './components/icons';
 import { StatisticsPage } from './pages/StatisticsPage';
-import { STATISTICS_NAV, statisticsView, type StatisticsView } from './pages/statisticsViews';
+import { STATISTICS_LABELS, STATISTICS_NAV, statisticsGroup, statisticsView, type StatisticsView } from './pages/statisticsViews';
 import { OrdersPage } from './pages/OrdersPage';
 import { TablesPage } from './pages/TablesPage';
 import { MenuPage } from './pages/MenuPage';
@@ -257,6 +257,7 @@ export function AdminApp() {
   }
   const [collapsedSection, setCollapsedSection] = useState<Section | null>(null);
   const statsView = statisticsView(route.get('view'));
+  const statsGroup = statisticsGroup(statsView);
   const warehouseView = (WAREHOUSE_NAV.some((item) => item.key === route.get('view')) ? route.get('view') : 'balances') as WarehouseView;
   const requestedMenuView = route.get('view') === 'ingredientCategories' ? 'categories' : route.get('view');
   const menuView = MENU_NAV.find((item) => item.key === requestedMenuView)?.key ?? 'goods';
@@ -269,7 +270,7 @@ export function AdminApp() {
   function setStatsView(view: StatisticsView) {
     const next = new URLSearchParams({ section: 'stats', view });
     if (section === 'stats') {
-      for (const key of ['statsPeriod', 'statsFrom', 'statsTo']) {
+      for (const key of ['statsPeriod', 'statsFrom', 'statsTo', 'taxPeriod', 'taxFrom', 'taxTo']) {
         const value = route.get(key);
         if (value) next.set(key, value);
       }
@@ -448,7 +449,7 @@ export function AdminApp() {
 
   const current = sections.find((s) => s.key === section) ?? sections[0];
   const currentViewLabel = section === 'stats'
-    ? statsView === 'sales' ? 'Статистика продаж' : STATISTICS_NAV.find((item) => item.key === statsView)?.label
+    ? statsGroup.key === 'sales' ? 'Статистика продаж' : statsGroup.label
     : section === 'warehouse'
       ? WAREHOUSE_NAV.find((item) => item.key === warehouseView)?.label
       : section === 'menu' ? MENU_NAV.find((item) => item.key === menuView)?.label
@@ -512,7 +513,7 @@ export function AdminApp() {
                   : s.key === 'finance' ? financeNav : s.key === 'staff' ? personnelNav
                     : s.key === 'requests' ? requestsNav : s.key === 'settings' ? SETTINGS_NAV : [];
           const currentView = s.key === 'warehouse' ? warehouseView
-            : s.key === 'menu' ? menuView : s.key === 'stats' ? statsView
+            : s.key === 'menu' ? menuView : s.key === 'stats' ? statsGroup.key
               : s.key === 'finance' ? financeView : s.key === 'settings' ? settingsView : s.key === 'requests' ? requestsView?.key : staffView;
           const hasChildren = children.length > 0;
           const expanded = hasChildren && active && collapsedSection !== s.key;
@@ -520,7 +521,7 @@ export function AdminApp() {
           const childrenId = `workspace-${variant}-${s.key}-children`;
           const flyout = compact && sidebarFlyout?.section === s.key ? sidebarFlyout : null;
           function openView(view: string) {
-            if (!active || view !== currentView || route.has('editor')) {
+            if (!active || view !== (s.key === 'stats' ? statsView : currentView) || route.has('editor')) {
               if (s.key === 'warehouse') setWarehouseView(view as WarehouseView);
               else if (s.key === 'menu') setMenuView(view as MenuView);
               else if (s.key === 'stats') setStatsView(view as StatisticsView);
@@ -705,7 +706,18 @@ export function AdminApp() {
             <NoAccessScreen />
           ) : (
             <>
-              {section === 'stats' && canSection('statistics') && (statsView === 'taxes' ? <TaxReportPage /> : <StatisticsPage view={statsView} />)}
+              {section === 'stats' && canSection('statistics') && <div className="space-y-4">
+                {statsGroup.reports.length > 0 && <nav aria-label={t('Отчёты статистики')}
+                  className="flex flex-wrap items-center gap-x-5 border-b border-border print:hidden">
+                  {statsGroup.reports.map((report) => <button type="button" key={report} onClick={() => setStatsView(report)}
+                    aria-current={statsView === report ? 'page' : undefined}
+                    className={`border-b-2 px-1 py-2 text-sm font-medium ${statsView === report
+                      ? 'border-primary text-primary' : 'border-transparent text-text-secondary hover:text-text-primary'}`}>
+                    {t(STATISTICS_LABELS[report])}
+                  </button>)}
+                </nav>}
+                {statsView === 'taxes' ? <TaxReportPage /> : <StatisticsPage view={statsView} />}
+              </div>}
               {section === 'orders' && canSection('orders') && <OrdersPage />}
               {section === 'requests' && (requestsView?.key === 'refunds' ? <RefundQueuePage />
                 : requestsView?.key === 'cancellations' ? <ItemCancellationQueuePage /> : <NoAccessScreen />)}

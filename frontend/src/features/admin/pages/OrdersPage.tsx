@@ -159,8 +159,8 @@ export function OrdersPage() {
           </>}
         </div>
 
-        <div className="mb-3">{period.filter}</div>
         <OrdersFilters
+          periodFilter={period.filter}
           tab={tab}
           paymentMethod={paymentMethod}
           waiterId={waiterId}

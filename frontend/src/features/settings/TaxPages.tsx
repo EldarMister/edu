@@ -251,10 +251,10 @@ export function TaxReportPage() {
       balanceMoney(Number(row.salesAmount)), balanceMoney(Number(row.amount))]) };
   return <div className="space-y-3">
     <WorkspaceHeaderActions>
+      {period.filter}
       <TaxTableActions endpoint={TAX_REPORT_ENDPOINT} params={params} table={table} canExport={canAction('exportReports')} />
     </WorkspaceHeaderActions>
-    <div className="poster-toolbar">
-      {period.filter}
+    <div className="flex flex-wrap items-center gap-2">
       <Select ariaLabel="Операции с налогом" className="w-auto" value={filters.kind} onChange={(kind) => update({ kind })}
         options={[{ value: '', label: 'Все операции' }, ...Object.entries(TAX_REPORT_LABELS).map(([value, label]) => ({ value, label }))]} />
     </div>

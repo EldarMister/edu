@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { Select, type SelectOption } from '@/components/Select';
 import { useT } from '@/lib/i18n';
 import { IconX } from './icons';
@@ -39,6 +39,7 @@ const SORT_OPTIONS: { value: OrderSort; label: string }[] = [
 ];
 
 type Props = {
+  periodFilter: ReactNode;
   tab: string;
   paymentMethod: string;
   waiterId: string;
@@ -59,6 +60,7 @@ export function OrdersFilters(props: Props) {
   const ctrl = 'orders-filter-control';
   return (
     <div className="orders-filters">
+      <div className="orders-period-filter">{props.periodFilter}</div>
       <Select className={`${ctrl} orders-status-select`} ariaLabel={tr('Статус заказа')} value={props.tab} onChange={props.onTabChange} options={STATUS_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />
       <Select className={`${ctrl} orders-payment-select`} ariaLabel={tr('Способ оплаты')} value={props.paymentMethod} onChange={props.onPaymentMethodChange} options={PAYMENT_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />
       <Select className={`${ctrl} orders-waiter-select`} ariaLabel={tr('Официант')} value={props.waiterId} onChange={props.onWaiterChange} options={props.waiterOptions} />

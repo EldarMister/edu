@@ -7,6 +7,7 @@ import { useT } from '@/lib/i18n';
 import { IconCheck, IconOrders } from '../components/icons';
 import { useStatistics, useStatisticsReports, type StatsPeriod } from '../api';
 import { StatisticsReport } from './StatisticsReport';
+import { WorkspaceHeaderActions } from './WorkspaceHeader';
 import type { StatisticsView } from './statisticsViews';
 import { usePageFilters } from './warehouse/workspace-route';
 import { REPORT_PERIODS, ReportPeriodFilter } from './warehouse/ReportPeriodFilter';
@@ -58,10 +59,12 @@ export function StatisticsPage({ view }: { view: Exclude<StatisticsView, 'taxes'
   const activeQuery = view === 'overview' ? statsQ : reportsQ;
   return (
     <div className="space-y-4 overflow-x-hidden">
-      <ReportPeriodFilter label={t('Период')} today={today} preset={period} presets={PERIODS}
-        range={warehousePeriodRange(period, today, from, to)}
-        onPreset={(value) => updatePeriod({ statsPeriod: value })}
-        onRange={(statsFrom, statsTo) => updatePeriod({ statsPeriod: 'custom', statsFrom, statsTo })} />
+      <WorkspaceHeaderActions>
+        <ReportPeriodFilter label={t('Период')} today={today} preset={period} presets={PERIODS}
+          range={warehousePeriodRange(period, today, from, to)}
+          onPreset={(value) => updatePeriod({ statsPeriod: value })}
+          onRange={(statsFrom, statsTo) => updatePeriod({ statsPeriod: 'custom', statsFrom, statsTo })} />
+      </WorkspaceHeaderActions>
 
       {activeQuery.isError ? <div className="card space-y-3 p-5">
         <p role="alert" className="text-danger">{apiError(activeQuery.error)}</p>

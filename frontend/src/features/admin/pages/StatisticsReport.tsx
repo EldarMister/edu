@@ -10,7 +10,7 @@ import { exportCsv, printReport } from '@/lib/report-output';
 import type { StatisticsReports } from '../api';
 import { WorkspaceHeaderActions, WorkspaceHeaderCount } from './WorkspaceHeader';
 import { WorkspaceSearch } from './WorkspaceSearch';
-import { STATISTICS_NAV, type StatisticsView } from './statisticsViews';
+import { STATISTICS_LABELS, type StatisticsView } from './statisticsViews';
 import { groupProductSales, productSalesMetrics } from './product-sales-report';
 
 type Report = Exclude<StatisticsView, 'overview' | 'taxes'>;
@@ -100,7 +100,7 @@ export function StatisticsReport({ report, data }: { report: Report; data: Stati
   const hidden = hiddenColumns.split(',').filter(Boolean);
   const [sort, setSort] = useState({ key: defaultSort[report], ascending: report === 'staff' });
   const [printBlocked, setPrintBlocked] = useState(false);
-  const title = t(STATISTICS_NAV.find(({ key }) => key === report)?.label ?? 'Статистика');
+  const title = t(STATISTICS_LABELS[report]);
   const source: Row[] = report === 'categories' ? data.categories.map((row) => ({
     ...row, foodCost: row.cost != null && row.revenue > 0 ? 100 * row.cost / row.revenue : null,
   })) : data[report];
