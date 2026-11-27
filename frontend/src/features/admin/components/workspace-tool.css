@@ -1,0 +1,43 @@
+.workspace-tool {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 5px;
+  color: rgb(var(--edu-link));
+  font-size: 14px;
+  font-weight: 400;
+  white-space: nowrap;
+  cursor: pointer;
+  list-style: none;
+}
+.workspace-tool::-webkit-details-marker { display: none; }
+.workspace-tool:hover:not(:disabled) { background: light-dark(#f2f6ff, var(--edu-selected)); }
+.workspace-tool:focus-visible { outline: 2px solid rgb(var(--edu-text)); outline-offset: 1px; }
+.workspace-tool:disabled { opacity: .56; cursor: not-allowed; }
+.workspace-tool > svg { flex: none; width: 20px; height: 20px; }
+.workspace-tool[data-disclosure]::after {
+  content: '';
+  border: 3px solid transparent;
+  border-bottom: 0;
+  border-top-color: currentColor;
+  margin-left: -3px;
+}
+details[open] > .workspace-tool[data-disclosure]::after,
+.workspace-tool[data-disclosure][aria-expanded='true']::after { transform: rotate(180deg); }
+@media (max-width: 820px) {
+  .workspace-tool:has(> .catalogue-action-label) { width: 40px; padding: 0; }
+  .workspace-tool > .catalogue-action-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .workspace-tool[data-disclosure]:has(> .catalogue-action-label)::after { display: none; }
+}
+@media print { .workspace-tool { display: none; } }

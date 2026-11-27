@@ -1,3 +1,4 @@
+import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { IconExport, IconPrinter } from '@/features/admin/components/icons';
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -123,6 +124,19 @@ export function WarehouseReportsTab({
   const categories = [...new Set((ingredients.data ?? []).flatMap((i) => (i.category ? [i.category] : [])))];
   return (
     <div className="card overflow-hidden">
+      <WorkspaceHeaderActions>
+        {canExport && <button
+          type="button"
+          className="workspace-tool"
+          onClick={() => void download()}
+          disabled={exporting}
+        >
+          <IconExport />Экспорт CSV
+        </button>}
+        <button type="button" className="workspace-tool" disabled={!query.isSuccess} onClick={() => window.print()}>
+          <IconPrinter />Печать
+        </button>
+      </WorkspaceHeaderActions>
       <div className="space-y-3 border-b border-border p-4 print:hidden">
         <div className="flex flex-wrap gap-2">
           {!contextOnly && (
@@ -156,17 +170,6 @@ export function WarehouseReportsTab({
               }}
             />
           )}
-          {canExport && <button
-            type="button"
-            className="btn-secondary btn-md"
-            onClick={() => void download()}
-            disabled={exporting}
-          >
-            <IconExport />Экспорт CSV
-          </button>}
-          <button type="button" className="btn-secondary btn-md" disabled={!query.isSuccess} onClick={() => window.print()}>
-            <IconPrinter />Печать
-          </button>
         </div>
         <div className="flex flex-wrap gap-2">
           {!(contextOnly && ingredientId) && (

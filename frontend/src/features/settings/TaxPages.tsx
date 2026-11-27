@@ -49,9 +49,9 @@ function TaxTableActions({ endpoint, params, table, canExport }: {
     finally { setExporting(false); }
   }
   return <>
-    {canExport && <button type="button" className="supply-header-action" disabled={exporting || !table.rows.length}
+    {canExport && <button type="button" className="workspace-tool" disabled={exporting || !table.rows.length}
       onClick={() => void exportTable()}><IconExport />{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
-    <button type="button" className="supply-header-action" disabled={!table.rows.length} onClick={() => {
+    <button type="button" className="workspace-tool" disabled={!table.rows.length} onClick={() => {
       setError('');
       if (!printReport(table.title, '', table.headers, table.rows)) {
         setError('Разрешите всплывающие окна для печати.');
@@ -252,9 +252,9 @@ export function TaxReportPage() {
   return <div className="space-y-3">
     <WorkspaceHeaderActions>
       <TaxTableActions endpoint={TAX_REPORT_ENDPOINT} params={params} table={table} canExport={canAction('exportReports')} />
-      {period.filter}
     </WorkspaceHeaderActions>
     <div className="poster-toolbar">
+      {period.filter}
       <Select ariaLabel="Операции с налогом" className="w-auto" value={filters.kind} onChange={(kind) => update({ kind })}
         options={[{ value: '', label: 'Все операции' }, ...Object.entries(TAX_REPORT_LABELS).map(([value, label]) => ({ value, label }))]} />
     </div>

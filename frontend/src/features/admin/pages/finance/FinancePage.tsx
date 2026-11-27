@@ -155,7 +155,7 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts' | 'ca
           { value: '', label: 'Все счета' }, { value: 'cash', label: 'Наличные' }, { value: 'noncash', label: 'Безналичные' },
         ]} /></RegisterFilter></>}
         tools={data.canManage && <>
-          <button type="button" className="finance-tool" onClick={() => openEditor({ type: 'financeAccountTrash' })}>
+          <button type="button" className="workspace-tool" onClick={() => openEditor({ type: 'financeAccountTrash' })}>
             <IconTrash aria-hidden="true" /> Корзина
           </button>
           {addButton('Добавить счёт', 'financeAccount')}
@@ -265,8 +265,9 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts' | 'ca
         </RegisterFilter>
         {(scope || kind || categoryId || search) && <button type="button" className="finance-tool"
           onClick={() => setFilters({ financeScope: '', financeKind: '', financeCategory: '', financeSearch: '' })}>Сбросить</button>}
+        {transactionPeriod.filter}
       </>}
-      tools={<>{transactionPeriod.filter}
+      tools={<>
         {data.accounts.length > 0 && (data.canManage || !data.canViewAll && data.categories.length > 0) && addButton('Добавить транзакцию', 'financeTransaction')}
       </>}
       totals={showDeleted ? undefined : { date: { value: 'Итого' }, amount: { value: total, display: <span className={total < 0 ? 'text-danger' : undefined}>{financeMoney(total)}</span> } }}

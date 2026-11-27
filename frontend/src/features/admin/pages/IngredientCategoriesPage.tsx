@@ -120,9 +120,9 @@ export function IngredientCategoriesPage() {
       <WorkspaceHeaderActions>
         <div className="catalogue-header-actions">
           <ColumnButton onClick={() => setShowColumns(true)} />
-          {can('actions.exportReports') && <button type="button" className="supply-header-action" title="Экспорт CSV"
+          {can('actions.exportReports') && <button type="button" className="workspace-tool" title="Экспорт CSV"
             disabled={!rows.length} onClick={() => report(false)}><IconExport /><span className="catalogue-action-label">Экспорт</span></button>}
-          <button type="button" className="supply-header-action" title="Печать" disabled={!rows.length} onClick={() => report(true)}>
+          <button type="button" className="workspace-tool" title="Печать" disabled={!rows.length} onClick={() => report(true)}>
             <IconPrinter /><span className="catalogue-action-label">Печать</span>
           </button>
           {canManage && <button type="button" className="catalogue-add" onClick={() => setCreating(true)}>Добавить</button>}

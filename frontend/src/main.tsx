@@ -9,6 +9,7 @@ import { installAudioUnlock } from '@/lib/audio';
 import { APP_RELOAD_PARAM } from '@/lib/app-update';
 import './index.css';
 import './theme.css';
+import './features/admin/components/workspace-tool.css';
 
 installAudioUnlock();
 

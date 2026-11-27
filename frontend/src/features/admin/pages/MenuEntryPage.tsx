@@ -461,7 +461,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, initia
       </div>
     }>
       {!isGoods && canRecipe && <WorkspaceHeaderActions>
-        <button type="button" className="btn-secondary btn-md inline-flex items-center gap-2" onClick={printRecipe}
+        <button type="button" className="workspace-tool" onClick={printRecipe}
           disabled={busy || preview.pending || !preview.data?.items.length}>
           <IconPrinter />Распечатать
         </button>

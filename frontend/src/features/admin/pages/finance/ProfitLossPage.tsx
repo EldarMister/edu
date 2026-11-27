@@ -34,10 +34,12 @@ export function ProfitLossPage() {
   }
   return <section aria-label="Отчёт о прибылях и убытках">
     <WorkspaceHeaderActions>
-      {canAction('exportReports') && <button className="supply-header-action" type="button" disabled={busy || !query.data}
+      {canAction('exportReports') && <button className="workspace-tool" type="button" disabled={busy || !query.data}
         onClick={() => void download()}><IconExport />Экспорт в Excel</button>}
-      <FinancePeriod from={pnlFrom} to={pnlTo} onApply={({ from, to }) => update({ pnlFrom: from, pnlTo: to })} />
     </WorkspaceHeaderActions>
+    <div className="poster-toolbar">
+      <FinancePeriod from={pnlFrom} to={pnlTo} onApply={({ from, to }) => update({ pnlFrom: from, pnlTo: to })} />
+    </div>
     {error && <p role="alert" className="text-danger">{error}</p>}
     <QueryState pending={query.isPending} error={query.error}>
       <table className="poster-table w-full"><thead><tr><th scope="col">Статья</th><th scope="col" className="text-right">Сумма</th>

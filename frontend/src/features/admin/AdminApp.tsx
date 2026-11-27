@@ -633,8 +633,8 @@ export function AdminApp() {
   };
 
   const workspaceHeader = (
-    <header className={`workspace-header flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 sm:flex-nowrap border-b border-border bg-white px-4 py-3 lg:px-6 ${scrollOrdersHeader ? 'sticky left-0' : ''}`}>
-      <div className="flex min-w-0 flex-1 items-center gap-3">
+    <header className={`workspace-header flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-white px-4 py-3 lg:px-6 ${scrollOrdersHeader ? 'sticky left-0' : ''}`}>
+      <div className="flex min-w-0 flex-1 items-center gap-3 sm:min-w-40">
         <button
           className="-ml-1 shrink-0 rounded-lg p-1.5 text-text-secondary hover:bg-background lg:hidden"
           onClick={() => setMobileNav(true)}
@@ -652,7 +652,7 @@ export function AdminApp() {
           {pageTitle}
         </h1></WorkspaceTitleSlot>
       </div>
-      <div className="contents sm:flex sm:items-center sm:gap-3">
+      <div className="contents sm:flex sm:min-w-0 sm:max-w-full sm:items-center sm:gap-3">
         <WorkspaceActionsSlot className="order-last basis-full empty:hidden sm:order-none sm:basis-auto" />
         <ConnectionStatus />
       </div>

@@ -1,3 +1,4 @@
+import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { useState, type ReactNode } from 'react';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
@@ -108,21 +109,21 @@ export function FinanceRegister({
   ];
 
   return <section className="finance-register" aria-label={title}>
-    <div className="finance-register-toolbar print:hidden">
+    {filters && <div className="finance-register-toolbar print:hidden">
       <div className="finance-register-filters">{filters}</div>
-      <div className="finance-register-tools">
-        {defaultColumns && <ColumnButton onClick={() => setShowColumns(true)} />}
-        {reportActions && rows.length > 0 && <>
-          {canAction('exportReports') && <button type="button" className="finance-tool" onClick={() => downloadRegister(title, output())}>
-            <IconExport />Экспорт
-          </button>}
-          <button type="button" className="finance-tool" onClick={() => setPrintError(!printRegister(title, output()))}>
-            <IconPrinter aria-hidden="true" /> Печать
-          </button>
-        </>}
-        {tools}
-      </div>
-    </div>
+    </div>}
+    <WorkspaceHeaderActions>
+      {defaultColumns && <ColumnButton onClick={() => setShowColumns(true)} />}
+      {reportActions && <>
+        {canAction('exportReports') && <button type="button" className="workspace-tool" disabled={!rows.length} onClick={() => downloadRegister(title, output())}>
+          <IconExport />Экспорт
+        </button>}
+        <button type="button" className="workspace-tool" disabled={!rows.length} onClick={() => setPrintError(!printRegister(title, output()))}>
+          <IconPrinter aria-hidden="true" /> Печать
+        </button>
+      </>}
+      {tools}
+    </WorkspaceHeaderActions>
     {printError && <p className="px-4 py-2 text-sm text-danger" role="alert">Разрешите всплывающие окна для печати отчёта.</p>}
     <div className="finance-register-scroll" tabIndex={0} role="region" aria-label="Таблица">
       <table className="finance-register-table" style={{ minWidth }}>

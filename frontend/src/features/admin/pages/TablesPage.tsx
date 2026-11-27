@@ -1,3 +1,4 @@
+import { WorkspaceHeaderActions } from './WorkspaceHeader';
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
@@ -122,6 +123,11 @@ export function TablesPage() {
           </div>
         </div>
       </div>
+      {editable && !mapView && <WorkspaceHeaderActions>
+        <button type="button" className="btn-primary btn-md" onClick={() => setHallModal('new')}>
+          <IconPlus className="h-4 w-4" /> {tr('Добавить зал')}
+        </button>
+      </WorkspaceHeaderActions>}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-secondary">
           <Sum label={tr('Залов')} value={o?.hallsCount ?? '—'} />
@@ -132,9 +138,6 @@ export function TablesPage() {
           <Sep />
           <Sum label={tr('Занятых')} value={o?.occupiedCount ?? '—'} />
         </div>
-        {editable && !mapView && <button className="btn-secondary btn-md" onClick={() => setHallModal('new')}>
-          <IconPlus className="h-4 w-4" /> {tr('Добавить зал')}
-        </button>}
       </div>
 
       {hallsQ.isLoading ? (

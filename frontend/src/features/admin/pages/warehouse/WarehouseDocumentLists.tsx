@@ -233,15 +233,15 @@ export function DocumentList({
   return (
     <div className={inventory ? 'poster-inventory-list' : 'poster-register-surface'}>
       {inventory && <WorkspaceHeaderCount count={query.isSuccess ? rows.length : undefined} />}
-      {inventory && <WorkspaceHeaderActions>{period.filter}</WorkspaceHeaderActions>}
-      {writeoff && <WorkspaceHeaderActions>
-        {can('actions.exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!rows.length || exporting}
+      <WorkspaceHeaderActions>
+        {!inventory && <ColumnButton onClick={() => setEditingColumns(true)} />}
+        {!inventory && can('actions.exportReports') && <button type="button" className="workspace-tool" disabled={!rows.length || exporting}
           onClick={exportRegister}><IconExport />Экспорт Excel</button>}
         {canCreate && <button type="button" className="btn-primary btn-md" onClick={onCreate}>Добавить</button>}
-      </WorkspaceHeaderActions>}
+      </WorkspaceHeaderActions>
       <div className="poster-toolbar">
         <WorkspaceSearch label="Поиск документов" placeholder={inventory ? 'Быстрый поиск' : 'Поиск...'} value={search} onChange={(value) => changeFilter('Search', value)} />
-        {!inventory && period.filter}
+        {period.filter}
         {filters}
         {!inventory && <WarehouseMultiFilter label={transfer ? 'Склады' : 'Склад'} value={warehouseSelection}
           options={locations.map(({ id, name }) => ({ value: id, label: name }))}
@@ -285,10 +285,6 @@ export function DocumentList({
           </div>
         </details>
         {filtered && <button type="button" className="text-sm text-text-muted" onClick={resetFilters}>Сбросить всё</button>}
-        {!inventory && <ColumnButton onClick={() => setEditingColumns(true)} />}
-        {transfer && can('actions.exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!rows.length || exporting}
-          onClick={exportRegister}><IconExport />Экспорт Excel</button>}
-        {!writeoff && canCreate && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
       </div>
       {!inventory && editingColumns && <WarehouseColumnSettings columns={selectedColumns} defaults={availableColumns} resetColumns={defaultColumns}
         label={columnLabel} onClose={() => setEditingColumns(false)}
@@ -462,6 +458,9 @@ export function ProductionList({
   return (
     <div>
       <WorkspaceHeaderCount count={query.isSuccess ? totalRows : undefined} />
+      {can('actions.warehouseProduce') && <WorkspaceHeaderActions>
+        <button type="button" className="btn-primary btn-md" onClick={onCreate}>Произвести</button>
+      </WorkspaceHeaderActions>}
       <div className="poster-toolbar">
         <WorkspaceSearch label="Поиск производства" value={state.productionSearch} onChange={(value) => update({ productionSearch: value, productionPage: '1' })} />
         {period.filter}
@@ -469,7 +468,6 @@ export function ProductionList({
         <Select ariaLabel="Статус производства" className="poster-filter h-9 min-w-36" value={status ?? ''}
           onChange={(value) => update({ productionStatus: value, productionPage: '1' })}
           options={[{ value: '', label: 'Все статусы' }, { value: 'posted', label: 'Проведена' }, { value: 'reversed', label: 'Сторнирована' }]} />
-        {can('actions.warehouseProduce') && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Произвести</button>}
       </div>
       <QueryState pending={query.isPending} error={query.error}>
         <div className="hidden overflow-x-auto md:block">

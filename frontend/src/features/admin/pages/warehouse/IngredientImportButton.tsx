@@ -15,7 +15,7 @@ const keys = Object.keys(fields) as Field[];
 export function IngredientImportButton() {
   const [open, setOpen] = useState(false);
   return <>
-    <button type="button" className="supply-header-action" title="Импорт" aria-haspopup="dialog" onClick={() => setOpen(true)}>
+    <button type="button" className="workspace-tool" title="Импорт" aria-haspopup="dialog" onClick={() => setOpen(true)}>
       <IconImport /><span className="catalogue-action-label">Импорт</span></button>
     {open && <ImportDialog close={() => setOpen(false)} />}
   </>;

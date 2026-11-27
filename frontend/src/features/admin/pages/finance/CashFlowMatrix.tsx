@@ -1,3 +1,4 @@
+import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
@@ -145,6 +146,36 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
         </div>;
       })}
     </dl>}
+    <WorkspaceHeaderActions>
+      {(flow.accountOpening || orderedMonths.length > 1) && <details className="cash-flow-column-menu">
+        <ColumnSummary />
+        <div>
+          {flow.accountOpening && <>
+            <label><input type="checkbox" checked={showAmounts} onChange={(event) => toggleColumn('amounts', event.target.checked)} /> Карта и наличные, деньги</label>
+            <label><input type="checkbox" checked={showPercent} onChange={(event) => toggleColumn('percent', event.target.checked)} /> Карта и наличные, %</label>
+          </>}
+          {orderedMonths.length > 1 && <div className="border-t border-border px-2 py-2">
+            <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
+              <span className="font-medium">Порядок месяцев</span>
+              {savedPeriods && <button type="button" className="text-primary" onClick={() => savePeriods('')}>Сбросить</button>}
+            </div>
+            <ul className="max-h-52 overflow-y-auto divide-y divide-border">
+              {orderedMonths.map(({ key, label }, index) => <li key={key} className="flex items-center gap-1 py-1 text-sm">
+                <span className="min-w-0 flex-1">{label}</span>
+                <button type="button" className="h-7 w-7 rounded border border-border disabled:opacity-30"
+                  aria-label={`Сдвинуть «${label}» влево`} disabled={index === 0} onClick={() => moveMonth(index, -1)}>↑</button>
+                <button type="button" className="h-7 w-7 rounded border border-border disabled:opacity-30"
+                  aria-label={`Сдвинуть «${label}» вправо`} disabled={index === orderedMonths.length - 1} onClick={() => moveMonth(index, 1)}>↓</button>
+              </li>)}
+            </ul>
+          </div>}
+        </div>
+      </details>}
+      {canAction('exportReports') && <button type="button" className="workspace-tool" onClick={() => outputReport('csv')}><IconExport />Экспорт CSV</button>}
+      <button type="button" className="workspace-tool" onClick={() => outputReport('print')}>
+        <IconPrinter />Печать
+      </button>
+    </WorkspaceHeaderActions>
     <div className="cash-flow-card min-w-0 rounded-xl border border-border bg-card">
       <div className="cash-flow-toolbar">
         <div className="cash-flow-filters">
@@ -153,36 +184,6 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
             setAccounts(value);
           }} />
           {period}
-        </div>
-        <div className="cash-flow-tools">
-          {(flow.accountOpening || orderedMonths.length > 1) && <details className="cash-flow-column-menu">
-            <ColumnSummary />
-            <div>
-              {flow.accountOpening && <>
-                <label><input type="checkbox" checked={showAmounts} onChange={(event) => toggleColumn('amounts', event.target.checked)} /> Карта и наличные, деньги</label>
-                <label><input type="checkbox" checked={showPercent} onChange={(event) => toggleColumn('percent', event.target.checked)} /> Карта и наличные, %</label>
-              </>}
-              {orderedMonths.length > 1 && <div className="border-t border-border px-2 py-2">
-                <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
-                  <span className="font-medium">Порядок месяцев</span>
-                  {savedPeriods && <button type="button" className="text-primary" onClick={() => savePeriods('')}>Сбросить</button>}
-                </div>
-                <ul className="max-h-52 overflow-y-auto divide-y divide-border">
-                  {orderedMonths.map(({ key, label }, index) => <li key={key} className="flex items-center gap-1 py-1 text-sm">
-                    <span className="min-w-0 flex-1">{label}</span>
-                    <button type="button" className="h-7 w-7 rounded border border-border disabled:opacity-30"
-                      aria-label={`Сдвинуть «${label}» влево`} disabled={index === 0} onClick={() => moveMonth(index, -1)}>↑</button>
-                    <button type="button" className="h-7 w-7 rounded border border-border disabled:opacity-30"
-                      aria-label={`Сдвинуть «${label}» вправо`} disabled={index === orderedMonths.length - 1} onClick={() => moveMonth(index, 1)}>↓</button>
-                  </li>)}
-                </ul>
-              </div>}
-            </div>
-          </details>}
-          {canAction('exportReports') && <button type="button" className="btn-secondary btn-md" onClick={() => outputReport('csv')}><IconExport />Экспорт CSV</button>}
-          <button type="button" className="btn-secondary btn-md" onClick={() => outputReport('print')}>
-            <IconPrinter />Печать
-          </button>
         </div>
       </div>
       {printError && <p role="alert" className="border-b border-border px-4 py-2 text-sm text-danger">

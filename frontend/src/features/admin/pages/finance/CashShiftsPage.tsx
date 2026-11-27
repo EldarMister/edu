@@ -1,3 +1,4 @@
+import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { useId, useRef, useState, type ReactNode } from 'react';
 import { RowIconButton } from '../../components/RowIconButton';
 import { Modal } from '@/components/Modal';
@@ -93,19 +94,17 @@ export function CashShiftsPage() {
   return <QueryState pending={shifts.isPending} error={shifts.error}>
     {shifts.data && <>
       <section className="finance-register cash-shift-history min-w-0">
-        <div className="finance-register-toolbar print:hidden">
-          {canManage && !current && shifts.data.enabled && <button type="button" className="btn-secondary btn-md"
+        <WorkspaceHeaderActions>
+          <button type="button" className="workspace-tool" disabled={!rows.length}
+            onClick={() => setPrintBlocked(!printRegister('Кассовые смены', [
+              [...columns.slice(0, 4), 'Книжный остаток при открытии', 'Разница при открытии', ...columns.slice(4)], ...rows.map((shift) => [
+              String(shift.number), financeDateTime(shift.openedAt), shift.closedAt ? financeDateTime(shift.closedAt) : 'Не закрыта',
+              shift.openingAmount, shift.openingExpectedAmount, shift.openingDifference, shift.collectionAmount, shift.actualAmount, shift.difference,
+            ])]))}><IconPrinter />Печать</button>
+          {canManage && !current && shifts.data.enabled && <button type="button" className="btn-primary btn-md"
             onClick={() => setEditing('open')}>Открыть смену</button>}
-          <div className="finance-register-tools">
-            <button type="button" className="btn-secondary btn-md inline-flex items-center gap-2" disabled={!rows.length}
-              onClick={() => setPrintBlocked(!printRegister('Кассовые смены', [
-                [...columns.slice(0, 4), 'Книжный остаток при открытии', 'Разница при открытии', ...columns.slice(4)], ...rows.map((shift) => [
-                String(shift.number), financeDateTime(shift.openedAt), shift.closedAt ? financeDateTime(shift.closedAt) : 'Не закрыта',
-                shift.openingAmount, shift.openingExpectedAmount, shift.openingDifference, shift.collectionAmount, shift.actualAmount, shift.difference,
-              ])]))}><IconPrinter />Распечатать</button>
-            {period}
-          </div>
-        </div>
+        </WorkspaceHeaderActions>
+        <div className="finance-register-toolbar print:hidden">{period}</div>
         {current && <div className="cash-shift-history-notice print:hidden">
           <div>
             <p className="font-semibold">Кассовая смена открыта</p>

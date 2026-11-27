@@ -36,7 +36,7 @@ export function OrdersExportButton({ filters, disabled }: { filters: OrderListFi
   }
 
   return <>
-    <button type="button" className="btn-secondary btn-md" disabled={disabled} onClick={() => {
+    <button type="button" className="workspace-tool" data-disclosure aria-haspopup="dialog" disabled={disabled} onClick={() => {
       setDetails(false);
       setError('');
       setOpen(true);

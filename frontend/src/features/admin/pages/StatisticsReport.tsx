@@ -1,5 +1,5 @@
 import { IconExport, IconPrinter } from '@/features/admin/components/icons';
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { ColumnSummary } from '../components/ColumnControl';
 import { Link, useLocation } from 'react-router-dom';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
@@ -80,7 +80,7 @@ function choices(rows: Row[], key: string, label: string, all: string) {
     .sort((a, b) => a.label.localeCompare(b.label, 'ru'))];
 }
 
-export function StatisticsReport({ report, data, periodControl }: { report: Report; data: StatisticsReports; periodControl: ReactNode }) {
+export function StatisticsReport({ report, data }: { report: Report; data: StatisticsReports }) {
   const t = useT();
   const { pathname } = useLocation();
   const { canAction, canSection } = usePermissions();
@@ -178,11 +178,10 @@ export function StatisticsReport({ report, data, periodControl }: { report: Repo
           </label>)}
         </div>
       </details>}
-      {canAction('exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!rows.length}
+      {canAction('exportReports') && <button type="button" className="workspace-tool" disabled={!rows.length}
         onClick={() => exportCsv(title, headings, outputRows())}><IconExport />{t('Экспорт CSV')}</button>}
-      <button type="button" className="btn-secondary btn-md" disabled={!rows.length}
+      <button type="button" className="workspace-tool" disabled={!rows.length}
         onClick={() => setPrintBlocked(!printReport(title, caption, headings, outputRows()))}><IconPrinter />{t('Печать')}</button>
-      {periodControl}
     </WorkspaceHeaderActions>
     {printBlocked && <p role="alert" className="text-sm text-danger">{t('Разрешите всплывающие окна и повторите печать.')}</p>}
     <section className="card min-w-0 overflow-hidden">

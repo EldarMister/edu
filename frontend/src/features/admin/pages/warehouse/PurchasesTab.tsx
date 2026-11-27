@@ -444,7 +444,7 @@ function PurchaseForm({
   return (
     <div ref={formRef} className="poster-form poster-form--document poster-purchase-form space-y-6">
       {costs && can('actions.exportReports') && <WorkspaceHeaderActions>
-        <button type="button" className="btn-ghost btn-md text-primary"
+        <button type="button" className="workspace-tool"
           disabled={busy || !enteredRows.length || (stockEditable && (!catalogReady || !dateValid || !timingReady || !!locationError || !!discountError || !!rowErrors.size))}
           onClick={printSupply}><IconPrinter />Печать</button>
       </WorkspaceHeaderActions>}

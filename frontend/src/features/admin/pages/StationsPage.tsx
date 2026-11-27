@@ -9,7 +9,7 @@ import { apiError } from '@/lib/api';
 import { QueryState, DocumentField } from './warehouse/WarehouseUi';
 import { useEditorRoute, usePageFilter } from './warehouse/workspace-route';
 import { EditorPage, useEditorDirty } from './warehouse/EditorPage';
-import { WorkspaceHeaderCount } from './WorkspaceHeader';
+import { WorkspaceHeaderActions, WorkspaceHeaderCount } from './WorkspaceHeader';
 import { WorkspaceSearch } from './WorkspaceSearch';
 
 const STATUS_OPTIONS = [
@@ -50,12 +50,14 @@ export function StationsPage() {
   return <QueryState pending={pending} error={query.error}>
     <div className="poster-directory-surface">
       <WorkspaceHeaderCount count={query.isPlaceholderData ? undefined : rows.length} />
+      {owner && <WorkspaceHeaderActions>
+        <button type="button" aria-label="Добавить станцию" className="btn-primary btn-md"
+          onClick={() => openEditor({ type: 'station' })}>Добавить</button>
+      </WorkspaceHeaderActions>}
       <div className="poster-toolbar">
         <WorkspaceSearch label="Поиск станции" value={search} onChange={setSearch} />
         <Select ariaLabel="Статус станции" className="poster-filter w-44"
           value={filterStatus} onChange={setStatus} options={STATUS_OPTIONS} />
-        {owner && <button type="button" aria-label="Добавить станцию" className="btn-primary btn-md ml-auto"
-          onClick={() => openEditor({ type: 'station' })}>Добавить</button>}
       </div>
       <div className="overflow-x-auto">
       <table className="poster-table poster-directory-table poster-directory-table--stations w-full min-w-[460px]">

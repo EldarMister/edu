@@ -97,7 +97,7 @@ export function MenuGoodsActions({ filters, columns, saveColumns, ready, canExpo
   }
   return <>
     <ColumnButton onClick={() => setColumnsOpen(true)} />
-    {canExport && <button type="button" className="supply-header-action" disabled={!ready || exporting} title="Экспорт"
+    {canExport && <button type="button" className="workspace-tool" disabled={!ready || exporting} title="Экспорт"
       onClick={() => void exportGoods()}><IconExport aria-hidden="true" /><span className="catalogue-action-label">{exporting ? 'Выгрузка…' : 'Экспорт'}</span></button>}
     {error && <p className="basis-full text-sm text-danger" role="alert">{error}</p>}
     {columnsOpen && <WarehouseColumnSettings columns={columns} defaults={columnOptions} resetColumns={defaults}

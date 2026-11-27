@@ -207,12 +207,11 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
       <WorkspaceHeaderCount count={query.data ? rows.length : undefined} />
       <WorkspaceHeaderActions>
         <ColumnButton onClick={() => setSettingsOpen(true)} />
-        {canExport && <button type="button" className="supply-header-action" disabled={exporting}
+        {canExport && <button type="button" className="workspace-tool" disabled={exporting}
           onClick={() => void exportWorkbook()}><IconExport />{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
-        {canExport && <button type="button" className="supply-header-action" disabled={!query.isSuccess || !rows.length}
+        {canEdit && <button type="button" className="workspace-tool" onClick={() => onCreate(true)}><IconImport />Импорт с ИИ</button>}
+        {canExport && <button type="button" className="workspace-tool" disabled={!query.isSuccess || !rows.length}
           onClick={printList}><IconPrinter />Печать</button>}
-        {period.filter}
-        {canEdit && <button type="button" className="supply-header-action" onClick={() => onCreate(true)}><IconImport />Импорт с ИИ</button>}
         {canEdit && <button type="button" className="btn-primary btn-md" onClick={() => onCreate()}>Добавить</button>}
       </WorkspaceHeaderActions>
       {settingsOpen && <WarehouseColumnSettings columns={columns} defaults={allowedColumns} resetColumns={resetColumns}
@@ -224,6 +223,7 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
           setSettingsOpen(false);
         }} />}
       <div className="poster-toolbar print:hidden">
+        {period.filter}
         <WorkspaceSearch label="Поиск поставок" placeholder="Быстрый поиск" value={search}
           onChange={(value) => filter({ supplySearch: value })} />
         <WarehouseMultiFilter label="Поставщик" value={supplier} options={supplierOptions}

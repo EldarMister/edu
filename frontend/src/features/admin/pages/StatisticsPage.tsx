@@ -10,7 +10,6 @@ import { IconCheck, IconOrders } from '../components/icons';
 import { useStatistics, useStatisticsReports, type StatsPeriod } from '../api';
 import { StatisticsReport } from './StatisticsReport';
 import type { StatisticsView } from './statisticsViews';
-import { WorkspaceHeaderActions } from './WorkspaceHeader';
 import { usePageFilters } from './warehouse/workspace-route';
 
 const PERIODS: { value: StatsPeriod; label: string }[] = [
@@ -68,12 +67,14 @@ export function StatisticsPage({ view }: { view: Exclude<StatisticsView, 'taxes'
 
   return (
     <div className="space-y-4 overflow-x-hidden">
-      {(view === 'overview' || !reportsQ.data) && <WorkspaceHeaderActions>{periodControl}</WorkspaceHeaderActions>}
-      {period === 'custom' && <div className="flex flex-wrap items-center gap-2">
-        <DatePicker aria-label={t('С даты')} className="input h-10 w-[150px]" value={from} max={to} onChange={(value) => updatePeriod({ statsFrom: value })} />
-        <span className="text-sm text-text-muted">—</span>
-        <DatePicker aria-label={t('По дату')} className="input h-10 w-[150px]" value={to} min={from} max={today} onChange={(value) => updatePeriod({ statsTo: value })} />
-      </div>}
+      <div className="flex flex-wrap items-center gap-2">
+        {periodControl}
+        {period === 'custom' && <>
+          <DatePicker aria-label={t('С даты')} className="input h-10 w-[150px]" value={from} max={to} onChange={(value) => updatePeriod({ statsFrom: value })} />
+          <span className="text-sm text-text-muted">—</span>
+          <DatePicker aria-label={t('По дату')} className="input h-10 w-[150px]" value={to} min={from} max={today} onChange={(value) => updatePeriod({ statsTo: value })} />
+        </>}
+      </div>
 
       {activeQuery.isError ? <div className="card space-y-3 p-5">
         <p role="alert" className="text-danger">{apiError(activeQuery.error)}</p>
@@ -86,7 +87,7 @@ export function StatisticsPage({ view }: { view: Exclude<StatisticsView, 'taxes'
           <RevenueChart data={[...reportsQ.data.sales].sort((a, b) => a.date.localeCompare(b.date))
             .map(({ date, revenue }) => ({ label: chartDay.format(new Date(date + 'T00:00:00Z')), amount: revenue }))} />
         </section>}
-        <StatisticsReport key={view} report={view} data={reportsQ.data} periodControl={periodControl} />
+        <StatisticsReport key={view} report={view} data={reportsQ.data} />
       </div> : d && (
         <div key={view} className="workspace-stagger space-y-4">
           {/* Метрики: десктоп — две карточки */}

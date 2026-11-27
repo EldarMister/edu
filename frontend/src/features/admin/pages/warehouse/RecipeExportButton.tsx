@@ -46,7 +46,7 @@ export function RecipeExportButton({ kind, ids, pending }: {
   }
 
   return <>
-    <button type="button" className="supply-header-action" title="Экспорт" aria-haspopup="dialog" data-catalogue-disclosure disabled={pending || !ids.length} onClick={() => {
+    <button type="button" className="workspace-tool" title="Экспорт" aria-haspopup="dialog" data-disclosure disabled={pending || !ids.length} onClick={() => {
       setComposition(false);
       setError('');
       setOpen(true);

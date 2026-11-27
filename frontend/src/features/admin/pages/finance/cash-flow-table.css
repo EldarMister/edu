@@ -1,6 +1,5 @@
 .cash-flow-toolbar,
-.cash-flow-filters,
-.cash-flow-tools { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 8px; }
+.cash-flow-filters { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 8px; }
 .cash-flow-toolbar { justify-content: space-between; gap: 8px 16px; padding: 8px 12px; border-bottom: 1px solid rgb(var(--edu-border)); }
 .cash-flow-toolbar .report-period-trigger { min-height: 36px; }
 .cash-flow-column-menu { position: relative; }

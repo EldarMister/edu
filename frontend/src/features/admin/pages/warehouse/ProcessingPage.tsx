@@ -1,3 +1,4 @@
+import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { IconExport } from '@/features/admin/components/icons';
 import { useState, type ReactNode } from 'react';
 import { ColumnButton } from '../../components/ColumnControl';
@@ -74,14 +75,16 @@ export function ProcessingPage({
   }
   return (
     <div className="poster-register-surface min-w-0">
+      <WorkspaceHeaderActions>
+        <ColumnButton onClick={() => setEditingColumns(true)} />
+        {can('actions.exportReports') && <button type="button" className="workspace-tool" disabled={!documents.length || exporting}
+          onClick={exportRegister}><IconExport />Экспорт Excel</button>}
+        {canProduce && <button type="button" className="btn-primary btn-md" onClick={onCreate}>Добавить</button>}
+      </WorkspaceHeaderActions>
       <div className="poster-toolbar">
         <WorkspaceSearch label="Поиск переработок" value={search} onChange={setSearch} />
         {period.filter}
         {filters}
-        <ColumnButton onClick={() => setEditingColumns(true)} />
-        {can('actions.exportReports') && <button type="button" className="btn-secondary btn-md" disabled={!documents.length || exporting}
-          onClick={exportRegister}><IconExport />Экспорт Excel</button>}
-        {canProduce && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
       </div>
       {editingColumns && <WarehouseColumnSettings columns={columns} defaults={defaultColumns}
         label={(key) => processingColumns[key]} onClose={() => setEditingColumns(false)}
@@ -531,6 +534,10 @@ function ProcessingForm({
   );
   return (
     <div className="poster-form poster-form--document poster-document--modern space-y-7">
+      {document && !editable && can('actions.exportReports') && <WorkspaceHeaderActions>
+        <button type="button" className="workspace-tool"
+          disabled={exportingAct} onClick={() => exportDocument(document.id)}><IconExport />Скачать акт Excel</button>
+      </WorkspaceHeaderActions>}
       <div className="poster-document-panel poster-document-fields space-y-3">
         {editable ? <StockOperationDateField label="Дата и время переработки" value={timing} onChange={setTiming}
           onValidityChange={setDateValid} disabled={busy} /> : document && <DocumentField label="Дата и время переработки">
@@ -600,8 +607,6 @@ function ProcessingForm({
             : undefined
         }
       >
-        {document && !editable && can('actions.exportReports') && <button type="button" className="btn-secondary btn-md"
-          disabled={exportingAct} onClick={() => exportDocument(document.id)}><IconExport />Скачать акт Excel</button>}
         {editable ? (
           <>
             <button className="btn-primary btn-md" disabled={busy || !dateValid} onClick={() => void save(true)}>

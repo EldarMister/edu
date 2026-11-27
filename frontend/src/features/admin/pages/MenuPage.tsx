@@ -273,11 +273,11 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
             {!isGoods && <ColumnButton onClick={() => setRecipeColumnsOpen(true)} />}
             {canExportRecipes && <RecipeExportButton kind="recipes" ids={rows.map(({ id }) => id)} pending={!dishesQ.isSuccess} />}
             {editable && <MenuImportButton kind={isGoods ? 'goods' : 'recipe'} />}
-            <button type="button" className="supply-header-action" title="Печать" onClick={printList}
+            <button type="button" className="workspace-tool" title="Печать" onClick={printList}
               disabled={!listQ.isSuccess || !visibleRows.length || showRecipeCosts && costQuery.isPending}>
               <IconPrinter aria-hidden="true" /><span className="catalogue-action-label">Печать</span>
             </button>
-            {!isGoods && editable && <button type="button" className="supply-header-action" title="Корзина"
+            {!isGoods && editable && <button type="button" className="workspace-tool" title="Корзина"
               onClick={() => openEditor({ type: 'recipeTrash' })}><IconTrash aria-hidden="true" /><span className="catalogue-action-label">Корзина</span></button>}
             {!isGoods && editable && (
               <MenuActions
@@ -653,7 +653,7 @@ export function MenuCategoriesPage() {
       </div>
       {editable && !editor && <WorkspaceHeaderActions>
         <div className="catalogue-header-actions">
-          <button type="button" className="supply-header-action" title="Корзина категорий"
+          <button type="button" className="workspace-tool" title="Корзина категорий"
             onClick={() => openEditor({ type: 'categoryTrash' })}>
             <IconTrash aria-hidden="true" /><span className="catalogue-action-label">Корзина</span>
           </button>

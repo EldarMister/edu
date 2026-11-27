@@ -21,7 +21,7 @@ const templates = {
 export function MenuImportButton({ kind }: { kind: Kind }) {
   const [open, setOpen] = useState(false);
   return <>
-    <button type="button" className="supply-header-action" title="Импорт" aria-haspopup="dialog" onClick={() => setOpen(true)}>
+    <button type="button" className="workspace-tool" title="Импорт" aria-haspopup="dialog" onClick={() => setOpen(true)}>
       <IconImport aria-hidden="true" /><span className="catalogue-action-label">Импорт</span>
     </button>
     {open && <MenuImportDialog kind={kind} close={() => setOpen(false)} />}

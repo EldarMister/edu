@@ -29,7 +29,7 @@ export function PreparationPrintButton({ recipe }: { recipe: PreparationRecipe }
       push({ message: 'Разрешите открытие окна печати в браузере.', at: new Date().toISOString() });
     }
   }
-  return <button type="button" className="btn-secondary btn-md inline-flex items-center gap-2"
+  return <button type="button" className="workspace-tool"
     title="Печать сохранённой рецептуры" disabled={!recipe.items.length} onClick={print}>
     <IconPrinter />Распечатать
   </button>;

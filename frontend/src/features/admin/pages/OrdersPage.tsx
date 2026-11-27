@@ -141,7 +141,6 @@ export function OrdersPage() {
       <WorkspaceHeaderActions>
         <ColumnButton label={tr('Столбцы')} onClick={() => setColumnsOpen(true)} />
         {canAction('exportReports') && <OrdersExportButton filters={listFilters} disabled={!items.length || !!ordersError} />}
-        {period.filter}
       </WorkspaceHeaderActions>
       <div className="orders-controls">
         <div className="orders-summary workspace-enter" aria-busy={summaryQ.isPending}>
@@ -160,6 +159,7 @@ export function OrdersPage() {
           </>}
         </div>
 
+        <div className="mb-3">{period.filter}</div>
         <OrdersFilters
           tab={tab}
           paymentMethod={paymentMethod}

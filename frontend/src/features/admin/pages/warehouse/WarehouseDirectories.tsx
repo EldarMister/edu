@@ -1,3 +1,4 @@
+import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { RowIconButton } from '../../components/RowIconButton';
 import { createPortal } from 'react-dom';
@@ -180,9 +181,11 @@ export function SuppliersPage() {
   }, { purchaseCount: 0, purchaseTotal: 0, knownDebt: 0, missingSettlementCount: 0 });
   return (
     <div className="poster-directory-surface">
+      {editable && <WorkspaceHeaderActions>
+        <button type="button" className="btn-primary btn-md" onClick={() => openEditor({ type: 'supplier' })}>Добавить</button>
+      </WorkspaceHeaderActions>}
       <div className="poster-toolbar">
         <WorkspaceSearch value={search} onChange={setSearch} label="Поиск поставщика" placeholder="Поиск..." />
-        {editable && <button type="button" className="btn-primary btn-md ml-auto" onClick={() => openEditor({ type: 'supplier' })}>Добавить</button>}
       </div>
       {error && (
         <p role="alert" className="py-3 text-danger">
@@ -302,9 +305,11 @@ export function LocationsPage({ data }: { data: WarehouseLocations }) {
   const location = editor?.type === 'location' && editor.id ? data.locations.find((item) => item.id === editor.id) : undefined;
   return (
     <div className="poster-directory-surface">
+      {editable && <WorkspaceHeaderActions>
+        <button type="button" className="btn-primary btn-md" onClick={() => openEditor({ type: 'location' })}>Добавить</button>
+      </WorkspaceHeaderActions>}
       <div className="poster-toolbar">
         <WorkspaceSearch label="Поиск склада" value={search} onChange={setSearch} placeholder="Поиск..." />
-        {editable && <button type="button" className="btn-primary btn-md ml-auto" onClick={() => openEditor({ type: 'location' })}>Добавить</button>}
       </div>
       {canReadCosts && valuation.isError && <p role="alert" className="px-4 py-3 text-danger">Не удалось загрузить стоимость остатков. <button type="button" className="text-primary" onClick={() => void valuation.refetch()}>Повторить</button></p>}
       <div className="overflow-x-auto">
@@ -498,6 +503,9 @@ export function PackagesPage() {
   }
   return (
     <div className="poster-directory-surface">
+      {editable && <WorkspaceHeaderActions>
+        <button type="button" className="btn-primary btn-md" onClick={() => openEditor({ type: 'package' })}>Добавить</button>
+      </WorkspaceHeaderActions>}
       <div className="poster-toolbar">
         <WorkspaceSearch label="Поиск фасовок" value={search} onChange={setSearch} placeholder="Поиск..." />
         <Select
@@ -507,7 +515,6 @@ export function PackagesPage() {
           onChange={setUnit}
           options={[{ value: '', label: 'Ед. измерения' }, ...UNIT_OPTIONS]}
         />
-        {editable && <button type="button" className="btn-primary btn-md ml-auto" onClick={() => openEditor({ type: 'package' })}>Добавить</button>}
       </div>
       {error && (
         <p role="alert" className="py-3 text-danger">

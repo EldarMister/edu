@@ -6,7 +6,7 @@ import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { useAuth } from '@/store/auth';
 import { PROCESSING_METHODS, qty, useBalances, useIngredientCategories, useIngredientMutations, useIngredients, type Ingredient } from './api';
 import { QueryState } from './WarehouseUi';
-import { useEditorRoute, usePageFilter, usePageFilters } from './workspace-route';
+import { usePageFilter, usePageFilters } from './workspace-route';
 import { useWarehousePolicy } from './settings-api';
 import { UNIT_OPTIONS, unitConversionFactor } from './units';
 import { WorkspaceHeaderActions, WorkspaceHeaderCount } from '../WorkspaceHeader';
@@ -111,7 +111,6 @@ export function IngredientsTab({
   const dataColumns = columns.slice(1);
   const suppliesVisible = can('actions.warehouseReports') && costs;
   const preparedCatalogue = catalogue === 'preparations';
-  const { openEditor } = useEditorRoute();
   const prepLabels: Record<string, string> = { name: 'Название', output: 'Выход', cost: 'Себестоимость' };
   const prepAvailable = costs ? ['name', 'output', 'cost'] : ['name', 'output'];
   const [prepPreference, savePrepColumns] = useColumnPreference('menu-preparations');
@@ -244,8 +243,6 @@ export function IngredientsTab({
       )}
       {manageIngredients && <RowActionMenu label={item.name} action="Удалить"
         onAction={() => { remove.reset(); setRemoving(item); }} />}
-      {preparedCatalogue && can('actions.warehouseRecipes') && <button type="button" title="Копировать полуфабрикат"
-        onClick={() => openEditor({ type: 'preparation', id: item.id, action: 'copy' })}>Копировать</button>}
       {production &&
         item.isPrepared &&
         item.preparationMode !== 'virtual' &&
@@ -413,12 +410,12 @@ export function IngredientsTab({
         <div className="catalogue-header-actions">
           <ColumnButton onClick={() => setIngredientColumnsOpen(true)} />
           {canExportPreparations && <RecipeExportButton kind="preparations" ids={rows.map(({ id }) => id)} pending={!catalogueQuery.isSuccess} />}
-          {!preparedCatalogue && can('actions.exportReports') && <button type="button" className="supply-header-action" disabled={!query.isSuccess}
+          {!preparedCatalogue && can('actions.exportReports') && <button type="button" className="workspace-tool" disabled={!query.isSuccess}
             title="Экспорт CSV" onClick={() => reportCatalogue(false)}><IconExport /><span className="catalogue-action-label">Экспорт</span></button>}
           {!preparedCatalogue && canCreate && <IngredientImportButton />}
-          <button type="button" className="supply-header-action" title="Печать" disabled={!query.isSuccess} onClick={() => reportCatalogue(true)}>
+          <button type="button" className="workspace-tool" title="Печать" disabled={!query.isSuccess} onClick={() => reportCatalogue(true)}>
             <IconPrinter /><span className="catalogue-action-label">Печать</span></button>
-          {manageIngredients && <button type="button" className="supply-header-action"
+          {manageIngredients && <button type="button" className="workspace-tool"
             onClick={() => setCreatingCategory(true)}>Добавить категорию</button>}
           {canCreate && <button type="button" className="catalogue-add" onClick={onCreate}>Добавить</button>}
         </div>
@@ -451,10 +448,11 @@ export function IngredientsTab({
           setIngredientColumnsOpen(false);
         }} />}
       {!catalogue && <>
-        {canExport && <WorkspaceHeaderActions>
-          <button type="button" className="supply-header-action" disabled={exporting || !query.isSuccess}
-            onClick={() => void exportBalances()}><IconExport />{exporting ? 'Выгрузка…' : 'Экспорт'}</button>
-        </WorkspaceHeaderActions>}
+        <WorkspaceHeaderActions>
+          <ColumnButton onClick={() => setColumnsOpen(true)} />
+          {canExport && <button type="button" className="workspace-tool" disabled={exporting || !query.isSuccess}
+            onClick={() => void exportBalances()}><IconExport />{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
+        </WorkspaceHeaderActions>
         {columnsOpen && <WarehouseColumnSettings columns={columns} defaults={columnOptions} resetColumns={defaultColumns}
           label={(key) => columnSpec(key).label} onClose={() => setColumnsOpen(false)}
           onApply={(selection) => {
@@ -554,7 +552,6 @@ export function IngredientsTab({
           onClick={() => setBalanceFilter({ search: '', kind: '', category: '', unit: '', stockFilter: '', warehouse: '', balanceWarehouses: '' })}>
           Сбросить всё
         </button>}
-        {!catalogue && <ColumnButton className="ml-auto shrink-0" onClick={() => setColumnsOpen(true)} />}
       </div>
       <QueryState pending={query.isPending} error={query.error}>
         <div className="hidden overflow-x-auto md:block">

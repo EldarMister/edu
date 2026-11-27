@@ -210,7 +210,7 @@ function PostedWriteoffEditor({ document, locations, onClose, onReview, onReload
 
   return <div className="poster-form poster-form--document poster-document--modern space-y-6">
     <WorkspaceHeaderActions>
-      {can('actions.exportReports') && <button type="button" className="btn-secondary btn-md"
+      {can('actions.exportReports') && <button type="button" className="workspace-tool"
         disabled={pending || !lines.enteredCount} onClick={() => exportWriteoffLines(lines.rows, canSeeCosts ? displayAmounts : undefined)}>
         <IconExport />Экспорт CSV
       </button>}
@@ -513,12 +513,12 @@ function StockDocumentDraft({
         <WorkspaceHeaderActions>
           {can('actions.exportReports') && <StockDocumentExportButton id={document.id} kind="inventory"
             disabled={hasUnsavedValues || !timingReady || pending || stale} />}
-          <button type="button" className="btn-ghost btn-md text-primary" disabled={previewNeedsSave || !timingReady} onClick={() => window.print()}><IconPrinter />Печать списка</button>
+          <button type="button" className="workspace-tool" disabled={previewNeedsSave || !timingReady} onClick={() => window.print()}><IconPrinter />Печать списка</button>
         </WorkspaceHeaderActions>
       </>}
       {document.kind === 'writeoff' && <>
         {can('actions.exportReports') && <WorkspaceHeaderActions>
-          <button type="button" className="btn-secondary btn-md" disabled={!writeoffLines.enteredCount || pending || fileReading}
+          <button type="button" className="workspace-tool" disabled={!writeoffLines.enteredCount || pending || fileReading}
             onClick={() => exportWriteoffLines(writeoffLines.rows)}><IconExport />Экспорт CSV</button>
         </WorkspaceHeaderActions>}
         <WriteoffFileImport disabled={pending || stale || fileReading || !writeoffLines.options.isSuccess}
@@ -744,7 +744,7 @@ function StockDocumentReview({
     >
       {document.kind === 'inventory' && <InventoryCountSheet document={document} warehouseName={warehouse.name} rows={document.items} />}
       {document.kind === 'writeoff' && document.itemsCount > 0 && can('actions.exportReports') && <WorkspaceHeaderActions>
-        <button type="button" className="btn-secondary btn-md"
+        <button type="button" className="workspace-tool"
           onClick={() => exportWriteoffLines(writeoffDraftLines(document.sourceLines, document.items))}><IconExport />Экспорт CSV</button>
       </WorkspaceHeaderActions>}
       <div className="poster-document-panel poster-document-fields space-y-3">
@@ -785,7 +785,7 @@ function StockDocumentReview({
           <StockDocumentExportButton id={document.id} kind="inventory" disabled={pending} />}
         <button
           type="button"
-          className="btn-ghost btn-md print:hidden text-primary"
+          className="workspace-tool"
           onClick={() => window.print()}
         >
           <IconPrinter />Печать

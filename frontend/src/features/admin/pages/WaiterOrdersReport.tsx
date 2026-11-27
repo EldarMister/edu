@@ -1,3 +1,4 @@
+import { WorkspaceHeaderActions } from './WorkspaceHeader';
 import { useMemo, useState } from 'react';
 import { Select } from '@/components/Select';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
@@ -203,6 +204,15 @@ export function WaiterOrdersReport({ staff, staffLoading }: {
       )}
 
       <div className="min-w-0 rounded-xl border border-border bg-card" aria-busy={report.isLoading || staffLoading}>
+        <WorkspaceHeaderActions>
+          {view === 'orders' && <ColumnButton onClick={() => setColumnsOpen(true)} />}
+          {canAction('exportReports') && <button type="button" onClick={() => outputReport('csv')} className="workspace-tool" disabled={!hasOutput}>
+            <IconExport />Экспорт CSV
+          </button>}
+          <button type="button" onClick={() => outputReport('print')} className="workspace-tool" disabled={!hasOutput}>
+            <IconPrinter />Печать
+          </button>
+        </WorkspaceHeaderActions>
         <div className="no-print flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border px-3 py-2">
           <div role="group" aria-label="Раздел отчёта" className="flex flex-wrap gap-1">
             <button type="button" aria-pressed={view === 'orders'} onClick={() => setView('orders')}
@@ -214,14 +224,7 @@ export function WaiterOrdersReport({ staff, staffLoading }: {
             {view === 'orders' && <>
               <WorkspaceSearch value={search} onChange={setSearch} label="Поиск по заказам" placeholder="Блюдо или № заказа"
               className="max-sm:w-full [&_.input]:pl-8 [&_.input]:pr-8" />
-              <ColumnButton onClick={() => setColumnsOpen(true)} />
             </>}
-            {canAction('exportReports') && <button type="button" onClick={() => outputReport('csv')} className="btn-secondary btn-md" disabled={!hasOutput}>
-              <IconExport />Экспорт CSV
-            </button>}
-            <button type="button" onClick={() => outputReport('print')} className="btn-secondary btn-md" disabled={!hasOutput}>
-              <IconPrinter />Печать
-            </button>
           </div>
         </div>
         {printError && <p role="alert" className="no-print px-4 py-2 text-sm text-danger">Разрешите всплывающие окна, чтобы распечатать отчёт</p>}

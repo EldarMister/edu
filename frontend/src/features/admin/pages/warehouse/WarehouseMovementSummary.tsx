@@ -246,7 +246,7 @@ export function WarehouseMovementSummary({ warehouseId, range, onOpen, onHistory
         }}>Сбросить всё</button>}
         <WorkspaceHeaderActions>
           <ColumnButton onClick={() => setEditingColumns(true)} />
-          {canExport && <button type="button" className="supply-header-action" disabled={exporting} onClick={() => void download()}>
+          {canExport && <button type="button" className="workspace-tool" disabled={exporting} onClick={() => void download()}>
             <IconExport />{exporting ? 'Выгрузка…' : 'Экспорт в Excel'}
           </button>}
         </WorkspaceHeaderActions>

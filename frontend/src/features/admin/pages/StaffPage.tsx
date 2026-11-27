@@ -26,7 +26,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
 import { IconPlus, IconEdit, IconTrash, IconEye, IconEyeOff, IconExport } from '../components/icons';
 import { WaiterOrdersReport } from './WaiterOrdersReport';
-import { WorkspaceHeaderCount } from './WorkspaceHeader';
+import { WorkspaceHeaderActions, WorkspaceHeaderCount } from './WorkspaceHeader';
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { DocumentField } from './warehouse/WarehouseUi';
 import { useEditorRoute } from './warehouse/workspace-route';
@@ -254,23 +254,19 @@ export function StaffPage({ initialTab = 'employees' }: { initialTab?: StaffTab 
                 <IconRefresh className={`h-4 w-4 ${currentShiftLoading ? 'animate-spin' : ''}`} />
                 {tr('Обновить')}
               </button>
-              <button
-                onClick={exportCsv}
-                disabled={!reportQ.data || !rows.length}
-                className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-3 text-sm text-text-secondary transition-colors hover:bg-background disabled:opacity-50"
-              >
-                <IconExport />{tr('Экспорт')}
-              </button>
             </>
           )}
-          {canManageStaff && <button
-            className="flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-white transition-colors hover:bg-primary-hover"
-            onClick={() => openEditor({ type: 'employee' })}
-          >
-            <IconPlus className="h-4 w-4" /> {tr('Добавить сотрудника')}
-          </button>}
         </div>
       </div>}
+
+      {tab === 'employees' && <WorkspaceHeaderActions>
+        <button type="button" onClick={exportCsv} disabled={!reportQ.data || !rows.length} className="workspace-tool">
+          <IconExport />{tr('Экспорт')}
+        </button>
+        {canManageStaff && <button type="button" className="btn-primary btn-md" onClick={() => openEditor({ type: 'employee' })}>
+          <IconPlus className="h-4 w-4" /> {tr('Добавить сотрудника')}
+        </button>}
+      </WorkspaceHeaderActions>}
 
       <div className="no-scrollbar flex items-center gap-5 overflow-x-auto border-b border-border">
         <TabButton active={tab === 'employees'} onClick={() => setTab('employees')}>
@@ -474,8 +470,13 @@ export function WorkShiftHistory() {
   }
 
   return <div className="space-y-3">
+    <WorkspaceHeaderActions>
+      <button type="button" className="workspace-tool" onClick={exportHistoryCsv} disabled={!historyQ.data?.items.length}>
+        <IconExport />Экспорт
+      </button>
+    </WorkspaceHeaderActions>
     <HistoryFilters filters={filters} setFilters={setFilters} staffOptions={staffOptions} roleOptions={roleOptions}
-      loading={historyQ.isFetching} onRefresh={() => void historyQ.refetch()} onExport={exportHistoryCsv} />
+      loading={historyQ.isFetching} onRefresh={() => void historyQ.refetch()} />
     {historyQ.isError ? <p role="alert" className="py-6 text-sm text-danger">{apiError(historyQ.error)}{' '}
       <button type="button" className="underline" onClick={() => void historyQ.refetch()}>Повторить</button></p> : <ShiftHistoryTable
       data={historyQ.data}
@@ -528,7 +529,6 @@ function HistoryFilters({
   roleOptions,
   loading,
   onRefresh,
-  onExport,
 }: {
   filters: ShiftHistoryFilters;
   setFilters: React.Dispatch<React.SetStateAction<ShiftHistoryFilters>>;
@@ -536,7 +536,6 @@ function HistoryFilters({
   roleOptions: { value: string; label: string }[];
   loading: boolean;
   onRefresh: () => void;
-  onExport: () => void;
 }) {
   const periodOptions: { value: ShiftHistoryPeriod; label: string }[] = [
     { value: 'today', label: 'Сегодня' },
@@ -602,12 +601,6 @@ function HistoryFilters({
       >
         <IconRefresh className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         Обновить
-      </button>
-      <button
-        onClick={onExport}
-        className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-white px-3 text-sm text-text-secondary transition-colors hover:bg-background"
-      >
-        <IconExport />Экспорт
       </button>
     </div>
   );

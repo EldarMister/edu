@@ -1,7 +1,6 @@
 .finance-register { background: rgb(var(--edu-card)); }
 .finance-register-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 24px; padding: 4px 10px 16px; }
-.finance-register-filters, .finance-register-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
-.finance-register-tools { margin-left: auto; justify-content: flex-end; }
+.finance-register-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
 .finance-tool { display: inline-flex; gap: 7px; align-items: center; min-height: 36px; font-size: 14px; color: rgb(var(--edu-link)); }
 .finance-tool svg { width: 19px; height: 19px; }
 .finance-tool:hover { text-decoration: underline; }
@@ -43,5 +42,4 @@
 }
 @media (max-width: 640px) {
   .finance-register-toolbar { padding-inline: 0; gap: 8px; }
-  .finance-register-tools { justify-content: flex-start; margin-left: 0; }
 }

@@ -324,7 +324,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
       >
         {kind === 'writeoff' && <>
           {can('actions.exportReports') && <WorkspaceHeaderActions>
-            <button type="button" className="btn-secondary btn-md" disabled={!writeoffLines.enteredCount || busy}
+            <button type="button" className="workspace-tool" disabled={!writeoffLines.enteredCount || busy}
               onClick={() => exportWriteoffLines(writeoffLines.rows)}><IconExport />Экспорт CSV</button>
           </WorkspaceHeaderActions>}
           <WriteoffFileImport disabled={busy || !writeoffLines.options.isSuccess} onBusy={setFileReading} onRead={writeoffLines.importRows} />

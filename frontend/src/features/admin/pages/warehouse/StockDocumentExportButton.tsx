@@ -26,7 +26,7 @@ export function StockDocumentExportButton({ id, kind, disabled = false }: {
   }
 
   const label = kind === 'transfer' ? 'Скачать акт XLSX' : 'Скачать XLSX';
-  return <button type="button" className="btn-ghost btn-md print:hidden text-primary" disabled={disabled || pending}
+  return <button type="button" className="workspace-tool" disabled={disabled || pending}
     title={disabled ? 'Сначала сохраните изменения' : undefined} onClick={() => void download()}>
     <IconExport />{pending ? 'Выгрузка…' : label}
   </button>;

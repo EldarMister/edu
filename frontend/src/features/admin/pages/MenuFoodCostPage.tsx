@@ -1,3 +1,4 @@
+import { WorkspaceHeaderActions } from './WorkspaceHeader';
 import { IconExport } from '@/features/admin/components/icons';
 import { useDeferredValue, useState } from 'react';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -112,6 +113,12 @@ function FoodCostControl({ onOpen }: { onOpen: (row: MenuLink) => void }) {
           onClick={() => setBasketOpen(true)}>План цен · {basket.entries.length}</button>}
       </div>
     </header>
+    {canExport && <WorkspaceHeaderActions>
+      <button type="button" className="workspace-tool" disabled={!(tab === 'positions' ? positions : ingredients).length}
+        onClick={exportTable}><IconExport />CSV</button>
+      <button type="button" className="workspace-tool" disabled={exporting || !(tab === 'positions' ? positions : ingredients).length}
+        onClick={() => void exportExcel()}><IconExport />Excel</button>
+    </WorkspaceHeaderActions>}
     {report.isError && <p className="text-sm text-danger" role="alert">{apiError(report.error)}</p>}
     {report.isPending && <WorkspacePending />}
     {data && insights && <>
@@ -155,12 +162,6 @@ function FoodCostControl({ onOpen }: { onOpen: (row: MenuLink) => void }) {
           <div className="flex flex-wrap items-center gap-2">
             <WorkspaceSearch label={tab === 'positions' ? 'Поиск позиций' : 'Поиск ингредиентов'}
               value={filters.foodReportSearch} onChange={(foodReportSearch) => setFilters({ foodReportSearch })} />
-            {canExport && <>
-              <button type="button" className="btn-secondary btn-md" disabled={!(tab === 'positions' ? positions : ingredients).length}
-                onClick={exportTable}><IconExport />CSV</button>
-              <button type="button" className="btn-secondary btn-md" disabled={exporting || !(tab === 'positions' ? positions : ingredients).length}
-                onClick={() => void exportExcel()}><IconExport />Excel</button>
-            </>}
           </div>
         </div>
         {exportError && <p className="text-sm text-danger" role="alert">{exportError}</p>}

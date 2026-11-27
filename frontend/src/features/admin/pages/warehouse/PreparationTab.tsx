@@ -975,6 +975,11 @@ export function ProductionBatchModal({ id, onClose }: { id: string; onClose: () 
       )}
       {batch && (
         <div className="space-y-3">
+          <WorkspaceHeaderActions>
+          <button type="button" className="workspace-tool" onClick={() => window.print()}>
+            <IconPrinter />Печать
+          </button>
+          </WorkspaceHeaderActions>
           {batch.reversedAt && (
             <p className="rounded-lg bg-warning/10 p-3 text-sm">Проведение отменено: {batch.reverseReason}</p>
           )}
@@ -1019,9 +1024,6 @@ export function ProductionBatchModal({ id, onClose }: { id: string; onClose: () 
               </span>
             </div>
           ))}
-          <button type="button" className="btn-secondary btn-md" onClick={() => window.print()}>
-            <IconPrinter />Печать
-          </button>
         </div>
       )}
     </EditorPage>

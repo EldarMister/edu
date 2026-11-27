@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, apiError } from '@/lib/api';
+import { IconImport } from '../../components/icons';
 import type { InvoicePreview } from './invoice-import-values';
 
 export function PurchaseInvoiceImport({ initialOpen, disabled, onBusy, onRead }: {
@@ -47,8 +48,11 @@ export function PurchaseInvoiceImport({ initialOpen, disabled, onBusy, onRead }:
     }
   }
   return <section aria-label="Импорт накладной">
-    <button type="button" className="text-sm font-medium text-primary" aria-expanded={open} disabled={reading}
-      onClick={() => setOpen(!open)}>{initialOpen ? 'Распознать накладную' : 'Импорт поставки'} {open ? '▴' : '▾'}</button>
+    <button type="button" className="workspace-tool" data-disclosure aria-expanded={open} disabled={reading}
+      onClick={() => setOpen(!open)}>
+      <IconImport aria-hidden="true" />
+      {initialOpen ? 'Распознать накладную' : 'Импорт поставки'}
+    </button>
     {open && <div className="mt-2 rounded-lg border border-dashed border-border p-4"
       onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void read(Array.from(event.dataTransfer.files)); }}>
       <p className="text-sm">Перетащите фото, PDF или таблицу накладной. Распознанные позиции появятся в поставке для проверки.</p>

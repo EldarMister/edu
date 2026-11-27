@@ -6,6 +6,7 @@ import { api, apiError } from '@/lib/api';
 import { useSocketEvent } from '@/lib/socket';
 import { useAuth } from '@/store/auth';
 import type { Role } from '@/types';
+import { IconCheck, IconClock, IconLogout, IconX } from '../components/icons';
 import { financeKey } from './finance/api';
 import { WorkShiftHistory } from './StaffPage';
 import { WorkspaceHeaderActions } from './WorkspaceHeader';
@@ -24,7 +25,16 @@ interface EmployeeShift {
 type ShiftAction = { employee: EmployeeShift; kind: 'start' | 'approve' | 'reject' | 'close' };
 const registerKey = ['admin', 'staff', 'work-shifts'] as const;
 const date = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Asia/Bishkek', dateStyle: 'short', timeStyle: 'short' });
-const actions = { start: 'Начать смену', approve: 'Подтвердить начало', reject: 'Отклонить запрос', close: 'Завершить смену' };
+const actions = {
+  start: { label: 'Начать смену', icon: IconClock,
+    color: 'border-primary/30 bg-primary/10 text-[rgb(var(--edu-link))] hover:bg-primary/20' },
+  approve: { label: 'Подтвердить начало', icon: IconCheck,
+    color: 'border-success/30 bg-success/10 text-[light-dark(#166534,rgb(var(--edu-success)))] hover:bg-success/20' },
+  reject: { label: 'Отклонить запрос', icon: IconX,
+    color: 'border-border text-text-secondary hover:bg-background hover:text-text-primary' },
+  close: { label: 'Завершить смену', icon: IconLogout,
+    color: 'border-warning/30 bg-warning/10 text-[light-dark(#854d0e,rgb(var(--edu-warning)))] hover:bg-warning/20' },
+};
 const roleLabel: Record<Role, string> = { OWNER: 'Владелец', ADMIN: 'Администратор', WAITER: 'Официант', KITCHEN: 'Кухня', BAR: 'Бар' };
 
 export function WorkShiftsPage() {
@@ -79,7 +89,7 @@ export function WorkShiftsPage() {
       <div className="poster-toolbar"><WorkspaceSearch label="Поиск сотрудника" value={search} onChange={setSearch} /></div>
       <QueryState pending={query.isPending} error={query.error} empty={!rows.length}>
         <div className="overflow-x-auto"><table className="poster-table w-full min-w-[560px]">
-          <thead><tr><th>Сотрудник</th><th>Рабочая смена</th><th>Время (Бишкек)</th><th /></tr></thead>
+          <thead><tr><th>Сотрудник</th><th>Рабочая смена</th><th>Время (Бишкек)</th><th><span className="sr-only">Действия</span></th></tr></thead>
           <tbody>{rows.map((employee) => {
             const { active, request } = employee;
             const time = active?.startedAt ?? request?.requestedAt;
@@ -91,17 +101,24 @@ export function WorkShiftsPage() {
               </td>
               <td>{time ? date.format(new Date(time)) : '—'}</td>
               <td>{canEditSection('staff') && (active || employee.id !== ownId) && <div className="flex flex-wrap justify-end gap-2">
-                {choices.map((kind) => <button key={kind} type="button" className={`${kind === 'reject' ? 'btn-secondary' : 'btn-primary'} btn-sm`}
-                  onClick={() => { change.reset(); setAction({ kind, employee }); }}>{actions[kind]}</button>)}
+                {choices.map((kind) => {
+                  const { label, icon: Icon, color } = actions[kind];
+                  return <button key={kind} type="button"
+                    className={`btn min-h-10 w-44 shrink-0 whitespace-nowrap rounded-lg border px-3 text-[13px] ${color}`}
+                    onClick={() => { change.reset(); setAction({ kind, employee }); }}>
+                    <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    {label}
+                  </button>;
+                })}
               </div>}</td>
             </tr>;
           })}</tbody>
         </table></div>
       </QueryState>
     </>}
-    {action && <Modal open manageFocus title={actions[action.kind]} onClose={close} footer={<div className="flex justify-end gap-2">
+    {action && <Modal open manageFocus title={actions[action.kind].label} onClose={close} footer={<div className="flex justify-end gap-2">
       <button type="button" className="btn-secondary btn-md" disabled={change.isPending} onClick={close}>Отмена</button>
-      <button type="button" className="btn-primary btn-md" disabled={change.isPending} onClick={() => change.mutate(action)}>{actions[action.kind]}</button>
+      <button type="button" className="btn-primary btn-md" disabled={change.isPending} onClick={() => change.mutate(action)}>{actions[action.kind].label}</button>
     </div>}>
       <p>{action.employee.name}</p>
       {change.isError && <p role="alert" className="mt-2 text-sm text-danger">{apiError(change.error)}</p>}
