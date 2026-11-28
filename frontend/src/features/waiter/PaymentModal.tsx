@@ -1,4 +1,4 @@
-import { IconPrinter, IconSplit } from '@/features/admin/components/icons';
+import { IconPrinter } from '@/features/admin/components/icons';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import type { Order, PaymentMethod, Receipt } from '@/types';
@@ -56,7 +56,6 @@ export function PaymentModal({
   open,
   onClose,
   onPaid,
-  onSplitItems,
   initialSplitMode,
 }: {
   order: Order;
@@ -64,7 +63,6 @@ export function PaymentModal({
   open: boolean;
   onClose: () => void;
   onPaid: () => void;
-  onSplitItems?: () => void;
   initialSplitMode?: AmountSplitMode;
 }) {
   const t = useT();
@@ -409,7 +407,7 @@ export function PaymentModal({
     <>
       <FullScreenPayment order={order} enabled={enabled} qrImageUrl={qrImageUrl} allItemsServed={allActiveItemsServed}
         open={open} busy={pay.isPending} error={error} splitOpen={splitOpen} onClose={close}
-        onSplit={() => setSplitOpen(true)} onSplitItems={onSplitItems} onConfirm={confirmTender} />
+        onSplit={() => setSplitOpen(true)} onConfirm={confirmTender} />
       {splitBill}
     </>,
     document.body,
@@ -421,19 +419,9 @@ export function PaymentModal({
 
   return createPortal(
     <>
-      <Modal open={open} fullScreen manageFocus ariaLabel={t('Оплата заказа')}
-        contentClassName="mobile-payment" onClose={closeMobilePayment}>
-        <header className="mobile-payment-header">
-          <button type="button" className="mobile-payment-back" onClick={closeMobilePayment}
-            aria-label={t('Назад')} disabled={blocked} data-dialog-initial-focus>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M19 12H5m7 7-7-7 7-7" />
-            </svg>
-          </button>
-          <h2>{t('Оплата заказа')}</h2>
-        </header>
-
+      <Modal open={open} bottomSheet manageFocus dismissible={!blocked} title={t('Оплата заказа')}
+        panelClassName="mobile-payment-panel max-w-md sm:rounded-b-none" contentClassName="mobile-payment"
+        onClose={closeMobilePayment}>
         <div className="mobile-payment-body">
           <div className="mobile-payment-controls">
             <p className="text-[13px] text-text-muted">
@@ -442,10 +430,6 @@ export function PaymentModal({
             <div className="mobile-payment-total">
               <span className="text-[13px] text-text-secondary">{t('К оплате')}</span>
               <strong className="text-[28px] leading-tight text-text-primary">{money(order.finalAmount)}</strong>
-              {onSplitItems && <button type="button" className="mobile-payment-split"
-                disabled={blocked} onClick={onSplitItems}>
-                <IconSplit className="size-3.5" aria-hidden="true" />{t('Разделить по позициям')}
-              </button>}
             </div>
 
             {!allActiveItemsServed && <p role="alert" className="text-sm text-warning">

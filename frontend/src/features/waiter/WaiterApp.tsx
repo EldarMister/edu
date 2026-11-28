@@ -1359,7 +1359,6 @@ export function WaiterApp() {
           open={!!paymentOrder}
           onClose={() => setPaymentOrder(null)}
           onPaid={() => finishPayment(paymentOrder)}
-          onSplitItems={canWork && canSplitOrder(paymentOrder) ? () => showSplitOrder(paymentOrder) : undefined}
         />
       )}
 

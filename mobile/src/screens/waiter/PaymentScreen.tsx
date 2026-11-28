@@ -1,7 +1,6 @@
 import React, { useRef, useState } from 'react';
-import { Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { BottomSheet } from '@/components/BottomSheet';
 import { CashShiftEditor } from '@/components/CashShiftPanel';
 import { Button, Field, Loading } from '@/components/ui';
 import { apiError } from '@/lib/api';
@@ -16,11 +15,10 @@ import { mobilePaymentMethods } from '../../../../frontend/src/features/waiter/m
 
 const paymentOrder: Tender[] = ['qr', 'cash', 'card'];
 
-export function PaymentScreen({ order, onClose, onPaid, onSplitItems }: {
+export function PaymentScreen({ order, onClose, onPaid }: {
   order: Order;
   onClose: () => void;
   onPaid: () => void;
-  onSplitItems?: () => void;
 }) {
   const { width, height } = useWindowDimensions();
   const settings = usePublicSettings();
@@ -73,99 +71,79 @@ export function PaymentScreen({ order, onClose, onPaid, onSplitItems }: {
     onClose={() => setOpeningCashShift(false)} />;
 
   return (
-    <Modal visible presentationStyle="fullScreen" onRequestClose={close}>
-      <SafeAreaView style={styles.safe}>
-        <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === 'ios' && method === 'mixed' ? 'padding' : undefined}>
-          <View style={styles.header}>
-            <Pressable style={styles.back} onPress={close} disabled={pay.isPending} accessibilityRole="button" accessibilityLabel="Назад">
-              <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
-            </Pressable>
-            <Text style={styles.heading} accessibilityRole="header">Оплата заказа</Text>
+    <BottomSheet visible title="Оплата заказа" onClose={close} panelStyle={styles.panel} bodyStyle={styles.sheetBody}
+      footer={cashShiftRequired ? <Button title="Открыть кассовую смену" onPress={() => setOpeningCashShift(true)} />
+        : <Button title={footerLabel} onPress={() => void submit()} loading={pay.isPending}
+          disabled={!method || qrMissing || (canManage && total > 0 && cashShift.isPending) || (method === 'mixed' && !mixed)} />}>
+      <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === 'ios' && method === 'mixed' ? 'padding' : undefined}>
+        <View style={[styles.body, landscape && styles.landscape]}>
+          <View style={[styles.controls, landscape && styles.fill]}>
+            <Text style={styles.subtitle}>Стол {order.table.number}{hallSuffix(order.table)} · {displayOrderNumber(order.orderNumber)}</Text>
+            <View style={styles.total}>
+              <Text style={styles.subtitle}>К оплате</Text>
+              <Text style={styles.totalValue}>{money(total)}</Text>
+            </View>
+            {Number(order.discountAmount) > 0 && <Text style={styles.subtitle}>Скидка · {money(order.discountAmount)}</Text>}
+            {settings.isPending && <Loading text="Загрузка способов оплаты…" />}
+            {!settings.isPending && !settings.error && !options.length && <Text style={styles.subtitle}>Нет настроенных способов оплаты</Text>}
+            {cashShiftRequired && <Text style={styles.subtitle}>Откройте кассовую смену перед оплатой.</Text>}
+            {options.length > 0 && !cashShiftRequired && <View style={styles.methods}>
+              <Text style={styles.methodLabel}>Способ оплаты</Text>
+              <View style={styles.methodRow}>
+                {options.map(({ value, label }) => <Pressable key={value} accessibilityRole="button"
+                  accessibilityState={{ selected: value === method }} disabled={pay.isPending}
+                  style={[styles.method, value === method && styles.methodActive]}
+                  onPress={() => { if (!submitting.current) setSelected(value); }}>
+                  <Text style={[styles.methodText, value === method && styles.methodTextActive]}>{label}</Text>
+                </Pressable>)}
+              </View>
+            </View>}
           </View>
 
-          <View style={[styles.body, landscape && styles.landscape]}>
-            <View style={[styles.controls, landscape && styles.fill]}>
-              <Text style={styles.subtitle}>Стол {order.table.number}{hallSuffix(order.table)} · {displayOrderNumber(order.orderNumber)}</Text>
-              <View style={styles.total}>
-                <Text style={styles.subtitle}>К оплате</Text>
-                <Text style={styles.totalValue}>{money(total)}</Text>
-                {onSplitItems && <Pressable style={styles.split} accessibilityRole="button" onPress={onSplitItems} disabled={pay.isPending}>
-                  <Ionicons name="git-branch-outline" size={14} color={colors.primary} />
-                  <Text style={styles.splitText}>Разделить по позициям</Text>
-                </Pressable>}
-              </View>
-              {Number(order.discountAmount) > 0 && <Text style={styles.subtitle}>Скидка · {money(order.discountAmount)}</Text>}
-              {settings.isPending && <Loading text="Загрузка способов оплаты…" />}
-              {!settings.isPending && !settings.error && !options.length && <Text style={styles.subtitle}>Нет настроенных способов оплаты</Text>}
-              {cashShiftRequired && <Text style={styles.subtitle}>Откройте кассовую смену перед оплатой.</Text>}
-              {options.length > 0 && !cashShiftRequired && <View style={styles.methods}>
-                <Text style={styles.methodLabel}>Способ оплаты</Text>
-                <View style={styles.methodRow}>
-                  {options.map(({ value, label }) => <Pressable key={value} accessibilityRole="button"
-                    accessibilityState={{ selected: value === method }} disabled={pay.isPending}
-                    style={[styles.method, value === method && styles.methodActive]}
-                    onPress={() => { if (!submitting.current) setSelected(value); }}>
-                    <Text style={[styles.methodText, value === method && styles.methodTextActive]}>{label}</Text>
-                  </Pressable>)}
-                </View>
+          {!cashShiftRequired && method === 'qr' && qrSrc ? <View style={styles.qr}>
+            <Text style={styles.qrCaption}>Покажите QR-код клиенту для оплаты</Text>
+            <View style={styles.qrSpace} onLayout={({ nativeEvent: { layout } }) => {
+              setQrSize(Math.floor(Math.min(layout.width, layout.height, 440)));
+            }}>
+              {qrSize > 0 && <View style={[styles.qrFrame, { width: qrSize, height: qrSize }]}>
+                <Image source={{ uri: qrSrc }} accessibilityLabel="QR-код для оплаты" style={styles.qrImage} resizeMode="contain" />
               </View>}
             </View>
+            <Text style={styles.qrCaption}>Ожидание оплаты</Text>
+            {errors}
+          </View> : <ScrollView style={styles.fill} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.details}>
+            {!cashShiftRequired && qrMissing && <Text style={styles.error}>QR-код не загружен. Добавьте его в настройках или выберите другой способ оплаты.</Text>}
+            {!cashShiftRequired && method === 'mixed' && <>
+              {available.map((value) => <Field key={value} label={tenderLabels[value]} value={drafts[value]} keyboardType="decimal-pad"
+                placeholder="0,00" maxLength={13} editable={!pay.isPending}
+                onChangeText={(input) => setDrafts((current) => ({ ...current, [value]: input }))} />)}
+              {!!mixed?.change && <Text style={styles.subtitle}>Сдача · {money(mixed.change)}</Text>}
+              {!mixed && <Text style={styles.subtitle}>Укажите суммы по двум или более способам. Итог оплаты должен совпадать с чеком.</Text>}
+              {!!qrSrc && (mixed?.qrAmount ?? 0) > 0 && <View style={styles.mixedQr}>
+                <Text style={styles.qrCaption}>Покажите QR-код клиенту для оплаты</Text>
+                <Image source={{ uri: qrSrc }} accessibilityLabel="QR-код для оплаты" style={styles.mixedQrImage} resizeMode="contain" />
+              </View>}
+            </>}
+            {!cashShiftRequired && method === 'card' && <Text style={styles.subtitle}>Подтвердите оплату на банковском терминале.</Text>}
+            {errors}
+          </ScrollView>}
+        </View>
 
-            {!cashShiftRequired && method === 'qr' && qrSrc ? <View style={styles.qr}>
-              <Text style={styles.qrCaption}>Покажите QR-код клиенту для оплаты</Text>
-              <View style={styles.qrSpace} onLayout={({ nativeEvent: { layout } }) => {
-                setQrSize(Math.floor(Math.min(layout.width, layout.height, 440)));
-              }}>
-                {qrSize > 0 && <View style={[styles.qrFrame, { width: qrSize, height: qrSize }]}>
-                  <Image source={{ uri: qrSrc }} accessibilityLabel="QR-код для оплаты" style={styles.qrImage} resizeMode="contain" />
-                </View>}
-              </View>
-              <Text style={styles.qrCaption}>Ожидание оплаты</Text>
-              {errors}
-            </View> : <ScrollView style={styles.fill} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.details}>
-              {!cashShiftRequired && qrMissing && <Text style={styles.error}>QR-код не загружен. Добавьте его в настройках или выберите другой способ оплаты.</Text>}
-              {!cashShiftRequired && method === 'mixed' && <>
-                {available.map((value) => <Field key={value} label={tenderLabels[value]} value={drafts[value]} keyboardType="decimal-pad"
-                  placeholder="0,00" maxLength={13} editable={!pay.isPending}
-                  onChangeText={(input) => setDrafts((current) => ({ ...current, [value]: input }))} />)}
-                {!!mixed?.change && <Text style={styles.subtitle}>Сдача · {money(mixed.change)}</Text>}
-                {!mixed && <Text style={styles.subtitle}>Укажите суммы по двум или более способам. Итог оплаты должен совпадать с чеком.</Text>}
-                {!!qrSrc && (mixed?.qrAmount ?? 0) > 0 && <View style={styles.mixedQr}>
-                  <Text style={styles.qrCaption}>Покажите QR-код клиенту для оплаты</Text>
-                  <Image source={{ uri: qrSrc }} accessibilityLabel="QR-код для оплаты" style={styles.mixedQrImage} resizeMode="contain" />
-                </View>}
-              </>}
-              {!cashShiftRequired && method === 'card' && <Text style={styles.subtitle}>Подтвердите оплату на банковском терминале.</Text>}
-              {errors}
-            </ScrollView>}
-          </View>
-
-          <View style={styles.footer}>
-            {cashShiftRequired ? <Button title="Открыть кассовую смену" onPress={() => setOpeningCashShift(true)} />
-              : <Button title={footerLabel} onPress={() => void submit()} loading={pay.isPending}
-                disabled={!method || qrMissing || (canManage && total > 0 && cashShift.isPending) || (method === 'mixed' && !mixed)} />}
-          </View>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    </Modal>
+      </KeyboardAvoidingView>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.white, paddingHorizontal: 14 },
+  panel: { height: '90%' },
+  sheetBody: { flex: 1, minHeight: 0, paddingVertical: 0 },
   fill: { flex: 1, minWidth: 0 },
-  header: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
-  back: { width: 30, height: 36, alignItems: 'center', justifyContent: 'center' },
-  heading: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
   body: { flex: 1, minHeight: 0, paddingVertical: 10, gap: 10 },
   landscape: { flexDirection: 'row', gap: 18 },
   controls: { gap: 10 },
   subtitle: { fontSize: fontSize.sm, color: colors.textMuted },
   total: { alignItems: 'center', gap: 2 },
   totalValue: { fontSize: 28, fontWeight: '700', color: colors.textPrimary },
-  split: { minHeight: 24, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  splitText: { fontSize: fontSize.sm, color: colors.primary },
   methods: { gap: spacing.sm },
   methodLabel: { fontSize: fontSize.sm, color: colors.textSecondary, fontWeight: '600' },
   methodRow: { flexDirection: 'row', gap: spacing.sm },
@@ -183,5 +161,4 @@ const styles = StyleSheet.create({
   mixedQr: { alignItems: 'center', gap: spacing.sm, padding: spacing.sm },
   mixedQrImage: { width: 180, height: 180 },
   error: { color: colors.danger, fontSize: fontSize.sm },
-  footer: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingVertical: 9 },
 });

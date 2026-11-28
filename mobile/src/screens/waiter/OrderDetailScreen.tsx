@@ -181,8 +181,7 @@ export function OrderDetailScreen() {
         }} />}
       {amountSplit && canPay && <SplitAmountsSheet order={amountSplit.order} mode={amountSplit.mode}
         onClose={() => setAmountSplit(null)} onPaid={finishPayment} />}
-      {payOpen && canPay && <PaymentScreen order={order} onClose={() => setPayOpen(false)} onPaid={finishPayment}
-        onSplitItems={canSplitItems ? () => { setPayOpen(false); openSplit('items'); } : undefined} />}
+      {payOpen && canPay && <PaymentScreen order={order} onClose={() => setPayOpen(false)} onPaid={finishPayment} />}
     </SafeAreaView>
   );
 }

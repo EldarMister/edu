@@ -4,7 +4,7 @@
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  padding: env(safe-area-inset-top, 0px) max(14px, env(safe-area-inset-right, 0px))
+  padding: 0 max(14px, env(safe-area-inset-right, 0px))
     env(safe-area-inset-bottom, 0px) max(14px, env(safe-area-inset-left, 0px));
 }
 
@@ -12,26 +12,9 @@
   inset: 0;
 }
 
-.mobile-payment-header {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-  min-height: 48px;
-  border-bottom: 1px solid rgb(var(--edu-border));
-  font-size: 16px;
-  font-weight: 650;
+.mobile-payment-panel {
+  height: 90dvh;
 }
-
-.mobile-payment-back {
-  display: grid;
-  width: 30px;
-  height: 36px;
-  place-items: center;
-  border-radius: 8px;
-}
-
-.mobile-payment-back:hover { background: rgb(var(--edu-background)); }
 
 .mobile-payment-body {
   display: flex;
@@ -56,17 +39,6 @@
   align-items: center;
   gap: 2px;
 }
-
-.mobile-payment-split {
-  display: inline-flex;
-  min-height: 24px;
-  align-items: center;
-  gap: 4px;
-  color: rgb(var(--edu-link));
-  font-size: 13px;
-}
-
-.mobile-payment-split:disabled { opacity: .5; }
 
 .mobile-payment-method {
   min-width: 0;
@@ -130,6 +102,13 @@
   flex: none;
   border-top: 1px solid rgb(var(--edu-border));
   padding-block: 9px;
+}
+
+@media (max-height: 640px) {
+  .mobile-payment-panel > button:first-child { height: 20px; }
+  .mobile-payment-body { gap: 6px; padding-block: 6px; }
+  .mobile-payment-controls { gap: 8px; }
+  .mobile-payment-footer { padding-block: 6px; }
 }
 
 @media (orientation: landscape) and (max-height: 560px) {

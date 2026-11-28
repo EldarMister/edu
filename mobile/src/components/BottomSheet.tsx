@@ -25,6 +25,7 @@ export function BottomSheet({
   footer,
   sheet = false,
   bodyStyle,
+  panelStyle,
   maxHeight,
   bottomInset = 0,
   backdropBottomInset = 0,
@@ -38,6 +39,7 @@ export function BottomSheet({
   /** true — стиль «нижний лист» с хваталкой вместо шапки-крестика. */
   sheet?: boolean;
   bodyStyle?: ViewStyle;
+  panelStyle?: ViewStyle;
   maxHeight?: ViewStyle['maxHeight'];
   bottomInset?: number;
   backdropBottomInset?: number;
@@ -53,6 +55,7 @@ export function BottomSheet({
         <SafeAreaView
           style={[
             styles.sheet,
+            panelStyle,
             noShadow && styles.sheetNoShadow,
             maxHeight ? { maxHeight } : null,
             bottomInset ? { marginBottom: bottomInset } : null,

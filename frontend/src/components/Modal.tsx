@@ -8,7 +8,6 @@ export function Modal({
   open,
   onClose,
   title,
-  ariaLabel = title,
   contentClassName,
   titleActions,
   toolbar,
@@ -16,6 +15,7 @@ export function Modal({
   footer,
   panelClassName = 'max-w-md',
   suspended = false,
+  dismissible = true,
   bottomSheet = false,
   fullScreen = false,
   manageFocus = false,
@@ -23,7 +23,6 @@ export function Modal({
   open: boolean;
   onClose: () => void;
   title?: string;
-  ariaLabel?: string;
   contentClassName?: string;
   titleActions?: ReactNode;
   toolbar?: ReactNode;
@@ -31,12 +30,13 @@ export function Modal({
   footer?: ReactNode;
   panelClassName?: string;
   suspended?: boolean;
+  dismissible?: boolean;
   bottomSheet?: boolean;
   fullScreen?: boolean;
   manageFocus?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
-  useDialogEscape(panel, open && !suspended, onClose);
+  useDialogEscape(panel, open && !suspended && dismissible, onClose);
   useEffect(() => {
     if (!open || !manageFocus) return;
     const opener = document.activeElement;
@@ -67,7 +67,7 @@ export function Modal({
     <div className={`modal-backdrop z-[60] flex items-end justify-center p-0 ${bottomSheet || fullScreen ? '' : 'sm:items-center sm:p-4'}`} style={suspended ? { visibility: 'hidden' } : undefined} aria-hidden={suspended || undefined}>
       <div
         className="absolute inset-0"
-        onClick={onClose}
+        onClick={dismissible ? onClose : undefined}
         aria-hidden
       />
       <div
@@ -75,7 +75,7 @@ export function Modal({
         data-modal-panel
         role="dialog"
         aria-modal={!suspended}
-        aria-label={ariaLabel}
+        aria-label={title}
         tabIndex={manageFocus ? -1 : undefined}
         onKeyDown={manageFocus && !suspended ? (event) => {
           if (event.key !== 'Tab' || event.defaultPrevented ||
@@ -95,13 +95,13 @@ export function Modal({
         // иначе на низких телефонах низ модалки с кнопками уезжает за экран.
         style={fullScreen ? undefined : { maxHeight: 'calc(92dvh - env(safe-area-inset-bottom, 0px))' }}
       >
-        {!fullScreen && <SheetHandle panel={panel} onClose={onClose} enabled={!suspended} className={bottomSheet ? '' : 'sm:hidden'} />}
+        {!fullScreen && <SheetHandle panel={panel} onClose={onClose} enabled={!suspended && dismissible} className={bottomSheet ? '' : 'sm:hidden'} />}
         {title && (
           <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
             <h3 className="text-base font-semibold text-text-primary">{title}</h3>
             <div className="flex items-center gap-2">
               {titleActions}
-              <button type="button" onClick={onClose} className="text-text-light hover:text-text-secondary" aria-label="Закрыть">
+              <button type="button" disabled={!dismissible} onClick={onClose} className="text-text-light hover:text-text-secondary" aria-label="Закрыть">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M18 6 6 18M6 6l12 12" />
                 </svg>
