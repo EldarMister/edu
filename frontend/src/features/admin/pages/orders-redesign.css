@@ -51,6 +51,25 @@
   margin: 14px 0 17px;
 }
 
+.orders-more-filters {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-inline: 14px;
+}
+
+.orders-extra-filters:not([hidden]) {
+  display: flex;
+  flex: 1 0 100%;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.orders-extra-filters .orders-filter-control { max-width: 100%; }
+
 .orders-filter-control,
 .orders-period-filter > .report-period-trigger {
   height: 46px;
@@ -229,6 +248,7 @@
 }
 @media (max-width: 480px) {
   .orders-filters > .orders-filter-control,
-  .orders-period-filter,
-  .orders-search-wrap { width: 100%; max-width: none; }
+  .orders-period-filter { flex: 1 1 auto; width: auto; max-width: 100%; }
+  .orders-search-wrap { flex-basis: 100%; max-width: none; }
+  .orders-extra-filters .orders-filter-control { width: 100%; }
 }
