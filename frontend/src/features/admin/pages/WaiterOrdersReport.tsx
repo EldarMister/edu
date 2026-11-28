@@ -74,7 +74,7 @@ export function WaiterOrdersReport({ staff, staffLoading }: {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<{ key: ColumnKey; descending: boolean }>({ key: 'orderedAt', descending: true });
   const [columnPreference, saveColumns] = useColumnPreference('waiter-orders-report');
-  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [columnsOpen, setColumnsOpen] = useState<HTMLButtonElement | null>(null);
   const [printError, setPrintError] = useState(false);
   const resolvedPreference = columnPreference.split(',').map((key) => key === 'servedAt' ? 'paidAt' : key).join(',');
   const columns = visibleWarehouseColumns(resolvedPreference, defaultColumns);
@@ -205,7 +205,7 @@ export function WaiterOrdersReport({ staff, staffLoading }: {
 
       <div className="min-w-0 rounded-xl border border-border bg-card" aria-busy={report.isLoading || staffLoading}>
         <WorkspaceHeaderActions>
-          {view === 'orders' && <ColumnButton onClick={() => setColumnsOpen(true)} />}
+          {view === 'orders' && <ColumnButton expanded={!!columnsOpen} onClick={(event) => setColumnsOpen(columnsOpen ? null : event.currentTarget)} />}
           {canAction('exportReports') && <button type="button" onClick={() => outputReport('csv')} className="workspace-tool" disabled={!hasOutput}>
             <IconExport />Экспорт CSV
           </button>}
@@ -284,10 +284,10 @@ export function WaiterOrdersReport({ staff, staffLoading }: {
         )}
       </div>
 
-      {columnsOpen && <WarehouseColumnSettings columns={columns} defaults={defaultColumns} label={(key) => columnLabels[key]}
-        onClose={() => setColumnsOpen(false)} onApply={(selected, reset) => {
+      {columnsOpen && <WarehouseColumnSettings anchor={columnsOpen} columns={columns} defaults={defaultColumns} label={(key) => columnLabels[key]}
+        onClose={() => setColumnsOpen(null)} onApply={(selected, reset) => {
           saveColumns(reset && selected.join(',') === defaultColumns.join(',') ? '' : selected.join(','));
-          setColumnsOpen(false);
+          setColumnsOpen(null);
         }} />}
     </section>
   );

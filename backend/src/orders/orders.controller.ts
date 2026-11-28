@@ -44,8 +44,13 @@ export class OrdersController {
 
   @Get('history')
   @Roles(Role.WAITER)
-  history(@CurrentUser() user: AuthUser, @Query('cursor') cursor?: string) {
-    return this.orders.waiterOrderHistory(user.id, cursor);
+  history(
+    @CurrentUser() user: AuthUser,
+    @Query('cursor') cursor?: string,
+    @Query('filter') filter?: string,
+    @Query('period') period?: string,
+  ) {
+    return this.orders.waiterOrderHistory(user.id, cursor, filter, period);
   }
 
   @Get('item-cancellation-requests')

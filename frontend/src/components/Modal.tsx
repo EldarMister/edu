@@ -8,6 +8,7 @@ export function Modal({
   open,
   onClose,
   title,
+  titleActions,
   toolbar,
   children,
   footer,
@@ -20,6 +21,7 @@ export function Modal({
   open: boolean;
   onClose: () => void;
   title?: string;
+  titleActions?: ReactNode;
   toolbar?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
@@ -93,11 +95,14 @@ export function Modal({
         {title && (
           <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
             <h3 className="text-base font-semibold text-text-primary">{title}</h3>
-            <button type="button" onClick={onClose} className="text-text-light hover:text-text-secondary" aria-label="Закрыть">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18 6 6 18M6 6l12 12" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-2">
+              {titleActions}
+              <button type="button" onClick={onClose} className="text-text-light hover:text-text-secondary" aria-label="Закрыть">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
         )}
         {toolbar && <div className="shrink-0 border-b border-border px-4">{toolbar}</div>}

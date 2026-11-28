@@ -17,6 +17,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Role, DiscountType, TableStatus, OrderStatus } from '@prisma/client';
+import { TablePlanEditDto } from './floor-plan.dto';
 
 // ---------- Залы ----------
 export class CreateHallDto {
@@ -56,6 +57,9 @@ export class CreateTableDto {
 
   @IsInt() @Min(1) @Max(2147483647)
   seats: number;
+
+  @IsOptional() @ValidateNested() @Type(() => TablePlanEditDto)
+  placement?: TablePlanEditDto;
 }
 export class UpdateTableDto {
   @IsOptional() @IsString()
@@ -75,6 +79,9 @@ export class UpdateTableDto {
 
   @IsOptional() @IsEnum(TableStatus)
   status?: TableStatus;
+
+  @IsOptional() @ValidateNested() @Type(() => TablePlanEditDto)
+  placement?: TablePlanEditDto;
 }
 
 // ---------- Категории ----------

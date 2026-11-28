@@ -286,8 +286,8 @@ export interface Order {
   comment: string | null;
   requiresWaiterDecision: boolean;
   createdAt: string;
-  closedAt?: string | null;
   updatedAt?: string;
+  closedAt?: string | null;
   table: TableItem & { hall?: { name: string } };
   waiter: { id: string; name: string } | null;
   source?: 'pos' | 'qr' | 'delivery' | 'pickup';
@@ -297,8 +297,8 @@ export interface Order {
   deliveryAddress?: string | null;
   pickupTime?: string | null;
   items: OrderItem[];
-  /** Разбивка по способам оплаты. Приходит в списке заказов админки. */
-  payments?: { method: PaymentMethod; amount: string; source?: PaymentSource }[];
+  /** Разбивка по способам оплаты. Имя кассира доступно в деталях заказа. */
+  payments?: { method: PaymentMethod; amount: string; source?: PaymentSource; cashier?: { name: string } }[];
   // ККМ / фискализация (null = ККМ выключена или чек ещё не пробит).
   fiscalReceiptNumber?: string | null;
   fiscalSign?: string | null;

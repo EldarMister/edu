@@ -19,7 +19,7 @@ import { goodsExportColumns, writeGoodsWorkbook, type GoodsExportQuery } from '.
 import { dishTaxFields } from '../settings/order-taxes';
 import { categorySettings, categoryTaxMode, updateInheritedTaxes } from './menu-category-tax';
 import { categoryImageRef, categoryPhoto } from '../categories/category-image';
-import { type SaveFloorPlanDto, withinFloorPlan } from './floor-plan.dto';
+import { type SaveFloorPlanDto, type TablePlanEditDto, withinFloorPlan } from './floor-plan.dto';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import type { MenuPriceBatchDto } from './menu-prices.dto';
 import { saveMenuPrices } from './menu-prices';
@@ -169,7 +169,7 @@ export class CatalogService {
     return { ok: true };
   }
 
-  async createTable(dto: CreateTableDto) {
+  async createTable(dto: CreateTableDto, actor?: AuditActor) {
     const { hallId, seats, number: requestedNumber } = dto;
     const name = dto.name === undefined ? undefined : dto.name?.trim() || null;
     if (hallId.startsWith('delivery-hall:')) throw new NotFoundException('Зал не найден');
@@ -204,17 +204,42 @@ export class CatalogService {
         }
       }
 
-      return tx.table.create({ data: { hallId, number, name, seats, sortOrder: number } });
+      const created = await tx.table.create({ data: { hallId, number, name, seats, sortOrder: number } });
+      if (dto.placement) await this.saveTablePlacement(tx, created.hallId, created.id, dto.placement);
+      return created;
+    });
+    if (actor) await this.audit.log({
+      actor, tableId: table.id, entityId: table.id, entityType: AuditEntity.TABLE, actionType: AuditAction.TABLE_CREATED,
+      description: 'Стол добавлен',
+      newValue: { name: table.name, number: table.number, seats: table.seats, ...(dto.placement ? { shape: dto.placement.shape } : {}) },
     });
     this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, { tableId: table.id, hallId: table.hallId, action: 'create-table' });
     return table;
   }
 
-  async updateTable(id: string, dto: UpdateTableDto) {
-    const table = await this.prisma.table.findUnique({ where: { id } });
-    if (!table) throw new NotFoundException('Стол не найден');
+  async updateTable(id: string, dto: UpdateTableDto, actor?: AuditActor) {
+    const { placement, ...fields } = dto;
     const name = dto.name === undefined ? undefined : dto.name?.trim() || null;
-    const updated = await this.prisma.table.update({ where: { id }, data: { ...dto, name } });
+    const { table, updated } = await this.prisma.$transaction(async (tx) => {
+      const table = await tx.table.findUnique({ where: { id } });
+      if (!table) throw new NotFoundException('Стол не найден');
+      const updated = await tx.table.update({ where: { id }, data: { ...fields, name } });
+      if (placement) await this.saveTablePlacement(tx, updated.hallId, id, placement);
+      return { table, updated };
+    });
+    if (actor) {
+      const keys = ['name', 'number', 'seats', 'isActive'] as const;
+      const changes = keys.filter((key) => table[key] !== updated[key]);
+      if (changes.length || placement) await this.audit.log({
+        actor, tableId: id, entityId: id, entityType: AuditEntity.TABLE, actionType: AuditAction.TABLE_UPDATED,
+        description: 'Настройки стола изменены',
+        oldValue: Object.fromEntries(changes.map((key) => [key, table[key]])),
+        newValue: {
+          ...Object.fromEntries(changes.map((key) => [key, updated[key]])),
+          ...(placement ? { shape: placement.shape, label: placement.label?.trim() || null } : {}),
+        },
+      });
+    }
     if (dto.status && dto.status !== table.status) {
       this.events.emitBroadcast(SERVER_EVENTS.TABLE_STATUS_CHANGED, {
         id: updated.id,
@@ -225,6 +250,36 @@ export class CatalogService {
     }
     this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, { tableId: updated.id, hallId: updated.hallId, action: 'update-table' });
     return updated;
+  }
+
+  private async saveTablePlacement(tx: Prisma.TransactionClient, hallId: string, tableId: string, placement: TablePlanEditDto) {
+    if (!withinFloorPlan(placement)) throw new BadRequestException('Стол должен находиться в границах карты');
+    const hall = await tx.hall.findUnique({ where: { id: hallId }, select: { floorPlan: true } });
+    if (!hall) throw new NotFoundException('Зал не найден');
+    const saved = Array.isArray(hall.floorPlan) ? hall.floorPlan : [];
+    const otherTables = saved.filter((entry) => !entry || typeof entry !== 'object' || !('tableId' in entry) || entry.tableId !== tableId);
+    const { version, x, y, width, height, shape, label } = placement;
+    const floorPlan = [...otherTables, { tableId, x, y, width, height, shape, ...(label?.trim() ? { label: label.trim() } : {}) }];
+    const updated = await tx.hall.updateMany({
+      where: { id: hallId, floorPlanVersion: version },
+      data: { floorPlan: floorPlan as Prisma.InputJsonValue, floorPlanVersion: { increment: 1 } },
+    });
+    if (!updated.count) throw new ConflictException('Карта зала изменилась. Откройте стол заново');
+  }
+
+  async tableChanges(id: string) {
+    const table = await this.prisma.table.findUnique({ where: { id }, select: { id: true } });
+    if (!table) throw new NotFoundException('Стол не найден');
+    return this.prisma.auditLog.findMany({
+      where: {
+        entityType: AuditEntity.TABLE, entityId: id,
+        actionType: { in: [AuditAction.TABLE_CREATED, AuditAction.TABLE_UPDATED] },
+        createdAt: { gte: new Date(Date.now() - 7 * 86_400_000) },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 50,
+      select: { id: true, userName: true, description: true, oldValue: true, newValue: true, createdAt: true },
+    });
   }
 
   async deleteTable(id: string) {

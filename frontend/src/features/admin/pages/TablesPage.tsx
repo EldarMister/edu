@@ -1,5 +1,5 @@
 import { WorkspaceHeaderActions } from './WorkspaceHeader';
-import { useEffect, useId, useState, type FormEvent } from 'react';
+import { useEffect, useState } from 'react';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { DeleteNameField } from '../components/DeleteNameField';
@@ -14,6 +14,7 @@ import { useNotifications } from '@/store/notifications';
 import { IconEdit, IconTrash, IconPlus, IconQr } from '../components/icons';
 import { TableQrModal } from '../components/TableQrModal';
 import { HallFloorPlanEditor } from '../components/HallFloorPlanEditor';
+import { TableEditor } from '../components/TableEditor';
 import { usePageFilter } from './warehouse/workspace-route';
 import { usePublicSettings } from '@/features/settings/api';
 import {
@@ -41,7 +42,7 @@ export function TablesPage() {
   const [hallModal, setHallModal] = useState<AdminHall | null | 'new'>(null);
   const [hallToDelete, setHallToDelete] = useState<{ hall: AdminHall; confirmation: string } | null>(null);
   const hallDeleteConfirmed = !!hallToDelete && hallToDelete.confirmation.trim() === hallToDelete.hall.name.trim();
-  const [tableModal, setTableModal] = useState<{ hall: AdminHall; table: AdminTableItem | null } | null>(null);
+  const [tableModal, setTableModal] = useState<{ hall: AdminHall; table: AdminTableItem | null; copy?: AdminTableItem } | null>(null);
   const [tableToDelete, setTableToDelete] = useState<AdminTableItem | null>(null);
   const [qrModal, setQrModal] = useState<{ table: AdminTableItem; hallName: string } | null>(null);
   const [collapsedHalls, setCollapsedHalls] = useState<Set<string>>(() => new Set());
@@ -50,7 +51,7 @@ export function TablesPage() {
   const o = overview.data;
   const halls = hallsQ.data ?? [];
   const tableToDeleteHall = halls.find((hall) => hall.id === tableToDelete?.hallId);
-  const mapView = view === 'map';
+  const mapView = view !== 'list';
 
   async function changeMode(useMap: boolean) {
     if (!editable || setMode.isPending) return;
@@ -107,9 +108,9 @@ export function TablesPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div role="group" aria-label="Раздел столов" className="inline-flex gap-1 rounded-xl border border-border bg-white p-1">
           <button type="button" aria-pressed={!mapView} className={`rounded-lg px-3 py-2 text-sm ${!mapView ? 'bg-primary text-white' : 'text-text-secondary'}`}
-            onClick={() => setView('')}>Список столов</button>
+            onClick={() => setView('list')}>Список столов</button>
           <button type="button" aria-pressed={mapView} className={`rounded-lg px-3 py-2 text-sm ${mapView ? 'bg-primary text-white' : 'text-text-secondary'}`}
-            onClick={() => setView('map')}>Карта зала</button>
+            onClick={() => setView('map')}>Редактор столов</button>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-text-muted">На кассе по умолчанию</span>
@@ -146,8 +147,12 @@ export function TablesPage() {
         <p role="alert" className="text-sm text-danger">{apiError(hallsQ.error)}</p>
       ) : mapView ? (
         <HallFloorPlanEditor halls={halls} editable={editable}
+          onAddHall={() => setHallModal('new')}
+          onEditHall={setHallModal}
+          onRemoveHall={(hall) => setHallToDelete({ hall, confirmation: '' })}
           onAdd={(hall) => setTableModal({ hall, table: null })}
           onEdit={(hall, table) => setTableModal({ hall, table })}
+          onCopy={(hall, copy) => setTableModal({ hall, table: null, copy })}
           onRemove={requestTableDelete} />
       ) : (
         <div className="space-y-3">
@@ -275,9 +280,10 @@ export function TablesPage() {
         </Modal>
       )}
       {editable && tableModal && (
-        <TableModal
+        <TableEditor
           hall={tableModal.hall}
           table={tableModal.table}
+          copy={tableModal.copy}
           onClose={() => setTableModal(null)}
         />
       )}
@@ -407,93 +413,6 @@ function HallModal({ hall, onClose }: { hall: AdminHall | null; onClose: () => v
         )}
         {error && <p className="text-sm text-danger">{error}</p>}
       </div>
-    </Modal>
-  );
-}
-
-function TableModal({
-  hall,
-  table,
-  onClose,
-}: {
-  hall: AdminHall;
-  table: AdminTableItem | null;
-  onClose: () => void;
-}) {
-  const formId = useId();
-  const { create, update } = useTableMutations();
-  const push = useNotifications((s) => s.push);
-  const [number, setNumber] = useState(table ? String(table.number) : '');
-  const [name, setName] = useState(table?.name ?? '');
-  const [seats, setSeats] = useState(table ? String(table.seats) : '2');
-  const [isActive, setIsActive] = useState(table?.isActive ?? true);
-  const [error, setError] = useState('');
-  const pending = create.isPending || update.isPending;
-
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (pending) return;
-    setError('');
-    const values = { number: number === '' ? undefined : Number(number), name: name.trim() || null, seats: Number(seats) };
-    try {
-      if (table) {
-        await update.mutateAsync({ id: table.id, ...values, isActive });
-        push({ message: 'Стол обновлён', at: new Date().toISOString() });
-      } else {
-        await create.mutateAsync({ hallId: hall.id, ...values });
-        push({ message: 'Стол добавлен', at: new Date().toISOString() });
-      }
-      onClose();
-    } catch (err) {
-      setError(apiError(err));
-    }
-  }
-
-  return (
-    <Modal
-      open
-      onClose={() => !pending && onClose()}
-      title={table ? table.name || `Стол №${table.number}` : `Новый стол · ${hall.name}`}
-      footer={
-        <button type="submit" form={formId} className="btn-primary btn-lg w-full font-semibold" disabled={pending}>
-          {pending ? <Spinner /> : table ? 'Сохранить' : 'Добавить'}
-        </button>
-      }
-    >
-      <form id={formId} onSubmit={onSubmit} className="space-y-3">
-        <Field label="Название стола" htmlFor={`${formId}-name`}>
-          <input id={`${formId}-name`} className="input" value={name} maxLength={40}
-            placeholder="Например, Бар" onChange={(event) => setName(event.target.value)} />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Номер стола" htmlFor={`${formId}-number`}>
-            <input id={`${formId}-number`} className="input" type="number" inputMode="numeric"
-              min={1} max={2147483647} step={1} required={!!table} placeholder="Автоматически"
-              value={number} onChange={(event) => setNumber(event.target.value)} />
-          </Field>
-          <Field label="Мест" htmlFor={`${formId}-seats`}>
-            <input
-              id={`${formId}-seats`}
-              className="input"
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={2147483647}
-              step={1}
-              required
-              value={seats}
-              onChange={(e) => setSeats(e.target.value)}
-            />
-          </Field>
-        </div>
-        {table && (
-          <label className="flex items-center gap-2.5 text-sm text-text-secondary">
-            <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
-            Стол активен
-          </label>
-        )}
-        {error && <p role="alert" className="text-sm text-danger">{error}</p>}
-      </form>
     </Modal>
   );
 }

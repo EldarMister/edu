@@ -39,16 +39,23 @@ export function useWaiterCabinet(period: 'day' | 'week' | 'month' = 'week') {
   });
 }
 
-export function useWaiterOrderHistory(enabled: boolean) {
+export type ArchiveFilter = 'all' | 'cash' | 'card' | 'qr' | 'refunds';
+export type ArchivePeriod = 'today' | 'week' | 'month' | 'all';
+
+type ArchiveOrder = CabinetRecentOrder & {
+  closedAt?: string | null;
+  items?: Pick<Order['items'][number], 'dishNameSnapshot' | 'dishVariantNameSnapshot'>[];
+};
+
+export function useWaiterOrderHistory(filter: ArchiveFilter, period: ArchivePeriod) {
   return useInfiniteQuery({
-    queryKey: ['orders', 'waiter-history'],
+    queryKey: ['orders', 'waiter-history', filter, period],
     initialPageParam: null as string | null,
     queryFn: async ({ pageParam, signal }) => (await api.get<{
-      items: CabinetRecentOrder[];
+      items: ArchiveOrder[];
       nextCursor: string | null;
-    }>('/orders/history', { params: { cursor: pageParam }, signal })).data,
+    }>('/orders/history', { params: { cursor: pageParam, filter, period }, signal })).data,
     getNextPageParam: (page) => page.nextCursor,
-    enabled,
   });
 }
 

@@ -1,10 +1,9 @@
-import { IconPrinter } from '@/features/admin/components/icons';
 import { ModifierPicker } from './ModifierPicker';
 import type { CartModifiers } from './cart';
 import { usePublicSettings } from '@/features/settings/api';
 import { waiterItemPermission, waiterOrderPermission } from '@/lib/order-permissions';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { Order, CartLine, DishVariant, WaiterShift } from '@/types';
+import type { Order, CartLine, DishVariant, ReceiptPrintType, WaiterShift } from '@/types';
 import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
 import { isAxiosError } from 'axios';
@@ -63,10 +62,12 @@ import { OrderPanel } from './OrderPanel';
 import { OrdersList } from './OrdersList';
 import { OrdersPage } from '@/features/admin/pages/OrdersPage';
 import { WaiterProfile } from './WaiterProfile';
-import { WaiterCabinet, WaiterOrderArchive } from './WaiterCabinet';
+import { WaiterCabinet } from './WaiterCabinet';
+import { WaiterOrderArchive } from './WaiterOrderArchive';
+import { TerminalFunctions, TerminalFunctionsButton } from './TerminalFunctions';
 import { useRefundUpdates } from '@/features/refunds/api';
 import { useItemCancellationUpdates, useRequestItemCancellation } from '@/features/requests/item-cancellations';
-import { CashShiftBanner } from '@/features/settings/CashShiftControls';
+import { CashShiftBanner, type CashShiftEditor } from '@/features/settings/CashShiftControls';
 import { WorkspaceLinks } from '@/components/WorkspaceLinks';
 import { useRadioVisibility } from '@/features/ptt/radioVisibility';
 import { PaymentModal } from './PaymentModal';
@@ -155,7 +156,9 @@ export function WaiterApp() {
   const beginPrint = useReceiptPrint((s) => s.begin);
   const printOrderReceipt = useOrderReceiptPrinter();
   const [printQueueOpen, setPrintQueueOpen] = useState(false);
-  const [printingPreliminary, setPrintingPreliminary] = useState(false);
+  const [functionsOpen, setFunctionsOpen] = useState(false);
+  const [cashShiftEditor, setCashShiftEditor] = useState<CashShiftEditor | null>(null);
+  const [printingReceipt, setPrintingReceipt] = useState(false);
 
   const [tab, setTab] = useState<Tab>('tables');
   const [viewingOrderId, setViewingOrderId] = useState<string | null>(null);
@@ -754,30 +757,29 @@ export function WaiterApp() {
     setTab(remaining ? 'cart' : 'tables');
   }
 
-  // «Счёт»: создаём запрос на печать предварительного расчёта (тот же поток
-  // подтверждения администратором, что и обычный чек) и открываем лист ожидания.
-  async function requestPreliminaryReceipt(order: Order) {
+  // Для сотрудников без прямой печати отправляем заявку и показываем её статус.
+  async function requestOrderReceipt(order: Order, type: ReceiptPrintType) {
     if (canPrintReceipts) {
       const printWindow = window.open('', '_blank', 'width=380,height=640');
       if (!printWindow) {
         push({ message: t('Разрешите всплывающие окна и повторите печать.'), type: 'error', at: new Date().toISOString() });
         return;
       }
-      setPrintingPreliminary(true);
+      setPrintingReceipt(true);
       try {
-        await printOrderReceipt(order.id, printWindow, { preliminary: true });
+        await printOrderReceipt(order.id, printWindow, { preliminary: type === 'preliminary' });
       } catch (error) {
         printWindow.close();
         push({ message: apiError(error), type: 'error', at: new Date().toISOString() });
       } finally {
-        setPrintingPreliminary(false);
+        setPrintingReceipt(false);
       }
       return;
     }
     if (!canRequestPrint) return;
     try {
       const [request, receipt] = await Promise.all([
-        createPrintRequest.mutateAsync({ orderId: order.id, type: 'preliminary' }),
+        createPrintRequest.mutateAsync({ orderId: order.id, type }),
         fetchReceipt(order.id),
       ]);
       beginPrint(request, receipt);
@@ -1024,13 +1026,13 @@ export function WaiterApp() {
           key={displayedOrder.id}
           order={displayedOrder}
           submitting={actionPending}
-          preliminaryPending={createPrintRequest.isPending || printingPreliminary}
+          preliminaryPending={createPrintRequest.isPending || printingReceipt}
           claimPending={claimQrOrder.isPending}
           onClaimQr={() => claimQr(displayedOrder)}
           onPickedUp={() => runAction(() => pickedUp.mutateAsync(displayedOrder.id))}
           onServed={() => runAction(() => served.mutateAsync(displayedOrder.id))}
           onToPayment={canTakePayment ? () => goToPayment(displayedOrder) : undefined}
-          onPreliminaryReceipt={canPrintReceipts || canRequestPrint ? () => requestPreliminaryReceipt(displayedOrder) : undefined}
+          onPreliminaryReceipt={canPrintReceipts || canRequestPrint ? () => requestOrderReceipt(displayedOrder, 'preliminary') : undefined}
           onContinueAfterRejection={() => continueAfterPartialRejection(displayedOrder)}
           onReplaceRejectedItem={(item) => replaceRejectedFromOrder(displayedOrder, item)}
           onRemoveRejectedItem={(item) => removeRejectedFromOrder(displayedOrder, item)}
@@ -1087,9 +1089,6 @@ export function WaiterApp() {
     <div className="flex flex-wrap items-center gap-2">
       {canViewAllOrders && <button type="button" className="btn-secondary btn-md"
         onClick={() => setShowAllOrders(!showRegister)}>{t(showRegister ? 'Мои активные' : 'Все заказы')}</button>}
-      <button type="button" aria-label={t('Архив заказов')} className="btn-secondary btn-md" onClick={() => setOrderArchiveOpen(true)}>
-        {t('Архив')}
-      </button>
     </div>
   );
 
@@ -1136,8 +1135,10 @@ export function WaiterApp() {
         </div>
         <DesktopNav current={desktopView} onChange={(next) => changeTab(next)} />
         <div className="flex items-center gap-3">
-          {canHandlePrintQueue && <button type="button" className="btn-secondary btn-md" disabled={!canWork}
-            onClick={() => setPrintQueueOpen(true)}><IconPrinter />{t('Печать чека')}</button>}
+          <button type="button" aria-label={t('Архив заказов')} className="btn-secondary btn-md" onClick={() => setOrderArchiveOpen(true)}>
+            {t('Архив')}
+          </button>
+          <TerminalFunctionsButton open={functionsOpen} onOpen={() => setFunctionsOpen(true)} />
           <ConnectionStatus />
           <span className="hidden text-sm text-text-secondary sm:inline">{user?.name}</span>
         </div>
@@ -1145,7 +1146,12 @@ export function WaiterApp() {
       <WorkspaceLinks current="terminal" />
       <OfflineBanner inHeader />
       </div>
-      <CashShiftBanner promptOnEntry={canWork && !showShiftGate && tab !== 'profile' && !paymentOrder && !splitOrder} />
+      <CashShiftBanner
+        promptOnEntry={canWork && !showShiftGate && tab !== 'profile' && !paymentOrder && !splitOrder
+          && !functionsOpen && !orderArchiveOpen && !printQueueOpen}
+        editor={cashShiftEditor}
+        setEditor={setCashShiftEditor}
+      />
 
       {showPushBanner && (
         <BackgroundPushBanner onEnable={pushNotifications.enable} />
@@ -1297,7 +1303,39 @@ export function WaiterApp() {
 
       <BottomNav tab={activeNavTab} setTab={changeTab} ordersCount={ordersAttentionCount} />
 
-      {orderArchiveOpen && <WaiterOrderArchive onClose={() => setOrderArchiveOpen(false)} />}
+      {orderArchiveOpen && <WaiterOrderArchive
+        titleActions={<TerminalFunctionsButton open={functionsOpen} onOpen={() => setFunctionsOpen(true)} />}
+        onClose={() => setOrderArchiveOpen(false)}
+        onNewOrder={() => {
+          setOrderArchiveOpen(false);
+          setEditingOrderId(null);
+          setSelectedCheckId(null);
+          cart.select(null);
+          changeTab('tables');
+        }}
+        canStartOrder={canWork}
+        onPrint={canPrintReceipts || canRequestPrint ? (order) => void requestOrderReceipt(order, 'receipt') : undefined}
+        printing={printingReceipt || createPrintRequest.isPending}
+      />}
+
+      {functionsOpen && <TerminalFunctions
+        onClose={() => setFunctionsOpen(false)}
+        onArchive={orderArchiveOpen ? undefined : () => setOrderArchiveOpen(true)}
+        onPrintQueue={canHandlePrintQueue ? () => setPrintQueueOpen(true) : undefined}
+        canWork={canWork}
+        onCashShift={(editor) => {
+          setOrderArchiveOpen(false);
+          setCashShiftEditor(editor);
+        }}
+        onDelivery={canCreateDelivery ? () => {
+          setOrderArchiveOpen(false);
+          startDelivery();
+        } : undefined}
+        onProfile={() => {
+          setOrderArchiveOpen(false);
+          changeTab('profile');
+        }}
+      />}
 
       {canHandlePrintQueue && canWork && printQueueOpen && (
         <Modal open title={t('Печать чека')} onClose={() => setPrintQueueOpen(false)} panelClassName="max-w-5xl max-h-[90dvh]">

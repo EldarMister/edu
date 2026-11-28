@@ -59,7 +59,7 @@ export function ProcessingPage({
   const q = useProcessing({ warehouseId, search, from: period.range.dateFrom, to: period.range.dateTo });
   const documents = q.data ?? [];
   const [columnPreference, saveColumns] = useColumnPreference('warehouse-processing');
-  const [editingColumns, setEditingColumns] = useState(false);
+  const [editingColumns, setEditingColumns] = useState<HTMLButtonElement | null>(null);
   const [exporting, setExporting] = useState(false);
   const notify = useNotifications((state) => state.push);
   const columns = visibleWarehouseColumns(columnPreference, defaultColumns);
@@ -76,7 +76,7 @@ export function ProcessingPage({
   return (
     <div className="poster-register-surface min-w-0">
       <WorkspaceHeaderActions>
-        <ColumnButton onClick={() => setEditingColumns(true)} />
+        <ColumnButton expanded={!!editingColumns} onClick={(event) => setEditingColumns(editingColumns ? null : event.currentTarget)} />
         {can('actions.exportReports') && <button type="button" className="workspace-tool" disabled={!documents.length || exporting}
           onClick={exportRegister}><IconExport />Экспорт Excel</button>}
         {canProduce && <button type="button" className="btn-primary btn-md" onClick={onCreate}>Добавить</button>}
@@ -86,12 +86,12 @@ export function ProcessingPage({
         {period.filter}
         {filters}
       </div>
-      {editingColumns && <WarehouseColumnSettings columns={columns} defaults={defaultColumns}
-        label={(key) => processingColumns[key]} onClose={() => setEditingColumns(false)}
+      {editingColumns && <WarehouseColumnSettings anchor={editingColumns} columns={columns} defaults={defaultColumns}
+        label={(key) => processingColumns[key]} onClose={() => setEditingColumns(null)}
         onApply={(selection) => {
           const joined = selection.join(',');
           saveColumns(joined === defaultColumns.join(',') ? '' : joined);
-          setEditingColumns(false);
+          setEditingColumns(null);
         }} />}
       <QueryState pending={q.isPending} error={q.error}>
         <div className="overflow-x-auto">

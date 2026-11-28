@@ -104,7 +104,7 @@ export function DocumentList({
   const { can } = usePermissions();
   const costs = can('actions.warehouseCosts');
   const [columnPreference, saveColumns] = useColumnPreference(transfer ? 'warehouse-transfers' : 'warehouse-writeoffs');
-  const [editingColumns, setEditingColumns] = useState(false);
+  const [editingColumns, setEditingColumns] = useState<HTMLButtonElement | null>(null);
   const [exporting, setExporting] = useState(false);
   const notify = useNotifications((state) => state.push);
   const availableColumns = (transfer ? transferColumns : writeoffColumns).filter((key) => costs || key !== 'amount');
@@ -234,7 +234,7 @@ export function DocumentList({
     <div className={inventory ? 'poster-inventory-list' : 'poster-register-surface'}>
       {inventory && <WorkspaceHeaderCount count={query.isSuccess ? rows.length : undefined} />}
       <WorkspaceHeaderActions>
-        {!inventory && <ColumnButton onClick={() => setEditingColumns(true)} />}
+        {!inventory && <ColumnButton expanded={!!editingColumns} onClick={(event) => setEditingColumns(editingColumns ? null : event.currentTarget)} />}
         {!inventory && can('actions.exportReports') && <button type="button" className="workspace-tool" disabled={!rows.length || exporting}
           onClick={exportRegister}><IconExport />Экспорт Excel</button>}
         {canCreate && <button type="button" className="btn-primary btn-md" onClick={onCreate}>Добавить</button>}
@@ -286,12 +286,12 @@ export function DocumentList({
         </details>
         {filtered && <button type="button" className="text-sm text-text-muted" onClick={resetFilters}>Сбросить всё</button>}
       </div>
-      {!inventory && editingColumns && <WarehouseColumnSettings columns={selectedColumns} defaults={availableColumns} resetColumns={defaultColumns}
-        label={columnLabel} onClose={() => setEditingColumns(false)}
+      {!inventory && editingColumns && <WarehouseColumnSettings anchor={editingColumns} columns={selectedColumns} defaults={availableColumns} resetColumns={defaultColumns}
+        label={columnLabel} onClose={() => setEditingColumns(null)}
         onApply={(selection) => {
           const joined = selection.join(',');
           saveColumns(joined === defaultColumns.join(',') ? '' : joined);
-          setEditingColumns(false);
+          setEditingColumns(null);
         }} />}
       <QueryState pending={query.isPending} error={query.error}>
         <div className="hidden overflow-x-auto md:block">

@@ -1,5 +1,6 @@
 import { lockRecipeGraph } from '../warehouse/recipe-resolution';
 import { visibleMenuDish } from '../categories/menu-visibility';
+import { warehouseDateRange, warehouseDay } from '../warehouse/report-range';
 import { recordOrderReceipts } from '../finance/order-receipts';
 import { receiptTaxes, recordOrderTaxes } from '../settings/order-taxes';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
@@ -64,6 +65,7 @@ const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
 ];
 
 const WAITER_HISTORY_PAGE_SIZE = 30;
+const HISTORY_PERIOD_DAYS: ReadonlyMap<string, number> = new Map([['today', 1], ['week', 7], ['month', 30]]);
 type OrderForCancellation = Prisma.OrderGetPayload<{ include: typeof orderInclude }>;
 type TerminalOrderTarget = { tableId: string; delivery?: never } | {
   tableId?: never;
@@ -201,7 +203,17 @@ export class OrdersService {
   }
 
   async findByIdForActor(id: string, actor: AuditActor) {
-    const order = await this.prisma.order.findUniqueOrThrow({ where: { id }, include: { ...orderInclude, taxes: receiptTaxes } });
+    const order = await this.prisma.order.findUniqueOrThrow({
+      where: { id },
+      include: {
+        ...orderInclude,
+        taxes: receiptTaxes,
+        payments: {
+          ...orderInclude.payments,
+          select: { ...orderInclude.payments.select, cashier: { select: { name: true } } },
+        },
+      },
+    });
     if (actor.role === Role.WAITER && !this.canWaiterViewOrder(order, actor.id)) {
       throw new ForbiddenException('Это не ваш заказ');
     }
@@ -267,30 +279,58 @@ export class OrdersService {
     };
   }
 
-  async waiterOrderHistory(waiterId: string, cursor?: string) {
-    const where: Prisma.OrderWhereInput = { waiterId };
+  async waiterOrderHistory(waiterId: string, cursor?: string, filter = 'all', period = 'all') {
+    const filters: Prisma.OrderWhereInput[] = [];
+    if (period !== 'all') {
+      const days = HISTORY_PERIOD_DAYS.get(period);
+      if (!days) throw new BadRequestException('Неверный период истории заказов');
+      const now = new Date();
+      const from = warehouseDay(new Date(now.getTime() - (days - 1) * 86_400_000));
+      const range = warehouseDateRange(from, warehouseDay(now));
+      filters.push({
+        OR: [{ closedAt: range }, { closedAt: null, createdAt: range }],
+      });
+    }
+    if (filter === 'refunds') {
+      filters.push({ OR: [{ refundedAmount: { gt: 0 } }, { paymentStatus: PaymentStatus.refunded }] });
+    } else if (filter === 'cash' || filter === 'card' || filter === 'qr') {
+      filters.push({
+        OR: [
+          { paymentMethod: filter },
+          { payments: { some: { method: filter, status: { in: [PaymentStatus.paid, PaymentStatus.refunded] } } } },
+        ],
+      });
+    } else if (filter !== 'all') {
+      throw new BadRequestException('Неверный фильтр истории заказов');
+    }
     if (cursor !== undefined) {
       const [timestamp, id, extra] = typeof cursor === 'string' ? cursor.split(',') : [];
       const createdAt = new Date(timestamp);
       if (!id || extra !== undefined || !Number.isFinite(createdAt.getTime()) || createdAt.toISOString() !== timestamp) {
         throw new BadRequestException('Неверный курсор истории заказов');
       }
-      where.OR = [
-        { createdAt: { lt: createdAt } },
-        { createdAt, id: { lt: id } },
-      ];
+      filters.push({ OR: [{ createdAt: { lt: createdAt } }, { createdAt, id: { lt: id } }] });
     }
 
     const orders = await this.prisma.order.findMany({
-      where,
+      where: { waiterId, AND: filters },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: WAITER_HISTORY_PAGE_SIZE + 1,
-      select: cabinetOrderSelect,
+      select: {
+        ...cabinetOrderSelect,
+        closedAt: true,
+        items: {
+          where: { status: { notIn: [OrderItemStatus.cancelled, OrderItemStatus.rejected] } },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          take: 2,
+          select: { dishNameSnapshot: true, dishVariantNameSnapshot: true },
+        },
+      },
     });
     const page = orders.slice(0, WAITER_HISTORY_PAGE_SIZE);
     const last = page[page.length - 1];
     return {
-      items: page.map(formatCabinetOrder),
+      items: page.map((order) => ({ ...formatCabinetOrder(order), closedAt: order.closedAt, items: order.items })),
       nextCursor: orders.length > page.length ? `${last.createdAt.toISOString()},${last.id}` : null,
     };
   }

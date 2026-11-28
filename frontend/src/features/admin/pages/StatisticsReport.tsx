@@ -1,6 +1,7 @@
+import { ColumnPopover } from '../components/ColumnPopover';
 import { IconExport, IconPrinter } from '@/features/admin/components/icons';
 import { useState } from 'react';
-import { ColumnSummary } from '../components/ColumnControl';
+import { ColumnButton } from '../components/ColumnControl';
 import { Link, useLocation } from 'react-router-dom';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { Select } from '@/components/Select';
@@ -85,6 +86,7 @@ export function StatisticsReport({ report, data }: { report: Report; data: Stati
   const { pathname } = useLocation();
   const { canAction, canSection } = usePermissions();
   const seeCosts = canSection('warehouse') && canAction('warehouseCosts') && canAction('warehouseReports');
+  const [columnAnchor, setColumnAnchor] = useState<HTMLButtonElement | null>(null);
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [employee, setEmployee] = useState('');
@@ -158,9 +160,10 @@ export function StatisticsReport({ report, data }: { report: Report; data: Stati
   return <>
     <WorkspaceHeaderCount count={rows.length} />
     <WorkspaceHeaderActions>
-      {report !== 'payments' && <details className="relative">
-        <ColumnSummary label={t('Столбцы')} />
-        <div className="absolute right-0 z-20 mt-1 grid min-w-44 gap-2 rounded-xl border border-border bg-card p-3 shadow-card">
+      {report !== 'payments' && <>
+        <ColumnButton expanded={!!columnAnchor} onClick={(event) => setColumnAnchor(columnAnchor ? null : event.currentTarget)} />
+        {columnAnchor && <ColumnPopover anchor={columnAnchor} onClose={() => setColumnAnchor(null)}>
+          <div className="space-y-2 px-2 py-2 [&_input]:accent-primary [&_label]:flex [&_label]:gap-2">
           {report === 'products' && <div className="grid gap-2 border-b border-border pb-2">
             <label className="flex items-center gap-2 whitespace-nowrap text-sm">
               <input type="checkbox" checked={showVariants} onChange={(event) => setGrouping('variants', event.target.checked)} />
@@ -176,8 +179,9 @@ export function StatisticsReport({ report, data }: { report: Report; data: Stati
               onChange={(event) => setHiddenColumns((event.target.checked ? hidden.filter((entry) => entry !== key) : [...hidden, key]).join(','))} />
             {t(label)}
           </label>)}
-        </div>
-      </details>}
+          </div>
+        </ColumnPopover>}
+      </>}
       {canAction('exportReports') && <button type="button" className="workspace-tool" disabled={!rows.length}
         onClick={() => exportCsv(title, headings, outputRows())}><IconExport />{t('Экспорт CSV')}</button>}
       <button type="button" className="workspace-tool" disabled={!rows.length}

@@ -88,7 +88,7 @@ export function FinanceRegister({
   reportActions?: boolean;
 }) {
   const [selection, setSelection] = useColumnPreference(columnPreference ?? title);
-  const [showColumns, setShowColumns] = useState(false);
+  const [showColumns, setShowColumns] = useState<HTMLButtonElement | null>(null);
   const [printError, setPrintError] = useState(false);
   const { canAction } = usePermissions();
   const byKey = new Map(columns.map((column) => [column.key, column]));
@@ -113,7 +113,7 @@ export function FinanceRegister({
       <div className="finance-register-filters">{filters}</div>
     </div>}
     <WorkspaceHeaderActions>
-      {defaultColumns && <ColumnButton onClick={() => setShowColumns(true)} />}
+      {defaultColumns && <ColumnButton expanded={!!showColumns} onClick={(event) => setShowColumns(showColumns ? null : event.currentTarget)} />}
       {reportActions && <>
         {canAction('exportReports') && <button type="button" className="workspace-tool" disabled={!rows.length} onClick={() => downloadRegister(title, output())}>
           <IconExport />Экспорт
@@ -157,9 +157,9 @@ export function FinanceRegister({
         </tr></tfoot>}
       </table>
     </div>
-    {showColumns && defaultColumns && <WarehouseColumnSettings columns={visible.map(({ key }) => key)} defaults={keys} resetColumns={defaultColumns}
+    {showColumns && defaultColumns && <WarehouseColumnSettings anchor={showColumns} columns={visible.map(({ key }) => key)} defaults={keys} resetColumns={defaultColumns}
       label={(key) => byKey.get(key)?.label ?? key}
-      onClose={() => setShowColumns(false)}
-      onApply={(selected) => { setSelection(selected.join(',')); setShowColumns(false); }} />}
+      onClose={() => setShowColumns(null)}
+      onApply={(selected) => { setSelection(selected.join(',')); setShowColumns(null); }} />}
   </section>;
 }

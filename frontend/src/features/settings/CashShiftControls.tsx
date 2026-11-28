@@ -76,10 +76,15 @@ export function CashShiftSettings({ collectionAccountId, onCollectionAccountChan
   </section>;
 }
 
-export function CashShiftBanner({ promptOnEntry = false }: { promptOnEntry?: boolean }) {
+export type CashShiftEditor = 'open' | 'close' | 'operation';
+
+export function CashShiftBanner({ promptOnEntry = false, editor, setEditor }: {
+  promptOnEntry?: boolean;
+  editor: CashShiftEditor | null;
+  setEditor: (editor: CashShiftEditor | null) => void;
+}) {
   const { canView, canManage } = useCashShiftAccess();
   const query = useCashShiftState(canView);
-  const [editor, setEditor] = useState<'open' | 'close' | 'operation' | null>(null);
   const [dismissed, setDismissed] = useState(false);
   if (!canView || !query.data?.enabled) return null;
   const current = query.data.current;

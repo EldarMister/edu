@@ -29,7 +29,6 @@ import {
   IconStaff,
   IconSettings,
   IconJournal,
-  IconPrinter,
   IconWarehouse,
   IconMoney,
 } from './components/icons';
@@ -143,7 +142,6 @@ type Section =
   | 'stats'
   | 'orders'
   | 'requests'
-  | 'receipts'
   | 'tables'
   | 'menu'
   | 'warehouse'
@@ -170,7 +168,6 @@ const SECTIONS: {
   { key: 'stats', label: 'Статистика', icon: IconStats, perm: 'statistics' },
   { key: 'orders', label: 'Заказы', icon: IconOrders, perm: 'orders' },
   { key: 'requests', label: 'Заявки', icon: IconJournal },
-  { key: 'receipts', label: 'Печать чека', icon: IconPrinter, perm: 'checks' },
   { key: 'tables', label: 'Столы', icon: IconTables, perm: 'tables' },
   { key: 'menu', label: 'Меню', icon: IconMenu, perm: 'menu' },
   { key: 'warehouse', label: 'Склад', icon: IconWarehouse, perm: 'warehouse' },
@@ -201,6 +198,7 @@ export function AdminApp() {
   const requestsNav = [
     ...(canManageRefunds ? [{ key: 'refunds', label: 'Заявки на возврат' }] : []),
     ...(canManageCancellations ? [{ key: 'cancellations', label: 'Отмены блюд' }] : []),
+    ...(canHandlePrintRequests ? [{ key: 'receipts', label: 'Печать чека' }] : []),
   ];
   useRefundUpdates('admin', canManageRefunds);
   useItemCancellationUpdates('admin', canManageCancellations);
@@ -215,7 +213,6 @@ export function AdminApp() {
     (key !== 'positions' || isOwner) && (key !== 'shifts' || can('actions.closeShift')));
 
   const sections = SECTIONS.filter((s) => {
-    if (s.key === 'receipts') return canHandlePrintRequests;
     if (s.key === 'finance') return financeNav.length > 0;
     if (s.key === 'requests') return requestsNav.length > 0;
     return !!s.perm && canSection(s.perm);
@@ -224,8 +221,11 @@ export function AdminApp() {
   const profileOpen = route.get('section') === 'profile';
   useWorkspaceScroll();
   const legacyStations = route.get('section') === 'menu' && route.get('view') === 'stations';
-  const section = (legacyStations ? 'staff' : route.get('section') || (isOwner ? 'stats' : 'orders')) as Section;
-  const requestsView = requestsNav.find(({ key }) => key === route.get('view')) ?? requestsNav[0];
+  const legacyReceipts = route.get('section') === 'receipts';
+  const section = (legacyReceipts ? 'requests' : legacyStations ? 'staff' : route.get('section') || (isOwner ? 'stats' : 'orders')) as Section;
+  const requestedView = legacyReceipts ? 'receipts' : route.get('view');
+  const requestsView = requestsNav.find(({ key }) => key === requestedView) ?? requestsNav[0];
+  const showPrintRequests = section === 'requests' && requestsView?.key === 'receipts';
   const warehousePolicy = useWarehousePolicy(canSection('warehouse'));
   const warehouseLocations = useWarehouseLocations(canSection('warehouse'));
   function setSection(next: Section) {
@@ -288,12 +288,13 @@ export function AdminApp() {
     if (section === 'finance' && isAdmin && financeAccess.isPending) return;
     if (sections.length > 0 && !sections.some((s) => s.key === section)) {
       setSection(sections[0].key);
-    } else if (legacyStations) {
+    } else if (legacyStations || legacyReceipts) {
       const next = new URLSearchParams(route);
-      next.set('section', 'staff');
+      next.set('section', section);
+      if (legacyReceipts && requestsView) next.set('view', requestsView.key);
       setRoute(next, { replace: true });
     }
-  }, [sections, section, isAdmin, financeAccess.isPending, legacyStations, profileOpen, route, setRoute]);
+  }, [sections, section, isAdmin, financeAccess.isPending, legacyStations, legacyReceipts, requestsView, profileOpen, route, setRoute]);
 
   useEffect(() => {
     if (!mobileNav) {
@@ -456,7 +457,7 @@ export function AdminApp() {
         : section === 'finance' ? financeNav.find(({ key }) => key === financeView)?.label
           : section === 'staff' ? personnelNav.find(({ key }) => key === staffView)?.label
             : section === 'requests' ? requestsView?.label
-            : section === 'tables' && route.get('view') === 'map' ? 'Карта зала'
+            : section === 'tables' && route.get('view') !== 'list' ? 'Редактор столов'
               : section === 'settings' ? settingsView === 'general' ? 'Общие настройки' : settingsTab.label : undefined;
   const pageTitle = profileOpen ? t('Личный кабинет') : current ? t(currentViewLabel ?? current.label) : '';
   const scrollOrdersHeader = !profileOpen && section === 'orders' && canSection('orders');
@@ -699,7 +700,7 @@ export function AdminApp() {
         <OfflineBanner />
         {!scrollOrdersHeader && workspaceHeader}
         <main
-          className={`workspace-main app-scrollbar-subtle flex-1 ${scrollOrdersHeader ? 'orders-workspace overflow-auto' : 'overflow-y-auto overflow-x-hidden p-4 lg:p-6'} ${posterWorkspace ? 'poster-workspace' : ''} ${['receipts', 'tables', 'menu', 'staff'].includes(section) ? 'pt-2 lg:pt-3' : ''}`}
+          className={`workspace-main app-scrollbar-subtle flex-1 ${scrollOrdersHeader ? 'orders-workspace overflow-auto' : 'overflow-y-auto overflow-x-hidden p-4 lg:p-6'} ${posterWorkspace ? 'poster-workspace' : ''} ${showPrintRequests || ['tables', 'menu', 'staff'].includes(section) ? 'pt-2 lg:pt-3' : ''}`}
         >
           {scrollOrdersHeader && workspaceHeader}
           {profileOpen ? <AdminProfilePage /> : !current ? (
@@ -720,8 +721,8 @@ export function AdminApp() {
               </div>}
               {section === 'orders' && canSection('orders') && <OrdersPage />}
               {section === 'requests' && (requestsView?.key === 'refunds' ? <RefundQueuePage />
-                : requestsView?.key === 'cancellations' ? <ItemCancellationQueuePage /> : <NoAccessScreen />)}
-              {section === 'receipts' && canHandlePrintRequests && <ReceiptPrintsPage />}
+                : requestsView?.key === 'cancellations' ? <ItemCancellationQueuePage />
+                  : showPrintRequests ? <ReceiptPrintsPage /> : <NoAccessScreen />)}
               {section === 'tables' && canSection('tables') && <TablesPage />}
               {section === 'menu' && canSection('menu') && <>
                 {requestedMenuView === 'foodCost' ? <Navigate replace to="?section=menu&view=goods" />

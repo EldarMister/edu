@@ -84,7 +84,7 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
   const columnSetting = conditions.supplyColumns || savedColumns;
   const columns = columnSetting ? visibleWarehouseColumns(columnSetting, allowedColumns) : resetColumns;
   const expanded = new Set(conditions.supplyExpanded.split(',').filter(Boolean));
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState<HTMLButtonElement | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');
   const params = { warehouseId, search, status, paymentStatus, suppliers: selectedSuppliers, categories: selectedCategories,
@@ -206,7 +206,7 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
     <section className="warehouse-supplies" aria-label="Реестр поставок">
       <WorkspaceHeaderCount count={query.data ? rows.length : undefined} />
       <WorkspaceHeaderActions>
-        <ColumnButton onClick={() => setSettingsOpen(true)} />
+        <ColumnButton expanded={!!settingsOpen} onClick={(event) => setSettingsOpen(settingsOpen ? null : event.currentTarget)} />
         {canExport && <button type="button" className="workspace-tool" disabled={exporting}
           onClick={() => void exportWorkbook()}><IconExport />{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
         {canEdit && <button type="button" className="workspace-tool" onClick={() => onCreate(true)}><IconImport />Импорт с ИИ</button>}
@@ -214,13 +214,13 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
           onClick={printList}><IconPrinter />Печать</button>}
         {canEdit && <button type="button" className="btn-primary btn-md" onClick={() => onCreate()}>Добавить</button>}
       </WorkspaceHeaderActions>
-      {settingsOpen && <WarehouseColumnSettings columns={columns} defaults={allowedColumns} resetColumns={resetColumns}
-        label={(key) => supplyColumns[key].label} onClose={() => setSettingsOpen(false)}
+      {settingsOpen && <WarehouseColumnSettings anchor={settingsOpen} columns={columns} defaults={allowedColumns} resetColumns={resetColumns}
+        label={(key) => supplyColumns[key].label} onClose={() => setSettingsOpen(null)}
         onApply={(selected) => {
           const value = selected.join(',') === resetColumns.join(',') ? '' : selected.join(',');
           saveColumns(value);
           update({ supplyColumns: value });
-          setSettingsOpen(false);
+          setSettingsOpen(null);
         }} />}
       <div className="poster-toolbar print:hidden">
         {period.filter}

@@ -549,16 +549,29 @@ export function useHallMutations() {
   return { create, update, remove };
 }
 
+type TablePlacement = Omit<FloorPlanTable, 'tableId'> & { version: number };
+export type TableChange = {
+  id: string; userName: string | null; description: string | null;
+  oldValue: Record<string, unknown> | null; newValue: Record<string, unknown> | null; createdAt: string;
+};
+export function useTableChanges(id: string | undefined) {
+  return useQuery({
+    queryKey: ['admin', 'table-changes', id],
+    queryFn: () => get<TableChange[]>(`/admin/tables/${id}/changes`),
+    enabled: !!id,
+  });
+}
+
 export function useTableMutations() {
   const qc = useQueryClient();
-  const invalidate = useInvalidate([['admin', 'halls'], ['admin', 'tables', 'overview']]);
+  const invalidate = useInvalidate([['admin', 'halls'], ['admin', 'tables', 'overview'], ['admin', 'table-changes'], ['halls']]);
   const create = useMutation({
-    mutationFn: (b: { hallId: string; number?: number; name?: string | null; seats: number }) =>
+    mutationFn: (b: { hallId: string; number?: number; name?: string | null; seats: number; placement?: TablePlacement }) =>
       api.post('/admin/tables', b).then((r) => r.data),
     onSuccess: invalidate,
   });
   const update = useMutation({
-    mutationFn: ({ id, ...b }: { id: string; number?: number; name?: string | null; seats?: number; isActive?: boolean }) =>
+    mutationFn: ({ id, ...b }: { id: string; number?: number; name?: string | null; seats?: number; isActive?: boolean; placement?: TablePlacement }) =>
       api.patch(`/admin/tables/${id}`, b).then((r) => r.data),
     onSuccess: invalidate,
   });

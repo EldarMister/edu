@@ -151,7 +151,7 @@ export function WarehouseMovementSummary({ warehouseId, range, onOpen, onHistory
   const minimumTableWidth = Math.max(190 + (columns.length - 1) * 90,
     columns.reduce((total, key) => total + (widths[key] ?? minColumnWidth(key)), 0));
   const numericColumns = columns.filter((column) => column !== 'name' && column !== 'kind');
-  const [editingColumns, setEditingColumns] = useState(false);
+  const [editingColumns, setEditingColumns] = useState<HTMLButtonElement | null>(null);
   const nameCondition = nameConditions.find(({ value }) => value === conditions.movementNameCondition)?.value;
   const needsNameValue = nameCondition && nameCondition !== 'empty' && nameCondition !== 'notEmpty';
   const [exporting, setExporting] = useState(false);
@@ -245,14 +245,14 @@ export function WarehouseMovementSummary({ warehouseId, range, onOpen, onHistory
           });
         }}>Сбросить всё</button>}
         <WorkspaceHeaderActions>
-          <ColumnButton onClick={() => setEditingColumns(true)} />
+          <ColumnButton expanded={!!editingColumns} onClick={(event) => setEditingColumns(editingColumns ? null : event.currentTarget)} />
           {canExport && <button type="button" className="workspace-tool" disabled={exporting} onClick={() => void download()}>
             <IconExport />{exporting ? 'Выгрузка…' : 'Экспорт в Excel'}
           </button>}
         </WorkspaceHeaderActions>
       </div>
-      {editingColumns && <WarehouseColumnSettings columns={columns} defaults={defaultColumns}
-        label={(key) => reportColumns[key].label} onClose={() => setEditingColumns(false)}
+      {editingColumns && <WarehouseColumnSettings anchor={editingColumns} columns={columns} defaults={defaultColumns}
+        label={(key) => reportColumns[key].label} onClose={() => setEditingColumns(null)}
         onApply={(selected, resetWidths) => {
           const value = selected.join(',') === defaultColumns.join(',') ? '' : selected.join(',');
           saveColumns(value);
@@ -261,7 +261,7 @@ export function WarehouseMovementSummary({ warehouseId, range, onOpen, onHistory
             movementColumns: value,
             ...(resetWidths ? { movementColumnWidths: '' } : {}),
           });
-          setEditingColumns(false);
+          setEditingColumns(null);
         }} />}
       {query.isPending && <WorkspacePending />}
       {(query.isError || error) && (

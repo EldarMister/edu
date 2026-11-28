@@ -1,3 +1,6 @@
+import { ColumnCheckbox, ColumnPopover } from '../components/ColumnPopover';
+import { ColumnButton } from '../components/ColumnControl';
+import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { DatePicker, DateTimePicker } from '@/components/DatePicker';
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -116,6 +119,11 @@ export function StaffPage({ initialTab = 'employees' }: { initialTab?: StaffTab 
   useSocketEvent('waiter:shift_started', refreshShifts);
   useSocketEvent('waiter:shift_ended', refreshShifts);
   useSocketEvent('waiter:shift_updated', refreshShifts);
+  const [columnAnchor, setColumnAnchor] = useState<HTMLButtonElement | null>(null);
+  const [hiddenStaffColumns, setHiddenStaffColumns] = useColumnPreference('staff-directory');
+  const hidden = hiddenStaffColumns.split(',').filter(Boolean);
+  const showShift = !hidden.includes('shift');
+  const showTurnover = !hidden.includes('turnover');
   const [employeeSearch, setEmployeeSearch] = useState('');
   const [employeePosition, setEmployeePosition] = useState('');
   const [employeeStatus, setEmployeeStatus] = useState('');
@@ -261,6 +269,17 @@ export function StaffPage({ initialTab = 'employees' }: { initialTab?: StaffTab 
       </div>}
 
       {tab === 'employees' && <WorkspaceHeaderActions>
+        <ColumnButton expanded={!!columnAnchor} onClick={(event) => setColumnAnchor(columnAnchor ? null : event.currentTarget)} />
+        {columnAnchor && <ColumnPopover anchor={columnAnchor} onClose={() => setColumnAnchor(null)}
+          footer={<button type="button" className="btn-ghost btn-md w-full" onClick={() => setHiddenStaffColumns('')}>Сбросить</button>}>
+          <ColumnCheckbox checked disabled onChange={() => {}}>Сотрудник / Должность</ColumnCheckbox>
+          {[{ key: 'shift', label: 'Смена' }, { key: 'turnover', label: 'Оборот' }].map(({ key, label }) =>
+            <ColumnCheckbox key={key} checked={!hidden.includes(key)} onChange={(checked) =>
+              setHiddenStaffColumns((checked ? hidden.filter((value) => value !== key) : [...hidden, key]).join(','))}>
+              {tr(label)}
+            </ColumnCheckbox>)}
+          <ColumnCheckbox checked disabled onChange={() => {}}>{tr('Действия')}</ColumnCheckbox>
+        </ColumnPopover>}
         <button type="button" onClick={exportCsv} disabled={!reportQ.data || !rows.length} className="workspace-tool">
           <IconExport />{tr('Экспорт')}
         </button>
@@ -302,8 +321,8 @@ export function StaffPage({ initialTab = 'employees' }: { initialTab?: StaffTab 
                 <tr className="border-b border-border bg-background/40 text-left text-xs text-text-muted">
                   <th className="w-9 px-2 py-2.5" />
                   <th className="px-3 py-2.5 font-medium">Сотрудник / Должность</th>
-                  <th className="px-3 py-2.5 font-medium">{tr('Смена')}</th>
-                  <th className="px-3 py-2.5 text-right font-medium">{tr('Оборот')}</th>
+                  {showShift && <th className="px-3 py-2.5 font-medium">{tr('Смена')}</th>}
+                  {showTurnover && <th className="px-3 py-2.5 text-right font-medium">{tr('Оборот')}</th>}
                   <th className="px-3 py-2.5 text-right font-medium">{tr('Действия')}</th>
                 </tr>
               </thead>
@@ -334,10 +353,10 @@ export function StaffPage({ initialTab = 'employees' }: { initialTab?: StaffTab 
                             {member?.isActive === false && ' · Неактивен'}
                           </div>
                         </td>
-                        <td className="whitespace-nowrap px-3 py-2.5 text-text-secondary">{row ? shiftLabel(row) : '—'}</td>
-                        <td className="whitespace-nowrap px-3 py-2.5 text-right font-medium">
+                        {showShift && <td className="whitespace-nowrap px-3 py-2.5 text-text-secondary">{row ? shiftLabel(row) : '—'}</td>}
+                        {showTurnover && <td className="whitespace-nowrap px-3 py-2.5 text-right font-medium">
                           {waiterReport ? money(waiterReport.turnover) : '—'}
-                        </td>
+                        </td>}
                         <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                           {canEdit && <div className="flex items-center justify-end gap-1">
                             <IconBtn title={tr('Изменить')} onClick={openEdit}>
@@ -351,7 +370,7 @@ export function StaffPage({ initialTab = 'employees' }: { initialTab?: StaffTab 
                       </tr>
                       {open && waiterReport && (
                         <tr className="border-b border-border bg-background/30">
-                          <td colSpan={5} className="px-3 py-3">
+                          <td colSpan={3 + Number(showShift) + Number(showTurnover)} className="px-3 py-3">
                             <ShiftDetails row={waiterReport} onEdit={canEdit ? openEdit : undefined} />
                           </td>
                         </tr>

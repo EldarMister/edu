@@ -4,14 +4,21 @@ import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty,
 const PLAN_COLUMNS = 24;
 const PLAN_MAX_ROWS = 600;
 
-class FloorPlanTableDto {
-  @IsString() @IsNotEmpty() @MaxLength(64) tableId!: string;
+export class FloorPlanPlacementDto {
   @IsInt() @Min(0) @Max(PLAN_COLUMNS - 4) x!: number;
   @IsInt() @Min(0) @Max(PLAN_MAX_ROWS - 4) y!: number;
   @IsInt() @Min(4) @Max(PLAN_COLUMNS) width!: number;
   @IsInt() @Min(4) @Max(PLAN_MAX_ROWS) height!: number;
   @IsIn(['rectangle', 'round']) shape!: 'rectangle' | 'round';
   @IsOptional() @IsString() @MaxLength(30) label?: string;
+}
+
+class FloorPlanTableDto extends FloorPlanPlacementDto {
+  @IsString() @IsNotEmpty() @MaxLength(64) tableId!: string;
+}
+
+export class TablePlanEditDto extends FloorPlanPlacementDto {
+  @IsInt() @Min(0) @Max(2147483646) version!: number;
 }
 
 export class SaveFloorPlanDto {
@@ -26,6 +33,6 @@ export class SetFloorPlanModeDto {
   @IsBoolean() useFloorPlan!: boolean;
 }
 
-export function withinFloorPlan(table: FloorPlanTableDto) {
+export function withinFloorPlan(table: FloorPlanPlacementDto) {
   return table.x + table.width <= PLAN_COLUMNS && table.y + table.height <= PLAN_MAX_ROWS;
 }

@@ -108,14 +108,20 @@ export class CatalogController {
 
   @Post('tables')
   @RequirePermission('sections.tables')
-  createTable(@Body() dto: CreateTableDto) {
-    return this.catalog.createTable(dto);
+  createTable(@Body() dto: CreateTableDto, @CurrentUser() user: AuthUser) {
+    return this.catalog.createTable(dto, user);
+  }
+
+  @Get('tables/:id/changes')
+  @RequirePermission('sections.tables')
+  tableChanges(@Param('id') id: string) {
+    return this.catalog.tableChanges(id);
   }
 
   @Patch('tables/:id')
   @RequirePermission('sections.tables')
-  updateTable(@Param('id') id: string, @Body() dto: UpdateTableDto) {
-    return this.catalog.updateTable(id, dto);
+  updateTable(@Param('id') id: string, @Body() dto: UpdateTableDto, @CurrentUser() user: AuthUser) {
+    return this.catalog.updateTable(id, dto, user);
   }
 
   @Delete('tables/:id')

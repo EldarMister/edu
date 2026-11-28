@@ -50,7 +50,7 @@ export function IngredientCategoriesPage({ search }: { search: string }) {
   const [creating, setCreating] = useState(false);
   const [removing, setRemoving] = useState<IngredientCategory | null>(null);
   const [removeIngredients, setRemoveIngredients] = useState(false);
-  const [showColumns, setShowColumns] = useState(false);
+  const [showColumns, setShowColumns] = useState<HTMLButtonElement | null>(null);
   const [printError, setPrintError] = useState('');
   useEffect(() => { setName(editing ?? ''); }, [editing]);
   const canManage = can('actions.warehouseSettings');
@@ -117,7 +117,7 @@ export function IngredientCategoriesPage({ search }: { search: string }) {
       <WorkspaceHeaderCount count={query.data?.length} />
       <WorkspaceHeaderActions>
         <div className="catalogue-header-actions">
-          <ColumnButton onClick={() => setShowColumns(true)} />
+          <ColumnButton expanded={!!showColumns} onClick={(event) => setShowColumns(showColumns ? null : event.currentTarget)} />
           {can('actions.exportReports') && <button type="button" className="workspace-tool" title="Экспорт CSV"
             disabled={!rows.length} onClick={() => report(false)}><IconExport /><span className="catalogue-action-label">Экспорт</span></button>}
           <button type="button" className="workspace-tool" title="Печать" disabled={!rows.length} onClick={() => report(true)}>
@@ -176,11 +176,11 @@ export function IngredientCategoriesPage({ search }: { search: string }) {
         {rename.error && <p role="alert" className="text-sm text-danger">{apiError(rename.error)}</p>}
       </form>
     </EditorPage>}
-    {showColumns && <WarehouseColumnSettings columns={columns} defaults={defaults} label={(column) => labels[column]}
-      onClose={() => setShowColumns(false)} onApply={(selected, reset) => {
+    {showColumns && <WarehouseColumnSettings anchor={showColumns} columns={columns} defaults={defaults} label={(column) => labels[column]}
+      onClose={() => setShowColumns(null)} onApply={(selected, reset) => {
         setSavedColumns(reset && selected.join(',') === defaults.join(',') ? '' : selected.join(','));
         if (!selected.includes(sortColumn)) setListOptions({ sortBy: 'name', sort: 'asc' });
-        setShowColumns(false);
+        setShowColumns(null);
       }} />}
     {creating && <NewIngredientCategory onClose={() => setCreating(false)} />}
     {removing && <RemoveDirectoryEntry title="Удалить категорию ингредиентов?" pending={remove.isPending} error={remove.error}

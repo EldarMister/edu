@@ -92,7 +92,7 @@ function TaxDirectory({ onEdit }: { onEdit: (id?: string) => void }) {
   const taxes = list.data ?? [];
   const [savedColumns, saveColumns] = useColumnPreference('settings-taxes');
   const columns = visibleWarehouseColumns(filters.taxColumns || savedColumns, defaultColumns);
-  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [columnsOpen, setColumnsOpen] = useState<HTMLButtonElement | null>(null);
   const [rateOpen, setRateOpen] = useState(Boolean(filters.rate));
   const [toDelete, setToDelete] = useState<MenuTax | null>(null);
   const { remove } = useTaxMutations();
@@ -105,7 +105,7 @@ function TaxDirectory({ onEdit }: { onEdit: (id?: string) => void }) {
   return <div className="space-y-3">
     <WorkspaceHeaderCount count={list.isSuccess ? visible.length : undefined} />
     <WorkspaceHeaderActions>
-      <ColumnButton onClick={() => setColumnsOpen(true)} />
+      <ColumnButton expanded={!!columnsOpen} onClick={(event) => setColumnsOpen(columnsOpen ? null : event.currentTarget)} />
       <TaxTableActions endpoint={TAX_DIRECTORY_ENDPOINT} params={{ ...queryParams, columns: columns.join(',') }}
         table={table} canExport={canAction('exportReports')} />
       {editable && <button type="button" className="btn-primary btn-md" onClick={() => onEdit()}>Добавить</button>}
@@ -157,12 +157,12 @@ function TaxDirectory({ onEdit }: { onEdit: (id?: string) => void }) {
         </p>}
       </div>
     </QueryState>
-    {columnsOpen && <WarehouseColumnSettings columns={columns} defaults={defaultColumns} label={(key) => labels[key]}
-      onClose={() => setColumnsOpen(false)} onApply={(selection) => {
+    {columnsOpen && <WarehouseColumnSettings anchor={columnsOpen} columns={columns} defaults={defaultColumns} label={(key) => labels[key]}
+      onClose={() => setColumnsOpen(null)} onApply={(selection) => {
         const value = selection.join(',') === defaultColumns.join(',') ? '' : selection.join(',');
         saveColumns(value);
         setFilters({ taxColumns: value });
-        setColumnsOpen(false);
+        setColumnsOpen(null);
       }} />}
     {toDelete && <Modal open title="Удаление налога" onClose={() => !remove.isPending && setToDelete(null)}
       footer={<div className="flex justify-end gap-2">

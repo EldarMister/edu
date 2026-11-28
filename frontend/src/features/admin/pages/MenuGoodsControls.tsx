@@ -69,7 +69,7 @@ export function MenuGoodsActions({ filters, columns, saveColumns, ready, canExpo
   ready: boolean;
   canExport: boolean;
 }) {
-  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [columnsOpen, setColumnsOpen] = useState<HTMLButtonElement | null>(null);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
   async function exportGoods() {
@@ -96,13 +96,13 @@ export function MenuGoodsActions({ filters, columns, saveColumns, ready, canExpo
     finally { setExporting(false); }
   }
   return <>
-    <ColumnButton onClick={() => setColumnsOpen(true)} />
+    <ColumnButton expanded={!!columnsOpen} onClick={(event) => setColumnsOpen(columnsOpen ? null : event.currentTarget)} />
     {canExport && <button type="button" className="workspace-tool" disabled={!ready || exporting} title="Экспорт"
       onClick={() => void exportGoods()}><IconExport aria-hidden="true" /><span className="catalogue-action-label">{exporting ? 'Выгрузка…' : 'Экспорт'}</span></button>}
     {error && <p className="basis-full text-sm text-danger" role="alert">{error}</p>}
-    {columnsOpen && <WarehouseColumnSettings columns={columns} defaults={columnOptions} resetColumns={defaults}
-      label={(key) => menuGoodsColumns[key]} onClose={() => setColumnsOpen(false)}
-      onApply={(selected) => { saveColumns(selected); setColumnsOpen(false); }} />}
+    {columnsOpen && <WarehouseColumnSettings anchor={columnsOpen} columns={columns} defaults={columnOptions} resetColumns={defaults}
+      label={(key) => menuGoodsColumns[key]} onClose={() => setColumnsOpen(null)}
+      onApply={(selected) => { saveColumns(selected); setColumnsOpen(null); }} />}
   </>;
 }
 

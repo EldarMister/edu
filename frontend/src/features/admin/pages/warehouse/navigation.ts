@@ -26,7 +26,10 @@ export const WAREHOUSE_NAV: { key: WarehouseView; label: string; permission?: st
   { key: 'packages', label: 'Фасовки', permission: 'warehouseSettings' },
   { key: 'production', label: 'Производство', permission: 'warehouseProduce' },
 ];
-export function warehouseViewAllowed(view: { permission?: string; costs?: boolean }, permissions: ReturnType<typeof usePermissions>) {
+export function warehouseViewAllowed(
+  view: { permission?: string; costs?: boolean },
+  permissions: Pick<ReturnType<typeof usePermissions>, 'canSection' | 'canEditSection' | 'canAction' | 'can'>,
+) {
   const readOnly = permissions.canSection('warehouse') && !permissions.canEditSection('warehouse');
   return (!view.costs || permissions.canAction('warehouseCosts')) &&
     (!view.permission || permissions.can(`actions.${view.permission}`) || (readOnly && view.permission !== 'warehouseReports'));

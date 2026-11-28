@@ -1,3 +1,4 @@
+import { ColumnPopover } from '../../components/ColumnPopover';
 import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -5,7 +6,7 @@ import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { usePermissions } from '@/hooks/usePermissions';
 import { printReport } from '@/lib/report-output';
 import { IconPrinter, IconExport } from '../../components/icons';
-import { ColumnSummary } from '../../components/ColumnControl';
+import { ColumnButton } from '../../components/ColumnControl';
 import type { CashFlow, FinanceAccount, FinanceCategory, FinanceEntry } from './api';
 import { buildCashFlowTable, flowCell, type FlowColumn, type FlowLine, type FlowMovement } from './cash-flow-table';
 import { downloadRegister } from './FinanceRegister';
@@ -31,6 +32,7 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
   const { canAction } = usePermissions();
   const [expanded, setExpanded] = useState<string[]>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [columnAnchor, setColumnAnchor] = useState<HTMLButtonElement | null>(null);
   const [printError, setPrintError] = useState(false);
   const [savedColumns, saveColumns] = useColumnPreference('finance-cash-flow');
   const [savedPeriods, savePeriods] = useColumnPreference('finance-cash-flow-periods');
@@ -147,9 +149,10 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
       })}
     </dl>}
     <WorkspaceHeaderActions>
-      {(flow.accountOpening || orderedMonths.length > 1) && <details className="cash-flow-column-menu">
-        <ColumnSummary />
-        <div>
+      {(flow.accountOpening || orderedMonths.length > 1) && <>
+        <ColumnButton expanded={!!columnAnchor} onClick={(event) => setColumnAnchor(columnAnchor ? null : event.currentTarget)} />
+        {columnAnchor && <ColumnPopover anchor={columnAnchor} onClose={() => setColumnAnchor(null)}>
+          <div className="space-y-2 px-2 py-2 [&_input]:accent-primary [&_label]:flex [&_label]:gap-2">
           {flow.accountOpening && <>
             <label><input type="checkbox" checked={showAmounts} onChange={(event) => toggleColumn('amounts', event.target.checked)} /> Карта и наличные, деньги</label>
             <label><input type="checkbox" checked={showPercent} onChange={(event) => toggleColumn('percent', event.target.checked)} /> Карта и наличные, %</label>
@@ -169,8 +172,9 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
               </li>)}
             </ul>
           </div>}
-        </div>
-      </details>}
+          </div>
+        </ColumnPopover>}
+      </>}
       {canAction('exportReports') && <button type="button" className="workspace-tool" onClick={() => outputReport('csv')}><IconExport />Экспорт CSV</button>}
       <button type="button" className="workspace-tool" onClick={() => outputReport('print')}>
         <IconPrinter />Печать

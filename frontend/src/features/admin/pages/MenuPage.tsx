@@ -82,7 +82,7 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
   const { category: categoryId, search, availability, station: stationId, nameSort } = filters;
   const taxSort = filters.taxSort === 'asc' || filters.taxSort === 'desc' ? filters.taxSort : '';
   const [compositionId, setCompositionId] = useState<string | null>(null);
-  const [recipeColumnsOpen, setRecipeColumnsOpen] = useState(false);
+  const [recipeColumnsOpen, setRecipeColumnsOpen] = useState<HTMLButtonElement | null>(null);
   const [recipeColumnPreference, saveRecipeColumnPreference] = useColumnPreference('menu-recipes');
   const location = useLocation();
   const { editor, openEditor, closeEditor } = useEditorRoute();
@@ -257,7 +257,7 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
           <div className="catalogue-header-actions">
             {isGoods && <MenuGoodsActions filters={filters} columns={columns} saveColumns={saveColumns}
               ready={goodsQ.isSuccess} canExport={can('actions.exportReports')} />}
-            {!isGoods && <ColumnButton onClick={() => setRecipeColumnsOpen(true)} />}
+            {!isGoods && <ColumnButton expanded={!!recipeColumnsOpen} onClick={(event) => setRecipeColumnsOpen(recipeColumnsOpen ? null : event.currentTarget)} />}
             {canExportRecipes && <RecipeExportButton kind="recipes" ids={rows.map(({ id }) => id)} pending={!dishesQ.isSuccess} />}
             {editable && <MenuImportButton kind={isGoods ? 'goods' : 'recipe'} />}
             <button type="button" className="workspace-tool" title="Печать" onClick={printList}
@@ -280,11 +280,11 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
           </div>
         </WorkspaceHeaderActions>
       )}
-      {!isGoods && recipeColumnsOpen && <WarehouseColumnSettings columns={recipeColumns} defaults={recipeDefaults}
-        label={(column) => recipeColumnLabels[column]} onClose={() => setRecipeColumnsOpen(false)}
+      {!isGoods && recipeColumnsOpen && <WarehouseColumnSettings anchor={recipeColumnsOpen} columns={recipeColumns} defaults={recipeDefaults}
+        label={(column) => recipeColumnLabels[column]} onClose={() => setRecipeColumnsOpen(null)}
         onApply={(selected, reset) => {
           saveRecipeColumnPreference(reset && selected.join(',') === recipeDefaults.join(',') ? '' : selected.join(','));
-          setRecipeColumnsOpen(false);
+          setRecipeColumnsOpen(null);
         }} />}
       {categoriesQ.isError && (
         <ListLoadError

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Modal } from '@/components/Modal';
+import { ColumnCheckbox, ColumnPopover } from '../../components/ColumnPopover';
 
 export function visibleWarehouseColumns<Key extends string>(value: string, defaults: Key[], available = defaults) {
   if (!value) return defaults;
@@ -8,10 +8,11 @@ export function visibleWarehouseColumns<Key extends string>(value: string, defau
   return [required, ...[...requested].filter((key): key is Key => key !== required && available.includes(key as Key))];
 }
 
-export function WarehouseColumnSettings<Key extends string>({ columns, defaults, resetColumns = defaults, label, onClose, onApply }: {
+export function WarehouseColumnSettings<Key extends string>({ columns, defaults, resetColumns = defaults, anchor, label, onClose, onApply }: {
   columns: Key[];
   defaults: Key[];
   resetColumns?: Key[];
+  anchor: HTMLButtonElement;
   label: (key: Key) => string;
   onClose: () => void;
   onApply: (selected: Key[], reset: boolean) => void;
@@ -42,23 +43,23 @@ export function WarehouseColumnSettings<Key extends string>({ columns, defaults,
   }
 
   return (
-    <Modal open manageFocus title="Столбцы" onClose={onClose} footer={
-      <div className="flex flex-wrap justify-between gap-2">
-        <button type="button" className="btn-secondary btn-md" onClick={() => {
+    <ColumnPopover anchor={anchor} onClose={onClose} footer={
+      <div className="flex items-center justify-between gap-2">
+        <button type="button" className="btn-ghost btn-md text-link" onClick={() => {
           setOrder([...resetColumns, ...defaults.filter((key) => !resetColumns.includes(key))]);
           setSelected(resetColumns);
           setReset(true);
-        }}>Сбросить к стандартным</button>
+        }}><span aria-hidden="true">↻</span> Сбросить</button>
         <button type="button" className="btn-primary btn-md"
-          onClick={() => onApply(order.filter((key) => selected.includes(key)), reset)}>Применить</button>
+          onClick={() => { onApply(order.filter((key) => selected.includes(key)), reset); anchor.focus(); }}>Применить</button>
       </div>
     }>
-      <ul className="divide-y divide-border">
+      <ul className="space-y-0.5">
         {order.map((key, index) => {
           const caption = label(key);
           const checked = selected.includes(key);
           return (
-            <li key={key} className={`flex min-h-10 items-center gap-2 px-1 text-sm ${dropTarget === key ? 'bg-primary/10' : ''}`}
+            <li key={key} className={`flex min-h-10 items-center gap-2 rounded-md px-0.5 text-sm ${dropTarget === key ? 'bg-primary/10' : ''}`}
               onDragOver={(event) => {
                 if (!dragged || key === required) return;
                 event.preventDefault();
@@ -72,21 +73,20 @@ export function WarehouseColumnSettings<Key extends string>({ columns, defaults,
                   event.dataTransfer.setData('text/plain', key);
                   setDragged(key);
                 }} onDragEnd={() => { setDragged(null); setDropTarget(null); }}>⠿</span> : <span className="w-5" aria-hidden="true" />}
-              <label className="flex min-w-0 flex-1 items-center gap-3 py-2">
-                <input type="checkbox" className="h-4 w-4 accent-primary" checked={checked} disabled={key === required}
-                  onChange={() => setSelected((current) => checked ? current.filter((value) => value !== key) : [...current, key])} />
-                <span>{caption}</span>
-              </label>
+              <ColumnCheckbox checked={checked} disabled={key === required}
+                onChange={() => setSelected((current) => checked ? current.filter((value) => value !== key) : [...current, key])}>
+                {caption}
+              </ColumnCheckbox>
               {key !== required && <>
-                <button type="button" className="h-8 w-8 rounded border border-border text-text-muted disabled:opacity-30"
+                <button type="button" className="h-7 w-6 shrink-0 rounded text-text-muted hover:bg-background disabled:opacity-25"
                   aria-label={`Поднять столбец «${caption}»`} disabled={index <= 1} onClick={() => move(index, -1)}>↑</button>
-                <button type="button" className="h-8 w-8 rounded border border-border text-text-muted disabled:opacity-30"
+                <button type="button" className="h-7 w-6 shrink-0 rounded text-text-muted hover:bg-background disabled:opacity-25"
                   aria-label={`Опустить столбец «${caption}»`} disabled={index === order.length - 1} onClick={() => move(index, 1)}>↓</button>
               </>}
             </li>
           );
         })}
       </ul>
-    </Modal>
+    </ColumnPopover>
   );
 }

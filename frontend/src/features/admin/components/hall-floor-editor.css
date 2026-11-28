@@ -1,0 +1,87 @@
+.hall-editor-bar {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  padding: .75rem 1rem;
+  border-bottom: 1px solid rgb(var(--edu-border));
+}
+
+.hall-editor-workarea {
+  flex: 1;
+  min-height: 18rem;
+  max-height: min(56rem, max(23rem, calc(100dvh - 19rem)));
+  overflow: auto;
+  padding: .75rem;
+  background: rgb(var(--edu-background));
+}
+
+.hall-editor-map {
+  position: relative;
+  width: min(100%, 46rem);
+  min-width: 19rem;
+}
+
+.hall-editor-map .floor-plan-scroll {
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: rgb(var(--edu-card));
+}
+
+.hall-editor-map .floor-plan-canvas {
+  background-image:
+    linear-gradient(to right, rgb(var(--edu-border) / .8) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(var(--edu-border) / .8) 1px, transparent 1px);
+}
+
+.hall-editor-map .hall-editor-table {
+  border: 1px solid rgb(var(--edu-border));
+  background: rgb(var(--edu-background));
+  color: rgb(var(--edu-text));
+  box-shadow: var(--edu-shadow-card);
+}
+
+.hall-editor-map .hall-editor-table:hover {
+  border-color: rgb(var(--edu-focus) / .6);
+}
+
+.hall-editor-map .hall-editor-table[data-selected='true'] {
+  border-color: rgb(var(--edu-focus));
+  outline: 1px solid rgb(var(--edu-focus) / .65);
+  background: rgb(var(--edu-primary) / .09);
+}
+
+.hall-editor-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 30px;
+  border-radius: 6px;
+  color: rgb(var(--edu-text-secondary));
+}
+
+.hall-editor-icon:hover { background: rgb(var(--edu-primary) / .08); }
+.hall-editor-icon:disabled { opacity: .4; }
+
+.hall-editor-table-tools {
+  position: absolute;
+  z-index: 1;
+  top: 4px;
+  left: 50%;
+  translate: -50% 0;
+  display: flex;
+  gap: 1px;
+  padding: 2px;
+  border: 1px solid rgb(var(--edu-border));
+  border-radius: 9px;
+  background: rgb(var(--edu-card));
+  box-shadow: var(--edu-shadow-card);
+}
+@media (max-width: 767px) {
+  .hall-editor-table-tools .hall-editor-icon { width: 23px; height: 22px; }
+  .hall-editor-table[data-selected='true'] .floor-plan-drag { justify-content: flex-end; padding-bottom: 4px; }
+  .hall-editor-table[data-selected='true'] .floor-plan-drag span:first-child { display: none; }
+}

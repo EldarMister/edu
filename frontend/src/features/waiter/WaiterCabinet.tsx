@@ -18,7 +18,7 @@ import { useNotifications } from '@/store/notifications';
 import { IconPrinter } from '@/features/admin/components/icons';
 import { useOrderReceiptPrinter } from './useOrderReceiptPrinter';
 import { useReceiptPrint } from './receiptPrint';
-import { fetchReceipt, useCreateReceiptPrintRequest, useWaiterCabinet, useWaiterOrderHistory, useOrderDetails, type CabinetRecentOrder } from './api';
+import { fetchReceipt, useCreateReceiptPrintRequest, useWaiterCabinet, useOrderDetails, type CabinetRecentOrder } from './api';
 
 export function WaiterCabinet({ onBack, onOpenHistory }: { onBack: () => void; onOpenHistory: () => void }) {
   const logout = useAuth((s) => s.logout);
@@ -144,35 +144,6 @@ export function WaiterCabinet({ onBack, onOpenHistory }: { onBack: () => void; o
       {detailId && <WaiterOrderDetails id={detailId} onClose={() => setDetailId(null)} />}
     </div>
   );
-}
-
-export function WaiterOrderArchive({ onClose }: { onClose: () => void }) {
-  const t = useT();
-  const [detailId, setDetailId] = useState<string | null>(null);
-  const history = useWaiterOrderHistory(true);
-  const orders = history.data?.pages.flatMap((page) => page.items) ?? [];
-  return <>
-      <Modal open suspended={!!detailId} onClose={onClose} title={t('История заказов')}>
-        {history.isLoading && <Spinner className="mx-auto h-5 w-5" />}
-        {history.isError && <p className="py-2 text-sm text-danger">{t('Не удалось загрузить заказы')}</p>}
-        {!history.isLoading && !history.isError && !orders.length && <p>{t('Заказов пока нет')}</p>}
-        {orders.map((order, index) => {
-          const date = new Date(order.createdAt).toDateString();
-          return <div key={order.id} className="border-b border-border">
-            {(index === 0 || new Date(orders[index - 1].createdAt).toDateString() !== date) &&
-              <p className="pt-3 text-xs text-text-muted">{new Date(order.createdAt).toLocaleDateString('ru-RU')}</p>}
-            <OrderRow order={order} tableLabel={t('Стол')} onOpen={() => setDetailId(order.id)} />
-          </div>;
-        })}
-        {(history.hasNextPage || (history.isError && !orders.length)) && <button
-          type="button"
-          className="btn-secondary btn-md mt-3 w-full"
-          disabled={history.isFetching}
-          onClick={() => void (orders.length ? history.fetchNextPage({ cancelRefetch: false }) : history.refetch())}
-        >{t(history.isError ? 'Повторить' : 'Показать ещё')}</button>}
-      </Modal>
-      {detailId && <WaiterOrderDetails id={detailId} onClose={() => setDetailId(null)} />}
-  </>;
 }
 
 function WaiterOrderDetails({ id, onClose }: { id: string; onClose: () => void }) {

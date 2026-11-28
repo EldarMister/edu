@@ -98,7 +98,7 @@ export function IngredientsTab({
     try { return localStorage.getItem(columnStorageKey) ?? ''; }
     catch { return ''; }
   });
-  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [columnsOpen, setColumnsOpen] = useState<HTMLButtonElement | null>(null);
   const [creatingCategory, setCreatingCategory] = useState(false);
   const [removing, setRemoving] = useState<Ingredient | null>(null);
   const { remove } = useIngredientMutations();
@@ -117,7 +117,7 @@ export function IngredientsTab({
   const prepColumns = visibleWarehouseColumns(prepPreference, prepAvailable);
   const canExportPreparations = preparedCatalogue && can('sections.menu') && can('actions.exportReports');
   const [ingredientColumnPreference, saveIngredientColumns] = useColumnPreference('menu-ingredients');
-  const [ingredientColumnsOpen, setIngredientColumnsOpen] = useState(false);
+  const [ingredientColumnsOpen, setIngredientColumnsOpen] = useState<HTMLButtonElement | null>(null);
   const ingredientOptions = (Object.keys(ingredientColumns) as IngredientColumn[]).filter((key) => costs || !ingredientColumnSpec(key).costs);
   const ingredientDefaults = ingredientOptions.filter((key) => !ingredientColumnSpec(key).optional);
   const selectedIngredientColumns = ingredientColumnPreference
@@ -408,7 +408,7 @@ export function IngredientsTab({
       {catalogue && <WorkspaceHeaderCount count={query.data ? catalogueRows.length : undefined} />}
       {catalogue && <WorkspaceHeaderActions>
         <div className="catalogue-header-actions">
-          <ColumnButton onClick={() => setIngredientColumnsOpen(true)} />
+          <ColumnButton expanded={!!ingredientColumnsOpen} onClick={(event) => setIngredientColumnsOpen(ingredientColumnsOpen ? null : event.currentTarget)} />
           {canExportPreparations && <RecipeExportButton kind="preparations" ids={rows.map(({ id }) => id)} pending={!catalogueQuery.isSuccess} />}
           {!preparedCatalogue && can('actions.exportReports') && <button type="button" className="workspace-tool" disabled={!query.isSuccess}
             title="Экспорт CSV" onClick={() => reportCatalogue(false)}><IconExport /><span className="catalogue-action-label">Экспорт</span></button>}
@@ -437,24 +437,24 @@ export function IngredientsTab({
           onClick={hideGuide}>×</button>
       </aside>}
       {catalogue && exportError && <p role="alert" className="py-2 text-sm text-danger">{exportError}</p>}
-      {preparedCatalogue && ingredientColumnsOpen && <WarehouseColumnSettings columns={prepColumns} defaults={prepAvailable}
-        label={(key) => prepLabels[key]} onClose={() => setIngredientColumnsOpen(false)}
-        onApply={(selection) => { savePrepColumns(selection.join(',')); setIngredientColumnsOpen(false); }} />}
-      {catalogue === 'ingredients' && ingredientColumnsOpen && <WarehouseColumnSettings columns={selectedIngredientColumns} defaults={ingredientOptions}
+      {preparedCatalogue && ingredientColumnsOpen && <WarehouseColumnSettings anchor={ingredientColumnsOpen} columns={prepColumns} defaults={prepAvailable}
+        label={(key) => prepLabels[key]} onClose={() => setIngredientColumnsOpen(null)}
+        onApply={(selection) => { savePrepColumns(selection.join(',')); setIngredientColumnsOpen(null); }} />}
+      {catalogue === 'ingredients' && ingredientColumnsOpen && <WarehouseColumnSettings anchor={ingredientColumnsOpen} columns={selectedIngredientColumns} defaults={ingredientOptions}
         resetColumns={ingredientDefaults} label={(key) => ingredientColumnSpec(key).label}
-        onClose={() => setIngredientColumnsOpen(false)} onApply={(selection) => {
+        onClose={() => setIngredientColumnsOpen(null)} onApply={(selection) => {
           const value = selection.join(',');
           saveIngredientColumns(value === ingredientDefaults.join(',') ? '' : value);
-          setIngredientColumnsOpen(false);
+          setIngredientColumnsOpen(null);
         }} />}
       {!catalogue && <>
         <WorkspaceHeaderActions>
-          <ColumnButton onClick={() => setColumnsOpen(true)} />
+          <ColumnButton expanded={!!columnsOpen} onClick={(event) => setColumnsOpen(columnsOpen ? null : event.currentTarget)} />
           {canExport && <button type="button" className="workspace-tool" disabled={exporting || !query.isSuccess}
             onClick={() => void exportBalances()}><IconExport />{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
         </WorkspaceHeaderActions>
-        {columnsOpen && <WarehouseColumnSettings columns={columns} defaults={columnOptions} resetColumns={defaultColumns}
-          label={(key) => columnSpec(key).label} onClose={() => setColumnsOpen(false)}
+        {columnsOpen && <WarehouseColumnSettings anchor={columnsOpen} columns={columns} defaults={columnOptions} resetColumns={defaultColumns}
+          label={(key) => columnSpec(key).label} onClose={() => setColumnsOpen(null)}
           onApply={(selection) => {
             const selected = selection.join(',');
             const value = selected === defaultColumns.join(',') ? '' : selected;
@@ -463,7 +463,7 @@ export function IngredientsTab({
               try { localStorage.setItem(columnStorageKey, value); }
               catch { /* The selection remains available in the open table. */ }
             }
-            setColumnsOpen(false);
+            setColumnsOpen(null);
           }} />}
         {exportError && <p role="alert" className="py-2 text-sm text-danger">{exportError}</p>}
       </>}

@@ -54,7 +54,7 @@ export function OrdersPage({ scope = 'admin' }: { scope?: 'admin' | 'terminal' }
   const period = useListPeriod('orders', 'all', tr(byClose ? 'Дата закрытия' : 'Период'));
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<OrderSort>('default');
-  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [columnsOpen, setColumnsOpen] = useState<HTMLButtonElement | null>(null);
   const [savedColumns, saveColumns] = useColumnPreference(scope + '-orders');
   const columnOptions = readOnly ? availableOrderColumns.filter((key) => key !== 'actions') : availableOrderColumns;
   const defaultColumns = readOnly ? defaultOrderColumns.filter((key) => key !== 'actions') : defaultOrderColumns;
@@ -143,7 +143,7 @@ export function OrdersPage({ scope = 'admin' }: { scope?: 'admin' | 'terminal' }
       ? { width: `max(100%, calc(${orderTableWidth(columns)}px + 2 * var(--orders-gutter)))` }
       : undefined}>
       <WorkspaceHeaderActions>
-        <ColumnButton label={tr('Столбцы')} onClick={() => setColumnsOpen(true)} />
+        <ColumnButton label={tr('Столбцы')} expanded={!!columnsOpen} onClick={(event) => setColumnsOpen(columnsOpen ? null : event.currentTarget)} />
         {!readOnly && canAction('exportReports') && <OrdersExportButton filters={listFilters} disabled={!items.length || !!ordersError} />}
       </WorkspaceHeaderActions>
       <div className="orders-controls">
@@ -196,12 +196,12 @@ export function OrdersPage({ scope = 'admin' }: { scope?: 'admin' | 'terminal' }
         onEdit={readOnly ? undefined : openStatusEditor}
         onCancel={readOnly ? undefined : setCancelTarget}
       />
-      {columnsOpen && <WarehouseColumnSettings columns={columns} defaults={columnOptions} resetColumns={defaultColumns}
-        label={(key) => tr(orderColumnLabel(key))} onClose={() => setColumnsOpen(false)}
+      {columnsOpen && <WarehouseColumnSettings anchor={columnsOpen} columns={columns} defaults={columnOptions} resetColumns={defaultColumns}
+        label={(key) => tr(orderColumnLabel(key))} onClose={() => setColumnsOpen(null)}
         onApply={(selected) => {
           const value = selected.join(',');
           saveColumns(value === defaultColumns.join(',') ? '' : value);
-          setColumnsOpen(false);
+          setColumnsOpen(null);
         }} />}
       <CancelOrderModal
         open={!!cancelTarget}

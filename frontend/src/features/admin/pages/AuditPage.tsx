@@ -17,6 +17,8 @@ const ACTION_LABELS: Record<string, string> = {
   ORDER_ITEM_ADDED: 'Добавление блюда',
   ORDER_ITEM_REMOVED: 'Удаление блюда',
   ORDER_ITEM_QUANTITY_CHANGED: 'Изменение количества',
+  TABLE_CREATED: 'Добавление стола',
+  TABLE_UPDATED: 'Изменение стола',
   TABLE_CLOSED: 'Закрытие стола',
   TABLE_MOVED: 'Перенос стола',
   TABLE_TRANSFERRED: 'Передача стола',
