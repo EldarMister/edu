@@ -279,14 +279,21 @@ export class OrdersService {
     };
   }
 
-  async waiterOrderHistory(waiterId: string, cursor?: string, filter = 'all', period = 'all') {
+  async waiterOrderHistory(waiterId: string, cursor?: string, filter = 'all', period = 'all', dateFrom?: string, dateTo?: string) {
     const filters: Prisma.OrderWhereInput[] = [];
     if (period !== 'all') {
-      const days = HISTORY_PERIOD_DAYS.get(period);
-      if (!days) throw new BadRequestException('Неверный период истории заказов');
-      const now = new Date();
-      const from = warehouseDay(new Date(now.getTime() - (days - 1) * 86_400_000));
-      const range = warehouseDateRange(from, warehouseDay(now));
+      if (period === 'custom') {
+        if (typeof dateFrom !== 'string' || !dateFrom || typeof dateTo !== 'string' || !dateTo) {
+          throw new BadRequestException('Укажите начало и конец периода истории заказов');
+        }
+      } else {
+        const days = HISTORY_PERIOD_DAYS.get(period);
+        if (!days) throw new BadRequestException('Неверный период истории заказов');
+        const now = new Date();
+        dateFrom = warehouseDay(new Date(now.getTime() - (days - 1) * 86_400_000));
+        dateTo = warehouseDay(now);
+      }
+      const range = warehouseDateRange(dateFrom, dateTo);
       filters.push({
         OR: [{ closedAt: range }, { closedAt: null, createdAt: range }],
       });

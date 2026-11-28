@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Modal } from '@/components/Modal';
-import { Select } from '@/components/Select';
+import { REPORT_PERIODS, ReportPeriodFilter, type PeriodPreset } from '@/features/admin/pages/warehouse/ReportPeriodFilter';
+import { warehouseDay, warehousePeriodRange } from '@/features/admin/pages/warehouse/warehouse-period';
 import { Spinner } from '@/components/Spinner';
 import { usePermissions } from '@/hooks/usePermissions';
 import { displayOrderNumber, orderItemDisplayName, orderPlaceLabel, paymentMethodLabel, taxRateLabel } from '@/lib/format';
@@ -9,7 +10,7 @@ import { ORDER_STATUS } from '@/lib/status';
 import { useLocale } from '@/store/locale';
 import { OrderRefunds } from '@/features/refunds/OrderRefunds';
 import type { Order } from '@/types';
-import { useOrderDetails, useWaiterOrderHistory, type ArchiveFilter, type ArchivePeriod } from './api';
+import { useOrderDetails, useWaiterOrderHistory, type ArchiveFilter } from './api';
 
 const FILTERS: { value: ArchiveFilter; label: string }[] = [
   { value: 'all', label: 'Все заказы' },
@@ -17,13 +18,6 @@ const FILTERS: { value: ArchiveFilter; label: string }[] = [
   { value: 'card', label: 'Карта' },
   { value: 'qr', label: 'QR-код' },
   { value: 'refunds', label: 'Возвраты' },
-];
-
-const PERIODS: { value: ArchivePeriod; label: string }[] = [
-  { value: 'today', label: 'Сегодня' },
-  { value: 'week', label: 'За 7 дней' },
-  { value: 'month', label: 'За 30 дней' },
-  { value: 'all', label: 'За всё время' },
 ];
 
 const amounts = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -49,10 +43,13 @@ export function WaiterOrderArchive({
   const t = useT();
   const date = dates[useLocale((s) => s.locale)];
   const [filter, setFilter] = useState<ArchiveFilter>('all');
-  const [period, setPeriod] = useState<ArchivePeriod>('today');
+  const [period, setPeriod] = useState<PeriodPreset>('today');
+  const [{ from, to }, setDates] = useState({ from: '', to: '' });
+  const today = warehouseDay();
+  const range = warehousePeriodRange(period, today, from, to);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showMobileReceipt, setShowMobileReceipt] = useState(false);
-  const history = useWaiterOrderHistory(filter, period);
+  const history = useWaiterOrderHistory(filter, range);
   const orders = history.data?.pages.flatMap((page) => page.items) ?? [];
   const selected = orders.find((order) => order.id === selectedId) ?? orders[0];
 
@@ -81,15 +78,15 @@ export function WaiterOrderArchive({
             ))}
           </div>
           <div className="flex items-center gap-2">
-            <Select
-              ariaLabel={t('Период')}
-              className="h-10 w-36"
-              value={period}
-              options={PERIODS.map(({ value, label }) => ({ value, label: t(label) }))}
-              onChange={(value) => {
-                const next = PERIODS.find((option) => option.value === value);
-                if (next) { setPeriod(next.value); resetSelection(); }
-              }}
+            <ReportPeriodFilter
+              preset={period}
+              today={today}
+              range={range}
+              label={t('Период')}
+              allCaption={t('За всё время')}
+              presets={REPORT_PERIODS}
+              onPreset={(value) => { setPeriod(value); resetSelection(); }}
+              onRange={(from, to) => { setDates({ from, to }); setPeriod('custom'); resetSelection(); }}
             />
             <button type="button" className="btn-primary btn-md" onClick={onNewOrder} disabled={!canStartOrder}>
               {t('Новый заказ')}
@@ -98,7 +95,7 @@ export function WaiterOrderArchive({
         </div>
         <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(15rem,24%)_minmax(0,1fr)]">
           <div
-            key={filter + period}
+            key={[filter, range.dateFrom, range.dateTo].join(':')}
             className={`min-h-0 overflow-y-auto bg-background md:block md:border-r md:border-border ${showMobileReceipt && selected ? 'hidden' : ''}`}
           >
             {history.isPending && <div className="flex justify-center p-5 text-primary"><Spinner className="h-5 w-5" /></div>}

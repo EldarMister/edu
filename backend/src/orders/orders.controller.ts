@@ -49,8 +49,10 @@ export class OrdersController {
     @Query('cursor') cursor?: string,
     @Query('filter') filter?: string,
     @Query('period') period?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
   ) {
-    return this.orders.waiterOrderHistory(user.id, cursor, filter, period);
+    return this.orders.waiterOrderHistory(user.id, cursor, filter, period, dateFrom, dateTo);
   }
 
   @Get('item-cancellation-requests')

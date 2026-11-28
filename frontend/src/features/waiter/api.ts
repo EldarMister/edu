@@ -40,21 +40,21 @@ export function useWaiterCabinet(period: 'day' | 'week' | 'month' = 'week') {
 }
 
 export type ArchiveFilter = 'all' | 'cash' | 'card' | 'qr' | 'refunds';
-export type ArchivePeriod = 'today' | 'week' | 'month' | 'all';
 
 type ArchiveOrder = CabinetRecentOrder & {
   closedAt?: string | null;
   items?: Pick<Order['items'][number], 'dishNameSnapshot' | 'dishVariantNameSnapshot'>[];
 };
 
-export function useWaiterOrderHistory(filter: ArchiveFilter, period: ArchivePeriod) {
+export function useWaiterOrderHistory(filter: ArchiveFilter, { dateFrom, dateTo }: { dateFrom?: string; dateTo?: string }) {
+  const period = dateFrom && dateTo ? 'custom' : 'all';
   return useInfiniteQuery({
-    queryKey: ['orders', 'waiter-history', filter, period],
+    queryKey: ['orders', 'waiter-history', filter, dateFrom, dateTo],
     initialPageParam: null as string | null,
     queryFn: async ({ pageParam, signal }) => (await api.get<{
       items: ArchiveOrder[];
       nextCursor: string | null;
-    }>('/orders/history', { params: { cursor: pageParam, filter, period }, signal })).data,
+    }>('/orders/history', { params: { cursor: pageParam, filter, period, dateFrom, dateTo }, signal })).data,
     getNextPageParam: (page) => page.nextCursor,
   });
 }
