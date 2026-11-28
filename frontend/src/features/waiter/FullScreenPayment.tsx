@@ -9,7 +9,7 @@ import { PaymentKeypad, type PaymentKey } from './PaymentKeypad';
 import { normalizeAmount, quickCashAmounts, tenderTotals, type TenderAmounts, type TenderMethod } from './paymentAmounts';
 import { PaymentQrPreview } from './PaymentQrPreview';
 import { SplitBillMenu } from './SplitBillMenu';
-import type { SplitMode } from './splitBillModel';
+import type { AmountSplitMode, SplitMode } from './splitBillModel';
 
 const METHODS = [
   { value: 'cash', label: 'Наличные', Icon: IconCash },
@@ -39,7 +39,7 @@ export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, 
   error: string;
   splitOpen: boolean;
   onClose: () => void;
-  onSplitAmount: () => void;
+  onSplitAmount: (mode: AmountSplitMode) => void;
   onSplitItems?: () => void;
   onConfirm: (amounts: TenderAmounts, active: TenderMethod) => void;
 }) {
@@ -63,7 +63,7 @@ export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, 
   const qrMissing = !qrImageUrl && (entered.qr > 0 || (total === 0 && selected === 'qr'));
   const canSplitAmount = methods.some(({ value }) => value !== 'qr' || !!qrImageUrl) && Math.round(total * 100) >= 2;
   const availableSplitModes: SplitMode[] = [];
-  if (allItemsServed && canSplitAmount) availableSplitModes.push('amount');
+  if (allItemsServed && canSplitAmount) availableSplitModes.push('amount', 'equal');
   if (allItemsServed && onSplitItems) availableSplitModes.push('items');
   const cashDue = amounts.cash + remaining;
   const cashPresets = enabled.includes('cash') ? quickCashAmounts(cashDue) : [];
@@ -199,9 +199,9 @@ export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, 
               onClick={(event) => setSplitAnchor(splitAnchor ? null : event.currentTarget)}>
               {t('Разделить')}
             </button>
-            {splitAnchor && !busy && !splitOpen && <SplitBillMenu anchor={splitAnchor} modes={['amount', 'items']}
+            {splitAnchor && !busy && !splitOpen && <SplitBillMenu anchor={splitAnchor} modes={['amount', 'items', 'equal']}
               availableModes={availableSplitModes} onClose={() => setSplitAnchor(null)}
-              onSelect={(mode) => { if (mode === 'amount') onSplitAmount(); else onSplitItems?.(); }} />}
+              onSelect={(mode) => { if (mode === 'items') onSplitItems?.(); else onSplitAmount(mode); }} />}
             <button type="button" className="payment-button btn-primary btn-lg grow font-semibold"
               disabled={!canConfirm} onClick={() => { if (canConfirm) onConfirm(amounts, selected); }}>
               {busy ? <Spinner /> : t('Принять оплату')}

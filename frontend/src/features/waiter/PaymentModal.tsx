@@ -96,6 +96,7 @@ export function PaymentModal({
   const [draft, setDraft] = useState(EMPTY_AMOUNTS);
   // Окно «Разделение счёта».
   const [splitOpen, setSplitOpen] = useState(!!initialSplitMode);
+  const [splitMode, setSplitMode] = useState<AmountSplitMode>(initialSplitMode ?? 'amount');
 
   const qrImageUrl = resolveQrSrc(settings.data?.qrImageUrl);
   const enabled = settings.data?.paymentMethods ?? (['qr', 'cash'] as PaymentMethod[]);
@@ -391,9 +392,9 @@ export function PaymentModal({
   }
 
   const splitBill = <SplitBillSheet
-    key={order.id}
+    key={order.id + ':' + splitMode}
     open={splitOpen}
-    mode={initialSplitMode}
+    mode={splitMode}
     total={total}
     wideLayout={useDesktopPayment}
     paymentMethods={available.map(({ value }) => value)}
@@ -409,7 +410,8 @@ export function PaymentModal({
     <>
       <FullScreenPayment order={order} enabled={enabled} qrImageUrl={qrImageUrl} allItemsServed={allActiveItemsServed}
         open={open} busy={pay.isPending} error={error} splitOpen={splitOpen} onClose={close}
-        onSplitAmount={() => setSplitOpen(true)} onSplitItems={onSplitItems} onConfirm={confirmTender} />
+        onSplitAmount={(mode) => { setSplitMode(mode); setSplitOpen(true); }}
+        onSplitItems={onSplitItems} onConfirm={confirmTender} />
       {splitBill}
     </>,
     document.body,
