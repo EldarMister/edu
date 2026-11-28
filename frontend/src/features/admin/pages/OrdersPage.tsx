@@ -8,7 +8,7 @@ import { displayOrderNumber, money, orderPlaceLabel } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
-import { normalizeOrderPaymentMethod, OrdersFilters, type OrderSort } from '../components/OrdersFilters';
+import { normalizeOrderPaymentMethod, OrdersFilters, type OrderFilter, type OrderSort } from '../components/OrdersFilters';
 import { availableOrderColumns, defaultOrderColumns, orderColumnLabel, orderTableWidth, OrdersTable } from '../components/OrdersTable';
 import { OrdersExportButton } from '../components/OrdersExportButton';
 import { ColumnButton } from '../components/ColumnControl';
@@ -45,6 +45,7 @@ export function OrdersPage({ scope = 'admin' }: { scope?: 'admin' | 'terminal' }
   const tr = useT();
   const [{ ordersTab: tab, ordersPaymentMethod, ordersComments, ordersType }, updateView] = usePageFilters({
     ordersTab: 'all', ordersPaymentMethod: '', ordersComments: '', ordersType: '',
+    ordersPeriod: 'all', ordersFrom: '', ordersTo: '', ordersPage: '1', ordersExpanded: '',
   });
   const byClose = tab === 'paid';
   const paymentMethod = normalizeOrderPaymentMethod(ordersPaymentMethod);
@@ -79,6 +80,19 @@ export function OrdersPage({ scope = 'admin' }: { scope?: 'admin' | 'terminal' }
     { value: '', label: tr('Все официанты') },
     ...(waiters.data ?? []).map((w) => ({ value: w.id, label: w.name })),
   ];
+
+  function clearFilters(hidden: OrderFilter[]) {
+    const patch = {
+      ...(hidden.includes('period') && { ordersPeriod: 'all', ordersFrom: '', ordersTo: '', ordersPage: '1', ordersExpanded: '' }),
+      ...(hidden.includes('status') && { ordersTab: 'all' }),
+      ...(hidden.includes('type') && { ordersType: '' }),
+      ...(hidden.includes('payment') && { ordersPaymentMethod: '' }),
+      ...(hidden.includes('comments') && { ordersComments: '' }),
+    };
+    if (Object.keys(patch).length) updateView(patch);
+    if (hidden.includes('waiter')) setWaiterId('');
+    if (hidden.includes('sort')) setSort('default');
+  }
 
   const filters: OrderListFilters = { tab, search, paymentMethod, waiterId, comments, orderType: ORDER_TYPES.find(({ value }) => value === ordersType)?.value, ...period.range, ...(byClose && { dateField: 'closed' }) };
   const listFilters = { ...filters, ...sortRequest(sort) };
@@ -164,7 +178,10 @@ export function OrdersPage({ scope = 'admin' }: { scope?: 'admin' | 'terminal' }
         </div>
 
         <OrdersFilters
+          scope={scope}
           periodFilter={period.filter}
+          periodActive={period.active}
+          onClearFilters={clearFilters}
           orderType={ordersType}
           onOrderTypeChange={(ordersType) => updateView({ ordersType })}
           tab={tab}

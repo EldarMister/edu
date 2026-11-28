@@ -51,24 +51,27 @@
   margin: 14px 0 17px;
 }
 
-.orders-more-filters {
-  display: inline-flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding-inline: 14px;
+.orders-filter-settings {
+  display: grid;
+  flex: 0 0 44px;
+  height: 46px;
+  place-items: center;
+  border: 1px solid rgb(var(--edu-border));
+  border-radius: 11px;
+  background: rgb(var(--edu-card));
+  color: rgb(var(--edu-text));
 }
 
-.orders-extra-filters:not([hidden]) {
-  display: flex;
-  flex: 1 0 100%;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
+.orders-filter-settings:hover,
+.orders-filter-settings[aria-expanded='true'] {
+  border-color: rgb(var(--edu-link) / .55);
+  background: rgb(var(--edu-primary) / .09);
 }
 
-.orders-extra-filters .orders-filter-control { max-width: 100%; }
+.orders-filter-settings:focus-visible {
+  outline: 2px solid rgb(var(--edu-focus));
+  outline-offset: 2px;
+}
 
 .orders-filter-control,
 .orders-period-filter > .report-period-trigger {
@@ -250,5 +253,4 @@
   .orders-filters > .orders-filter-control,
   .orders-period-filter { flex: 1 1 auto; width: auto; max-width: 100%; }
   .orders-search-wrap { flex-basis: 100%; max-width: none; }
-  .orders-extra-filters .orders-filter-control { width: 100%; }
 }

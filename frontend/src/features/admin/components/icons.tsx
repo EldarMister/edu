@@ -143,6 +143,9 @@ export const IconPrinter = (p: P) => (
     <rect x="6" y="14" width="12" height="8" rx="1" />
   </S>
 );
+export const IconSliders = (p: P) => (
+  <S {...p}><path d="M3 6h18M3 12h18M3 18h18M8 3v6M16 9v6M10 15v6" /></S>
+);
 export const IconColumns = (p: P) => (
   <S {...p}><rect x="2" y="4" width="20" height="16" rx="1.5" /><path d="M2 9h20M9 4v16M16 4v16" /></S>
 );

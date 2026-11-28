@@ -7,8 +7,16 @@ function readPreference(key: string, fallback: string) {
 }
 
 export function useColumnPreference(view: string, fallback = ''): [string, (value: string) => void] {
+  return useVisibilityPreference('columns', view, fallback);
+}
+
+export function useFilterPreference(view: string, fallback: string): [string, (value: string) => void] {
+  return useVisibilityPreference('filters', view, fallback);
+}
+
+function useVisibilityPreference(kind: 'columns' | 'filters', view: string, fallback: string): [string, (value: string) => void] {
   const userId = useAuth((state) => state.user?.id);
-  const key = `edu-pos-columns:${userId ?? 'guest'}:${view}`;
+  const key = `edu-pos-${kind}:${userId ?? 'guest'}:${view}`;
   const [saved, setSaved] = useState(() => ({ key, value: readPreference(key, fallback) }));
 
   return [saved.key === key ? saved.value : readPreference(key, fallback), (value) => {

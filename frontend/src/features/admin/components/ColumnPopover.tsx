@@ -3,16 +3,19 @@ import { createPortal } from 'react-dom';
 import { useT } from '@/lib/i18n';
 import './column-popover.css';
 
-export function ColumnPopover({ anchor, onClose, children, onReset }: {
+export function ColumnPopover({ anchor, onClose, children, onReset, title, align = 'end' }: {
   anchor: HTMLButtonElement;
   onClose: () => void;
   children: ReactNode;
   onReset?: () => void;
+  title?: string;
+  align?: 'start' | 'end';
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
   close.current = onClose;
   const t = useT();
+  const heading = title ?? t('Отображать столбцы');
 
   useLayoutEffect(() => {
     const element = panel.current;
@@ -22,7 +25,8 @@ export function ColumnPopover({ anchor, onClose, children, onReset }: {
       if (!element || !anchor.isConnected) { close.current(); return; }
       const rect = anchor.getBoundingClientRect();
       const width = Math.min(270, window.innerWidth - 2 * gap);
-      const left = Math.max(gap, Math.min(rect.right - width, window.innerWidth - width - gap));
+      const anchorEdge = align === 'start' ? rect.left : rect.right - width;
+      const left = Math.max(gap, Math.min(anchorEdge, window.innerWidth - width - gap));
       const below = window.innerHeight - rect.bottom - 2 * gap;
       const above = rect.top - 2 * gap;
       const openAbove = below < 320 && above > below;
@@ -56,14 +60,14 @@ export function ColumnPopover({ anchor, onClose, children, onReset }: {
       document.removeEventListener('keydown', closeFromKeyboard);
       document.removeEventListener('pointerdown', closeFromPointer);
     };
-  }, [anchor]);
+  }, [align, anchor]);
 
   return createPortal(
-    <div ref={panel} role="dialog" aria-label={t('Отображать столбцы')} className="column-popover"
+    <div ref={panel} role="dialog" aria-label={heading} className="column-popover"
       onBlur={(event) => {
         if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget) && event.relatedTarget !== anchor) onClose();
       }}>
-      <h3 className="column-popover-title">{t('Отображать столбцы')}</h3>
+      <h3 className="column-popover-title">{heading}</h3>
       <div className="column-popover-options app-scrollbar-subtle">{children}</div>
       {onReset && <div className="column-popover-footer">
         <button type="button" onClick={onReset}>

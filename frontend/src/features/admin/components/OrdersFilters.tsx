@@ -1,7 +1,9 @@
-import { useId, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useRef, useState, type ReactNode } from 'react';
 import { Select, type SelectOption } from '@/components/Select';
 import { useT } from '@/lib/i18n';
-import { IconX } from './icons';
+import { useFilterPreference } from '@/hooks/useColumnPreference';
+import { ColumnCheckbox, ColumnPopover } from './ColumnPopover';
+import { IconSliders, IconX } from './icons';
 import { ORDER_TYPES } from '@/features/waiter/OrderFulfillmentFields';
 
 export type OrderSort = 'default' | 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc';
@@ -39,8 +41,16 @@ const SORT_OPTIONS: { value: OrderSort; label: string }[] = [
   { value: 'amount_asc', label: 'Сумма: меньше → больше' },
 ];
 
+export type OrderFilter = 'period' | 'status' | 'type' | 'payment' | 'waiter' | 'comments' | 'sort';
+
+const DEFAULT_FILTERS: OrderFilter[] = ['period', 'status'];
+const DEFAULT_FILTER_PREFERENCE = DEFAULT_FILTERS.join(',');
+
 type Props = {
+  scope: 'admin' | 'terminal';
   periodFilter: ReactNode;
+  periodActive: boolean;
+  onClearFilters: (filters: OrderFilter[]) => void;
   orderType: string;
   onOrderTypeChange: (value: string) => void;
   tab: string;
@@ -61,30 +71,76 @@ type Props = {
 export function OrdersFilters(props: Props) {
   const tr = useT();
   const ctrl = 'orders-filter-control';
-  const advancedId = useId();
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const activeCount = [props.orderType, props.paymentMethod, props.waiterId, props.comments, props.sort !== 'default'].filter(Boolean).length;
+  const title = tr('Отображать фильтры');
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  const [saved, save] = useFilterPreference(props.scope + '-orders', DEFAULT_FILTER_PREFERENCE);
+  const preferred = saved.split(',');
+  const filters: { key: OrderFilter; label: string; active: boolean; control: ReactNode }[] = [
+    {
+      key: 'period', label: 'Период', active: props.periodActive,
+      control: <div className="orders-period-filter">{props.periodFilter}</div>,
+    },
+    {
+      key: 'status', label: 'Статус заказа', active: props.tab !== 'all',
+      control: <Select className={`${ctrl} orders-status-select`} ariaLabel={tr('Статус заказа')}
+        value={props.tab} onChange={props.onTabChange} options={STATUS_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />,
+    },
+    {
+      key: 'type', label: 'Тип заказа', active: !!props.orderType,
+      control: <Select className={ctrl} ariaLabel={tr('Тип заказа')} value={props.orderType} onChange={props.onOrderTypeChange}
+        options={[{ value: '', label: tr('Все типы заказов') }, ...ORDER_TYPES.map(({ value, label }) => ({ value, label: tr(label) }))]} />,
+    },
+    {
+      key: 'payment', label: 'Способ оплаты', active: !!props.paymentMethod,
+      control: <Select className={`${ctrl} orders-payment-select`} ariaLabel={tr('Способ оплаты')}
+        value={props.paymentMethod} onChange={props.onPaymentMethodChange} options={PAYMENT_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />,
+    },
+    {
+      key: 'waiter', label: 'Официант', active: !!props.waiterId,
+      control: <Select className={`${ctrl} orders-waiter-select`} ariaLabel={tr('Официант')}
+        value={props.waiterId} onChange={props.onWaiterChange} options={props.waiterOptions} />,
+    },
+    {
+      key: 'comments', label: 'Комментарии к чекам', active: !!props.comments,
+      control: <Select className={`${ctrl} orders-comment-select`} ariaLabel={tr('Комментарии к чекам')}
+        value={props.comments} onChange={props.onCommentsChange} options={COMMENT_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />,
+    },
+    {
+      key: 'sort', label: 'Сортировка', active: props.sort !== 'default',
+      control: <Select className={`${ctrl} orders-sort-select`} ariaLabel={tr('Сортировка')}
+        value={props.sort} onChange={(value) => props.onSortChange(value as OrderSort)} options={SORT_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />,
+    },
+  ];
+  const visible = filters.filter(({ key, active }) => active || preferred.includes(key));
+
+  function toggleFilter(key: OrderFilter, checked: boolean) {
+    const keys = filters.filter((filter) => filter.key === key ? checked : preferred.includes(filter.key));
+    save(keys.map((filter) => filter.key).join(','));
+    if (!checked && filters.some((filter) => filter.key === key && filter.active)) props.onClearFilters([key]);
+  }
+
+  function resetVisibility() {
+    save(DEFAULT_FILTER_PREFERENCE);
+    const hidden = filters.filter(({ key, active }) => active && !DEFAULT_FILTERS.includes(key)).map(({ key }) => key);
+    if (hidden.length) props.onClearFilters(hidden);
+  }
+
   return (
     <div className="orders-filters">
-      <div className="orders-period-filter">{props.periodFilter}</div>
-      <Select className={`${ctrl} orders-status-select`} ariaLabel={tr('Статус заказа')} value={props.tab} onChange={props.onTabChange} options={STATUS_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />
-      <button type="button" className={`${ctrl} orders-more-filters`} aria-expanded={advancedOpen}
-        aria-controls={advancedId} onClick={() => setAdvancedOpen((open) => !open)}>
-        <span>{tr('Фильтры')}{activeCount > 0 && ` (${activeCount})`}</span>
-        <svg aria-hidden="true" className={advancedOpen ? 'rotate-180' : ''} width="16" height="16"
-          viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-          <path d="m6 9 6 6 6-6" />
-        </svg>
+      <button type="button" className="orders-filter-settings" title={title} aria-label={title}
+        aria-haspopup="dialog" aria-expanded={anchor !== null}
+        onClick={(event) => setAnchor(anchor ? null : event.currentTarget)}>
+        <IconSliders aria-hidden="true" />
       </button>
+      {visible.map(({ key, control }) => <Fragment key={key}>{control}</Fragment>)}
       <OrdersSearchField value={props.search} onChange={props.onSearchChange} />
-      <div id={advancedId} className="orders-extra-filters" hidden={!advancedOpen}>
-        <Select className={ctrl} ariaLabel={tr('Тип заказа')} value={props.orderType} onChange={props.onOrderTypeChange}
-          options={[{ value: '', label: tr('Все типы заказов') }, ...ORDER_TYPES.map(({ value, label }) => ({ value, label: tr(label) }))]} />
-        <Select className={`${ctrl} orders-payment-select`} ariaLabel={tr('Способ оплаты')} value={props.paymentMethod} onChange={props.onPaymentMethodChange} options={PAYMENT_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />
-        <Select className={`${ctrl} orders-waiter-select`} ariaLabel={tr('Официант')} value={props.waiterId} onChange={props.onWaiterChange} options={props.waiterOptions} />
-        <Select className={`${ctrl} orders-comment-select`} ariaLabel={tr('Комментарии к чекам')} value={props.comments} onChange={props.onCommentsChange} options={COMMENT_OPTIONS.map((option) => ({ ...option, label: tr(option.label) }))} />
-        <Select className={`${ctrl} orders-sort-select`} value={props.sort} onChange={(value) => props.onSortChange(value as OrderSort)} options={SORT_OPTIONS.map((option) => ({ ...option, label: tr(option.label) }))} />
-      </div>
+      {anchor && <ColumnPopover anchor={anchor} title={title} align="start" onClose={() => setAnchor(null)} onReset={resetVisibility}>
+        {filters.map(({ key, active, label }) =>
+          <ColumnCheckbox key={key} checked={active || preferred.includes(key)} onChange={(checked) => toggleFilter(key, checked)}>
+            {tr(label)}
+          </ColumnCheckbox>,
+        )}
+      </ColumnPopover>}
     </div>
   );
 }
