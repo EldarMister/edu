@@ -4,7 +4,7 @@ import { waiterItemPermission, waiterOrderPermission } from '@/lib/order-permiss
 import { useEffect, useState } from 'react';
 import type { Order, OrderItemStatus, OrderSetComponent } from '@/types';
 import { OrderStatusBadges } from '@/components/StatusBadge';
-import { ORDER_STATUS, orderStationStatuses } from '@/lib/status';
+import { ORDER_STATUS } from '@/lib/status';
 import { usePendingItemCancellations } from '@/features/requests/item-cancellations';
 import { displayOrderNumber, money, orderItemDisplayName, orderPlaceLabel } from '@/lib/format';
 import { useT } from '@/lib/i18n';
@@ -172,19 +172,18 @@ export function OrderPanel({
     );
   }
 
-  const showReadyInHeader = order.status === 'ready' && orderStationStatuses(order).length === 0;
-  const statusBadges = <OrderStatusBadges order={order} size="sm" className="flex flex-wrap items-center gap-1" />;
-
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-border pb-1.5">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight text-text-primary">
-            {t('Заказ')} {displayOrderNumber(order.orderNumber)}
-            <span className="ml-2 text-[13px] font-normal text-text-muted">{orderPlaceLabel(order, t)}</span>
+          <h2 className="flex min-w-0 flex-1 items-baseline gap-2 text-[15px] font-semibold leading-tight text-text-primary">
+            <span className="shrink-0 whitespace-nowrap">{t('Заказ')} {displayOrderNumber(order.orderNumber)}</span>
+            <span className="min-w-0 truncate text-[13px] font-normal text-text-muted">{orderPlaceLabel(order, t)}</span>
           </h2>
-          <div className="flex shrink-0 items-center gap-2">
-            {showReadyInHeader && statusBadges}
+          <div className="min-w-0 max-w-[55%]">
+            <OrderStatusBadges order={order} size="sm" />
+          </div>
+          <div className="flex shrink-0 items-center gap-2 empty:hidden">
             {unclaimedQr && (
               <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
                 QR
@@ -209,7 +208,6 @@ export function OrderPanel({
           className="mt-2 h-9 w-full max-w-52" disabled={submitting}
           options={relatedChecks.map((check) => ({ value: check.id, label: `${t('Чек')} ${displayOrderNumber(check.orderNumber)}` }))}
           onChange={onSelectCheck} />}
-        {!showReadyInHeader && <div className="mt-1.5">{statusBadges}</div>}
       </div>
 
       {/* Позиции — компактный список */}
