@@ -8,6 +8,8 @@ import type { Order } from '@/types';
 import { PaymentKeypad, type PaymentKey } from './PaymentKeypad';
 import { normalizeAmount, quickCashAmounts, tenderTotals, type TenderAmounts, type TenderMethod } from './paymentAmounts';
 import { PaymentQrPreview } from './PaymentQrPreview';
+import { SplitBillMenu } from './SplitBillMenu';
+import type { SplitMode } from './splitBillModel';
 
 const METHODS = [
   { value: 'cash', label: 'Наличные', Icon: IconCash },
@@ -27,7 +29,7 @@ function animatePaymentButton(event: MouseEvent<HTMLDivElement>) {
 }
 
 export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, open, busy, error,
-  splitOpen, onClose, onSplit, onConfirm }: {
+  splitOpen, onClose, onSplitAmount, onSplitItems, onConfirm }: {
   order: Order;
   enabled: readonly string[];
   qrImageUrl: string | null;
@@ -37,13 +39,15 @@ export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, 
   error: string;
   splitOpen: boolean;
   onClose: () => void;
-  onSplit: () => void;
+  onSplitAmount: () => void;
+  onSplitItems?: () => void;
   onConfirm: (amounts: TenderAmounts, active: TenderMethod) => void;
 }) {
   const t = useT();
   const [draft, setDraft] = useState(EMPTY);
   const [active, setActive] = useState<TenderMethod>();
   const replaceAmount = useRef(true);
+  const [splitAnchor, setSplitAnchor] = useState<HTMLButtonElement | null>(null);
   const splitTrigger = useRef<HTMLButtonElement>(null);
   const prevSplitOpen = useRef(false);
   const total = Number(order.finalAmount);
@@ -57,7 +61,10 @@ export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, 
   const { amounts, remaining, change, over } = tenderTotals(total, entered);
   const showQrWarning = !qrImageUrl && (selected === 'qr' || entered.qr > 0);
   const qrMissing = !qrImageUrl && (entered.qr > 0 || (total === 0 && selected === 'qr'));
-  const canSplit = methods.some(({ value }) => value !== 'qr' || !!qrImageUrl) && Math.round(total * 100) >= 2;
+  const canSplitAmount = methods.some(({ value }) => value !== 'qr' || !!qrImageUrl) && Math.round(total * 100) >= 2;
+  const availableSplitModes: SplitMode[] = [];
+  if (allItemsServed && canSplitAmount) availableSplitModes.push('amount');
+  if (allItemsServed && onSplitItems) availableSplitModes.push('items');
   const cashDue = amounts.cash + remaining;
   const cashPresets = enabled.includes('cash') ? quickCashAmounts(cashDue) : [];
   const canConfirm = selected && allItemsServed && !busy && !remaining && !over && !qrMissing;
@@ -187,9 +194,14 @@ export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, 
 
           <div className="mt-auto flex flex-wrap items-center gap-3 border-t border-border pt-4">
             <button ref={splitTrigger} type="button" className="payment-button btn-secondary btn-lg grow whitespace-nowrap"
-              disabled={busy || !allItemsServed || !canSplit} onClick={onSplit}>
-              {t('Разделить по сумме')}
+              disabled={busy || splitOpen || !availableSplitModes.length}
+              aria-haspopup="dialog" aria-expanded={!!splitAnchor}
+              onClick={(event) => setSplitAnchor(splitAnchor ? null : event.currentTarget)}>
+              {t('Разделить')}
             </button>
+            {splitAnchor && !busy && !splitOpen && <SplitBillMenu anchor={splitAnchor} modes={['amount', 'items']}
+              availableModes={availableSplitModes} onClose={() => setSplitAnchor(null)}
+              onSelect={(mode) => { if (mode === 'amount') onSplitAmount(); else onSplitItems?.(); }} />}
             <button type="button" className="payment-button btn-primary btn-lg grow font-semibold"
               disabled={!canConfirm} onClick={() => { if (canConfirm) onConfirm(amounts, selected); }}>
               {busy ? <Spinner /> : t('Принять оплату')}

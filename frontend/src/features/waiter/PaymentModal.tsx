@@ -38,7 +38,7 @@ const METHOD_LABELS: Record<PaymentMethod, string> = {
   mixed: 'Смешанная',
 };
 
-const TOUCH_PHONE = '(pointer: coarse) and (max-width: 1023px)';
+const TOUCH_PHONE = '(pointer: coarse) and (max-height: 599px)';
 
 function subscribeToTouchPhone(onChange: () => void) {
   const query = window.matchMedia(TOUCH_PHONE);
@@ -56,6 +56,7 @@ export function PaymentModal({
   open,
   onClose,
   onPaid,
+  onSplitItems,
   initialSplitMode,
 }: {
   order: Order;
@@ -63,6 +64,7 @@ export function PaymentModal({
   open: boolean;
   onClose: () => void;
   onPaid: () => void;
+  onSplitItems?: () => void;
   initialSplitMode?: AmountSplitMode;
 }) {
   const t = useT();
@@ -407,7 +409,7 @@ export function PaymentModal({
     <>
       <FullScreenPayment order={order} enabled={enabled} qrImageUrl={qrImageUrl} allItemsServed={allActiveItemsServed}
         open={open} busy={pay.isPending} error={error} splitOpen={splitOpen} onClose={close}
-        onSplit={() => setSplitOpen(true)} onConfirm={confirmTender} />
+        onSplitAmount={() => setSplitOpen(true)} onSplitItems={onSplitItems} onConfirm={confirmTender} />
       {splitBill}
     </>,
     document.body,

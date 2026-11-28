@@ -49,7 +49,7 @@ export function ColumnPopover({ anchor, onClose, children, onReset, title, align
       if (event.target instanceof Node && !element?.contains(event.target) && !anchor.contains(event.target)) close.current();
     }
     place();
-    element.querySelector<HTMLElement>('input:not([disabled]), button')?.focus({ preventScroll: true });
+    element.querySelector<HTMLElement>('input:not([disabled]), button:not([disabled])')?.focus({ preventScroll: true });
     window.addEventListener('resize', place);
     window.addEventListener('scroll', place, true);
     document.addEventListener('keydown', closeFromKeyboard);

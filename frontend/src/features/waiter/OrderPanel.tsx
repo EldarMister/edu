@@ -1,5 +1,5 @@
-import { ColumnPopover } from '@/features/admin/components/ColumnPopover';
-import { SPLIT_OPTIONS, type SplitMode } from './splitBillModel';
+import { SplitBillMenu } from './SplitBillMenu';
+import type { SplitMode } from './splitBillModel';
 import { IconPrinter, IconSplit } from '@/features/admin/components/icons';
 import { usePublicSettings } from '@/features/settings/api';
 import { waiterItemPermission, waiterOrderPermission } from '@/lib/order-permissions';
@@ -395,14 +395,8 @@ export function OrderPanel({
               </button>}
             </div>
           )}
-          {splitAnchor && showSplit && !splitDisabled && <ColumnPopover anchor={splitAnchor} title={t('Разделить счёт')}
-            onClose={() => setSplitAnchor(null)}>
-            {SPLIT_OPTIONS.map(({ value, label }) => <button type="button" key={value}
-              className="block w-full rounded-md px-2 py-2 text-left text-sm hover:bg-primary/10 disabled:opacity-50"
-              disabled={!splitModes.includes(value)} onClick={() => { setSplitAnchor(null); onSplitOrder(value); }}>
-              {t(label)}
-            </button>)}
-          </ColumnPopover>}
+          {splitAnchor && showSplit && !splitDisabled && <SplitBillMenu anchor={splitAnchor} availableModes={splitModes}
+            onClose={() => setSplitAnchor(null)} onSelect={onSplitOrder} />}
           <ActionButton
             order={order}
             submitting={submitting}
