@@ -196,7 +196,7 @@ function linesToItems(lines: CartLine[]) {
   }));
 }
 
-export type DeliveryDetails = { customerName: string; customerPhone: string; deliveryAddress?: string; type?: 'delivery' | 'pickup'; deliveryFee?: number; pickupTime?: string };
+export type DeliveryDetails = { type: 'delivery' };
 
 export function useUpdateOrderFulfillment() {
   const queryClient = useQueryClient();

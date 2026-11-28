@@ -367,16 +367,18 @@ export function OrderDetailScreen() {
       );
     }
     switch (order.status) {
-      case 'ready':
+      case 'ready': {
+        const needsCourier = order.source === 'delivery' && Boolean(order.externalOrderId || order.deliveryAddress);
         return (
           <Button
-            title={cooldownActive ? String(actionCooldown) : order.source === 'delivery' ? 'Передать курьеру'
-              : order.source === 'pickup' ? 'Выдать заказ' : 'Вынес гостям'}
+            title={cooldownActive ? String(actionCooldown) : needsCourier ? 'Передать курьеру'
+              : isOffsite(order.source) ? 'Выдать заказ' : 'Вынес гостям'}
             loading={busy && !cooldownActive}
             disabled={cooldownActive}
-            onPress={() => runProtectedAction(() => (order.source === 'delivery' ? pickedUp : served).mutate(order.id, { onError }))}
+            onPress={() => runProtectedAction(() => (needsCourier ? pickedUp : served).mutate(order.id, { onError }))}
           />
         );
+      }
       case 'picked_up':
         return (
           <Button
@@ -503,7 +505,7 @@ export function OrderDetailScreen() {
       </View>
 
       <SheetScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-        {canAction('createDeliveryOrders') && order.updatedAt && order.source !== 'qr' && !order.externalOrderId
+        {canAction('createDeliveryOrders') && order.updatedAt && order.source !== 'qr' && order.source !== 'pickup' && !order.externalOrderId
           && !order.splitFromOrderId && family.length <= 1 && ['sent_to_kitchen', 'ready'].includes(order.status)
           && order.items.every((item) => ['new', 'cancelled', 'rejected'].includes(item.status) || item.prepStation === 'none')
           && waiterOrderPermission(order, 'edit', policies).allowed ? <EditOrderFulfillment order={order} /> : null}

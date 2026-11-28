@@ -1,5 +1,5 @@
 import { OrdersScreen as OrdersRegister } from '@/screens/admin/OrdersScreen';
-import { ORDER_TYPES, orderType, type OrderType } from './orderRules';
+import { TERMINAL_ORDER_TYPES, orderType, type TerminalOrderType } from './orderRules';
 import { FlatList, RefreshControl, View, SafeAreaView } from '@/components/themed';
 import { gridLayout } from '@/lib/layout';
 import React, { memo } from 'react';
@@ -70,7 +70,7 @@ export function OrdersScreen() {
   const [archiveOpen, setArchiveOpen] = React.useState(false);
   const [showAllOrders, setShowAllOrders] = React.useState(false);
   const showRegister = canViewAllOrders && showAllOrders;
-  const [typeFilter, setTypeFilter] = React.useState<OrderType | 'all'>('all');
+  const [typeFilter, setTypeFilter] = React.useState<TerminalOrderType | 'all'>('all');
   const [menuFor, setMenuFor] = React.useState<{ order: Order; top: number; left: number } | null>(null);
   const [menuRender, setMenuRender] = React.useState<{ order: Order; top: number; left: number } | null>(null);
   const menuProgress = useSharedValue(0);
@@ -286,7 +286,7 @@ export function OrdersScreen() {
         ) : (
           <>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs }}>
-              {[{ value: 'all', label: 'Все' } as const, ...ORDER_TYPES].map(({ value, label }) =>
+              {[{ value: 'all', label: 'Все' } as const, ...TERMINAL_ORDER_TYPES].map(({ value, label }) =>
                 <Button key={value} title={label} size="md" variant={typeFilter === value ? 'primary' : 'secondary'}
                   onPress={() => setTypeFilter(value)} />)}
             </View>

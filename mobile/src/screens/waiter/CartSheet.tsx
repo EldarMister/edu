@@ -25,8 +25,6 @@ export function CartSheet({
   submitLabel,
   delivery = false,
   typeControl,
-  customerFields,
-  deliveryFee,
   roundTotal = false,
 }: {
   visible: boolean;
@@ -36,8 +34,6 @@ export function CartSheet({
   submitLabel: string;
   delivery?: boolean;
   typeControl?: React.ReactNode;
-  customerFields?: React.ReactNode;
-  deliveryFee?: number;
   roundTotal?: boolean;
 }) {
   const focused = useIsFocused();
@@ -72,7 +68,7 @@ export function CartSheet({
 
   const footer = (
     <View style={styles.footerContent}>
-      {hasLines && commentOpen && !customerFields ? (
+      {hasLines && commentOpen ? (
         <TextInput
           value={comment}
           editable={!submitting}
@@ -83,11 +79,7 @@ export function CartSheet({
           autoFocus
         />
       ) : null}
-      {deliveryFee !== undefined ? <>
-        <View style={styles.totalRow}><Text style={styles.takeawayLabel} translate>Стоимость блюд</Text><Text style={styles.takeawayLabel}>{money(totals.total)}</Text></View>
-        <View style={styles.totalRow}><Text style={styles.takeawayLabel} translate>Доставка</Text><Text style={styles.takeawayLabel}>{money(deliveryFee)}</Text></View>
-      </> : null}
-      {deliveryFee === undefined && totals.rounding > 0 ? (
+      {totals.rounding > 0 ? (
         <View style={styles.totalRow}>
           <Text style={styles.takeawayLabel} translate>Округление</Text>
           <Text style={styles.takeawayLabel}>−{money(totals.rounding)}</Text>
@@ -95,7 +87,7 @@ export function CartSheet({
       ) : null}
       <View style={styles.totalRow}>
         <Text style={styles.totalLabel} translate>Итого</Text>
-        <NumberTicker value={totals.total + (deliveryFee ?? 0)} style={styles.totalValue} digitHeight={22} />
+        <NumberTicker value={totals.total} style={styles.totalValue} digitHeight={22} />
       </View>
       <Button
         title={submitLabel}
@@ -109,11 +101,11 @@ export function CartSheet({
           <FastPressable disabled={clearDisabled} onPress={() => { clear(); onClose(); }} style={[styles.clearBtn, clearDisabled && { opacity: 0.4 }]}>
             <Text style={styles.clearText} translate>Очистить</Text>
           </FastPressable>
-          {!customerFields && <FastPressable disabled={submitting} onPress={() => setCommentOpen(!commentOpen)} style={styles.clearBtn}>
+          <FastPressable disabled={submitting} onPress={() => setCommentOpen(!commentOpen)} style={styles.clearBtn}>
             <Text style={[styles.clearText, commentOpen && styles.commentToggleActive]} translate>
               {commentOpen ? 'Скрыть комментарий' : 'Комментарий'}
             </Text>
-          </FastPressable>}
+          </FastPressable>
         </View>
       ) : null}
     </View>
@@ -155,7 +147,6 @@ export function CartSheet({
       </View>}
     >
       <SheetScrollView style={styles.lines} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        {customerFields}
         {!hasLines ? (
           <View style={styles.emptyBox}>
             <Text style={styles.empty} translate>Корзина пуста</Text>

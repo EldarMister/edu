@@ -25,8 +25,8 @@ import { apiError } from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useConnectionStatus } from '@/services/socket';
 import { CartSheet } from './CartSheet';
-import { customerOrderError, customerOrderPayload, EMPTY_CUSTOMER, feeValue, OrderFulfillmentFields, OrderTypeSelect } from './OrderFulfillmentFields';
-import { isOffsite, orderTypeLabel, type OrderType } from './orderRules';
+import { OrderTypeSelect } from './OrderFulfillmentFields';
+import { isOffsite, type TerminalOrderType } from './orderRules';
 import { ModifierPickerSheet } from './ModifierPickerSheet';
 import { TablePickerSheet } from './TablePickerSheet';
 import { WeightPickerSheet } from './WeightPickerSheet';
@@ -89,12 +89,7 @@ export function MenuScreen() {
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<string>('all');
   const [cartOpen, setCartOpen] = useState(false);
-  const customerComment = useCart((state) => state.comment);
-  const [offsiteType, setOffsiteType] = useState<'delivery' | 'pickup'>('delivery');
-  const [deliveryDetails, setDeliveryDetails] = useState(EMPTY_CUSTOMER);
   const [choosingDineInTable, setChoosingDineInTable] = useState(false);
-  const deliveryFee = newDelivery && offsiteType === 'delivery' ? Math.max(0, feeValue(deliveryDetails.deliveryFee) || 0) : undefined;
-  const [deliveryError, setDeliveryError] = useState('');
   const [deliveryKey, setDeliveryKey] = useState(makeIdempotencyKey);
   const [tablePickerOpen, setTablePickerOpen] = useState(false);
   const [variantDish, setVariantDish] = useState<Dish | null>(null);
@@ -261,12 +256,6 @@ export function MenuScreen() {
         push({ message: 'У вас нет доступа к оформлению доставки', type: 'error', at: new Date().toISOString() });
         return;
       }
-      const error = customerOrderError(offsiteType, deliveryDetails);
-      if (error) {
-        setDeliveryError(error);
-        setCartOpen(true);
-        return;
-      }
     } else if (!activeOrderId && (tableNumber === 0 || tableId.startsWith('delivery-table:'))) {
       push({ message: 'Служебный стол доставки недоступен для нового заказа. Выберите стол в зале.', type: 'error', at: new Date().toISOString() });
       return;
@@ -290,8 +279,7 @@ export function MenuScreen() {
     };
     const onError = (e: unknown) => {
       if (!stillOwns()) return;
-      if (isNewDelivery) setDeliveryError(apiError(e));
-      else push({ message: apiError(e), type: 'error', at: new Date().toISOString() });
+      push({ message: apiError(e), type: 'error', at: new Date().toISOString() });
     };
 
     const createPayload = {
@@ -299,8 +287,7 @@ export function MenuScreen() {
       comment: isNewDelivery || orderCommentOpen ? orderComment : '',
       lines: owner.lines,
     };
-    if (isNewDelivery) setDeliveryError('');
-    const delivery = isNewDelivery ? customerOrderPayload(offsiteType, deliveryDetails) : null;
+    const delivery = isNewDelivery ? { type: 'delivery' as const } : null;
     const request = editingOrderId
       ? editOrder.mutateAsync({ orderId: editingOrderId, reason: 'Изменение состава заказа', comment: orderCommentOpen ? orderComment : '', lines: owner.lines })
       : activeOrderId
@@ -319,7 +306,6 @@ export function MenuScreen() {
       });
       done(editingOrderId || activeOrderId ? 'update' : 'create', updated.id);
       if (isNewDelivery) {
-        setDeliveryDetails(EMPTY_CUSTOMER);
         setDeliveryKey(makeIdempotencyKey());
       }
     }).catch(onError).finally(settled);
@@ -342,9 +328,8 @@ export function MenuScreen() {
       : newDelivery ? 'Отправить заказ' : cartSendLabel;
   const replacing = !!replacementTarget;
 
-  function switchOrderType(type: OrderType) {
+  function switchOrderType(type: TerminalOrderType) {
     if (submitting || activeOrderId || editingOrderId) return;
-    setDeliveryError('');
     if (type === 'dine_in') {
       setChoosingDineInTable(true);
       setCartOpen(false);
@@ -360,7 +345,6 @@ export function MenuScreen() {
       if (cart.lines.length || cart.comment) cart.moveDraftTo(NEW_DELIVERY_CART);
       else cart.selectTable(NEW_DELIVERY_CART);
     }
-    setOffsiteType(type);
   }
 
   return (
@@ -381,7 +365,7 @@ export function MenuScreen() {
           accessibilityRole="button" accessibilityLabel={deliveryOrder ? 'Доставка' : selectedOrder ? orderLocation(selectedOrder) : `Стол ${tableNumber}${hallName ? ` · ${hallName}` : ''}`}
           disabled={tableSubmitting || deliveryOrder || !!editingOrderId} onPress={() => setTablePickerOpen(true)}>
           <Text style={styles.tableChipText} numberOfLines={1} translate>
-            {deliveryOrder ? selectedOrder ? orderLocation(selectedOrder) : orderTypeLabel(offsiteType) : `Стол ${tableNumber}`}
+            {deliveryOrder ? selectedOrder ? orderLocation(selectedOrder) : 'Доставка' : `Стол ${tableNumber}`}
           </Text>
           {!deliveryOrder ? <PwaIcon name="chevronDown" size={14} color={colors.textMuted} strokeWidth={2} /> : null}
         </FastPressable>
@@ -460,7 +444,7 @@ export function MenuScreen() {
             <Text style={styles.cartCount}>
               {count} {pozLabel(count)}
             </Text>
-            <NumberTicker value={cartTotal + (deliveryFee ?? 0)} style={styles.cartTotal} digitHeight={17} />
+            <NumberTicker value={cartTotal} style={styles.cartTotal} digitHeight={17} />
           </View>
         </FastPressable>
         <Button
@@ -481,11 +465,8 @@ export function MenuScreen() {
         submitting={submitting}
         submitLabel={submitLabel}
         delivery={deliveryOrder}
-        deliveryFee={deliveryFee}
-        typeControl={canCreateDelivery && !activeOrderId && !editingOrderId ? <OrderTypeSelect value={newDelivery ? offsiteType : 'dine_in'}
+        typeControl={canCreateDelivery && !activeOrderId && !editingOrderId ? <OrderTypeSelect value={newDelivery ? 'delivery' : 'dine_in'}
           disabled={submitting} onChange={switchOrderType} /> : undefined}
-        customerFields={newDelivery ? <OrderFulfillmentFields type={offsiteType} value={deliveryDetails} onChange={setDeliveryDetails}
-          comment={customerComment} onComment={useCart.getState().setOrderComment} error={deliveryError} disabled={submitting} /> : undefined}
         roundTotal={roundCart}
       />
 

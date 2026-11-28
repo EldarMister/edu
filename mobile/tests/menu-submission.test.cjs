@@ -87,7 +87,6 @@ function harness({ deliveryAllowed = false, roundOrderTotal = false } = {}) {
   return { cart, auth, replacement, requests, navigations, notices, cartModule,
     render() { cursor = 0; effects = []; tree = MenuScreen(); effects.forEach(fn => fn()); return tree; },
     submit() { all(tree).find(x => x.type === 'CartSheet').props.onSubmit(); },
-    deliveryForm() { return this.cartSheet()?.customerFields?.props; },
     cartSheet() { return all(tree).find(x => x.type === 'CartSheet')?.props; },
     modifierPicker() { return all(tree).find(x => x.type === 'ModifierPickerSheet')?.props; },
     replace(item = dish) { const grid = all(tree).find(x => x.type === 'FlatList'); grid.props.renderItem({ item }).props.onAdd(item); },
@@ -151,29 +150,20 @@ test('same-frame submit runs once and late response only clears the submitted ta
   assert.equal(h.navigations.length, 0);
 });
 
-test('manual delivery validates customer details and isolates its checkout from table drafts', async () => {
+test('manual delivery requires only dishes and isolates its checkout from table drafts', async () => {
   const h = harness({ deliveryAllowed: true, roundOrderTotal: true });
   const { NEW_DELIVERY_CART, orderCartDestination, cartTotals } = h.cartModule;
   const tableLines = h.cart.getState().lines;
   h.cart.getState().selectTable(NEW_DELIVERY_CART); h.cart.getState().add(dish);
-  h.render(); h.submit(); h.render();
-  assert.equal(h.cartSheet().visible, true);
+  h.render();
   assert.equal(h.cartSheet().delivery, true);
   assert.equal(h.cartSheet().roundTotal, true);
-  h.deliveryForm().onChange({ ...h.deliveryForm().value, customerPhone: '998', deliveryAddress: 'Улица 1' });
-  h.render(); h.submit();
-  h.render();
-  assert.equal(h.deliveryForm().error, 'Укажите корректный телефон клиента');
-  assert.equal(h.requests.length, 0);
-
-  const details = { customerName: '', customerPhone: '+996 550-111-222', deliveryAddress: 'Улица 1' };
-  h.deliveryForm().onChange({ ...h.deliveryForm().value, ...details, deliveryFee: '35,50' });
-  h.render(); h.submit();
-  assert.equal(h.requests[0].payload.delivery.deliveryFee, 35.5);
-  assert.equal(h.requests[0].payload.delivery.customerPhone, details.customerPhone);
+  assert.equal(h.cartSheet().customerFields, undefined);
+  h.submit();
+  assert.deepEqual({ ...h.requests[0].payload.delivery }, { type: 'delivery' });
   assert.equal(h.requests[0].payload.tableId, undefined);
   h.requests[0].reject(new Error('Таймаут')); await flush(); h.render();
-  assert.equal(h.deliveryForm().error, 'Таймаут');
+  assert.ok(h.notices.some(notice => notice.message === 'Таймаут'));
   h.submit();
   assert.equal(h.requests[1].payload.idempotencyKey, h.requests[0].payload.idempotencyKey);
   h.requests[1].resolve({ id: 'delivery-order' }); await flush();
@@ -223,24 +213,17 @@ test('replacement suppresses duplicate press and does not clear a newer replacem
   assert.equal(h.navigations.length, 0);
 });
 
-test('switching a table draft to pickup retains the dishes and sends only pickup fields', async () => {
+test('switching a table draft to delivery keeps its dishes without customer fields', async () => {
   const h = harness({ deliveryAllowed: true });
   const lines = h.cart.getState().lines;
   h.render();
   h.cartSheet().typeControl.props.onChange('delivery');
   h.render();
-  h.deliveryForm().onChange({ ...h.deliveryForm().value, customerPhone: '+996 550-111-222',
-    customerName: 'Азиз', deliveryAddress: 'Улица 1', deliveryFee: '45', pickupTime: '19:30' });
-  h.cartSheet().typeControl.props.onChange('pickup');
-  h.render();
   h.submit();
   const { delivery, tableId } = h.requests[0].payload;
   assert.equal(tableId, undefined);
-  assert.equal(delivery.type, 'pickup');
-  assert.equal(delivery.pickupTime, '19:30');
-  assert.equal(delivery.deliveryAddress, undefined);
-  assert.equal(delivery.deliveryFee, undefined);
+  assert.deepEqual({ ...delivery }, { type: 'delivery' });
   assert.equal(h.cart.getState().lines, lines);
-  h.requests[0].resolve({ id: 'pickup-order' });
+  h.requests[0].resolve({ id: 'delivery-order' });
   await flush();
 });

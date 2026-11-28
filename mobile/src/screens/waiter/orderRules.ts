@@ -8,6 +8,10 @@ export const ORDER_TYPES = [
   { value: 'pickup', label: 'Самовывоз' },
 ] as const;
 export type OrderType = typeof ORDER_TYPES[number]['value'];
+export type TerminalOrderType = Exclude<OrderType, 'pickup'>;
+export const TERMINAL_ORDER_TYPES = ORDER_TYPES.filter(
+  (item): item is Exclude<typeof ORDER_TYPES[number], { value: 'pickup' }> => item.value !== 'pickup',
+);
 export const orderTypeLabel = (type: OrderType) => ORDER_TYPES.find(({ value }) => value === type)!.label;
 export const isOffsite = (source?: string): source is 'delivery' | 'pickup' => source === 'delivery' || source === 'pickup';
 export const orderType = (source?: string): OrderType => isOffsite(source) ? source : 'dine_in';
