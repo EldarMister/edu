@@ -949,12 +949,20 @@ export function WaiterApp() {
     <Panel
       title={t('Выбор стола')}
       action={
-        <TableActionsMenu
-          disabled={!selectedTable}
-          onCloseTable={() => setTableModal('close')}
-          onMove={() => setTableModal('move')}
-          onTransfer={() => setTableModal('transfer')}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          {canCreateDelivery && (
+            <button type="button" className="btn-secondary min-h-9 px-3 text-sm md:hidden"
+              disabled={!canWork || create.isPending} onClick={startDelivery}>
+              {t('Доставка')}
+            </button>
+          )}
+          <TableActionsMenu
+            disabled={!selectedTable}
+            onCloseTable={() => setTableModal('close')}
+            onMove={() => setTableModal('move')}
+            onTransfer={() => setTableModal('transfer')}
+          />
+        </div>
       }
     >
       <TablesGrid halls={halls} selectedTableId={selectedTableId} onSelect={selectTable} useMap={settings.data?.useFloorPlan} />
@@ -1068,12 +1076,6 @@ export function WaiterApp() {
     </Panel>
   );
 
-  const newDeliveryButton = canCreateDelivery && (
-    <button type="button" className="btn-primary btn-md shrink-0" disabled={!canWork || create.isPending} onClick={startDelivery}>
-      {t('Новая доставка')}
-    </button>
-  );
-
   const canViewAllOrders = canAction('viewAllOrders');
   const showRegister = canViewAllOrders && showAllOrders;
   const ordersHeading = t(showRegister ? 'Все заказы' : 'Активные заказы');
@@ -1088,7 +1090,6 @@ export function WaiterApp() {
       <button type="button" aria-label={t('Архив заказов')} className="btn-secondary btn-md" onClick={() => setOrderArchiveOpen(true)}>
         {t('Архив')}
       </button>
-      {newDeliveryButton}
     </div>
   );
 

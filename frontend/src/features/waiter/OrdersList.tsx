@@ -36,10 +36,12 @@ export function OrdersList({
 
   return (
     <div className="space-y-3 px-1.5">
-      <div className="flex flex-wrap gap-2" role="group" aria-label={t('Тип заказа')}>
+      <div className="inline-grid max-w-full grid-cols-3 gap-1 rounded-xl border border-border bg-background p-1" role="group" aria-label={t('Тип заказа')}>
         {[{ value: 'all', label: 'Все' } as const, ...TERMINAL_ORDER_TYPES].map(({ value, label }) =>
           <button type="button" key={value} aria-pressed={type === value}
-            className={type === value ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'} onClick={() => setType(value)}>{t(label)}</button>)}
+            className={`min-h-9 whitespace-nowrap rounded-lg px-3 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${type === value
+              ? 'bg-primary text-white' : 'text-text-secondary hover:bg-card hover:text-text-primary'}`}
+            onClick={() => setType(value)}>{t(label)}</button>)}
       </div>
       {!sortedOrders.length && <p className="py-12 text-center text-sm text-text-muted">{t('Активных заказов нет')}</p>}
       {sortedOrders.map((o) => {
