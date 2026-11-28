@@ -20,7 +20,7 @@ import {
 import { apiError } from '@/lib/api';
 import { displayOrderNumber, hallSuffix, money } from '@/utils/format';
 import { orderCustomizationText } from '@/utils/order-customization';
-import { PaymentSheet } from './PaymentSheet';
+import { PaymentScreen } from './PaymentScreen';
 import { SplitAmountsSheet, SplitItemsSheet } from './OrderSplitSheets';
 import { canSplitAmount, canSplitOrder, SPLIT_OPTIONS, type AmountSplitMode, type SplitMode } from '../../../../frontend/src/features/waiter/splitBillModel';
 import type { Order, OrderItem } from '@/types';
@@ -181,7 +181,8 @@ export function OrderDetailScreen() {
         }} />}
       {amountSplit && canPay && <SplitAmountsSheet order={amountSplit.order} mode={amountSplit.mode}
         onClose={() => setAmountSplit(null)} onPaid={finishPayment} />}
-      {payOpen && canPay && <PaymentSheet order={order} onClose={() => setPayOpen(false)} onPaid={finishPayment} />}
+      {payOpen && canPay && <PaymentScreen order={order} onClose={() => setPayOpen(false)} onPaid={finishPayment}
+        onSplitItems={canSplitItems ? () => { setPayOpen(false); openSplit('items'); } : undefined} />}
     </SafeAreaView>
   );
 }

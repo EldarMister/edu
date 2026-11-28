@@ -1,5 +1,5 @@
-import { IconPrinter } from '@/features/admin/components/icons';
-import { useEffect, useRef, useState } from 'react';
+import { IconPrinter, IconSplit } from '@/features/admin/components/icons';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import type { Order, PaymentMethod, Receipt } from '@/types';
 import { Modal } from '@/components/Modal';
@@ -21,6 +21,8 @@ import { useOrderReceiptPrinter } from './useOrderReceiptPrinter';
 import { FullScreenPayment } from './FullScreenPayment';
 import { normalizeAmount, tenderTotals, type TenderAmounts, type TenderMethod } from './paymentAmounts';
 import { PaymentQrPreview } from './PaymentQrPreview';
+import { mobilePaymentMethods } from './mobilePaymentMethods';
+import './mobile-payment.css';
 
 const ALL_METHODS: { value: TenderMethod; label: string }[] = [
   { value: 'qr', label: 'QR-код' },
@@ -35,6 +37,18 @@ const METHOD_LABELS: Record<PaymentMethod, string> = {
   card: 'Карта',
   mixed: 'Смешанная',
 };
+
+const TOUCH_PHONE = '(pointer: coarse) and (max-width: 1023px)';
+
+function subscribeToTouchPhone(onChange: () => void) {
+  const query = window.matchMedia(TOUCH_PHONE);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+}
+
+function isTouchPhone() {
+  return window.matchMedia(TOUCH_PHONE).matches;
+}
 
 export function PaymentModal({
   order,
@@ -54,6 +68,8 @@ export function PaymentModal({
   initialSplitMode?: AmountSplitMode;
 }) {
   const t = useT();
+  const touchPhone = useSyncExternalStore(subscribeToTouchPhone, isTouchPhone, () => false);
+  const useDesktopPayment = wideLayout && !touchPhone;
   const pay = usePay();
   const createPrintRequest = useCreateReceiptPrintRequest();
   const beginPrint = useReceiptPrint((s) => s.begin);
@@ -85,12 +101,9 @@ export function PaymentModal({
   const enabled = settings.data?.paymentMethods ?? (['qr', 'cash'] as PaymentMethod[]);
   const available = ALL_METHODS.filter(({ value }) => enabled.includes(value) && (value !== 'qr' || !!qrImageUrl));
   const mixedAvailable = available.length >= 2;
-  const methods: { value: PaymentMethod; label: string }[] = [
-    ...ALL_METHODS.filter((m) => enabled.includes(m.value)),
-    ...(mixedAvailable ? [{ value: 'mixed' as PaymentMethod, label: 'Смешанная' }] : []),
-  ];
-  const selected: PaymentMethod =
-    method && methods.some((m) => m.value === method) ? method : available[0]?.value ?? methods[0]?.value ?? 'qr';
+  const methods = mobilePaymentMethods(enabled, !!qrImageUrl, mixedAvailable);
+  const selected = method && methods.some((option) => option.value === method)
+    ? method : methods.find(({ value }) => value !== 'qr' || qrImageUrl)?.value ?? methods[0]?.value;
 
   const qrSelected = selected === 'qr';
   const qrMissing = qrSelected && !qrImageUrl;
@@ -104,7 +117,6 @@ export function PaymentModal({
   for (const { value } of available) entered[value] = Number(draft[value]) || 0;
   const { amounts, remaining, change, over } = tenderTotals(total, entered);
   const mixedValid = mixedSelected && remaining === 0 && !over && Object.values(amounts).filter((amount) => amount > 0).length >= 2;
-  const canSplit = allActiveItemsServed && available.length > 0 && Math.round(total * 100) >= 2;
 
   function changeAmount(field: TenderMethod, value: string) {
     const next = normalizeAmount(value);
@@ -166,7 +178,7 @@ export function PaymentModal({
 
   async function onConfirm() {
     setError('');
-    if (!allActiveItemsServed || !methods.length || qrMissing || (mixedSelected && !mixedValid)) return;
+    if (pay.isPending || splitOpen || !allActiveItemsServed || !selected || qrMissing || (mixedSelected && !mixedValid)) return;
     try {
       await completePayment(
         mixedSelected
@@ -383,7 +395,7 @@ export function PaymentModal({
     open={splitOpen}
     mode={initialSplitMode}
     total={total}
-    wideLayout={wideLayout}
+    wideLayout={useDesktopPayment}
     paymentMethods={available.map(({ value }) => value)}
     qrImageUrl={qrImageUrl}
     submitting={pay.isPending}
@@ -393,7 +405,7 @@ export function PaymentModal({
 
   if (initialSplitMode && !paymentAccepted) return createPortal(splitBill, document.body);
 
-  if (wideLayout) return createPortal(
+  if (useDesktopPayment) return createPortal(
     <>
       <FullScreenPayment order={order} enabled={enabled} qrImageUrl={qrImageUrl} allItemsServed={allActiveItemsServed}
         open={open} busy={pay.isPending} error={error} splitOpen={splitOpen} onClose={close}
@@ -403,134 +415,119 @@ export function PaymentModal({
     document.body,
   );
 
-  return (
+  const blocked = pay.isPending || splitOpen;
+  const closeMobilePayment = () => { if (!blocked) close(); };
+  const readyToConfirm = !blocked && !!selected && !qrMissing && allActiveItemsServed && (!mixedSelected || mixedValid);
+
+  return createPortal(
     <>
-    <Modal
-      open={open}
-      onClose={close}
-      title={t('Оплата заказа')}
-      footer={
-        <div className="flex items-center gap-2.5">
-          <button
-            className="btn-secondary btn-lg min-w-0 shrink-0 basis-[42%] border-primary bg-white px-2 text-sm font-medium leading-tight text-primary"
-            disabled={pay.isPending || !canSplit}
-            onClick={() => setSplitOpen(true)}
-          >
-            {t('Разделить по сумме')}
+      <Modal open={open} fullScreen manageFocus ariaLabel={t('Оплата заказа')}
+        contentClassName="mobile-payment" onClose={closeMobilePayment}>
+        <header className="mobile-payment-header">
+          <button type="button" className="mobile-payment-back" onClick={closeMobilePayment}
+            aria-label={t('Назад')} disabled={blocked} data-dialog-initial-focus>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M19 12H5m7 7-7-7 7-7" />
+            </svg>
           </button>
-          <button
-            className="btn-primary btn-lg min-w-0 flex-1 font-semibold"
-            disabled={pay.isPending || !methods.length || qrMissing || (mixedSelected && !mixedValid) || !allActiveItemsServed}
-            onClick={onConfirm}
-          >
-            {pay.isPending ? (
-              <Spinner />
-            ) : qrSelected || mixedSelected ? (
-              `${t('Оплачено')} · ${money(order.finalAmount)}`
-            ) : (
-              `${t('Принять оплату')} · ${money(order.finalAmount)}`
-            )}
-          </button>
-        </div>
-      }
-    >
-        <div className="min-w-0">
-          <p className="mb-1 text-sm text-text-muted">
-            {orderPlaceLabel(order, t)} · {displayOrderNumber(order.orderNumber)}
-          </p>
-          <div className="mb-4 flex items-baseline justify-between">
-            <span className="text-text-secondary">{t('К оплате')}</span>
-            <span className="text-2xl font-semibold">{money(order.finalAmount)}</span>
-          </div>
-          {onSplitItems && <button type="button" className="mb-3 py-1 text-sm font-medium text-primary hover:underline"
-            disabled={pay.isPending || splitOpen} onClick={onSplitItems}>{t('Разделить по позициям')}</button>}
+          <h2>{t('Оплата заказа')}</h2>
+        </header>
 
-          {!allActiveItemsServed && (
-            <div className="mb-4 rounded-xl bg-warning/10 px-3 py-2 text-sm text-warning">
+        <div className="mobile-payment-body">
+          <div className="mobile-payment-controls">
+            <p className="text-[13px] text-text-muted">
+              {orderPlaceLabel(order, t)} · {displayOrderNumber(order.orderNumber)}
+            </p>
+            <div className="mobile-payment-total">
+              <span className="text-[13px] text-text-secondary">{t('К оплате')}</span>
+              <strong className="text-[28px] leading-tight text-text-primary">{money(order.finalAmount)}</strong>
+              {onSplitItems && <button type="button" className="mobile-payment-split"
+                disabled={blocked} onClick={onSplitItems}>
+                <IconSplit className="size-3.5" aria-hidden="true" />{t('Разделить по позициям')}
+              </button>}
+            </div>
+
+            {!allActiveItemsServed && <p role="alert" className="text-sm text-warning">
               {t('Нельзя принять оплату: есть неподанные блюда.')}
-            </div>
-          )}
+            </p>}
 
-          <p className="mb-2 text-sm font-medium text-text-secondary">{t('Способ оплаты')}</p>
-          <div className={`grid gap-2 ${methods.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
-            {methods.map((m) => (
-              <button
-                key={m.value}
-                onClick={() => setMethod(m.value)}
-                className={`rounded-xl border px-2 py-3 text-[15px] font-medium transition-colors lg:px-4 ${
-                  selected === m.value
-                    ? 'border-primary bg-primary/5 text-primary'
-                    : 'border-border text-text-secondary hover:border-primary/40'
-                }`}
-              >
-                {t(m.label)}
-              </button>
-            ))}
+            {methods.length ? <div className="mobile-payment-methods" role="group" aria-label={t('Способ оплаты')}>
+              <p className="mb-2 text-[13px] font-semibold text-text-secondary">{t('Способ оплаты')}</p>
+              <div className="flex gap-2">
+                {methods.map(({ value, label }) => <button type="button" key={value} aria-pressed={selected === value}
+                  className="mobile-payment-method" disabled={blocked} onClick={() => setMethod(value)}>
+                  {t(label)}
+                </button>)}
+              </div>
+            </div> : <p role="status" className="text-sm text-text-muted">{t('Нет доступных способов оплаты')}</p>}
           </div>
 
-          {/* QR-код для оплаты */}
-          {qrSelected && (
-            <div className="mt-4">
-              {qrImageUrl ? (
-                <div className="flex flex-col items-center rounded-xl border border-border bg-white p-5">
-                  <p className="mb-3 text-sm text-text-secondary">{t('Покажите QR-код клиенту для оплаты')}</p>
-                  <img
-                    src={qrImageUrl}
-                    alt={t('QR-код для оплаты')}
-                    className="h-72 max-h-[56vh] w-72 max-w-full object-contain"
-                  />
+          <div className="mobile-payment-details">
+            {qrSelected && (qrImageUrl ? (
+              <figure className="mobile-payment-qr">
+                <figcaption className="text-[13px] text-text-secondary">{t('Покажите QR-код клиенту для оплаты')}</figcaption>
+                <div className="mobile-payment-qr-space">
+                  <img src={qrImageUrl} alt={t('QR-код для оплаты')} />
                 </div>
-              ) : (
-                <div className="rounded-xl border border-warning/30 bg-warning/5 p-4 text-center text-sm text-warning">
-                  {t('QR-код не загружен. Добавьте его в настройках или выберите другой способ оплаты.')}
-                </div>
-              )}
-            </div>
-          )}
+                <p className="text-[13px] text-text-muted">{t('Ожидание оплаты')}</p>
+              </figure>
+            ) : <p role="alert" className="text-sm text-warning">
+              {t('QR-код не загружен. Добавьте его в настройках или выберите другой способ оплаты.')}
+            </p>)}
 
-          {mixedSelected && (
-            <div className="mt-4">
-              <div className="space-y-3 rounded-xl border border-border bg-background p-4">
-                {available.map(({ value, label }) => <label key={value} className="flex items-center justify-between gap-3">
-                  <span className="text-[15px] text-text-secondary">{t(label)}</span>
-                  <input
-                    inputMode="decimal"
-                    className="input h-11 w-40 text-right"
-                    value={draft[value]}
-                    onChange={(event) => changeAmount(value, event.target.value)}
-                    placeholder="0"
-                  />
-                </label>)}
+            {mixedSelected && (
+              <div>
+                <div className="space-y-2 rounded-xl border border-border bg-background p-3">
+                  {available.map(({ value, label }) => <label key={value} className="flex items-center justify-between gap-3">
+                    <span className="text-[15px] text-text-secondary">{t(label)}</span>
+                    <input
+                      inputMode="decimal"
+                      aria-label={t(label)} className="input h-10 w-32 text-right"
+                      value={draft[value]}
+                      onChange={(event) => changeAmount(value, event.target.value)}
+                      placeholder="0"
+                    />
+                  </label>)}
+                </div>
+                <div className="mt-3 space-y-1.5 border-t border-border pt-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-text-muted">{t('Осталось')}</span>
+                    <span
+                      className={`font-medium ${
+                        remaining === 0 ? 'text-success' : over ? 'text-danger' : 'text-text-primary'
+                      }`}
+                    >
+                      {money(Math.max(0, remaining))}
+                    </span>
+                  </div>
+                  {!over && change > 0 && <div className="flex justify-between">
+                    <span className="text-text-muted">{t('Сдача')}</span><span>{money(change)}</span>
+                  </div>}
+                </div>
+                {entered.qr > 0 && qrImageUrl && <PaymentQrPreview url={qrImageUrl} />}
+
+                {over ? (
+                  <p className="mt-2 text-sm text-danger">{t('Сумма превышает итог заказа')}</p>
+                ) : (
+                  <p className="mt-2 text-xs text-text-light">{t('Сумма должна совпадать с итогом заказа')}</p>
+                )}
               </div>
-              <div className="mt-3 space-y-1.5 border-t border-border pt-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-text-muted">{t('Осталось')}</span>
-                  <span
-                    className={`font-medium ${
-                      remaining === 0 ? 'text-success' : over ? 'text-danger' : 'text-text-primary'
-                    }`}
-                  >
-                    {money(Math.max(0, remaining))}
-                  </span>
-                </div>
-                {!over && change > 0 && <div className="flex justify-between">
-                  <span className="text-text-muted">{t('Сдача')}</span><span>{money(change)}</span>
-                </div>}
-              </div>
-              {entered.qr > 0 && qrImageUrl && <PaymentQrPreview url={qrImageUrl} />}
+            )}
 
-              {over ? (
-                <p className="mt-2 text-sm text-danger">{t('Сумма превышает итог заказа')}</p>
-              ) : (
-                <p className="mt-2 text-xs text-text-light">{t('Сумма должна совпадать с итогом заказа')}</p>
-              )}
-            </div>
-          )}
-
-          {error && <p className="mt-3 text-sm text-danger">{error}</p>}
+            {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+          </div>
         </div>
-    </Modal>
-    {splitBill}
-    </>
+
+        <footer className="mobile-payment-footer">
+          <button type="button" className="btn-primary btn-lg w-full font-semibold"
+            disabled={!readyToConfirm} onClick={onConfirm}>
+            {pay.isPending ? <Spinner /> : (qrSelected || mixedSelected ? t('Оплачено') : t('Принять оплату')) + ' · ' + money(order.finalAmount)}
+          </button>
+        </footer>
+      </Modal>
+      {splitBill}
+    </>,
+    document.body,
   );
 }

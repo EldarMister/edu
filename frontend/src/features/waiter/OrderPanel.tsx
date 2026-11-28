@@ -1,6 +1,6 @@
 import { ColumnPopover } from '@/features/admin/components/ColumnPopover';
 import { SPLIT_OPTIONS, type SplitMode } from './splitBillModel';
-import { IconPrinter } from '@/features/admin/components/icons';
+import { IconPrinter, IconSplit } from '@/features/admin/components/icons';
 import { usePublicSettings } from '@/features/settings/api';
 import { waiterItemPermission, waiterOrderPermission } from '@/lib/order-permissions';
 import { useEffect, useState } from 'react';
@@ -390,9 +390,7 @@ export function OrderPanel({
                 className="btn btn-lg min-w-0 flex-1 border border-primary bg-white px-2 font-medium text-primary hover:bg-primary/5"
                 disabled={splitDisabled} aria-haspopup="dialog" aria-expanded={!!splitAnchor}
                 onClick={(event) => setSplitAnchor(splitAnchor ? null : event.currentTarget)}>
-                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 21v-5a5 5 0 0 0-1.5-3.5L5 7m0 0h5M5 7v5m7 4a5 5 0 0 1 1.5-3.5L19 7m0 0h-5m5 0v5" />
-                </svg>
+                <IconSplit className="size-[18px]" aria-hidden="true" />
                 {t('Разделить счёт')}
               </button>}
             </div>

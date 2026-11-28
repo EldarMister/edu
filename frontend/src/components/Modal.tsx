@@ -8,6 +8,8 @@ export function Modal({
   open,
   onClose,
   title,
+  ariaLabel = title,
+  contentClassName,
   titleActions,
   toolbar,
   children,
@@ -21,6 +23,8 @@ export function Modal({
   open: boolean;
   onClose: () => void;
   title?: string;
+  ariaLabel?: string;
+  contentClassName?: string;
   titleActions?: ReactNode;
   toolbar?: ReactNode;
   children: ReactNode;
@@ -71,7 +75,7 @@ export function Modal({
         data-modal-panel
         role="dialog"
         aria-modal={!suspended}
-        aria-label={title}
+        aria-label={ariaLabel}
         tabIndex={manageFocus ? -1 : undefined}
         onKeyDown={manageFocus && !suspended ? (event) => {
           if (event.key !== 'Tab' || event.defaultPrevented ||
@@ -106,7 +110,7 @@ export function Modal({
           </div>
         )}
         {toolbar && <div className="shrink-0 border-b border-border px-4">{toolbar}</div>}
-        <div className={fullScreen ? 'min-h-0 flex-1 overflow-y-auto' : 'min-h-0 flex-1 overflow-y-auto px-4 py-3'}>{children}</div>
+        <div className={contentClassName ?? (fullScreen ? 'min-h-0 flex-1 overflow-y-auto' : 'min-h-0 flex-1 overflow-y-auto px-4 py-3')}>{children}</div>
         {footer && (
           <div className="shrink-0 border-t border-border px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
             {footer}
