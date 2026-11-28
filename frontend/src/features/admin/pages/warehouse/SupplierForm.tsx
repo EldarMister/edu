@@ -53,8 +53,8 @@ export function SupplierForm({ supplier, initialName = '', onSaved, onClose }: {
       panelClassName="max-w-lg"
       manageFocus
       footer={editable && <div className="flex justify-end gap-2">
-        <button type="button" className="btn-secondary btn-sm" onClick={close} disabled={save.isPending}>Отмена</button>
-        <button type="submit" form={formId} className="btn-primary btn-sm" disabled={save.isPending || !form.name.trim()}>Сохранить</button>
+        <button type="button" className="btn-secondary btn-lg min-h-12 min-w-28 flex-1 sm:flex-none" onClick={close} disabled={save.isPending}>Отмена</button>
+        <button type="submit" form={formId} className="btn-primary btn-lg min-h-12 min-w-28 flex-1 sm:flex-none" disabled={save.isPending || !form.name.trim()}>Сохранить</button>
       </div>}
     >
       <form id={formId} className="poster-form poster-form--directory poster-document--modern" onSubmit={submit}>
