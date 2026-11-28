@@ -22,6 +22,7 @@ import { balanceMoney } from './balance-format';
 import { QueryState } from './WarehouseUi';
 import { unitLabel } from './units';
 import { usePageFilters } from './workspace-route';
+import { WarehouseFilters } from './WarehouseFilters';
 import { useWriteoffOptions } from './writeoff-api';
 import { WorkspaceHeaderActions, WorkspaceHeaderCount } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
@@ -118,8 +119,6 @@ export function DocumentList({
   const comment = inventory ? '' : conditions[kind + 'Comment'].trim().toLocaleLowerCase('ru');
   const minAmount = !inventory && costs ? parseDocumentAmount(conditions[kind + 'MinAmount']) : null;
   const maxAmount = !inventory && costs ? parseDocumentAmount(conditions[kind + 'MaxAmount']) : null;
-  const extraFilterCount = Number(!!status) + Number(!!employeeFilter) + Number(!!comment) + Number(minAmount != null || maxAmount != null)
-    + Number(selectedProducts.size > 0);
   const canCreate = can(`actions.${kind === 'inventory' ? 'warehouseCount' : kind === 'writeoff' ? 'warehouseWriteoff' : 'warehouseTransfer'}`);
   const canApprove = can('actions.warehouseApprove');
   function writeoffMenu(document: StockDocument) {
@@ -164,7 +163,8 @@ export function DocumentList({
   const columns = inventory
     ? ['Склад', 'Проверка остатков на', 'Дата и время проведения', 'Тип', ...(costs ? ['Результат'] : []), 'Статус', '']
     : [...selectedColumns.map(columnLabel), ''];
-  const filtered = !!(search || selectedReasons.length || extraFilterCount || categories.length || period.active || warehouseId || selectedWarehouses.length);
+  const filtered = !!(search || status || employeeFilter || comment || minAmount != null || maxAmount != null || selectedProducts.size ||
+    selectedReasons.length || categories.length || period.active || warehouseId || selectedWarehouses.length);
   const resetFilters = () => updateConditions({ [kind + 'Search']: '', [kind + 'Status']: '', [kind + 'Reason']: '',
     [kind + 'Page']: '1', [kind + 'Period']: 'all', [kind + 'From']: '', [kind + 'To']: '', [kind + 'Category']: '',
     [kind + 'Employee']: '', [kind + 'Warehouses']: '', [kind + 'Products']: '', [kind + 'Comment']: '', [kind + 'MinAmount']: '', [kind + 'MaxAmount']: '', warehouse: '' });
@@ -240,50 +240,52 @@ export function DocumentList({
         {canCreate && <button type="button" className="btn-primary btn-md" onClick={onCreate}>Добавить</button>}
       </WorkspaceHeaderActions>
       <div className="poster-toolbar">
-        <WorkspaceSearch label="Поиск документов" placeholder={inventory ? 'Быстрый поиск' : 'Поиск...'} value={search} onChange={(value) => changeFilter('Search', value)} />
-        {period.filter}
-        {filters}
-        {!inventory && <WarehouseMultiFilter label={transfer ? 'Склады' : 'Склад'} value={warehouseSelection}
-          options={locations.map(({ id, name }) => ({ value: id, label: name }))}
-          onChange={(value) => updateConditions({ [kind + 'Warehouses']: value, warehouse: '', [kind + 'Page']: '1' })} />}
-        {kind === 'writeoff' && <WarehouseMultiFilter label="Категории" value={conditions[kind + 'Category']}
-          options={categoryOptions.map((category) => ({ value: category, label: category }))}
-          onChange={(value) => updateConditions({ [kind + 'Category']: value, [kind + 'Page']: '1' })} />}
-        {writeoff && <WarehouseMultiFilter label="Причина" value={reasonValue} onChange={(value) => changeFilter('Reason', value)}
-          options={[{ value: noWriteoffReason, label: 'Без причины' },
-            ...(reasons.data?.map(({ id, label, archived }) => ({ value: id, label: archived ? `${label} (удалена)` : label })) ?? WRITEOFF_REASONS)]} />}
-        <details className="poster-list-filter">
-          <summary>+ Фильтр{extraFilterCount ? ' · ' + extraFilterCount : ''}</summary>
-          <div className="poster-list-filter-content">
-            <Select ariaLabel="Статус документа" value={status} onChange={(value) => changeFilter('Status', value)} className="w-48"
-              options={[{ value: '', label: 'Все статусы' }, ...statuses.map((value) => ({
-                value, label: documentStatus(value),
-              }))]} />
-            {writeoff && <div className="mt-2">
-              <WarehouseMultiFilter label="Товары" value={conditions.writeoffProducts}
+        <WarehouseFilters view={kind} onClear={(patch) => updateConditions({ ...patch, [kind + 'Page']: '1' })} filters={[
+          { key: 'period', label: 'Период', defaultVisible: true, control: period.filter,
+            clear: period.preset !== (transfer ? 'month' : 'all')
+              ? { [kind + 'Period']: transfer ? 'month' : 'all', [kind + 'From']: '', [kind + 'To']: '' } : undefined },
+          { key: 'warehouse', label: transfer ? 'Склады' : 'Склад', defaultVisible: true,
+            clear: warehouseSelection ? { [kind + 'Warehouses']: '', warehouse: '' } : undefined,
+            control: inventory ? filters : <WarehouseMultiFilter label={transfer ? 'Склады' : 'Склад'} value={warehouseSelection}
+              options={locations.map(({ id, name }) => ({ value: id, label: name }))}
+              onChange={(value) => updateConditions({ [kind + 'Warehouses']: value, warehouse: '', [kind + 'Page']: '1' })} /> },
+          { key: 'status', label: 'Статус документа', clear: status ? { [kind + 'Status']: '' } : undefined,
+            control: <Select ariaLabel="Статус документа" value={status} onChange={(value) => changeFilter('Status', value)}
+              options={[{ value: '', label: 'Все статусы' }, ...statuses.map((value) => ({ value, label: documentStatus(value) }))]} /> },
+          ...(writeoff ? [
+            { key: 'reason', label: 'Причина', defaultVisible: true, clear: selectedReasons.length ? { writeoffReason: '' } : undefined,
+              control: <WarehouseMultiFilter label="Причина" value={reasonValue} onChange={(value) => changeFilter('Reason', value)}
+                options={[{ value: noWriteoffReason, label: 'Без причины' },
+                  ...(reasons.data?.map(({ id, label, archived }) => ({ value: id, label: archived ? `${label} (удалена)` : label })) ?? WRITEOFF_REASONS)]} /> },
+            { key: 'category', label: 'Категории', clear: categories.length ? { writeoffCategory: '' } : undefined,
+              control: <WarehouseMultiFilter label="Категории" value={conditions.writeoffCategory}
+                options={categoryOptions.map((category) => ({ value: category, label: category }))}
+                onChange={(value) => updateConditions({ writeoffCategory: value, writeoffPage: '1' })} /> },
+            { key: 'products', label: 'Товары', clear: selectedProducts.size ? { writeoffProducts: '' } : undefined,
+              control: <WarehouseMultiFilter label="Товары" value={conditions.writeoffProducts}
                 options={[...productOptions].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'ru'))}
-                onChange={(value) => changeFilter('Products', value)} />
-            </div>}
-            {!inventory && <Select ariaLabel="Сотрудник" value={employeeFilter} className="mt-2 w-48"
-              onChange={(value) => changeFilter('Employee', value)} options={[
-                { value: '', label: 'Все сотрудники' }, ...employees.map((name) => ({ value: name, label: name })),
-              ]} />}
-            {!inventory && <input aria-label="Комментарий" placeholder="Комментарий" className="input mt-2 w-48"
-              value={conditions[kind + 'Comment']}
-              onChange={(event) => changeFilter('Comment', event.target.value)} />}
-            {!inventory && costs && <fieldset className="mt-2 w-48">
-              <legend className="text-xs text-text-muted">Сумма, с</legend>
-              <div className="flex gap-2">
-                <input aria-label="Сумма от" placeholder="От" className="input min-w-0 w-1/2" type="number" min="0" step="any"
-                  value={conditions[kind + 'MinAmount']}
-                  onChange={(event) => changeFilter('MinAmount', event.target.value)} />
-                <input aria-label="Сумма до" placeholder="До" className="input min-w-0 w-1/2" type="number" min="0" step="any"
-                  value={conditions[kind + 'MaxAmount']}
-                  onChange={(event) => changeFilter('MaxAmount', event.target.value)} />
-              </div>
-            </fieldset>}
-          </div>
-        </details>
+                onChange={(value) => changeFilter('Products', value)} /> },
+          ] : []),
+          ...(!inventory ? [
+            { key: 'employee', label: 'Сотрудник', clear: employeeFilter ? { [kind + 'Employee']: '' } : undefined,
+              control: <Select ariaLabel="Сотрудник" value={employeeFilter} onChange={(value) => changeFilter('Employee', value)}
+                options={[{ value: '', label: 'Все сотрудники' }, ...employees.map((name) => ({ value: name, label: name }))]} /> },
+            { key: 'comment', label: 'Комментарий', clear: comment ? { [kind + 'Comment']: '' } : undefined,
+              control: <input aria-label="Комментарий" placeholder="Комментарий" className="input w-40"
+                value={conditions[kind + 'Comment']} onChange={(event) => changeFilter('Comment', event.target.value)} /> },
+          ] : []),
+          ...(!inventory && costs ? [
+            { key: 'amount', label: 'Сумма', clear: minAmount != null || maxAmount != null ? { [kind + 'MinAmount']: '', [kind + 'MaxAmount']: '' } : undefined,
+              control: <fieldset className="flex max-w-full items-center gap-2">
+                <legend className="sr-only">Сумма, с</legend>
+                <input aria-label="Сумма от" placeholder="Сумма от" className="input w-28" type="number" min="0" step="any"
+                  value={conditions[kind + 'MinAmount']} onChange={(event) => changeFilter('MinAmount', event.target.value)} />
+                <input aria-label="Сумма до" placeholder="Сумма до" className="input w-28" type="number" min="0" step="any"
+                  value={conditions[kind + 'MaxAmount']} onChange={(event) => changeFilter('MaxAmount', event.target.value)} />
+              </fieldset> },
+          ] : []),
+        ]} />
+        <WorkspaceSearch label="Поиск документов" placeholder={inventory ? 'Быстрый поиск' : 'Поиск...'} value={search} onChange={(value) => changeFilter('Search', value)} />
         {filtered && <button type="button" className="text-sm text-text-muted" onClick={resetFilters}>Сбросить всё</button>}
       </div>
       {!inventory && editingColumns && <WarehouseColumnSettings anchor={editingColumns} columns={selectedColumns} defaults={availableColumns} resetColumns={defaultColumns}
@@ -427,7 +429,10 @@ export function ProductionList({
 }) {
   const { can } = usePermissions();
   const costs = can('actions.warehouseCosts');
-  const [state, update] = usePageFilters({ productionSearch: '', productionStatus: '', productionSort: 'desc', productionPage: '1' });
+  const [state, update] = usePageFilters({
+    productionSearch: '', productionStatus: '', productionSort: 'desc', productionPage: '1',
+    productionPeriod: 'all', productionFrom: '', productionTo: '', warehouse: '',
+  });
   const period = useListPeriod('production');
   const sort = state.productionSort === 'asc' ? 'asc' : 'desc';
   const status = ['posted', 'reversed'].includes(state.productionStatus) ? state.productionStatus : undefined;
@@ -461,12 +466,16 @@ export function ProductionList({
         <button type="button" className="btn-primary btn-md" onClick={onCreate}>Произвести</button>
       </WorkspaceHeaderActions>}
       <div className="poster-toolbar">
+        <WarehouseFilters view="production" onClear={(patch) => update({ ...patch, productionPage: '1' })} filters={[
+          { key: 'period', label: 'Период', defaultVisible: true, control: period.filter,
+            clear: period.active ? { productionPeriod: 'all', productionFrom: '', productionTo: '' } : undefined },
+          { key: 'warehouse', label: 'Склад', defaultVisible: true, control: filters, clear: warehouseId ? { warehouse: '' } : undefined },
+          { key: 'status', label: 'Статус производства', defaultVisible: true, clear: status ? { productionStatus: '' } : undefined,
+            control: <Select ariaLabel="Статус производства" className="poster-filter h-9 min-w-36" value={status ?? ''}
+              onChange={(value) => update({ productionStatus: value, productionPage: '1' })}
+              options={[{ value: '', label: 'Все статусы' }, { value: 'posted', label: 'Проведена' }, { value: 'reversed', label: 'Сторнирована' }]} /> },
+        ]} />
         <WorkspaceSearch label="Поиск производства" value={state.productionSearch} onChange={(value) => update({ productionSearch: value, productionPage: '1' })} />
-        {period.filter}
-        {filters}
-        <Select ariaLabel="Статус производства" className="poster-filter h-9 min-w-36" value={status ?? ''}
-          onChange={(value) => update({ productionStatus: value, productionPage: '1' })}
-          options={[{ value: '', label: 'Все статусы' }, { value: 'posted', label: 'Проведена' }, { value: 'reversed', label: 'Сторнирована' }]} />
       </div>
       <QueryState pending={query.isPending} error={query.error}>
         <div className="hidden overflow-x-auto md:block">

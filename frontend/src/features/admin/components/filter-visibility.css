@@ -1,0 +1,21 @@
+.filter-visibility-trigger {
+  display: grid;
+  flex: 0 0 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid rgb(var(--edu-border));
+  border-radius: 8px;
+  background: rgb(var(--edu-card));
+  color: rgb(var(--edu-text));
+}
+
+.filter-visibility-trigger:hover,
+.filter-visibility-trigger[aria-expanded='true'] {
+  border-color: rgb(var(--edu-link) / .55);
+  background: rgb(var(--edu-primary) / .09);
+}
+
+.filter-visibility-trigger:focus-visible {
+  outline: 2px solid rgb(var(--edu-focus));
+  outline-offset: 2px;
+}

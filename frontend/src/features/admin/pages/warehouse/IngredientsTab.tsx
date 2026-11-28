@@ -7,6 +7,7 @@ import { useAuth } from '@/store/auth';
 import { PROCESSING_METHODS, qty, useBalances, useIngredientCategories, useIngredientMutations, useIngredients, type Ingredient } from './api';
 import { QueryState } from './WarehouseUi';
 import { usePageFilter, usePageFilters } from './workspace-route';
+import { WarehouseFilters } from './WarehouseFilters';
 import { useWarehousePolicy } from './settings-api';
 import { UNIT_OPTIONS, unitConversionFactor } from './units';
 import { WorkspaceHeaderActions, WorkspaceHeaderCount } from '../WorkspaceHeader';
@@ -286,6 +287,16 @@ export function IngredientsTab({
       <span className="truncate">{item.name}</span>
     </button>
   );
+  const unitFilter = <Select ariaLabel="Единица измерения" className="poster-filter max-w-52" value={unit}
+    onChange={(value) => setBalanceFilter({ unit: value })}
+    options={[{ value: '', label: 'Ед. измерения' }, ...UNIT_OPTIONS]} />;
+  const stockSelect = <Select ariaLabel="Остатки" className={catalogue ? 'w-full' : 'poster-filter max-w-52'} value={filter}
+    onChange={(value) => catalogue ? onFilter(value as StockFilter) : setBalanceFilter({ stockFilter: value })}
+    options={[
+      { value: '', label: 'Все остатки' },
+      { value: 'low', label: 'Ниже лимита' },
+      { value: 'empty', label: 'Закончилось' },
+    ]} />;
   const filtered = !!(
     searchText ||
     category ||
@@ -466,86 +477,41 @@ export function IngredientsTab({
         {exportError && <p role="alert" className="py-2 text-sm text-danger">{exportError}</p>}
       </>}
       <div className="poster-toolbar">
-        <WorkspaceSearch label="Поиск позиции" placeholder={catalogue ? 'Быстрый поиск' : 'Поиск...'} value={search} onChange={(value) => setBalanceFilter({ search: value })} />
-        {filters}
-        {!catalogue && (
-          <WarehouseMultiFilter
-            label="Тип"
-            value={kind}
-            onChange={(value) => setBalanceFilter({ kind: value })}
-            options={[
-              { value: 'ingredient', label: 'Ингредиент' },
-              { value: 'goods', label: 'Товар' },
-              { value: 'preparation', label: 'Полуфабрикат' },
-              { value: 'prepared_dish', label: 'Готовое блюдо' },
-            ]}
-          />
-        )}
-        {!preparedCatalogue && (
-          <>
-            {catalogue ? <Select
-              ariaLabel="Категория"
-              className="poster-filter max-w-52"
-              value={category}
-              onChange={(value) => setBalanceFilter({ category: value })}
+        {!catalogue && <WarehouseFilters view="balances" onClear={setBalanceFilter} filters={[
+          { key: 'warehouse', label: 'Склад', defaultVisible: true,
+            clear: warehouseId || warehouseIds ? { warehouse: '', balanceWarehouses: '' } : undefined, control: filters },
+          { key: 'kind', label: 'Тип', defaultVisible: true, clear: balanceKinds.length ? { kind: '' } : undefined,
+            control: <WarehouseMultiFilter label="Тип" value={kind} onChange={(value) => setBalanceFilter({ kind: value })}
               options={[
-                { value: '', label: 'Категория' },
-                ...categories.map((value) => ({ value, label: value })),
-              ]}
-            /> : <WarehouseMultiFilter label="Категория" value={category} onChange={(value) => setBalanceFilter({ category: value })} options={[
-              { value: '', label: 'Без категории' },
-              ...categories.map((value) => ({ value, label: value })),
-            ]} />}
-            {catalogue && <Select
-              ariaLabel="Единица измерения"
-              className="poster-filter max-w-52"
-              value={unit}
-              onChange={(value) => setBalanceFilter({ unit: value })}
-              options={[{ value: '', label: 'Ед. измерения' }, ...UNIT_OPTIONS]}
-            />}
-          </>
-        )}
-        <details className="relative">
+                { value: 'ingredient', label: 'Ингредиент' },
+                { value: 'goods', label: 'Товар' },
+                { value: 'preparation', label: 'Полуфабрикат' },
+                { value: 'prepared_dish', label: 'Готовое блюдо' },
+              ]} /> },
+          { key: 'category', label: 'Категория', defaultVisible: true, clear: balanceCategories.length ? { category: '' } : undefined,
+            control: <WarehouseMultiFilter label="Категория" value={category} onChange={(value) => setBalanceFilter({ category: value })}
+              options={[{ value: '', label: 'Без категории' }, ...categories.map((value) => ({ value, label: value }))]} /> },
+          { key: 'unit', label: 'Единица измерения', clear: unit ? { unit: '' } : undefined, control: unitFilter },
+          { key: 'stock', label: 'Остаток', clear: filter ? { stockFilter: '' } : undefined, control: stockSelect },
+        ]} />}
+        <WorkspaceSearch label="Поиск позиции" placeholder={catalogue ? 'Быстрый поиск' : 'Поиск...'} value={search} onChange={(value) => setBalanceFilter({ search: value })} />
+        {catalogue && !preparedCatalogue && <>
+          <Select ariaLabel="Категория" className="poster-filter max-w-52" value={category}
+            onChange={(value) => setBalanceFilter({ category: value })}
+            options={[{ value: '', label: 'Категория' }, ...categories.map((value) => ({ value, label: value }))]} />
+          {unitFilter}
+        </>}
+        {catalogue && <details className="relative">
           <summary className="cursor-pointer list-none text-sm text-primary">
-            + Фильтр{filter || (!catalogue && unit) || (preparedCatalogue && category) ? ' •' : ''}
+            + Фильтр{filter || (preparedCatalogue && category) ? ' •' : ''}
           </summary>
           <div className="absolute left-0 top-full z-30 mt-2 w-60 space-y-3 border border-border bg-white p-3 shadow-md">
-            {preparedCatalogue && (
-              <Select
-                ariaLabel="Категория"
-                className="w-full"
-                value={category}
-                onChange={(value) => setBalanceFilter({ category: value })}
-                options={[
-                  { value: '', label: 'Все категории' },
-                  ...categories.map((value) => ({ value, label: value })),
-                ]}
-              />
-            )}
-            {!catalogue && (
-              <Select
-                ariaLabel="Единица измерения"
-                className="w-full"
-                value={unit}
-                onChange={(value) => setBalanceFilter({ unit: value })}
-                options={[{ value: '', label: 'Ед. измерения' }, ...UNIT_OPTIONS]}
-              />
-            )}
-            {!preparedCatalogue && (
-              <Select
-                ariaLabel="Остатки"
-                className="w-full"
-                value={filter}
-                onChange={(value) => catalogue ? onFilter(value as StockFilter) : setBalanceFilter({ stockFilter: value })}
-                options={[
-                  { value: '', label: 'Все остатки' },
-                  { value: 'low', label: 'Ниже лимита' },
-                  { value: 'empty', label: 'Закончилось' },
-                ]}
-              />
-            )}
+            {preparedCatalogue ? <Select ariaLabel="Категория" className="w-full" value={category}
+              onChange={(value) => setBalanceFilter({ category: value })}
+              options={[{ value: '', label: 'Все категории' }, ...categories.map((value) => ({ value, label: value }))]} />
+              : stockSelect}
           </div>
-        </details>
+        </details>}
         {!catalogue && (filtered || warehouseId || warehouseIds) && <button type="button" className="poster-balance-reset"
           onClick={() => setBalanceFilter({ search: '', kind: '', category: '', unit: '', stockFilter: '', warehouse: '', balanceWarehouses: '' })}>
           Сбросить всё

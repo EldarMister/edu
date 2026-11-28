@@ -19,6 +19,7 @@ import { QueryState } from './WarehouseUi';
 import { visibleWarehouseColumns, WarehouseColumnSettings } from './WarehouseColumnSettings';
 import { WarehouseMultiFilter, warehouseMultiFilterValues } from './WarehouseMultiFilter';
 import { usePageFilters } from './workspace-route';
+import { WarehouseFilters } from './WarehouseFilters';
 import { purchasePaymentLabels } from './purchase-settlement-api';
 import './warehouse-supplies.css';
 
@@ -222,20 +223,25 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
           update({ supplyColumns: value });
         }} />}
       <div className="poster-toolbar print:hidden">
-        {period.filter}
+        <WarehouseFilters view="supplies" onClear={filter} filters={[
+          { key: 'period', label: 'Период', defaultVisible: true, control: period.filter,
+            clear: period.active ? { supplyPeriod: 'all', supplyFrom: '', supplyTo: '' } : undefined },
+          { key: 'warehouse', label: 'Склад', defaultVisible: true, control: filters,
+            clear: warehouseId ? { warehouse: '' } : undefined },
+          { key: 'supplier', label: 'Поставщик', defaultVisible: true, clear: selectedSuppliers.length ? { supplySupplier: '' } : undefined,
+            control: <WarehouseMultiFilter label="Поставщик" value={supplier} options={supplierOptions}
+              onChange={(value) => filter({ supplySupplier: value })} /> },
+          { key: 'category', label: 'Категории', clear: selectedCategories.length ? { supplyCategories: '' } : undefined,
+            control: <WarehouseMultiFilter label="Категории" value={categories} options={categoryOptions}
+              onChange={(value) => filter({ supplyCategories: value })} /> },
+          { key: 'payment', label: 'Оплата поставки', clear: paymentStatus ? { supplyPayment: '' } : undefined,
+            control: <Select ariaLabel="Оплата поставки" value={paymentStatus} options={paymentStates}
+              onChange={(value) => filter({ supplyPayment: value })} /> },
+          { key: 'status', label: 'Статус поставки', clear: status ? { supplyStatus: '' } : undefined,
+            control: <Select ariaLabel="Статус поставки" value={status} options={states} onChange={(value) => filter({ supplyStatus: value })} /> },
+        ]} />
         <WorkspaceSearch label="Поиск поставок" placeholder="Быстрый поиск" value={search}
           onChange={(value) => filter({ supplySearch: value })} />
-        <WarehouseMultiFilter label="Поставщик" value={supplier} options={supplierOptions}
-          onChange={(value) => filter({ supplySupplier: value })} />
-        {filters}
-        <WarehouseMultiFilter label="Категории" value={categories} options={categoryOptions}
-          onChange={(value) => filter({ supplyCategories: value })} />
-        <Select ariaLabel="Оплата поставки" value={paymentStatus} options={paymentStates}
-          onChange={(value) => filter({ supplyPayment: value })} />
-        {status && <div className="flex items-center gap-2">
-          <Select ariaLabel="Статус поставки" value={status} options={states} onChange={(value) => filter({ supplyStatus: value })} />
-          <button type="button" className="text-text-muted" aria-label="Убрать фильтр статуса" onClick={() => filter({ supplyStatus: '' })}>×</button>
-        </div>}
         {hasFilters && <button type="button" className="text-sm text-primary" onClick={() => {
           filter({ supplySearch: '', supplyStatus: '', supplyPayment: '', supplySupplier: '', supplyCategories: '', warehouse: '',
             supplyPeriod: 'all', supplyFrom: '', supplyTo: '' });

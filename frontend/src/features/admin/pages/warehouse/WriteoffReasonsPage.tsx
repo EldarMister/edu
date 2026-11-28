@@ -12,7 +12,8 @@ import { QueryState } from './WarehouseUi';
 import { WriteoffReasonEditor } from './WriteoffReasonField';
 import { RemoveDirectoryEntry } from './RemoveDirectoryEntry';
 import { WriteoffReasonBadge } from './WriteoffReasonBadge';
-import { usePageFilter } from './workspace-route';
+import { usePageFilters } from './workspace-route';
+import { WarehouseFilters } from './WarehouseFilters';
 
 export function WriteoffReasonsPage({ onSelect, navigation }: {
   onSelect: (id: string, period: Pick<ReturnType<typeof useListPeriod>, 'preset' | 'range'>) => void;
@@ -21,7 +22,9 @@ export function WriteoffReasonsPage({ onSelect, navigation }: {
   const [editor, setEditor] = useState<WriteoffReasonOption | 'new' | null>(null);
   const [removing, setRemoving] = useState<WriteoffReasonOption | null>(null);
   const remove = useRemoveWriteoffReason();
-  const [search, setSearch] = usePageFilter('writeoffReasonsSearch');
+  const [{ writeoffReasonsSearch: search }, update] = usePageFilters({
+    writeoffReasonsSearch: '', writeoffReasonsPeriod: 'all', writeoffReasonsFrom: '', writeoffReasonsTo: '',
+  });
   const period = useListPeriod('writeoffReasons');
   const reasons = useWriteoffReasons();
   const documents = useStockDocuments(undefined, 'writeoff');
@@ -48,8 +51,12 @@ export function WriteoffReasonsPage({ onSelect, navigation }: {
     </WorkspaceHeaderActions>
     <div className="poster-register-surface">
       <div className="poster-toolbar">
-        <WorkspaceSearch label="Поиск причин" placeholder="Поиск причин" value={search} onChange={setSearch} />
-        {period.filter}
+        <WarehouseFilters view="writeoff-reasons" onClear={update} filters={[
+          { key: 'period', label: 'Период', defaultVisible: true, control: period.filter,
+            clear: period.active ? { writeoffReasonsPeriod: 'all', writeoffReasonsFrom: '', writeoffReasonsTo: '' } : undefined },
+        ]} />
+        <WorkspaceSearch label="Поиск причин" placeholder="Поиск причин" value={search}
+          onChange={(value) => update({ writeoffReasonsSearch: value })} />
       </div>
       <QueryState pending={reasons.isPending || documents.isPending} error={reasons.error ?? documents.error} empty={!filtered.length}>
         <div className="overflow-x-auto"><table className="poster-table poster-register-table w-full min-w-[580px] text-left text-sm">

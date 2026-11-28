@@ -205,8 +205,6 @@ div.poster-select-menu { border-radius: 8px; padding: 3px; box-shadow: 0 3px 10p
 .report-pagination button:hover:not(:disabled) { background: light-dark(#f1f5f9, var(--edu-raised)); color: rgb(var(--edu-link)); }
 .report-pagination button:disabled { opacity: .4; }
 .poster-movement-name-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.poster-movement-filter-label { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 8px; border: 1px solid light-dark(#d8dee6, rgb(var(--edu-border))); border-radius: 4px; color: light-dark(#334155, rgb(var(--edu-text))); font-size: 14px; }
-.poster-movement-filter-label button { display: grid; place-items: center; width: 20px; height: 24px; color: rgb(var(--edu-text-muted)); }
 .poster-workspace .poster-toolbar .poster-movement-name-filter .input { width: min(180px, 100%); height: 32px; min-height: 32px; font-size: 14px; }
 .poster-workspace :is(.poster-balance-table, .poster-movement-table, .poster-register-table, .poster-directory-table) > tbody > tr > td {
   height: 48px;
@@ -227,12 +225,6 @@ div.poster-select-menu { border-radius: 8px; padding: 3px; box-shadow: 0 3px 10p
 .poster-workspace .poster-balance-detail-heading:focus-within .poster-balance-actions,
 .poster-workspace .poster-balance-detail-heading:hover .poster-balance-actions { opacity: 1; }
 .poster-workspace .poster-balance-actions button { min-height: 32px; color: rgb(var(--edu-link)); font-size: 13px; }
-.poster-list-filter { position: relative; }
-.poster-list-filter > summary { display: flex; align-items: center; min-height: 32px; cursor: pointer; list-style: none; color: rgb(var(--edu-link)); font-size: 13px; }
-.poster-list-filter > summary::-webkit-details-marker { display: none; }
-.poster-list-filter > summary::after { content: ''; width: 0; height: 0; margin-left: 6px; border: 4px solid transparent; border-top-color: currentColor; transform: translateY(2px); }
-.poster-list-filter-content { position: absolute; top: calc(100% + 8px); left: 0; z-index: 35; min-width: 220px; padding: 12px; background: rgb(var(--edu-card)); border: 1px solid rgb(var(--edu-border)); border-radius: 6px; box-shadow: 0 5px 16px rgb(15 23 42 / .1); }
-.poster-workspace .poster-toolbar .poster-list-filter-content button.rounded-xl.border { width: 100%; border: 1px solid light-dark(#d8dee6, rgb(var(--edu-border))); }
 .poster-workspace .poster-register-footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 16px; background: light-dark(#f3f5f7, rgb(var(--edu-background))); color: rgb(var(--edu-text-muted)); font-size: 13px; border-top: 1px solid light-dark(#edf0f3, rgb(var(--edu-border))); }
 .poster-workspace :is(.poster-list-empty, .poster-directory-empty) { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 210px; padding: 32px 16px; text-align: center; }
 .poster-workspace :is(.poster-list-empty, .poster-directory-empty) > svg { width: 56px; height: 56px; padding: 10px; margin-bottom: 16px; border-radius: 10px; background: light-dark(#f1f4f7, var(--edu-raised)); color: rgb(var(--edu-text-light)); }
@@ -316,7 +308,6 @@ div.poster-select-menu { border-radius: 8px; padding: 3px; box-shadow: 0 3px 10p
 .poster-workspace .poster-movement-group-heading { background: light-dark(#f3f5f7, rgb(var(--edu-background))); }
 .poster-workspace .poster-movement-group-heading button { min-height: 28px; }
 .poster-workspace .poster-report-warehouse summary { color: rgb(var(--edu-text-secondary)); white-space: nowrap; }
-.poster-workspace .poster-report-warehouse .poster-list-filter-content { min-width: 230px; }
 @media (max-width: 639px) {
   .poster-workspace .poster-movement-groups th:first-child { width: auto; }
   .poster-workspace .poster-movement-groups :is(th, td) { padding: 8px; font-size: 13px; }

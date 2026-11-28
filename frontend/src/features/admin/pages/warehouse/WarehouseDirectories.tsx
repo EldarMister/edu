@@ -4,6 +4,7 @@ import { IconEllipsis } from '../../components/icons';
 import { RowIconButton } from '../../components/RowIconButton';
 import { createPortal } from 'react-dom';
 import { usePageFilter, useEditorRoute } from './workspace-route';
+import { WarehouseFilters } from './WarehouseFilters';
 import { EditorPage, useEditorDirty } from './EditorPage';
 import { Modal } from '@/components/Modal';
 import { WorkspaceSearch } from '../WorkspaceSearch';
@@ -508,14 +509,12 @@ export function PackagesPage() {
         <button type="button" className="btn-primary btn-md" onClick={() => openEditor({ type: 'package' })}>Добавить</button>
       </WorkspaceHeaderActions>}
       <div className="poster-toolbar">
+        <WarehouseFilters view="packages" onClear={() => setUnit('')} filters={[
+          { key: 'unit', label: 'Единица измерения', defaultVisible: true, clear: unit ? { unit: '' } : undefined,
+            control: <Select ariaLabel="Единица фасовки" className="poster-filter w-44" value={unit}
+              onChange={setUnit} options={[{ value: '', label: 'Ед. измерения' }, ...UNIT_OPTIONS]} /> },
+        ]} />
         <WorkspaceSearch label="Поиск фасовок" value={search} onChange={setSearch} placeholder="Поиск..." />
-        <Select
-          ariaLabel="Единица фасовки"
-          className="poster-filter w-44"
-          value={unit}
-          onChange={setUnit}
-          options={[{ value: '', label: 'Ед. измерения' }, ...UNIT_OPTIONS]}
-        />
       </div>
       {error && (
         <p role="alert" className="py-3 text-danger">

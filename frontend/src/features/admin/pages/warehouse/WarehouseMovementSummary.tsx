@@ -4,6 +4,7 @@ import { ColumnButton } from '../../components/ColumnControl';
 import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { usePageFilter, usePageFilters } from './workspace-route';
+import { WarehouseFilters } from './WarehouseFilters';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { useQuery } from '@tanstack/react-query';
 import { Select } from '@/components/Select';
@@ -204,36 +205,37 @@ export function WarehouseMovementSummary({ warehouseId, range, onOpen, onHistory
   return (
     <section className="poster-report-surface" aria-label="Отчёт по движению продуктов">
       <div className="poster-toolbar print:hidden">
+        <WarehouseFilters view="movement" onClear={filter} filters={[
+          { key: 'period', label: 'Период', defaultVisible: true, control: periodFilter,
+            clear: conditions.stockPeriod !== 'week' ? { stockPeriod: 'week', stockFrom: '', stockTo: '' } : undefined },
+          { key: 'warehouse', label: 'Склад', defaultVisible: true,
+            clear: selectedWarehouses.length ? { warehouse: '', movementWarehouses: '' } : undefined,
+            control: <WarehouseMultiFilter label="Склад" value={JSON.stringify(selectedWarehouses)}
+              options={locations.map(({ id, name }) => ({ value: id, label: name }))}
+              onChange={(value) => filter({ movementWarehouses: warehouseMultiFilterValues(value).join(','), warehouse: '' })} /> },
+          { key: 'kind', label: 'Тип', clear: selectedKinds.length ? { movementKind: '' } : undefined,
+            control: <WarehouseMultiFilter label="Тип" value={conditions.movementKind} options={kinds}
+              onChange={(value) => filter({ movementKind: value })} /> },
+          { key: 'category', label: 'Категория', clear: selectedCategories.length ? { movementCategory: '' } : undefined,
+            control: <WarehouseMultiFilter label="Категория" value={conditions.movementCategory}
+              options={categories.map((value) => ({ value, label: value }))}
+              onChange={(value) => filter({ movementCategory: value })} /> },
+          { key: 'movement', label: 'Движение продуктов', clear: onlyWithMovement ? { movementOnly: '' } : undefined,
+            control: <Select ariaLabel="Движение продуктов" value={onlyWithMovement}
+              placeholder="Движение продуктов"
+              options={[{ value: 'true', label: 'Только продукты с движением' }, { value: 'false', label: 'Все продукты, в т.ч. без движения' }]}
+              onChange={(value) => filter({ movementOnly: value })} /> },
+          { key: 'name', label: 'По названию', clear: nameCondition ? { movementNameCondition: '', movementNameValue: '' } : undefined,
+            control: <div className="poster-movement-name-filter">
+              <Select ariaLabel="Условие по названию" value={nameCondition ?? ''}
+                options={[{ value: '', label: 'По названию' }, ...nameConditions]}
+                onChange={(value) => filter({ movementNameCondition: value, ...(value ? {} : { movementNameValue: '' }) })} />
+              {needsNameValue && <input className="input" aria-label="Значение названия" placeholder="Введите название"
+                value={conditions.movementNameValue} maxLength={160}
+                onChange={(event) => filter({ movementNameValue: event.target.value })} />}
+            </div> },
+        ]} />
         <WorkspaceSearch label="Поиск продукта в движении" placeholder="Поиск…" value={search} onChange={(value) => filter({ movementSearch: value })} />
-        {periodFilter}
-        <WarehouseMultiFilter label="Склад" value={JSON.stringify(selectedWarehouses)}
-          options={locations.map(({ id, name }) => ({ value: id, label: name }))}
-          onChange={(value) => filter({ movementWarehouses: warehouseMultiFilterValues(value).join(','), warehouse: '' })} />
-        <WarehouseMultiFilter label="Тип" value={conditions.movementKind} options={kinds}
-          onChange={(value) => filter({ movementKind: value })} />
-        <WarehouseMultiFilter label="Категория" value={conditions.movementCategory}
-          options={categories.map((value) => ({ value, label: value }))}
-          onChange={(value) => filter({ movementCategory: value })} />
-        <Select ariaLabel="Движение продуктов" value={onlyWithMovement}
-          placeholder="Движение продуктов"
-          options={[{ value: 'true', label: 'Только продукты с движением' }, { value: 'false', label: 'Все продукты, в т.ч. без движения' }]}
-          onChange={(value) => filter({ movementOnly: value })} />
-        {nameCondition ? (
-          <div className="poster-movement-name-filter">
-            <span className="poster-movement-filter-label">
-              Название
-              <button type="button" aria-label="Убрать фильтр по названию"
-                onClick={() => filter({ movementNameCondition: '', movementNameValue: '' })}>×</button>
-            </span>
-            <Select ariaLabel="Условие по названию" value={nameCondition} options={nameConditions}
-              onChange={(value) => filter({ movementNameCondition: value })} />
-            {needsNameValue && <input className="input" aria-label="Значение названия" placeholder="Введите название"
-              value={conditions.movementNameValue} maxLength={160}
-              onChange={(event) => filter({ movementNameValue: event.target.value })} />}
-          </div>
-        ) : <Select ariaLabel="Добавить фильтр" value="" placeholder="+ Фильтр"
-          options={[{ value: 'name', label: 'Название' }]}
-          onChange={() => filter({ movementNameCondition: 'equals', movementNameValue: '' })} />}
         {hasFilters && <button type="button" className="text-sm text-primary" onClick={() => {
           saveColumns('');
           storeWidths('');

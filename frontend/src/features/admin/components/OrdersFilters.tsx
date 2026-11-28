@@ -1,9 +1,8 @@
-import { Fragment, useRef, useState, type ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { Select, type SelectOption } from '@/components/Select';
 import { useT } from '@/lib/i18n';
-import { useFilterPreference } from '@/hooks/useColumnPreference';
-import { ColumnCheckbox, ColumnPopover } from './ColumnPopover';
-import { IconSliders, IconX } from './icons';
+import { FilterVisibility } from './FilterVisibility';
+import { IconX } from './icons';
 import { ORDER_TYPES } from '@/features/waiter/OrderFulfillmentFields';
 
 export type OrderSort = 'default' | 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc';
@@ -44,7 +43,6 @@ const SORT_OPTIONS: { value: OrderSort; label: string }[] = [
 export type OrderFilter = 'period' | 'status' | 'type' | 'payment' | 'waiter' | 'comments' | 'sort';
 
 const DEFAULT_FILTERS: OrderFilter[] = ['period', 'status'];
-const DEFAULT_FILTER_PREFERENCE = DEFAULT_FILTERS.join(',');
 
 type Props = {
   scope: 'admin' | 'terminal';
@@ -71,10 +69,6 @@ type Props = {
 export function OrdersFilters(props: Props) {
   const tr = useT();
   const ctrl = 'orders-filter-control';
-  const title = tr('Отображать фильтры');
-  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
-  const [saved, save] = useFilterPreference(props.scope + '-orders', DEFAULT_FILTER_PREFERENCE);
-  const preferred = saved.split(',');
   const filters: { key: OrderFilter; label: string; active: boolean; control: ReactNode }[] = [
     {
       key: 'period', label: 'Период', active: props.periodActive,
@@ -111,36 +105,13 @@ export function OrdersFilters(props: Props) {
         value={props.sort} onChange={(value) => props.onSortChange(value as OrderSort)} options={SORT_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />,
     },
   ];
-  const visible = filters.filter(({ key, active }) => active || preferred.includes(key));
-
-  function toggleFilter(key: OrderFilter, checked: boolean) {
-    const keys = filters.filter((filter) => filter.key === key ? checked : preferred.includes(filter.key));
-    save(keys.map((filter) => filter.key).join(','));
-    if (!checked && filters.some((filter) => filter.key === key && filter.active)) props.onClearFilters([key]);
-  }
-
-  function resetVisibility() {
-    save(DEFAULT_FILTER_PREFERENCE);
-    const hidden = filters.filter(({ key, active }) => active && !DEFAULT_FILTERS.includes(key)).map(({ key }) => key);
-    if (hidden.length) props.onClearFilters(hidden);
-  }
-
   return (
     <div className="orders-filters">
-      <button type="button" className="orders-filter-settings" title={title} aria-label={title}
-        aria-haspopup="dialog" aria-expanded={anchor !== null}
-        onClick={(event) => setAnchor(anchor ? null : event.currentTarget)}>
-        <IconSliders aria-hidden="true" />
-      </button>
-      {visible.map(({ key, control }) => <Fragment key={key}>{control}</Fragment>)}
+      <FilterVisibility view={props.scope + '-orders'} onClear={props.onClearFilters}
+        filters={filters.map(({ key, active, ...filter }) => ({
+          ...filter, key, defaultVisible: DEFAULT_FILTERS.includes(key), clear: active ? key : undefined,
+        }))} />
       <OrdersSearchField value={props.search} onChange={props.onSearchChange} />
-      {anchor && <ColumnPopover anchor={anchor} title={title} align="start" onClose={() => setAnchor(null)} onReset={resetVisibility}>
-        {filters.map(({ key, active, label }) =>
-          <ColumnCheckbox key={key} checked={active || preferred.includes(key)} onChange={(checked) => toggleFilter(key, checked)}>
-            {tr(label)}
-          </ColumnCheckbox>,
-        )}
-      </ColumnPopover>}
     </div>
   );
 }

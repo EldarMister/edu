@@ -51,26 +51,10 @@
   margin: 14px 0 17px;
 }
 
-.orders-filter-settings {
-  display: grid;
-  flex: 0 0 44px;
+.orders-filters > .filter-visibility-trigger {
+  flex-basis: 44px;
   height: 46px;
-  place-items: center;
-  border: 1px solid rgb(var(--edu-border));
   border-radius: 11px;
-  background: rgb(var(--edu-card));
-  color: rgb(var(--edu-text));
-}
-
-.orders-filter-settings:hover,
-.orders-filter-settings[aria-expanded='true'] {
-  border-color: rgb(var(--edu-link) / .55);
-  background: rgb(var(--edu-primary) / .09);
-}
-
-.orders-filter-settings:focus-visible {
-  outline: 2px solid rgb(var(--edu-focus));
-  outline-offset: 2px;
 }
 
 .orders-filter-control,

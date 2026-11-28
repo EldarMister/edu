@@ -8,7 +8,8 @@ import { DocumentProductPicker } from './DocumentProductPicker';
 import { ItemCard } from './ItemCard';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { formatDocumentListDate } from './WarehouseDocumentLists';
-import { usePageFilter } from './workspace-route';
+import { usePageFilters } from './workspace-route';
+import { WarehouseFilters } from './WarehouseFilters';
 import { Select } from '@/components/Select';
 import { StockOperationDateField } from './StockOperationDateField';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -52,7 +53,9 @@ export function ProcessingPage({
   onCreate: () => void;
   onCopy: (id: string) => void;
 }) {
-  const [search, setSearch] = usePageFilter('processingSearch');
+  const [{ processingSearch: search }, update] = usePageFilters({
+    processingSearch: '', processingPeriod: 'month', processingFrom: '', processingTo: '', warehouse: '',
+  });
   const period = useListPeriod('processing', 'month');
   const { can } = usePermissions();
   const canProduce = can('actions.warehouseProduce');
@@ -82,9 +85,12 @@ export function ProcessingPage({
         {canProduce && <button type="button" className="btn-primary btn-md" onClick={onCreate}>Добавить</button>}
       </WorkspaceHeaderActions>
       <div className="poster-toolbar">
-        <WorkspaceSearch label="Поиск переработок" value={search} onChange={setSearch} />
-        {period.filter}
-        {filters}
+        <WarehouseFilters view="processing" onClear={update} filters={[
+          { key: 'period', label: 'Период', defaultVisible: true, control: period.filter,
+            clear: period.preset !== 'month' ? { processingPeriod: 'month', processingFrom: '', processingTo: '' } : undefined },
+          { key: 'warehouse', label: 'Склад', defaultVisible: true, control: filters, clear: warehouseId ? { warehouse: '' } : undefined },
+        ]} />
+        <WorkspaceSearch label="Поиск переработок" value={search} onChange={(value) => update({ processingSearch: value })} />
       </div>
       {editingColumns && <WarehouseColumnSettings anchor={editingColumns} columns={columns} defaults={defaultColumns}
         label={(key) => processingColumns[key]} onClose={() => setEditingColumns(null)}
