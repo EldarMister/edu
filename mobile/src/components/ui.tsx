@@ -25,6 +25,8 @@ export function Button({
   loading,
   disabled,
   danger,
+  leadingIcon,
+  accent,
   style,
 }: {
   title: string;
@@ -35,6 +37,8 @@ export function Button({
   disabled?: boolean;
   /** Вторичная кнопка с красным текстом (как «Выйти»). */
   danger?: boolean;
+  leadingIcon?: React.ReactNode;
+  accent?: boolean;
   style?: ViewStyle;
 }) {
   const isDisabled = disabled || loading;
@@ -42,7 +46,7 @@ export function Button({
   const bg =
     variant === 'primary' ? colors.primary : variant === 'danger' ? colors.danger : colors.white;
   const fg =
-    variant === 'secondary' ? (danger ? colors.danger : colors.textPrimary) : colors.white;
+    variant === 'secondary' ? (danger ? colors.danger : accent ? colors.primary : colors.textPrimary) : colors.white;
 
   return (
     <Pressable
@@ -58,14 +62,12 @@ export function Button({
       {loading ? (
         <ActivityIndicator color={fg} />
       ) : (
-        <Text
-          style={[
-            styles.btnText,
-            { color: fg, fontSize: size === 'lg' ? fontSize.base : fontSize.sm },
-          ]}
-        >
-          {title}
-        </Text>
+        <View style={styles.btnContent}>
+          {leadingIcon}
+          <Text style={[
+            styles.btnText, { color: fg, fontSize: size === 'lg' ? fontSize.base : fontSize.sm },
+          ]}>{title}</Text>
+        </View>
       )}
     </Pressable>
   );
@@ -251,6 +253,7 @@ export function RoundBtn({ kind, onPress, disabled = false, accessibilityLabel }
 }
 
 const styles = StyleSheet.create({
+  btnContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   btn: {
     borderRadius: radius.md,
     alignItems: 'center',

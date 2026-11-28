@@ -218,6 +218,32 @@ export function useCancelOrder() {
   });
 }
 
+export function useSplitOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId, ...payload }: {
+      orderId: string;
+      items: { itemId: string; quantity: number }[];
+      expectedUpdatedAt: string;
+      idempotencyKey: string;
+    }) => (await api.post<{ sourceOrder: Order; newOrder: Order }>('/orders/' + orderId + '/split', payload)).data,
+    retry: networkRetry,
+    onSuccess: async ({ sourceOrder, newOrder }) => {
+      const key = ['orders', 'active'];
+      await qc.cancelQueries({ queryKey: key });
+      qc.setQueryData<Order[]>(key, (current = []) => [
+        ...current.filter((order) => order.id !== sourceOrder.id && order.id !== newOrder.id),
+        ...[sourceOrder, newOrder].filter((order) => order.status !== 'paid' && order.status !== 'cancelled'),
+      ]);
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['orders'] });
+      void qc.invalidateQueries({ queryKey: ['halls'] });
+      void qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
+    },
+  });
+}
+
 export function usePay() {
   const qc = useQueryClient();
   return useMutation({
@@ -228,6 +254,7 @@ export function usePay() {
       cashAmount?: number;
       qrAmount?: number;
       cardAmount?: number;
+      splitPayments?: { method: Exclude<PaymentMethod, 'mixed'>; amount: number }[];
     }) => (await api.post<Order>('/payments', p)).data,
     retry: networkRetry,
     onSettled: () => {

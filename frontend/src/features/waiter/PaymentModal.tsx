@@ -16,6 +16,7 @@ import { beep } from '@/lib/sound';
 import { usePay, fetchReceipt, useCreateReceiptPrintRequest } from './api';
 import { useReceiptPrint } from './receiptPrint';
 import { SplitBillSheet } from './SplitBillSheet';
+import { splitPaymentMethod, type AmountSplitMode } from './splitBillModel';
 import { useOrderReceiptPrinter } from './useOrderReceiptPrinter';
 import { FullScreenPayment } from './FullScreenPayment';
 import { normalizeAmount, tenderTotals, type TenderAmounts, type TenderMethod } from './paymentAmounts';
@@ -42,6 +43,7 @@ export function PaymentModal({
   onClose,
   onPaid,
   onSplitItems,
+  initialSplitMode,
 }: {
   order: Order;
   wideLayout: boolean;
@@ -49,6 +51,7 @@ export function PaymentModal({
   onClose: () => void;
   onPaid: () => void;
   onSplitItems?: () => void;
+  initialSplitMode?: AmountSplitMode;
 }) {
   const t = useT();
   const pay = usePay();
@@ -76,7 +79,7 @@ export function PaymentModal({
   // Суммы для смешанной оплаты (как строки из инпутов).
   const [draft, setDraft] = useState(EMPTY_AMOUNTS);
   // Окно «Разделение счёта».
-  const [splitOpen, setSplitOpen] = useState(false);
+  const [splitOpen, setSplitOpen] = useState(!!initialSplitMode);
 
   const qrImageUrl = resolveQrSrc(settings.data?.qrImageUrl);
   const enabled = settings.data?.paymentMethods ?? (['qr', 'cash'] as PaymentMethod[]);
@@ -195,8 +198,8 @@ export function PaymentModal({
     payments: { method: Exclude<PaymentMethod, 'mixed'>; amount: number }[];
   }) {
     setError('');
-    const methods = new Set(payments.map((part) => part.method));
-    const method = methods.size === 1 ? payments[0].method : 'mixed';
+    const method = splitPaymentMethod(payments);
+    if (!method) return;
     await completePayment({ orderId: order.id, method, splitPayments: payments });
   }
 
@@ -378,14 +381,17 @@ export function PaymentModal({
   const splitBill = <SplitBillSheet
     key={order.id}
     open={splitOpen}
+    mode={initialSplitMode}
     total={total}
     wideLayout={wideLayout}
     paymentMethods={available.map(({ value }) => value)}
     qrImageUrl={qrImageUrl}
     submitting={pay.isPending}
-    onClose={() => setSplitOpen(false)}
+    onClose={initialSplitMode && !paymentAccepted ? close : () => setSplitOpen(false)}
     onComplete={handleSplitComplete}
   />;
+
+  if (initialSplitMode && !paymentAccepted) return createPortal(splitBill, document.body);
 
   if (wideLayout) return createPortal(
     <>

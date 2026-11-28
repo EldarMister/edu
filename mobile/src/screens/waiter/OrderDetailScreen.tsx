@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { Pressable } from 'react-native';
 import { Button, EmptyState, Loading } from '@/components/ui';
+import { BottomSheet } from '@/components/BottomSheet';
 import { OrderBadge } from '@/components/StatusBadge';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { useAuth } from '@/store/auth';
@@ -20,6 +21,8 @@ import { apiError } from '@/lib/api';
 import { displayOrderNumber, hallSuffix, money } from '@/utils/format';
 import { orderCustomizationText } from '@/utils/order-customization';
 import { PaymentSheet } from './PaymentSheet';
+import { SplitAmountsSheet, SplitItemsSheet } from './OrderSplitSheets';
+import { canSplitAmount, canSplitOrder, SPLIT_OPTIONS, type AmountSplitMode, type SplitMode } from '../../../../frontend/src/features/waiter/splitBillModel';
 import type { Order, OrderItem } from '@/types';
 
 type R = RouteProp<{ OrderDetail: { orderId: string } }, 'OrderDetail'>;
@@ -38,6 +41,9 @@ export function OrderDetailScreen() {
   const resolve = useResolvePartialRejection();
   const print = useCreateReceiptPrintRequest();
   const [payOpen, setPayOpen] = useState(false);
+  const [splitMenu, setSplitMenu] = useState(false);
+  const [itemSplit, setItemSplit] = useState<Order | null>(null);
+  const [amountSplit, setAmountSplit] = useState<{ order: Order; mode: AmountSplitMode } | null>(null);
 
   const onError = (e: unknown) => Alert.alert('Ошибка', apiError(e));
 
@@ -53,13 +59,35 @@ export function OrderDetailScreen() {
 
   const busy = pickedUp.isPending || served.isPending || toPayment.isPending || resolve.isPending;
 
+  const canSplitItems = canPay && canSplitOrder(order);
+  const canSplitMoney = canPay && canSplitAmount(order);
+  const canPrintBill = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready',
+    'picked_up', 'partially_rejected', 'served', 'waiting_payment'].includes(order.status) && !order.requiresWaiterDecision &&
+    (order.source !== 'qr' || !!order.waiter);
+
+  function openSplit(mode: SplitMode) {
+    if (!order || busy) return;
+    setSplitMenu(false);
+    if (mode === 'items') {
+      setItemSplit(order);
+      return;
+    }
+    if (order.status === 'waiting_payment') setAmountSplit({ order, mode });
+    else toPayment.mutate(order.id, { onError, onSuccess: (updated) => setAmountSplit({ order: updated, mode }) });
+  }
+
+  function finishPayment() {
+    setPayOpen(false);
+    setAmountSplit(null);
+    navigation.goBack();
+  }
+
   const mainAction = () => {
     if (order.requiresWaiterDecision) {
       return (
         <Button
           title="Продолжить без отказанного"
           variant="danger"
-          style={{ flex: 1 }}
           loading={resolve.isPending}
           onPress={() => resolve.mutate(order.id, { onError })}
         />
@@ -68,27 +96,26 @@ export function OrderDetailScreen() {
     switch (order.status) {
       case 'ready':
         return (
-          <Button title="Забрать" style={{ flex: 1 }} loading={busy} onPress={() => pickedUp.mutate(order.id, { onError })} />
+          <Button title="Забрать" loading={busy} onPress={() => pickedUp.mutate(order.id, { onError })} />
         );
       case 'picked_up':
         return (
-          <Button title="Подать" style={{ flex: 1 }} loading={busy} onPress={() => served.mutate(order.id, { onError })} />
+          <Button title="Подать" loading={busy} onPress={() => served.mutate(order.id, { onError })} />
         );
       case 'served':
-        return (
+        return canPay ? (
           <Button
             title="Перейти к оплате"
-            style={{ flex: 1 }}
-            loading={busy}
+              loading={busy}
             onPress={() =>
               toPayment.mutate(order.id, { onError, onSuccess: () => setPayOpen(true) })
             }
           />
-        );
+        ) : null;
       case 'waiting_payment':
-        return canPay ? <Button title="Оплатить" style={{ flex: 1 }} onPress={() => setPayOpen(true)} /> : null;
+        return canPay ? <Button title="Перейти к оплате" onPress={() => setPayOpen(true)} /> : null;
       default:
-        return <View style={{ flex: 1 }} />;
+        return null;
     }
   };
 
@@ -107,7 +134,7 @@ export function OrderDetailScreen() {
         <OrderBadge status={order.status} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
         {order.items.map((it) => (
           <ItemCard key={it.id} item={it} />
         ))}
@@ -118,31 +145,43 @@ export function OrderDetailScreen() {
           <Text style={styles.totalLabel}>Итого</Text>
           <Text style={styles.totalValue}>{money(order.finalAmount)}</Text>
         </View>
-        <View style={styles.actions}>
-          <Button
-            title="Счёт"
-            variant="secondary"
-            style={{ width: 110 }}
-            loading={print.isPending}
-            onPress={() =>
-              print.mutate(
+        {(canPrintBill || canSplitItems || canSplitMoney) && (
+          <View style={styles.actions}>
+            {canPrintBill && <Button title="Счёт" variant="secondary" accent style={styles.outline}
+              leadingIcon={<Ionicons name="print-outline" size={18} color={colors.primary} />}
+              loading={print.isPending}
+              onPress={() => print.mutate(
                 { orderId: order.id, type: 'preliminary' },
                 { onSuccess: () => Alert.alert('Готово', 'Запрос на печать отправлен администратору'), onError },
-              )
-            }
-          />
-          {mainAction()}
-        </View>
+              )} />}
+            {(canSplitItems || canSplitMoney) && <Button title="Разделить счёт" variant="secondary" accent style={styles.outline}
+              leadingIcon={<Ionicons name="git-branch-outline" size={18} color={colors.primary} />}
+              disabled={busy || print.isPending} onPress={() => setSplitMenu(true)} />}
+          </View>
+        )}
+        {mainAction()}
       </View>
 
-      {payOpen && canPay && <PaymentSheet
-        order={order}
-        onClose={() => setPayOpen(false)}
-        onPaid={() => {
-          setPayOpen(false);
-          navigation.goBack();
-        }}
-      />}
+      {splitMenu && <BottomSheet visible title="Разделить счёт" onClose={() => setSplitMenu(false)}>
+        {SPLIT_OPTIONS.map(({ value, label }) => {
+          const disabled = value === 'items' ? !canSplitItems : !canSplitMoney;
+          return <Pressable key={value} accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled}
+            style={[styles.splitOption, disabled && styles.disabled]} onPress={() => openSplit(value)}>
+            <Text style={styles.splitLabel}>{label}</Text>
+          </Pressable>;
+        })}
+      </BottomSheet>}
+      {itemSplit && canPay && <SplitItemsSheet order={itemSplit} onClose={() => setItemSplit(null)}
+        onSplit={(created) => {
+          setItemSplit(null);
+          Alert.alert('Создан отдельный чек', displayOrderNumber(created.orderNumber), [
+            { text: 'Закрыть' },
+            { text: 'Открыть чек', onPress: () => navigation.replace('OrderDetail', { orderId: created.id }) },
+          ]);
+        }} />}
+      {amountSplit && canPay && <SplitAmountsSheet order={amountSplit.order} mode={amountSplit.mode}
+        onClose={() => setAmountSplit(null)} onPaid={finishPayment} />}
+      {payOpen && canPay && <PaymentSheet order={order} onClose={() => setPayOpen(false)} onPaid={finishPayment} />}
     </SafeAreaView>
   );
 }
@@ -200,6 +239,7 @@ const styles = StyleSheet.create({
   },
   title: { flex: 1, fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },
   titleMuted: { fontSize: fontSize.base, fontWeight: '400', color: colors.textMuted },
+  scroll: { flex: 1 },
   list: { paddingHorizontal: spacing.md, gap: spacing.sm, paddingBottom: spacing.md },
   itemCard: {
     flexDirection: 'row',
@@ -229,5 +269,9 @@ const styles = StyleSheet.create({
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   totalLabel: { fontSize: fontSize.md, color: colors.textSecondary },
   totalValue: { fontSize: fontSize.xxl, fontWeight: '700', color: colors.textPrimary },
+  outline: { flex: 1, borderColor: colors.primary },
+  splitOption: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.sm },
+  splitLabel: { fontSize: fontSize.base, color: colors.textPrimary },
+  disabled: { opacity: 0.5 },
   actions: { flexDirection: 'row', gap: spacing.sm },
 });

@@ -71,7 +71,8 @@ import { CashShiftBanner, type CashShiftEditor } from '@/features/settings/CashS
 import { WorkspaceLinks } from '@/components/WorkspaceLinks';
 import { useRadioVisibility } from '@/features/ptt/radioVisibility';
 import { PaymentModal } from './PaymentModal';
-import { canSplitOrder, SplitOrderModal } from './SplitOrderModal';
+import { SplitOrderModal } from './SplitOrderModal';
+import { canSplitAmount, canSplitOrder, type AmountSplitMode, type SplitMode } from './splitBillModel';
 import { ReceiptPrintSheet } from './ReceiptPrintSheet';
 import { ShiftSummaryModal } from './ShiftSummaryModal';
 import { ShiftRequiredScreen } from './ShiftRequiredScreen';
@@ -164,6 +165,7 @@ export function WaiterApp() {
   const [viewingOrderId, setViewingOrderId] = useState<string | null>(null);
   const [selectedCheckId, setSelectedCheckId] = useState<string | null>(null);
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
+  const [paymentSplitMode, setPaymentSplitMode] = useState<AmountSplitMode>();
   const [splitOrder, setSplitOrder] = useState<Order | null>(null);
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
@@ -255,6 +257,11 @@ export function WaiterApp() {
   const displayedOrder = viewingOrder ?? activeOrder;
   const relatedChecks = !displayedOrder || orderType(displayedOrder.source) !== 'dine_in' ? []
     : orders.filter((order) => checkFamily(order) === checkFamily(displayedOrder));
+  const splitModes: SplitMode[] = [];
+  if (displayedOrder && canTakePayment && canWork) {
+    if (canSplitOrder(displayedOrder)) splitModes.push('items');
+    if (canSplitAmount(displayedOrder)) splitModes.push('amount', 'equal');
+  }
   const showCart = !viewingOrder && (cart.lines.length > 0 || !activeOrder);
   const activeNavTab: Tab = viewingOrder && tab === 'cart' ? 'orders' : tab;
   // Направления позиций корзины. Только «Без отправки» → готовить нечего,
@@ -637,9 +644,6 @@ export function WaiterApp() {
     setViewingOrderId(order.id);
     selectOrderCart(order);
     setTab(order.requiresWaiterDecision ? 'orders' : 'cart');
-    if (order.status === 'waiting_payment') {
-      void goToPayment(order);
-    }
   }
 
   async function claimQr(order: Order) {
@@ -720,15 +724,17 @@ export function WaiterApp() {
     push({ message: `${set.name} добавлен`, at: new Date().toISOString(), durationMs: 1800 });
   }
 
-  async function goToPayment(order: Order) {
+  async function goToPayment(order: Order, splitMode?: AmountSplitMode) {
     if (!canTakePayment) return;
     if (order.status === 'waiting_payment') {
+      setPaymentSplitMode(splitMode);
       setPaymentOrder(order);
       return;
     }
 
     try {
       const updated = await toPayment.mutateAsync(order.id);
+      setPaymentSplitMode(splitMode);
       setPaymentOrder(updated);
     } catch (err) {
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
@@ -1039,7 +1045,8 @@ export function WaiterApp() {
           onInsufficientPermissions={(item) => openAdministratorPrompt(displayedOrder, item)}
           onCancelOrder={() => cancelAfterPartialRejection(displayedOrder)}
           onEdit={() => startEditOrder(displayedOrder)}
-          onSplitOrder={canTakePayment && canWork && canSplitOrder(displayedOrder) ? () => showSplitOrder(displayedOrder) : undefined}
+          splitModes={splitModes}
+          onSplitOrder={(mode) => mode === 'items' ? showSplitOrder(displayedOrder) : void goToPayment(displayedOrder, mode)}
           fulfillmentEditor={canCreateDelivery && canWork && displayedOrder.updatedAt && displayedOrder.source !== 'qr' && displayedOrder.source !== 'pickup' &&
             !displayedOrder.externalOrderId && !displayedOrder.splitFromOrderId && relatedChecks.length <= 1 &&
             ['sent_to_kitchen', 'ready'].includes(displayedOrder.status) &&
@@ -1348,6 +1355,7 @@ export function WaiterApp() {
           key={paymentOrder.id}
           order={paymentOrder}
           wideLayout={wideLayout}
+          initialSplitMode={paymentSplitMode}
           open={!!paymentOrder}
           onClose={() => setPaymentOrder(null)}
           onPaid={() => finishPayment(paymentOrder)}

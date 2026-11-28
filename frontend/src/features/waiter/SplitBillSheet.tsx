@@ -9,6 +9,7 @@ import { Spinner } from '@/components/Spinner';
 import { Select } from '@/components/Select';
 import { normalizeAmount, type TenderMethod } from './paymentAmounts';
 import { PaymentQrPreview } from './PaymentQrPreview';
+import { adjustSplitAmount, maxSplitShares, splitAmounts, splitCents as cents, validSplitAmounts, type AmountSplitMode } from './splitBillModel';
 
 /**
  * Разделение счёта: делим сумму заказа на N платежей, каждый оплачивается
@@ -39,20 +40,11 @@ const METHODS: { value: Method; label: string }[] = [
 
 const num = (s: string) => Number(s) || 0;
 const round2 = (n: number) => Math.round(n * 100) / 100;
-const cents = (value: number) => Math.round(value * 100);
-
-function splitAmounts(total: number, count: number): string[] {
-  const totalC = cents(total);
-  const base = Math.floor(totalC / count);
-  return Array.from({ length: count }, (_, i) =>
-    String((base + Number(i < totalC % count)) / 100),
-  );
-}
-
 export function SplitBillSheet({
   open,
   total,
   wideLayout = false,
+  mode = 'amount',
   paymentMethods,
   qrImageUrl,
   submitting,
@@ -62,6 +54,7 @@ export function SplitBillSheet({
   open: boolean;
   total: number;
   wideLayout?: boolean;
+  mode?: AmountSplitMode;
   paymentMethods: PaymentMethod[];
   qrImageUrl: string | null;
   submitting: boolean;
@@ -85,9 +78,8 @@ export function SplitBillSheet({
   const [amountInputs, setAmountInputs] = useState<string[]>(() => splitAmounts(total, 2));
 
   const amounts = useMemo(() => amountInputs.map((value) => round2(num(value))), [amountInputs]);
-  const assignedValid = amounts.every((amount) => amount >= 0.01)
-    && amounts.reduce((sum, amount) => sum + cents(amount), 0) === cents(total);
-  const maxShares = Math.min(10, cents(total));
+  const assignedValid = validSplitAmounts(total, amounts);
+  const maxShares = maxSplitShares(total);
 
   const anyPaid = payments.some((p) => p.paid);
   const invalidPaidMethod = payments.some((p) => p.paid && (!allowed(p.method)
@@ -121,18 +113,7 @@ export function SplitBillSheet({
     if (payments[i]?.paid) return;
     const clean = normalizeAmount(value);
     if (clean === null) return;
-    setAmountInputs((prev) => {
-      const next = [...prev];
-      next[i] = clean;
-      const adjustIndex =
-        [...payments.keys()].find((idx) => idx !== i && !payments[idx].paid && idx > i) ??
-        [...payments.keys()].reverse().find((idx) => idx !== i && !payments[idx].paid);
-      if (adjustIndex !== undefined) {
-        const others = next.reduce((sum, amount, idx) => (idx === adjustIndex ? sum : sum + num(amount)), 0);
-        next[adjustIndex] = String(Math.max(0, round2(total - others)));
-      }
-      return next;
-    });
+    setAmountInputs((prev) => adjustSplitAmount(prev, i, clean, payments.map(({ paid }) => paid), total));
   }
 
   function changeTender(index: number, method: TenderMethod, value: string) {
@@ -251,7 +232,8 @@ export function SplitBillSheet({
               <p className="text-sm text-text-muted">{t('Сумма к оплате')}</p>
               <p className="text-xl font-semibold text-text-primary">{money(total)}</p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3" role={mode === 'equal' ? 'group' : undefined}
+              aria-label={mode === 'equal' ? t('Количество гостей') : undefined}>
               <CounterBtn label="−" onClick={() => changeCount(count - 1)} disabled={anyPaid || count <= 2} />
               <span className="w-5 text-center text-lg font-semibold text-text-primary">{count}</span>
               <CounterBtn label="+" onClick={() => changeCount(count + 1)} disabled={anyPaid || count >= maxShares} />
@@ -271,9 +253,9 @@ export function SplitBillSheet({
               >
                 <div className="flex items-center justify-between">
                   <span className="text-[15px] font-medium text-text-primary">
-                    {t('Платёж')} {i + 1}
+                    {t(mode === 'equal' ? 'Гость' : 'Платёж')} {i + 1}
                   </span>
-                  {p.paid ? (
+                  {p.paid || mode === 'equal' ? (
                     <span className="text-[15px] font-semibold text-text-primary">{money(amounts[i])}</span>
                   ) : (
                     <label className="flex items-center gap-1">

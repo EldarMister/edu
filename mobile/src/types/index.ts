@@ -179,6 +179,7 @@ export interface OrderItem {
   dishVariantNameSnapshot: string | null;
   priceSnapshot: string;
   quantity: number;
+  weightGrams?: number | null;
   discountAmount: string;
   finalPrice: string;
   status: OrderItemStatus;
@@ -202,9 +203,11 @@ export interface Order {
   serviceChargeAmount: string;
   finalAmount: string;
   paymentMethod: PaymentMethod | null;
+  paymentStatus?: 'pending' | 'paid' | 'refunded' | null;
   comment: string | null;
   requiresWaiterDecision: boolean;
   createdAt: string;
+  updatedAt?: string;
   table: {
     id: string;
     number: number;
@@ -214,7 +217,7 @@ export interface Order {
     hall?: { name: string };
   };
   waiter: { id: string; name: string } | null;
-  source?: 'waiter' | 'qr';
+  source?: 'waiter' | 'qr' | 'delivery' | 'pickup';
   items: OrderItem[];
   payments?: { method: PaymentMethod; amount: string; source?: PaymentSource }[];
   fiscalReceiptNumber?: string | null;

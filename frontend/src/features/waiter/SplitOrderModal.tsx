@@ -8,24 +8,7 @@ import { useT } from '@/lib/i18n';
 import type { Order } from '@/types';
 import { useSplitOrder } from './api';
 
-type Line = Order['items'][number];
-
-function activeLines(order: Order) {
-  return order.items.filter((item) => item.status !== 'cancelled' && item.status !== 'rejected');
-}
-
-function indivisible(item: Line) {
-  return item.quantity <= 1 || !!item.weightGrams;
-}
-
-export function canSplitOrder(order: Order) {
-  const items = activeLines(order);
-  return !!order.updatedAt && order.source !== 'delivery' && order.source !== 'pickup' && (order.source !== 'qr' || !!order.waiter)
-    && ['served', 'waiting_payment'].includes(order.status)
-    && !order.requiresWaiterDecision && (!order.paymentStatus || order.paymentStatus === 'pending')
-    && items.every(({ status }) => status === 'served')
-    && (items.length > 1 || items.some((item) => !indivisible(item)));
-}
+import { activeSplitItems, indivisibleSplitItem, splitItemSelection } from './splitBillModel';
 
 export function SplitOrderModal({ order, onClose, onSplit }: {
   order: Order;
@@ -37,13 +20,8 @@ export function SplitOrderModal({ order, onClose, onSplit }: {
   const request = useRef<{ payload: string; key: string }>();
   const submitting = useRef(false);
   const [selected, setSelected] = useState<Record<string, string>>({});
-  const items = activeLines(order);
-  const values = items.map(({ id, quantity }) => ({
-    itemId: id, quantity: Number(selected[id] ?? 0), max: quantity, selected: selected[id] !== undefined,
-  }));
-  const canSubmit = values.some((line) => line.selected)
-    && values.every((line) => !line.selected || Number.isInteger(line.quantity) && line.quantity >= 1 && line.quantity <= line.max)
-    && values.some((line) => line.quantity < line.max);
+  const items = activeSplitItems(order.items);
+  const lines = splitItemSelection(items, selected);
 
   function close() {
     if (!submitting.current) onClose();
@@ -60,8 +38,7 @@ export function SplitOrderModal({ order, onClose, onSplit }: {
   }
 
   async function submit() {
-    if (submitting.current || !canSubmit || !order.updatedAt) return;
-    const lines = values.filter((line) => line.selected).map(({ itemId, quantity }) => ({ itemId, quantity }));
+    if (submitting.current || !lines || !order.updatedAt) return;
     const payload = JSON.stringify(lines);
     if (request.current?.payload !== payload) request.current = { payload, key: clientId() };
     submitting.current = true;
@@ -79,7 +56,7 @@ export function SplitOrderModal({ order, onClose, onSplit }: {
   return <Modal open title={t('Разделить по позициям')} onClose={close} panelClassName="max-w-xl"
     footer={<div className="flex flex-wrap justify-end gap-2">
       <button type="button" className="btn-secondary btn-md" disabled={split.isPending} onClick={close}>{t('Отмена')}</button>
-      <button type="submit" form="split-order-form" className="btn-primary btn-md" disabled={split.isPending || !canSubmit}>
+      <button type="submit" form="split-order-form" className="btn-primary btn-md" disabled={split.isPending || !lines}>
         {split.isPending ? <Spinner /> : t('Создать отдельный чек')}
       </button>
     </div>}>
@@ -100,7 +77,7 @@ export function SplitOrderModal({ order, onClose, onSplit }: {
                 <span className="text-sm text-text-muted">×{item.quantity} · {money(item.finalPrice)}</span>
               </span>
             </label>
-            {quantity !== undefined && !indivisible(item) && <label className="flex shrink-0 items-center gap-2 text-sm text-text-secondary">
+            {quantity !== undefined && !indivisibleSplitItem(item) && <label className="flex shrink-0 items-center gap-2 text-sm text-text-secondary">
               {t('Перенести')}
               <input type="number" inputMode="numeric" min={1} max={item.quantity} step={1} className="input w-[4.5rem] px-2"
                 aria-label={`${t('Количество')} · ${name}`} value={quantity} disabled={split.isPending} required
@@ -109,7 +86,7 @@ export function SplitOrderModal({ order, onClose, onSplit }: {
           </li>;
         })}
       </ul>
-      {values.every((line) => line.quantity === line.max) && <p className="text-sm text-warning" role="status">
+      {items.every((item) => Number(selected[item.id]) === item.quantity) && <p className="text-sm text-warning" role="status">
         {t('Оставьте хотя бы одну позицию в исходном чеке.')}
       </p>}
       {split.isError && <p className="text-sm text-danger" role="alert">{apiError(split.error)}</p>}

@@ -1,3 +1,5 @@
+import { ColumnPopover } from '@/features/admin/components/ColumnPopover';
+import { SPLIT_OPTIONS, type SplitMode } from './splitBillModel';
 import { IconPrinter } from '@/features/admin/components/icons';
 import { usePublicSettings } from '@/features/settings/api';
 import { waiterItemPermission, waiterOrderPermission } from '@/lib/order-permissions';
@@ -109,6 +111,7 @@ export function OrderPanel({
   onCancelOrder,
   onEdit,
   onSplitOrder,
+  splitModes,
   fulfillmentEditor,
   relatedChecks,
   onSelectCheck,
@@ -131,12 +134,14 @@ export function OrderPanel({
   onCancelOrder: () => void;
   /** Открыть редактирование заказа (переиспользует логику корзины/сетов). */
   onEdit?: () => void;
-  onSplitOrder?: () => void;
+  onSplitOrder?: (mode: SplitMode) => void;
+  splitModes: readonly SplitMode[];
   fulfillmentEditor?: React.ReactNode;
   relatedChecks: Pick<Order, 'id' | 'orderNumber'>[];
   onSelectCheck: (id: string) => void;
 }) {
   const t = useT();
+  const [splitAnchor, setSplitAnchor] = useState<HTMLButtonElement | null>(null);
   const [billItemId, setBillItemId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState<string>(ITEM_CANCEL_REASONS[0]);
   const [cancelOther, setCancelOther] = useState('');
@@ -172,9 +177,16 @@ export function OrderPanel({
     );
   }
 
+  const canPrintBill = onPreliminaryReceipt && [
+    'sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready',
+    'picked_up', 'partially_rejected', 'served', 'waiting_payment',
+  ].includes(order.status) && !order.requiresWaiterDecision && !unclaimedQr;
+  const showSplit = !!onSplitOrder && splitModes.length > 0;
+  const splitDisabled = submitting || preliminaryPending;
+
   return (
-    <div className="flex h-full flex-col">
-      <div className="border-b border-border pb-1.5">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 border-b border-border pb-1.5">
         <div className="flex items-center justify-between gap-2">
           <h2 className="flex min-w-0 flex-1 items-baseline gap-2 text-[15px] font-semibold leading-tight text-text-primary">
             <span className="shrink-0 whitespace-nowrap">{t('Заказ')} {displayOrderNumber(order.orderNumber)}</span>
@@ -211,7 +223,7 @@ export function OrderPanel({
       </div>
 
       {/* Позиции — компактный список */}
-      <div className="no-scrollbar flex-1 space-y-1.5 overflow-y-auto py-2">
+      <div className="no-scrollbar min-h-0 flex-1 space-y-1.5 overflow-y-auto py-2">
         {(order.source === 'delivery' || order.source === 'pickup') && (
           <div className="mb-2 space-y-1 rounded-lg border border-border px-3 py-2 text-sm">
             <p className="break-words font-medium text-text-primary">{order.deliveryAddress || order.pickupTime}</p>
@@ -222,6 +234,11 @@ export function OrderPanel({
           </div>
         )}
         {fulfillmentEditor}
+        {order.comment && (
+          <p className="mb-2 break-words rounded-lg bg-background px-3 py-2 text-sm text-text-secondary">
+            {order.comment}
+          </p>
+        )}
         {order.items.map((it) => {
           const rejected = it.status === 'rejected';
           const cancelled = it.status === 'cancelled';
@@ -347,12 +364,7 @@ export function OrderPanel({
       </div>
 
       {/* Низ */}
-      <div className="border-t border-border pt-3">
-        {order.comment && (
-          <p className="mb-2 rounded-lg bg-background px-3 py-2 text-sm text-text-secondary">
-            {order.comment}
-          </p>
-        )}
+      <div className="shrink-0 border-t border-border pt-3">
         {Number(order.deliveryFee) > 0 && <div className="mb-1 flex items-center justify-between text-sm text-text-secondary">
           <span>{t('Доставка')}</span><span>{money(order.deliveryFee ?? 0)}</span>
         </div>}
@@ -367,37 +379,43 @@ export function OrderPanel({
               {t('Этот QR-заказ видят все официанты. Нажмите «Взять заказ», чтобы закрепить его за собой.')}
             </div>
           )}
-          {onSplitOrder && <button type="button" className="mb-2 block py-1 text-sm font-medium text-primary hover:underline"
-            disabled={submitting || preliminaryPending} onClick={onSplitOrder}>{t('Разделить по позициям')}</button>}
-          <div className="flex gap-2">
-          {onPreliminaryReceipt && [
-            'sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready',
-            'picked_up', 'partially_rejected', 'waiting_payment',
-          ].includes(order.status) && !order.requiresWaiterDecision && !unclaimedQr && (
-            <button
-              className="btn btn-lg shrink-0 border border-primary bg-white px-4 font-medium text-primary hover:bg-primary/5"
-              disabled={preliminaryPending}
-              onClick={onPreliminaryReceipt}
-            >
-              {preliminaryPending ? <Spinner /> : <><IconPrinter />{t('Счёт')}</>}
-            </button>
+          {(canPrintBill || showSplit) && (
+            <div className="mb-2 flex gap-2">
+              {canPrintBill && <button type="button"
+                className="btn btn-lg min-w-0 flex-1 border border-primary bg-white px-2 font-medium text-primary hover:bg-primary/5"
+                disabled={preliminaryPending} onClick={onPreliminaryReceipt}>
+                {preliminaryPending ? <Spinner /> : <><IconPrinter />{t('Счёт')}</>}
+              </button>}
+              {showSplit && <button type="button"
+                className="btn btn-lg min-w-0 flex-1 border border-primary bg-white px-2 font-medium text-primary hover:bg-primary/5"
+                disabled={splitDisabled} aria-haspopup="dialog" aria-expanded={!!splitAnchor}
+                onClick={(event) => setSplitAnchor(splitAnchor ? null : event.currentTarget)}>
+                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 21v-5a5 5 0 0 0-1.5-3.5L5 7m0 0h5M5 7v5m7 4a5 5 0 0 1 1.5-3.5L19 7m0 0h-5m5 0v5" />
+                </svg>
+                {t('Разделить счёт')}
+              </button>}
+            </div>
           )}
-          <div className="min-w-0 flex-1">
+          {splitAnchor && showSplit && !splitDisabled && <ColumnPopover anchor={splitAnchor} title={t('Разделить счёт')}
+            onClose={() => setSplitAnchor(null)}>
+            {SPLIT_OPTIONS.map(({ value, label }) => <button type="button" key={value}
+              className="block w-full rounded-md px-2 py-2 text-left text-sm hover:bg-primary/10 disabled:opacity-50"
+              disabled={!splitModes.includes(value)} onClick={() => { setSplitAnchor(null); onSplitOrder(value); }}>
+              {t(label)}
+            </button>)}
+          </ColumnPopover>}
           <ActionButton
             order={order}
             submitting={submitting}
-            preliminaryPending={preliminaryPending}
             claimPending={claimPending}
             onClaimQr={onClaimQr}
             onPickedUp={onPickedUp}
             onServed={onServed}
             onToPayment={onToPayment}
-            onPreliminaryReceipt={onPreliminaryReceipt}
             onContinueAfterRejection={onContinueAfterRejection}
             onCancelOrder={onCancelOrder}
           />
-          </div>
-          </div>
         </div>
       </div>
       <Modal
@@ -596,25 +614,21 @@ function PartialRejectionPanel({
 function ActionButton({
   order,
   submitting,
-  preliminaryPending,
   claimPending,
   onClaimQr,
   onPickedUp,
   onServed,
   onToPayment,
-  onPreliminaryReceipt,
   onContinueAfterRejection,
   onCancelOrder,
 }: {
   order: Order;
   submitting: boolean;
-  preliminaryPending: boolean;
   claimPending?: boolean;
   onClaimQr?: () => void;
   onPickedUp: () => void;
   onServed: () => void;
   onToPayment?: () => void;
-  onPreliminaryReceipt?: () => void;
   onContinueAfterRejection: () => void;
   onCancelOrder: () => void;
 }) {
@@ -711,30 +725,21 @@ function ActionButton({
     );
   }
   if (s === 'served') {
-    if (!onToPayment && !onPreliminaryReceipt) return null;
+    if (!onToPayment) return null;
     return (
       <div className="space-y-2">
-        {onToPayment && !allActiveItemsServed && (
+        {!allActiveItemsServed && (
           <div className="rounded-xl bg-warning/10 px-3 py-2 text-sm text-warning">
             {t('Нельзя перейти к оплате: есть неподанные блюда.')}
           </div>
         )}
-        <div className="flex gap-2">
-          {onPreliminaryReceipt && <button
-            className="btn btn-lg shrink-0 border border-primary bg-white px-4 font-medium text-primary hover:bg-primary/5"
-            disabled={preliminaryPending}
-            onClick={onPreliminaryReceipt}
-          >
-            {preliminaryPending ? <Spinner /> : <><IconPrinter />{t('Счёт')}</>}
-          </button>}
-          {onToPayment && <button
-            className="btn-primary btn-lg flex-1 font-semibold"
-            disabled={submitting || cooldownActive || !allActiveItemsServed}
-            onClick={() => runProtectedAction(onToPayment)}
-          >
-            {cooldownActive ? actionCooldown : spin ?? t('Перейти к оплате')}
-          </button>}
-        </div>
+        <button
+          className="btn-primary btn-lg w-full font-semibold"
+          disabled={submitting || cooldownActive || !allActiveItemsServed}
+          onClick={() => runProtectedAction(onToPayment)}
+        >
+          {cooldownActive ? actionCooldown : spin ?? t('Перейти к оплате')}
+        </button>
       </div>
     );
   }
