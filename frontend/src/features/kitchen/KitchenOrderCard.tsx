@@ -48,8 +48,7 @@ export function KitchenOrderCard({
   now,
   submitting,
   readOnly = false,
-  pendingItemIds,
-  pendingType,
+  pendingTypes,
   pendingPartial,
   onAccept,
   onBatch,
@@ -60,8 +59,7 @@ export function KitchenOrderCard({
   submitting: boolean;
   readOnly?: boolean;
   /** Блюда заказа с отложенным (ещё не подтверждённым) действием. */
-  pendingItemIds: string[];
-  pendingType: 'reject' | 'ready' | null;
+  pendingTypes: ReadonlyMap<string, 'reject' | 'ready'>;
   /** Количество в частичных действиях, ещё находящихся в окне отмены. */
   pendingPartial: { itemId: string; quantity: number }[];
   onAccept: () => void;
@@ -118,7 +116,7 @@ export function KitchenOrderCard({
 
   // Позицию можно выбрать, если она ещё «живая» и по ней нет отложенного действия.
   const isSelectable = (status: OrderItemStatus, id: string) =>
-    canSelect && !FINAL_ITEM_STATUSES.includes(status) && !pendingItemIds.includes(id);
+    canSelect && !FINAL_ITEM_STATUSES.includes(status) && !pendingTypes.has(id);
 
   // Чистим выбор от позиций, которые стали невыбираемыми (обновление по сокету / отложенное действие).
   useEffect(() => {
@@ -132,7 +130,7 @@ export function KitchenOrderCard({
       return next.size === prev.size ? prev : next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusById, pendingItemIds, canSelect]);
+  }, [statusById, pendingTypes, canSelect]);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -230,7 +228,8 @@ export function KitchenOrderCard({
     opts?: { container?: boolean },
   ) {
     const selectable = !opts?.container && isSelectable(status, id);
-    const pending = pendingItemIds.includes(id);
+    const pendingType = pendingTypes.get(id);
+    const pending = pendingType !== undefined;
     const pendingQuantity = pendingQuantityById.get(id);
     const pendingPartially = pending && pendingQuantity !== undefined;
     const cancelled = status === 'cancelled';

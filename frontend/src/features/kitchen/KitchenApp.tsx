@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
+import { displayOrderNumber } from '@/lib/format';
 import { useNotifications } from '@/store/notifications';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { Spinner } from '@/components/Spinner';
@@ -32,10 +33,12 @@ const TABS: { key: KitchenTab; label: string }[] = [
 ];
 
 /** Сколько секунд показывается блок отмены, прежде чем действие уйдёт официанту. */
-const UNDO_SECONDS = 8;
+const UNDO_SECONDS = 10;
 
 type PendingAction = {
+  id: number;
   orderId: string;
+  orderNumber: string;
   type: 'reject' | 'ready';
   itemIds: string[];
   setComponentIds: string[];
@@ -93,7 +96,8 @@ export function KitchenApp({
   const [now, setNow] = useState(() => Date.now());
   const [actingId, setActingId] = useState<string | null>(null);
   const [stopListOpen, setStopListOpen] = useState(false);
-  const [pending, setPending] = useState<PendingAction | null>(null);
+  const [pending, setPending] = useState<PendingAction[]>([]);
+  const nextPendingId = useRef(0);
   const historyPeriod = useListPeriod('kitchenHistory', 'today');
   const historyTab = tab === 'ready' || tab === 'rejected';
 
@@ -140,31 +144,32 @@ export function KitchenApp({
     run.catch((err) => push({ message: apiError(err), at: new Date().toISOString() }));
   }
 
-  // По истечении таймера действие фиксируется и уходит на сервер.
   useEffect(() => {
-    if (!pending) return;
-    if (!canChangeOrders) { setPending(null); return; }
-    const t = setTimeout(() => {
-      commit(pending);
-      setPending(null);
-    }, Math.max(0, pending.deadline - Date.now()));
-    return () => clearTimeout(t);
+    if (!pending.length) return;
+    if (!canChangeOrders) { setPending([]); return; }
+    const timers = pending.map((action) => setTimeout(() => {
+      commit(action);
+      removePending(action.id);
+    }, Math.max(0, action.deadline - Date.now())));
+    return () => timers.forEach(clearTimeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending, canChangeOrders]);
 
   function onBatch(
-    orderId: string,
+    order: { id: string; orderNumber: string },
     type: 'reject' | 'ready',
     ids: { itemIds: string[]; setComponentIds: string[]; partial?: { itemId: string; quantity: number }[] },
   ) {
     if (!canChangeOrders) return;
-    // Новое действие, пока предыдущее не подтверждено — фиксируем предыдущее сразу.
-    if (pending) commit(pending);
-    setPending({ orderId, type, ...ids, deadline: Date.now() + UNDO_SECONDS * 1000 });
+    const startedAt = Date.now();
+    setNow(startedAt);
+    const action = { id: ++nextPendingId.current, orderId: order.id, orderNumber: order.orderNumber,
+      type, ...ids, deadline: startedAt + UNDO_SECONDS * 1000 };
+    setPending((current) => [...current, action]);
   }
 
-  function cancelPending() {
-    setPending(null);
+  function removePending(id: number) {
+    setPending((current) => current.filter((action) => action.id !== id));
   }
 
   async function act(id: string, fn: () => Promise<unknown>) {
@@ -191,8 +196,6 @@ export function KitchenApp({
     disconnectSocket();
     logout();
   }
-
-  const undoSecondsLeft = pending ? Math.max(0, Math.ceil((pending.deadline - now) / 1000)) : 0;
 
   function closeSettings() {
     setSettingsOpen(false);
@@ -227,7 +230,7 @@ export function KitchenApp({
               }
               try { localStorage.setItem(stationKey, value); } catch { /* Storage can be disabled. */ }
             }}
-            disabled={!!pending || actingId !== null || stopListOpen}
+            disabled={pending.length > 0 || actingId !== null || stopListOpen}
           /> : <span className="text-sm font-medium text-text-primary">
             {availableStations[0]?.name ?? (assignedStation === 'bar' ? 'Бар' : assignedStation === 'kitchen' ? 'Кухня' : 'Станция приготовления')}
           </span>}
@@ -347,55 +350,63 @@ export function KitchenApp({
           // плотно по вертикали, без пустот «по высоте самой длинной в ряду»,
           // как было у grid (Сет с раскрытым составом тянул весь ряд).
           <div className="columns-1 gap-4 sm:columns-2 lg:columns-3 xl:columns-4">
-            {orders.map((o) => (
-              <div key={o.id} className="mb-4 break-inside-avoid">
-                <KitchenOrderCard
-                  order={o}
-                  tab={tab}
-                  now={now}
-                  submitting={actingId === o.id}
-                  readOnly={!canChangeOrders}
-                  pendingItemIds={
-                    pending?.orderId === o.id ? [...pending.itemIds, ...pending.setComponentIds] : []
-                  }
-                  pendingType={pending?.orderId === o.id ? pending.type : null}
-                  pendingPartial={pending?.orderId === o.id ? pending.partial ?? [] : []}
-                  onAccept={() => acceptOrder(o.id)}
-                  onBatch={(type, ids) => onBatch(o.id, type, ids)}
-                />
-              </div>
-            ))}
+            {orders.map((o) => {
+              const actions = pending.filter((action) => action.orderId === o.id);
+              const pendingTypes = new Map<string, PendingAction['type']>();
+              for (const action of actions) {
+                for (const id of [...action.itemIds, ...action.setComponentIds]) pendingTypes.set(id, action.type);
+              }
+              return (
+                <div key={o.id} className="mb-4 break-inside-avoid">
+                  <KitchenOrderCard
+                    order={o}
+                    tab={tab}
+                    now={now}
+                    submitting={actingId === o.id}
+                    readOnly={!canChangeOrders}
+                    pendingTypes={pendingTypes}
+                    pendingPartial={actions.flatMap((action) => action.partial ?? [])}
+                    onAccept={() => acceptOrder(o.id)}
+                    onBatch={(type, ids) => onBatch(o, type, ids)}
+                  />
+                </div>
+              );
+            })}
           </div>
         )}
       </main>
       ))}
 
-      {/* Нижний блок отмены действия с таймером */}
-      {pending && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4 sm:px-5 sm:pb-5">
-          <div className="pointer-events-auto flex w-full max-w-5xl items-center gap-3.5 rounded-2xl border border-border bg-white px-4 py-3.5 shadow-soft sm:px-5">
-            <UndoActionIcon />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[15px] font-semibold text-text-primary">
-                {pending.itemIds.length + pending.setComponentIds.length}{' '}
-                {pluralPositions(pending.itemIds.length + pending.setComponentIds.length)}{' '}
-                {pending.type === 'reject' ? 'помечены как отказ' : 'помечены как готовые'}
-              </p>
-              <p className="text-[13px] text-text-muted">
-                Отправка официанту через{' '}
-                <span className="font-semibold text-danger">
-                  {String(undoSecondsLeft).padStart(2, '0')} сек
-                </span>
-              </p>
-            </div>
-            <button
-              onClick={cancelPending}
-              className="shrink-0 rounded-xl border border-primary bg-white px-5 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/5"
-            >
-              Отменить
-            </button>
-          </div>
-        </div>
+      {pending.length > 0 && (
+        <section aria-label="Действия с возможностью отмены"
+          className="max-h-[38dvh] shrink-0 space-y-2 overflow-y-auto px-4 pb-4 pt-1 sm:px-5 sm:pb-5">
+          {pending.map((action) => {
+            const count = action.itemIds.length + action.setComponentIds.length;
+            const secondsLeft = Math.max(0, Math.ceil((action.deadline - now) / 1000));
+            const orderNumber = displayOrderNumber(action.orderNumber);
+            return (
+              <div key={action.id} className="mx-auto flex w-full max-w-5xl items-center gap-3 rounded-2xl border border-border bg-white px-3 py-2 shadow-soft sm:px-5">
+                <UndoActionIcon />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[15px] font-semibold text-text-primary">
+                    {orderNumber} · {count} {pluralPositions(count)}{' '}
+                    {action.type === 'reject' ? 'помечены как отказ' : 'помечены как готовые'}
+                  </p>
+                  <p className="text-[13px] text-text-muted">
+                    Отправка официанту через{' '}
+                    <span className="font-semibold text-danger">
+                      {String(secondsLeft).padStart(2, '0')} сек
+                    </span>
+                  </p>
+                </div>
+                <button type="button" aria-label={'Отменить действие по заказу ' + orderNumber} onClick={() => removePending(action.id)}
+                  className="shrink-0 rounded-xl border border-primary bg-white px-3 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/5">
+                  Отменить
+                </button>
+              </div>
+            );
+          })}
+        </section>
       )}
 
       {canChangeStopList && <StopListDrawer open={stopListOpen} station={station} onClose={() => setStopListOpen(false)} />}
