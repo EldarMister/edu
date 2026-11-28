@@ -158,11 +158,10 @@ function TaxDirectory({ onEdit }: { onEdit: (id?: string) => void }) {
       </div>
     </QueryState>
     {columnsOpen && <WarehouseColumnSettings anchor={columnsOpen} columns={columns} defaults={defaultColumns} label={(key) => labels[key]}
-      onClose={() => setColumnsOpen(null)} onApply={(selection) => {
+      onClose={() => setColumnsOpen(null)} onChange={(selection) => {
         const value = selection.join(',') === defaultColumns.join(',') ? '' : selection.join(',');
         saveColumns(value);
         setFilters({ taxColumns: value });
-        setColumnsOpen(null);
       }} />}
     {toDelete && <Modal open title="Удаление налога" onClose={() => !remove.isPending && setToDelete(null)}
       footer={<div className="flex justify-end gap-2">

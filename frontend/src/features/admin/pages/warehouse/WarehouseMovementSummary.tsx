@@ -253,7 +253,7 @@ export function WarehouseMovementSummary({ warehouseId, range, onOpen, onHistory
       </div>
       {editingColumns && <WarehouseColumnSettings anchor={editingColumns} columns={columns} defaults={defaultColumns}
         label={(key) => reportColumns[key].label} onClose={() => setEditingColumns(null)}
-        onApply={(selected, resetWidths) => {
+        onChange={(selected, resetWidths) => {
           const value = selected.join(',') === defaultColumns.join(',') ? '' : selected.join(',');
           saveColumns(value);
           if (resetWidths) storeWidths('');
@@ -261,7 +261,6 @@ export function WarehouseMovementSummary({ warehouseId, range, onOpen, onHistory
             movementColumns: value,
             ...(resetWidths ? { movementColumnWidths: '' } : {}),
           });
-          setEditingColumns(null);
         }} />}
       {query.isPending && <WorkspacePending />}
       {(query.isError || error) && (

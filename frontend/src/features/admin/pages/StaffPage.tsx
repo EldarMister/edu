@@ -271,7 +271,7 @@ export function StaffPage({ initialTab = 'employees' }: { initialTab?: StaffTab 
       {tab === 'employees' && <WorkspaceHeaderActions>
         <ColumnButton expanded={!!columnAnchor} onClick={(event) => setColumnAnchor(columnAnchor ? null : event.currentTarget)} />
         {columnAnchor && <ColumnPopover anchor={columnAnchor} onClose={() => setColumnAnchor(null)}
-          footer={<button type="button" className="btn-ghost btn-md w-full" onClick={() => setHiddenStaffColumns('')}>Сбросить</button>}>
+          onReset={() => setHiddenStaffColumns('')}>
           <ColumnCheckbox checked disabled onChange={() => {}}>Сотрудник / Должность</ColumnCheckbox>
           {[{ key: 'shift', label: 'Смена' }, { key: 'turnover', label: 'Оборот' }].map(({ key, label }) =>
             <ColumnCheckbox key={key} checked={!hidden.includes(key)} onChange={(checked) =>

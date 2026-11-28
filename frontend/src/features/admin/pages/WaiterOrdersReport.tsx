@@ -285,9 +285,8 @@ export function WaiterOrdersReport({ staff, staffLoading }: {
       </div>
 
       {columnsOpen && <WarehouseColumnSettings anchor={columnsOpen} columns={columns} defaults={defaultColumns} label={(key) => columnLabels[key]}
-        onClose={() => setColumnsOpen(null)} onApply={(selected, reset) => {
+        onClose={() => setColumnsOpen(null)} onChange={(selected, reset) => {
           saveColumns(reset && selected.join(',') === defaultColumns.join(',') ? '' : selected.join(','));
-          setColumnsOpen(null);
         }} />}
     </section>
   );

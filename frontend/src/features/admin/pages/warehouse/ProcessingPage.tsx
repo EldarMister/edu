@@ -88,10 +88,9 @@ export function ProcessingPage({
       </div>
       {editingColumns && <WarehouseColumnSettings anchor={editingColumns} columns={columns} defaults={defaultColumns}
         label={(key) => processingColumns[key]} onClose={() => setEditingColumns(null)}
-        onApply={(selection) => {
+        onChange={(selection) => {
           const joined = selection.join(',');
           saveColumns(joined === defaultColumns.join(',') ? '' : joined);
-          setEditingColumns(null);
         }} />}
       <QueryState pending={q.isPending} error={q.error}>
         <div className="overflow-x-auto">

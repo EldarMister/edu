@@ -216,11 +216,10 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
       </WorkspaceHeaderActions>
       {settingsOpen && <WarehouseColumnSettings anchor={settingsOpen} columns={columns} defaults={allowedColumns} resetColumns={resetColumns}
         label={(key) => supplyColumns[key].label} onClose={() => setSettingsOpen(null)}
-        onApply={(selected) => {
+        onChange={(selected) => {
           const value = selected.join(',') === resetColumns.join(',') ? '' : selected.join(',');
           saveColumns(value);
           update({ supplyColumns: value });
-          setSettingsOpen(null);
         }} />}
       <div className="poster-toolbar print:hidden">
         {period.filter}

@@ -177,10 +177,9 @@ export function IngredientCategoriesPage({ search }: { search: string }) {
       </form>
     </EditorPage>}
     {showColumns && <WarehouseColumnSettings anchor={showColumns} columns={columns} defaults={defaults} label={(column) => labels[column]}
-      onClose={() => setShowColumns(null)} onApply={(selected, reset) => {
+      onClose={() => setShowColumns(null)} onChange={(selected, reset) => {
         setSavedColumns(reset && selected.join(',') === defaults.join(',') ? '' : selected.join(','));
         if (!selected.includes(sortColumn)) setListOptions({ sortBy: 'name', sort: 'asc' });
-        setShowColumns(null);
       }} />}
     {creating && <NewIngredientCategory onClose={() => setCreating(false)} />}
     {removing && <RemoveDirectoryEntry title="Удалить категорию ингредиентов?" pending={remove.isPending} error={remove.error}

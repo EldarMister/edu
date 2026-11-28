@@ -1,4 +1,4 @@
-import { ColumnPopover } from '../components/ColumnPopover';
+import { ColumnCheckbox, ColumnPopover } from '../components/ColumnPopover';
 import { IconExport, IconPrinter } from '@/features/admin/components/icons';
 import { useState } from 'react';
 import { ColumnButton } from '../components/ColumnControl';
@@ -98,7 +98,8 @@ export function StatisticsReport({ report, data }: { report: Report; data: Stati
   function setGrouping(key: 'variants' | 'waiters', checked: boolean) {
     setProductBreakdown((checked ? [...grouping, key] : grouping.filter((entry) => entry !== key)).join(','));
   }
-  const [hiddenColumns, setHiddenColumns] = useColumnPreference(`statistics-${report}`, report === 'products' ? optionalProductColumns : '');
+  const defaultHiddenColumns = report === 'products' ? optionalProductColumns : '';
+  const [hiddenColumns, setHiddenColumns] = useColumnPreference(`statistics-${report}`, defaultHiddenColumns);
   const hidden = hiddenColumns.split(',').filter(Boolean);
   const [sort, setSort] = useState({ key: defaultSort[report], ascending: report === 'staff' });
   const [printBlocked, setPrintBlocked] = useState(false);
@@ -162,24 +163,24 @@ export function StatisticsReport({ report, data }: { report: Report; data: Stati
     <WorkspaceHeaderActions>
       {report !== 'payments' && <>
         <ColumnButton expanded={!!columnAnchor} onClick={(event) => setColumnAnchor(columnAnchor ? null : event.currentTarget)} />
-        {columnAnchor && <ColumnPopover anchor={columnAnchor} onClose={() => setColumnAnchor(null)}>
-          <div className="space-y-2 px-2 py-2 [&_input]:accent-primary [&_label]:flex [&_label]:gap-2">
-          {report === 'products' && <div className="grid gap-2 border-b border-border pb-2">
-            <label className="flex items-center gap-2 whitespace-nowrap text-sm">
-              <input type="checkbox" checked={showVariants} onChange={(event) => setGrouping('variants', event.target.checked)} />
+        {columnAnchor && <ColumnPopover anchor={columnAnchor} onClose={() => setColumnAnchor(null)} onReset={() => {
+          setHiddenColumns(defaultHiddenColumns);
+          if (report === 'products') setProductBreakdown('');
+        }}>
+          {report === 'products' && <div className="mb-1 border-b border-border pb-1">
+            <ColumnCheckbox checked={showVariants} onChange={(checked) => setGrouping('variants', checked)}>
               {t('Варианты отдельными строками')}
-            </label>
-            <label className="flex items-center gap-2 whitespace-nowrap text-sm">
-              <input type="checkbox" checked={showWaiters} onChange={(event) => setGrouping('waiters', event.target.checked)} />
+            </ColumnCheckbox>
+            <ColumnCheckbox checked={showWaiters} onChange={(checked) => setGrouping('waiters', checked)}>
               {t('Официанты отдельными строками')}
-            </label>
+            </ColumnCheckbox>
           </div>}
-          {allColumns.map(({ key, label }) => <label key={key} className="flex items-center gap-2 whitespace-nowrap text-sm">
-            <input type="checkbox" checked={!hidden.includes(key)} disabled={key === firstColumn[report]}
-              onChange={(event) => setHiddenColumns((event.target.checked ? hidden.filter((entry) => entry !== key) : [...hidden, key]).join(','))} />
-            {t(label)}
-          </label>)}
-          </div>
+          {allColumns.map(({ key, label }) => (
+            <ColumnCheckbox key={key} checked={!hidden.includes(key)} disabled={key === firstColumn[report]}
+              onChange={(checked) => setHiddenColumns((checked ? hidden.filter((entry) => entry !== key) : [...hidden, key]).join(','))}>
+              {t(label)}
+            </ColumnCheckbox>
+          ))}
         </ColumnPopover>}
       </>}
       {canAction('exportReports') && <button type="button" className="workspace-tool" disabled={!rows.length}

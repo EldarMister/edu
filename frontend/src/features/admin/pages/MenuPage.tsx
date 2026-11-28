@@ -282,9 +282,8 @@ function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
       )}
       {!isGoods && recipeColumnsOpen && <WarehouseColumnSettings anchor={recipeColumnsOpen} columns={recipeColumns} defaults={recipeDefaults}
         label={(column) => recipeColumnLabels[column]} onClose={() => setRecipeColumnsOpen(null)}
-        onApply={(selected, reset) => {
+        onChange={(selected, reset) => {
           saveRecipeColumnPreference(reset && selected.join(',') === recipeDefaults.join(',') ? '' : selected.join(','));
-          setRecipeColumnsOpen(null);
         }} />}
       {categoriesQ.isError && (
         <ListLoadError

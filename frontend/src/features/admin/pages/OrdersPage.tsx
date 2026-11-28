@@ -198,10 +198,9 @@ export function OrdersPage({ scope = 'admin' }: { scope?: 'admin' | 'terminal' }
       />
       {columnsOpen && <WarehouseColumnSettings anchor={columnsOpen} columns={columns} defaults={columnOptions} resetColumns={defaultColumns}
         label={(key) => tr(orderColumnLabel(key))} onClose={() => setColumnsOpen(null)}
-        onApply={(selected) => {
+        onChange={(selected) => {
           const value = selected.join(',');
           saveColumns(value === defaultColumns.join(',') ? '' : value);
-          setColumnsOpen(null);
         }} />}
       <CancelOrderModal
         open={!!cancelTarget}

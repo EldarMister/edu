@@ -1,4 +1,4 @@
-import { ColumnPopover } from '../../components/ColumnPopover';
+import { ColumnCheckbox, ColumnPopover } from '../../components/ColumnPopover';
 import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -151,17 +151,14 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
     <WorkspaceHeaderActions>
       {(flow.accountOpening || orderedMonths.length > 1) && <>
         <ColumnButton expanded={!!columnAnchor} onClick={(event) => setColumnAnchor(columnAnchor ? null : event.currentTarget)} />
-        {columnAnchor && <ColumnPopover anchor={columnAnchor} onClose={() => setColumnAnchor(null)}>
-          <div className="space-y-2 px-2 py-2 [&_input]:accent-primary [&_label]:flex [&_label]:gap-2">
+        {columnAnchor && <ColumnPopover anchor={columnAnchor} onClose={() => setColumnAnchor(null)}
+          onReset={() => { saveColumns(''); savePeriods(''); }}>
           {flow.accountOpening && <>
-            <label><input type="checkbox" checked={showAmounts} onChange={(event) => toggleColumn('amounts', event.target.checked)} /> Карта и наличные, деньги</label>
-            <label><input type="checkbox" checked={showPercent} onChange={(event) => toggleColumn('percent', event.target.checked)} /> Карта и наличные, %</label>
+            <ColumnCheckbox checked={showAmounts} onChange={(checked) => toggleColumn('amounts', checked)}>Карта и наличные, деньги</ColumnCheckbox>
+            <ColumnCheckbox checked={showPercent} onChange={(checked) => toggleColumn('percent', checked)}>Карта и наличные, %</ColumnCheckbox>
           </>}
           {orderedMonths.length > 1 && <div className="border-t border-border px-2 py-2">
-            <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
-              <span className="font-medium">Порядок месяцев</span>
-              {savedPeriods && <button type="button" className="text-primary" onClick={() => savePeriods('')}>Сбросить</button>}
-            </div>
+            <p className="mb-1 text-sm font-medium">Порядок месяцев</p>
             <ul className="max-h-52 overflow-y-auto divide-y divide-border">
               {orderedMonths.map(({ key, label }, index) => <li key={key} className="flex items-center gap-1 py-1 text-sm">
                 <span className="min-w-0 flex-1">{label}</span>
@@ -172,7 +169,6 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
               </li>)}
             </ul>
           </div>}
-          </div>
         </ColumnPopover>}
       </>}
       {canAction('exportReports') && <button type="button" className="workspace-tool" onClick={() => outputReport('csv')}><IconExport />Экспорт CSV</button>}

@@ -288,10 +288,9 @@ export function DocumentList({
       </div>
       {!inventory && editingColumns && <WarehouseColumnSettings anchor={editingColumns} columns={selectedColumns} defaults={availableColumns} resetColumns={defaultColumns}
         label={columnLabel} onClose={() => setEditingColumns(null)}
-        onApply={(selection) => {
+        onChange={(selection) => {
           const joined = selection.join(',');
           saveColumns(joined === defaultColumns.join(',') ? '' : joined);
-          setEditingColumns(null);
         }} />}
       <QueryState pending={query.isPending} error={query.error}>
         <div className="hidden overflow-x-auto md:block">

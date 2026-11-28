@@ -160,6 +160,6 @@ export function FinanceRegister({
     {showColumns && defaultColumns && <WarehouseColumnSettings anchor={showColumns} columns={visible.map(({ key }) => key)} defaults={keys} resetColumns={defaultColumns}
       label={(key) => byKey.get(key)?.label ?? key}
       onClose={() => setShowColumns(null)}
-      onApply={(selected) => { setSelection(selected.join(',')); setShowColumns(null); }} />}
+      onChange={(selected) => { setSelection(selected.join(',')); }} />}
   </section>;
 }

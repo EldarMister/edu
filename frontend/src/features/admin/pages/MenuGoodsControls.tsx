@@ -102,7 +102,7 @@ export function MenuGoodsActions({ filters, columns, saveColumns, ready, canExpo
     {error && <p className="basis-full text-sm text-danger" role="alert">{error}</p>}
     {columnsOpen && <WarehouseColumnSettings anchor={columnsOpen} columns={columns} defaults={columnOptions} resetColumns={defaults}
       label={(key) => menuGoodsColumns[key]} onClose={() => setColumnsOpen(null)}
-      onApply={(selected) => { saveColumns(selected); setColumnsOpen(null); }} />}
+      onChange={(selected) => { saveColumns(selected); }} />}
   </>;
 }
 

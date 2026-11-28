@@ -439,13 +439,12 @@ export function IngredientsTab({
       {catalogue && exportError && <p role="alert" className="py-2 text-sm text-danger">{exportError}</p>}
       {preparedCatalogue && ingredientColumnsOpen && <WarehouseColumnSettings anchor={ingredientColumnsOpen} columns={prepColumns} defaults={prepAvailable}
         label={(key) => prepLabels[key]} onClose={() => setIngredientColumnsOpen(null)}
-        onApply={(selection) => { savePrepColumns(selection.join(',')); setIngredientColumnsOpen(null); }} />}
+        onChange={(selection) => { savePrepColumns(selection.join(',')); }} />}
       {catalogue === 'ingredients' && ingredientColumnsOpen && <WarehouseColumnSettings anchor={ingredientColumnsOpen} columns={selectedIngredientColumns} defaults={ingredientOptions}
         resetColumns={ingredientDefaults} label={(key) => ingredientColumnSpec(key).label}
-        onClose={() => setIngredientColumnsOpen(null)} onApply={(selection) => {
+        onClose={() => setIngredientColumnsOpen(null)} onChange={(selection) => {
           const value = selection.join(',');
           saveIngredientColumns(value === ingredientDefaults.join(',') ? '' : value);
-          setIngredientColumnsOpen(null);
         }} />}
       {!catalogue && <>
         <WorkspaceHeaderActions>
@@ -455,7 +454,7 @@ export function IngredientsTab({
         </WorkspaceHeaderActions>
         {columnsOpen && <WarehouseColumnSettings anchor={columnsOpen} columns={columns} defaults={columnOptions} resetColumns={defaultColumns}
           label={(key) => columnSpec(key).label} onClose={() => setColumnsOpen(null)}
-          onApply={(selection) => {
+          onChange={(selection) => {
             const selected = selection.join(',');
             const value = selected === defaultColumns.join(',') ? '' : selected;
             setColumnFilter(value);
@@ -463,7 +462,6 @@ export function IngredientsTab({
               try { localStorage.setItem(columnStorageKey, value); }
               catch { /* The selection remains available in the open table. */ }
             }
-            setColumnsOpen(null);
           }} />}
         {exportError && <p role="alert" className="py-2 text-sm text-danger">{exportError}</p>}
       </>}
