@@ -951,23 +951,21 @@ export function WaiterApp() {
     <Panel
       title={t('Выбор стола')}
       action={
-        <div className="flex flex-wrap items-center gap-2">
-          {canCreateDelivery && (
-            <button type="button" className="btn-secondary min-h-9 px-3 text-sm md:hidden"
-              disabled={!canWork || create.isPending} onClick={startDelivery}>
-              {t('Доставка')}
-            </button>
-          )}
-          <TableActionsMenu
-            disabled={!selectedTable}
-            onCloseTable={() => setTableModal('close')}
-            onMove={() => setTableModal('move')}
-            onTransfer={() => setTableModal('transfer')}
-          />
-        </div>
+        <TableActionsMenu
+          disabled={!selectedTable}
+          onCloseTable={() => setTableModal('close')}
+          onMove={() => setTableModal('move')}
+          onTransfer={() => setTableModal('transfer')}
+        />
       }
     >
-      <TablesGrid halls={halls} selectedTableId={selectedTableId} onSelect={selectTable} useMap={settings.data?.useFloorPlan} />
+      <TablesGrid halls={halls} selectedTableId={selectedTableId} onSelect={selectTable} useMap={settings.data?.useFloorPlan}
+        trailingAction={canCreateDelivery && (
+          <button type="button" className="shrink-0 rounded-lg border border-border bg-white px-3.5 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-background disabled:opacity-50 md:hidden"
+            disabled={!canWork || create.isPending} onClick={startDelivery}>
+            {t('Доставка')}
+          </button>
+        )} />
     </Panel>
   );
 

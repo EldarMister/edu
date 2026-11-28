@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { Hall, TableStatus } from '@/types';
 import { TABLE_STATUS } from '@/lib/status';
 import { useT } from '@/lib/i18n';
@@ -25,11 +25,13 @@ export function TablesGrid({
   selectedTableId,
   onSelect,
   useMap = false,
+  trailingAction,
 }: {
   halls: Hall[];
   selectedTableId: string | null;
   onSelect: (tableId: string) => void;
   useMap?: boolean;
+  trailingAction?: ReactNode;
 }) {
   const t = useT();
   const [hallId, setHallId] = useState(() => halls.find((hall) =>
@@ -61,7 +63,7 @@ export function TablesGrid({
   return (
     <div className="flex h-full flex-col">
       {/* Вкладки залов */}
-      <div className="no-scrollbar mb-4 flex gap-2 overflow-x-auto">
+      <div className="no-scrollbar mb-4 flex gap-2 overflow-x-auto" role="group" aria-label={t('Залы')}>
         {halls.map((h) => (
           <button
             key={h.id}
@@ -75,6 +77,7 @@ export function TablesGrid({
             {h.name}
           </button>
         ))}
+        {trailingAction}
       </div>
 
       <div ref={viewportRef} className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
