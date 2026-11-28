@@ -16,15 +16,14 @@ import Animated, {
 import { useNavigation } from '@react-navigation/native';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
-import { Button, Card, EmptyState, Loading } from '@/components/ui';
+import { Button, Card, EmptyState, Loading, SegmentTabs } from '@/components/ui';
 import { popTiming } from '@/components/motion';
 import { PwaIcon } from '@/components/PwaIcon';
 import { OrderBadge } from '@/components/StatusBadge';
 import { colors, fontSize, spacing, useThemedStyle } from '@/theme';
 import { useActiveOrders, useCallAdministrator, useCancelOrder, useClaimQrOrder, useDishes } from '@/services/api/waiter';
-import { NEW_DELIVERY_CART, orderCartDestination, useCart } from '@/store/cart';
+import { orderCartDestination, useCart } from '@/store/cart';
 import { usePermissions } from '@/hooks/usePermissions';
-import { useConnectionStatus } from '@/services/socket';
 import { useNotifications } from '@/store/notifications';
 import { displayOrderNumber, hallSuffix, money, timeHM } from '@/utils/format';
 import { orderToCartLines } from '@/utils/orderCart';
@@ -57,11 +56,8 @@ export function OrdersScreen() {
   const dishes = useDishes();
   const selectTable = useCart((s) => s.selectTable);
   const { canAction, canOwnerOperation } = usePermissions();
-  const canCreateDelivery = canAction('createDeliveryOrders');
   const canViewAllOrders = canAction('viewAllOrders');
   const canCancelOrder = canOwnerOperation('cancelOrders');
-  const connected = useConnectionStatus();
-  const deliveryPending = useCart((s) => !!s.pendingTables[NEW_DELIVERY_CART.id]);
   const startEditing = useCart((s) => s.startEditing);
   const push = useNotifications((s) => s.push);
   const cancel = useCancelOrder();
@@ -269,26 +265,17 @@ export function OrdersScreen() {
           {canViewAllOrders && <Button title={showRegister ? 'Мои активные' : 'Все заказы'} size="md" variant="secondary"
             onPress={() => setShowAllOrders(!showRegister)} />}
           <Button title="Архив заказов" size="md" variant="secondary" onPress={() => setArchiveOpen(true)} />
-          {canCreateDelivery ? (
-            <Button
-              title="Новая доставка"
-              size="md"
-              disabled={!connected || deliveryPending}
-              onPress={() => {
-                selectTable(NEW_DELIVERY_CART);
-                navigateToMenu();
-              }}
-            />
-          ) : null}
         </View>
         {showRegister ? (
           <OrdersRegister scope="terminal" />
         ) : (
           <>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs }}>
-              {[{ value: 'all', label: 'Все' } as const, ...TERMINAL_ORDER_TYPES].map(({ value, label }) =>
-                <Button key={value} title={label} size="md" variant={typeFilter === value ? 'primary' : 'secondary'}
-                  onPress={() => setTypeFilter(value)} />)}
+            <View>
+              <SegmentTabs
+                items={[{ key: 'all', label: 'Все' }, ...TERMINAL_ORDER_TYPES.map(({ value, label }) => ({ key: value, label }))]}
+                value={typeFilter}
+                onChange={setTypeFilter}
+              />
             </View>
             {orders.isLoading ? (
               <Loading />

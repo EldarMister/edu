@@ -30,7 +30,9 @@ import {
   useTransferTable,
   type AvailableWaiter,
 } from '@/services/api/waiter';
-import { useCart } from '@/store/cart';
+import { NEW_DELIVERY_CART, useCart } from '@/store/cart';
+import { usePermissions } from '@/hooks/usePermissions';
+import { useConnectionStatus } from '@/services/socket';
 import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
 import { tableGridLayout } from '@/lib/layout';
@@ -51,6 +53,9 @@ export function TablesScreen() {
   const settings = usePublicSettings();
   const ordersQ = useActiveOrders();
   const selectTable = useCart((s) => s.selectTable);
+  const { canAction } = usePermissions();
+  const connected = useConnectionStatus();
+  const deliveryPending = useCart((s) => Boolean(s.pendingTables[NEW_DELIVERY_CART.id]));
   const selectedTableId = useCart((s) => s.tableId);
   const [hallId, setHallId] = useState<string | null>(null);
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -254,6 +259,14 @@ export function TablesScreen() {
             </FastPressable>
           </View>
         </View>
+
+        {canAction('createDeliveryOrders') && (
+          <Button title="Доставка" size="md" variant="secondary" style={styles.deliveryButton}
+            disabled={!connected || deliveryPending} onPress={() => {
+              selectTable(NEW_DELIVERY_CART);
+              navigation.navigate('Menu');
+            }} />
+        )}
 
         {halls.data && halls.data.length > 0 ? (
           <PillTabs
@@ -553,6 +566,7 @@ const styles = StyleSheet.create({
   panel: { flex: 1, paddingHorizontal: spacing.sm, paddingTop: spacing.sm },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
   hallTabs: { marginBottom: spacing.md },
+  deliveryButton: { alignSelf: 'flex-start', marginBottom: spacing.sm },
   panelTitle: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
   actionsAnchor: { position: 'relative', zIndex: 30 },
   editBtn: {
