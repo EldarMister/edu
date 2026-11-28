@@ -39,12 +39,13 @@ function mixedSumBy(order: { payments?: { method: string; amount: string }[] }, 
 }
 
 /** Подробная карточка заказа (порт PWA OrderDetailsModal). */
-export function OrderDetailsModal({ order, onClose, onOrderChange, allowItemCancellation = false, allowRefunds = false }: {
+export function OrderDetailsModal({ order, onClose, onOrderChange, allowItemCancellation = false, allowRefunds = false, readOnly = false }: {
   order: Order | null;
   onClose: () => void;
   onOrderChange?: (order: Order) => void;
   allowItemCancellation?: boolean;
   allowRefunds?: boolean;
+  readOnly?: boolean;
 }) {
   const [cancelItem, setCancelItem] = React.useState<Order['items'][number] | null>(null);
   const cancel = useCancelOrderItem();
@@ -61,14 +62,14 @@ export function OrderDetailsModal({ order, onClose, onOrderChange, allowItemCanc
     { label: 'Официант', value: <Text style={styles.infoVal} translate>{order.source === 'delivery' ? 'Доставка' : order.waiter?.name ?? 'QR menu'}</Text> },
     { label: 'Дата', value: <Text style={styles.infoVal}>{`${date.toLocaleDateString('ru-RU')} ${timeHM(order.createdAt)}`}</Text> },
     { label: 'Сумма', value: <Text style={styles.infoVal}>{money(order.finalAmount)}</Text> },
-    { label: 'Стол', value: <Text style={styles.infoVal} translate>{order.source === 'delivery' ? '—' : `Стол ${order.table.number}${hallSuffix(order.table)}`}</Text> },
+    { label: 'Стол', value: <Text style={styles.infoVal} translate>{order.source === 'delivery' ? 'Доставка' : order.source === 'pickup' ? 'Самовывоз' : `Стол ${order.table.number}${hallSuffix(order.table)}`}</Text> },
     { label: 'Оплата', value: <Text style={styles.infoVal}>{order.paymentMethod ? paymentDisplayLabel(order) : '—'}</Text> },
   ];
   if (showMixedBreakdown) {
     infoRows.push({ label: 'Наличными', value: <Text style={styles.infoVal}>{money(mixedSumBy(order, 'cash'))}</Text> });
     infoRows.push({ label: 'QR', value: <Text style={styles.infoVal}>{money(mixedSumBy(order, 'qr'))}</Text> });
   }
-  if (order.source === 'delivery') {
+  if (order.source === 'delivery' || order.source === 'pickup') {
     infoRows.push(...[{ label: 'Внешний заказ', value: order.externalOrderId ?? '—' }, { label: 'Клиент', value: order.deliveryCustomerName ?? '—' }, { label: 'Телефон', value: order.deliveryCustomerPhone ?? '—' }, { label: 'Адрес доставки', value: order.deliveryAddress ?? '—' }].map((r) => ({ label: r.label, value: <Text style={styles.infoVal}>{r.value}</Text> })));
   }
   const itemCancellationAllowed = allowItemCancellation && !['paid', 'cancelled', 'rejected', 'waiting_payment'].includes(order.status);
@@ -146,6 +147,7 @@ export function OrderDetailsModal({ order, onClose, onOrderChange, allowItemCanc
         <View style={styles.totals}>
           <Total label="Итого" value={money(order.totalAmount)} />
           {Number(order.discountAmount) > 0 ? <Total label="Скидка" value={money(order.discountAmount)} /> : null}
+          {Number(order.deliveryFee) > 0 && <Total label="Доставка" value={money(order.deliveryFee ?? 0)} />}
           {Number(order.serviceChargeAmount) > 0 ? <Total label="Обслуживание" value={money(order.serviceChargeAmount)} /> : null}
           <Total label={order.status === 'paid' ? 'Оплачено' : 'К оплате'} value={money(order.finalAmount)} strong />
           {refunded > 0 ? (
@@ -157,7 +159,7 @@ export function OrderDetailsModal({ order, onClose, onOrderChange, allowItemCanc
         </View>
 
         {allowRefunds && order.status === 'paid' ? <OrderRefunds key={order.id} order={order} mode="manage" /> : null}
-        <FiscalBlock order={order} />
+        <FiscalBlock order={order} readOnly={readOnly} />
       </SheetScrollView>
     </BottomSheet>
     <CancelOrderModal visible={!!cancelItem} title="Отменить блюдо?" confirmLabel="Отменить блюдо" orderLabel={cancelItem ? `${cancelItem.quantity}× ${orderItemDisplayName(cancelItem)} · ${money(cancelItem.finalPrice)}` : ''} submitting={cancel.isPending} onClose={() => setCancelItem(null)} onConfirm={(reason) => void confirmItemCancellation(reason)} />
@@ -165,7 +167,7 @@ export function OrderDetailsModal({ order, onClose, onOrderChange, allowItemCanc
   );
 }
 
-function FiscalBlock({ order }: { order: Order }) {
+function FiscalBlock({ order, readOnly }: { order: Order; readOnly: boolean }) {
   const retry = useRetryFiscal();
   const push = useNotifications((s) => s.push);
   const hasReceipt = !!order.fiscalReceiptNumber;
@@ -214,9 +216,9 @@ function FiscalBlock({ order }: { order: Order }) {
         <View style={styles.fiscalErrBadge}>
           <Text style={styles.fiscalErrBadgeText} translate>Ошибка ККМ</Text>
         </View>
-        <FastPressable onPress={() => void onRetry()} disabled={retry.isPending} style={styles.retryBtn}>
+        {!readOnly && <FastPressable onPress={() => void onRetry()} disabled={retry.isPending} style={styles.retryBtn}>
           <Text style={styles.retryText} translate>{retry.isPending ? 'Повтор…' : 'Повторить'}</Text>
-        </FastPressable>
+        </FastPressable>}
       </View>
       <Text style={styles.fiscalErrText}>{order.fiscalError}</Text>
     </View>

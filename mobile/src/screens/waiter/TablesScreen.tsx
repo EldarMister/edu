@@ -1,3 +1,4 @@
+import { isOffsite } from './orderRules';
 import { RefreshControl, View, SafeAreaView } from '@/components/themed';
 import React, { useMemo, useState } from 'react';
 import { StyleSheet, useWindowDimensions } from 'react-native';
@@ -71,7 +72,7 @@ export function TablesScreen() {
   const ordersByTable = useMemo(() => {
     const m = new Map<string, Order>();
     for (const o of ordersQ.data ?? []) {
-      if (o.source !== 'delivery' && !m.has(o.table.id)) m.set(o.table.id, o);
+      if (!isOffsite(o.source) && !m.has(o.table.id)) m.set(o.table.id, o);
     }
     return m;
   }, [ordersQ.data]);

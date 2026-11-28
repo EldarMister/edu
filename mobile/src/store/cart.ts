@@ -64,7 +64,7 @@ export const NEW_DELIVERY_CART = { id: `${DELIVERY_CART_PREFIX}new`, number: 0 }
 
 export function orderCartDestination(order: Order) {
   return {
-    id: order.source === 'delivery' ? `${DELIVERY_CART_PREFIX}${order.id}` : order.table.id,
+    id: (order.source === 'delivery' || order.source === 'pickup') ? `${DELIVERY_CART_PREFIX}${order.id}` : order.table.id,
     number: order.table.number,
     hallName: order.table.hall?.name,
   };

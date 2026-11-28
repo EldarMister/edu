@@ -579,6 +579,9 @@ function ReceiptContent({
             </View>
           ))}
         </View>
+        {Number(receipt.deliveryFee) > 0 && <View style={styles.receiptLine}>
+          <Text style={styles.receiptLineValue} translate>Доставка</Text><Text style={styles.receiptLineValue}>{money(receipt.deliveryFee ?? 0)}</Text>
+        </View>}
         {Number(receipt.serviceChargeAmount) > 0 ? (
           <View style={styles.receiptLine}>
             <Text style={styles.receiptLineLabel} translate>Обслуживание</Text>

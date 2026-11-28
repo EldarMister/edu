@@ -196,7 +196,22 @@ function linesToItems(lines: CartLine[]) {
   }));
 }
 
-export type DeliveryDetails = { customerName: string; customerPhone: string; deliveryAddress: string };
+export type DeliveryDetails = { customerName: string; customerPhone: string; deliveryAddress?: string; type?: 'delivery' | 'pickup'; deliveryFee?: number; pickupTime?: string };
+
+export function useUpdateOrderFulfillment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId, ...payload }: ({ tableId: string } | { delivery: DeliveryDetails }) & {
+      orderId: string; expectedUpdatedAt: string; comment?: string;
+    }) => (await api.patch<Order>('/orders/' + orderId + '/fulfillment', payload)).data,
+    onSuccess: (updated) => queryClient.setQueryData<Order[]>(['orders', 'active'], (orders) =>
+      orders?.map((order) => order.id === updated.id ? updated : order)),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['halls'] });
+    },
+  });
+}
 
 export function useCreateOrder() {
   const qc = useQueryClient();

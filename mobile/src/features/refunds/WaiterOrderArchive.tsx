@@ -80,7 +80,7 @@ export function CabinetOrderRow({ order, onPress }: { order: CabinetRecentOrder;
         {displayOrderNumber(order.orderNumber)}
       </Text>
       <Text style={styles.cabinetOrderTable} numberOfLines={1} translate>
-        {order.source === 'delivery' ? 'Доставка' : 'Стол ' + order.tableNumber}
+        {order.source === 'pickup' ? 'Самовывоз' : order.source === 'delivery' ? 'Доставка' : 'Стол ' + order.tableNumber}
       </Text>
       <Text style={styles.cabinetOrderTime}>{timeHM(order.createdAt)}</Text>
       <Text style={styles.cabinetOrderAmount} numberOfLines={1}>

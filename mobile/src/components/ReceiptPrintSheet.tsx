@@ -191,7 +191,7 @@ function ReceiptCard() {
     <View style={styles.receiptCard}>
       <View style={styles.receiptHead}>
         <Text style={styles.receiptOrder}>{displayOrderNumber(receipt.orderNumber)}</Text>
-        <Text style={styles.receiptTable} translate>Стол {receipt.tableNumber}</Text>
+        <Text style={styles.receiptTable} translate>{receipt.source === 'pickup' ? 'Самовывоз' : receipt.source === 'delivery' ? 'Доставка' : 'Стол ' + receipt.tableNumber}</Text>
       </View>
       <View style={styles.receiptItems}>
         {receipt.items.map((item, index) => (
@@ -203,6 +203,9 @@ function ReceiptCard() {
           </View>
         ))}
       </View>
+      {Number(receipt.deliveryFee) > 0 && <View style={styles.receiptRow}>
+        <Text style={styles.receiptRowValue} translate>Доставка</Text><Text style={styles.receiptRowValue}>{money(receipt.deliveryFee ?? 0)}</Text>
+      </View>}
       {Number(receipt.serviceChargeAmount) > 0 ? (
         <View style={styles.receiptRow}>
           <Text style={styles.receiptRowLabel} translate>Обслуживание</Text>

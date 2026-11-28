@@ -12,7 +12,7 @@ import { FullscreenSheet } from '@/components/FullscreenSheet';
 import { PwaIcon } from '@/components/PwaIcon';
 import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
-import { useActiveOrders, useAddItems, useCategories, useCreateOrder, useDishes, useEditOrder, useReplaceRejectedItem, type DeliveryDetails } from '@/services/api/waiter';
+import { useActiveOrders, useAddItems, useCategories, useCreateOrder, useDishes, useEditOrder, useReplaceRejectedItem } from '@/services/api/waiter';
 import { usePublicSettings } from '@/services/api/settings';
 import { cartLineName, cartTotals, isDeliveryCart, NEW_DELIVERY_CART, useCart, type CartModifiers } from '@/store/cart';
 import { useAuth } from '@/store/auth';
@@ -25,14 +25,14 @@ import { apiError } from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useConnectionStatus } from '@/services/socket';
 import { CartSheet } from './CartSheet';
-import { DeliveryDetailsSheet } from './DeliveryDetailsSheet';
+import { customerOrderError, customerOrderPayload, EMPTY_CUSTOMER, feeValue, OrderFulfillmentFields, OrderTypeSelect } from './OrderFulfillmentFields';
+import { isOffsite, orderTypeLabel, type OrderType } from './orderRules';
 import { ModifierPickerSheet } from './ModifierPickerSheet';
 import { TablePickerSheet } from './TablePickerSheet';
 import { WeightPickerSheet } from './WeightPickerSheet';
 import { orderLocation } from './orderRules';
 import type { CartLine, CartSetComponent, Category, Dish, DishVariant } from '@/types';
 
-const EMPTY_DELIVERY: DeliveryDetails = { customerName: '', customerPhone: '', deliveryAddress: '' };
 
 function currentDishQuantity(dishId: string): number {
   return useCart.getState().lines.reduce((sum, line) => sum + (line.dish.id === dishId ? line.quantity : 0), 0);
@@ -73,7 +73,7 @@ export function MenuScreen() {
   const dishes = useDishes();
   const orders = useActiveOrders();
   const selectedOrder = orders.data?.find((order) => order.id === activeOrderId);
-  const deliveryOrder = isDeliveryCart(tableId) || selectedOrder?.source === 'delivery';
+  const deliveryOrder = isDeliveryCart(tableId) || isOffsite(selectedOrder?.source);
   const newDelivery = tableId === NEW_DELIVERY_CART.id;
   const settings = usePublicSettings();
   const roundCart = activeOrderId ? !!editingOrderId && !!selectedOrder?.roundOrderTotal : !!settings.data?.roundOrderTotal;
@@ -89,8 +89,11 @@ export function MenuScreen() {
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<string>('all');
   const [cartOpen, setCartOpen] = useState(false);
-  const [deliveryOpen, setDeliveryOpen] = useState(false);
-  const [deliveryDetails, setDeliveryDetails] = useState(EMPTY_DELIVERY);
+  const customerComment = useCart((state) => state.comment);
+  const [offsiteType, setOffsiteType] = useState<'delivery' | 'pickup'>('delivery');
+  const [deliveryDetails, setDeliveryDetails] = useState(EMPTY_CUSTOMER);
+  const [choosingDineInTable, setChoosingDineInTable] = useState(false);
+  const deliveryFee = newDelivery && offsiteType === 'delivery' ? Math.max(0, feeValue(deliveryDetails.deliveryFee) || 0) : undefined;
   const [deliveryError, setDeliveryError] = useState('');
   const [deliveryKey, setDeliveryKey] = useState(makeIdempotencyKey);
   const [tablePickerOpen, setTablePickerOpen] = useState(false);
@@ -236,7 +239,7 @@ export function MenuScreen() {
     );
   }
 
-  const onSubmit = (delivery?: DeliveryDetails) => {
+  const onSubmit = () => {
     const { tableId, tableNumber, activeOrderId, editingOrderId, lines: cartLines, comment: orderComment, commentOpen: orderCommentOpen } = useCart.getState();
     if (!tableId) return;
     const selectedOrder = orders.data?.find((order) => order.id === activeOrderId);
@@ -258,13 +261,10 @@ export function MenuScreen() {
         push({ message: 'У вас нет доступа к оформлению доставки', type: 'error', at: new Date().toISOString() });
         return;
       }
-      if (!delivery) {
-        setDeliveryError('');
-        setDeliveryOpen(true);
-        return;
-      }
-      if (!/^\+?(?:[ ()-]*\d){6,15}[ ()-]*$/.test(delivery.customerPhone)) {
-        setDeliveryError('Укажите корректный телефон клиента');
+      const error = customerOrderError(offsiteType, deliveryDetails);
+      if (error) {
+        setDeliveryError(error);
+        setCartOpen(true);
         return;
       }
     } else if (!activeOrderId && (tableNumber === 0 || tableId.startsWith('delivery-table:'))) {
@@ -296,10 +296,11 @@ export function MenuScreen() {
 
     const createPayload = {
       idempotencyKey: isNewDelivery ? deliveryKey : idempotencyKey,
-      comment: orderCommentOpen ? orderComment : '',
+      comment: isNewDelivery || orderCommentOpen ? orderComment : '',
       lines: owner.lines,
     };
     if (isNewDelivery) setDeliveryError('');
+    const delivery = isNewDelivery ? customerOrderPayload(offsiteType, deliveryDetails) : null;
     const request = editingOrderId
       ? editOrder.mutateAsync({ orderId: editingOrderId, reason: 'Изменение состава заказа', comment: orderCommentOpen ? orderComment : '', lines: owner.lines })
       : activeOrderId
@@ -308,7 +309,7 @@ export function MenuScreen() {
     void request.then((updated) => {
       if (!stillOwns()) return;
       push({
-        message: isNewDelivery ? 'Заказ доставки оформлен'
+        message: isNewDelivery ? 'Заказ создан'
           : editingOrderId ? 'Изменения сохранены'
           : cartOnlyNone ? (activeOrderId ? 'Позиции добавлены в заказ' : 'Заказ создан')
           : destinations.multipleOrCustom ? 'Заказ отправлен на приготовление'
@@ -318,8 +319,7 @@ export function MenuScreen() {
       });
       done(editingOrderId || activeOrderId ? 'update' : 'create', updated.id);
       if (isNewDelivery) {
-        setDeliveryOpen(false);
-        setDeliveryDetails(EMPTY_DELIVERY);
+        setDeliveryDetails(EMPTY_CUSTOMER);
         setDeliveryKey(makeIdempotencyKey());
       }
     }).catch(onError).finally(settled);
@@ -339,8 +339,29 @@ export function MenuScreen() {
     ? 'Сохранить изменения'
     : activeOrderId
       ? 'Добавить к заказу'
-      : newDelivery ? 'Данные доставки' : cartSendLabel;
+      : newDelivery ? 'Отправить заказ' : cartSendLabel;
   const replacing = !!replacementTarget;
+
+  function switchOrderType(type: OrderType) {
+    if (submitting || activeOrderId || editingOrderId) return;
+    setDeliveryError('');
+    if (type === 'dine_in') {
+      setChoosingDineInTable(true);
+      setCartOpen(false);
+      setTablePickerOpen(true);
+      return;
+    }
+    const cart = useCart.getState();
+    if (!newDelivery && cart.carts[NEW_DELIVERY_CART.id]?.lines.length && (cart.lines.length || cart.comment)) {
+      push({ message: 'Сначала оформите текущий заказ вне зала', type: 'error', at: new Date().toISOString() });
+      return;
+    }
+    if (!newDelivery) {
+      if (cart.lines.length || cart.comment) cart.moveDraftTo(NEW_DELIVERY_CART);
+      else cart.selectTable(NEW_DELIVERY_CART);
+    }
+    setOffsiteType(type);
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={[]}>
@@ -360,7 +381,7 @@ export function MenuScreen() {
           accessibilityRole="button" accessibilityLabel={deliveryOrder ? 'Доставка' : selectedOrder ? orderLocation(selectedOrder) : `Стол ${tableNumber}${hallName ? ` · ${hallName}` : ''}`}
           disabled={tableSubmitting || deliveryOrder || !!editingOrderId} onPress={() => setTablePickerOpen(true)}>
           <Text style={styles.tableChipText} numberOfLines={1} translate>
-            {deliveryOrder ? 'Доставка' : `Стол ${tableNumber}`}
+            {deliveryOrder ? selectedOrder ? orderLocation(selectedOrder) : orderTypeLabel(offsiteType) : `Стол ${tableNumber}`}
           </Text>
           {!deliveryOrder ? <PwaIcon name="chevronDown" size={14} color={colors.textMuted} strokeWidth={2} /> : null}
         </FastPressable>
@@ -431,7 +452,7 @@ export function MenuScreen() {
       <View style={styles.cartBar}>
         <FastPressable
           style={styles.cartInfo}
-          disabled={count === 0}
+          disabled={count === 0 && !canCreateDelivery}
           onPress={() => setCartOpen(true)}
         >
           <PwaIcon name="cart" size={22} color={colors.textSecondary} />
@@ -439,7 +460,7 @@ export function MenuScreen() {
             <Text style={styles.cartCount}>
               {count} {pozLabel(count)}
             </Text>
-            <NumberTicker value={cartTotal} style={styles.cartTotal} digitHeight={17} />
+            <NumberTicker value={cartTotal + (deliveryFee ?? 0)} style={styles.cartTotal} digitHeight={17} />
           </View>
         </FastPressable>
         <Button
@@ -460,19 +481,13 @@ export function MenuScreen() {
         submitting={submitting}
         submitLabel={submitLabel}
         delivery={deliveryOrder}
+        deliveryFee={deliveryFee}
+        typeControl={canCreateDelivery && !activeOrderId && !editingOrderId ? <OrderTypeSelect value={newDelivery ? offsiteType : 'dine_in'}
+          disabled={submitting} onChange={switchOrderType} /> : undefined}
+        customerFields={newDelivery ? <OrderFulfillmentFields type={offsiteType} value={deliveryDetails} onChange={setDeliveryDetails}
+          comment={customerComment} onComment={useCart.getState().setOrderComment} error={deliveryError} disabled={submitting} /> : undefined}
         roundTotal={roundCart}
       />
-      {newDelivery && canCreateDelivery ? (
-        <DeliveryDetailsSheet
-          visible={deliveryOpen}
-          details={deliveryDetails}
-          error={deliveryError}
-          pending={submitting}
-          onChange={setDeliveryDetails}
-          onClose={() => setDeliveryOpen(false)}
-          onSubmit={onSubmit}
-        />
-      ) : null}
 
       <VariantSheet
         dish={variantDish}
@@ -528,7 +543,11 @@ export function MenuScreen() {
         }} />
       ) : null}
 
-      <TablePickerSheet visible={tablePickerOpen} onClose={() => setTablePickerOpen(false)} />
+      <TablePickerSheet visible={tablePickerOpen} newOrderOnly={choosingDineInTable} onClose={() => {
+        setTablePickerOpen(false);
+        if (choosingDineInTable) setCartOpen(true);
+        setChoosingDineInTable(false);
+      }} />
     </SafeAreaView>
   );
 }

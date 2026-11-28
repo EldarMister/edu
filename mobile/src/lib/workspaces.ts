@@ -46,6 +46,7 @@ export function workspacePermissions(user: AuthUser, workspace: Workspace) {
       && (user.role !== 'OWNER' || user.permissions?.ownerOperations?.printRequests !== false);
     permissions.ownerOperations = base.ownerOperations;
     permissions.actions.createDeliveryOrders = base.actions.createDeliveryOrders;
+    permissions.actions.viewAllOrders = base.actions.viewAllOrders;
     permissions.actions.closeShift = base.actions.closeShift;
     return permissions;
   }

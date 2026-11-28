@@ -9,8 +9,10 @@ import { usePrepStations } from '@/services/api/prepStations';
 import { refundStatusLabel } from '@/features/refunds/refundRules';
 
 /** Бейдж статуса заказа — зеркало OrderBadge из PWA. */
-export function OrderBadge({ status, size = 'md' }: { status: OrderStatus; size?: 'sm' | 'md' }) {
+export function OrderBadge({ status, source, size = 'md' }: { status: OrderStatus; source?: Order['source']; size?: 'sm' | 'md' }) {
   const meta = ORDER_STATUS[status];
+  const deliveryStatus = source === 'delivery' && (['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'].includes(status) ? 'Готовится'
+    : status === 'ready' ? 'Готов' : status === 'picked_up' ? 'В пути' : status === 'served' ? 'Доставлен' : null);
   return (
     <View
       style={[
@@ -20,7 +22,7 @@ export function OrderBadge({ status, size = 'md' }: { status: OrderStatus; size?
       ]}
     >
       <Text style={[styles.text, size === 'sm' ? styles.textSm : styles.textMd, { color: meta.fg }]} translate>
-        {meta.label}
+        {deliveryStatus || meta.label}
       </Text>
     </View>
   );
@@ -46,7 +48,7 @@ export function OrderStatusBadges({
     );
   }
   const chips = orderStationStatuses(order, stations);
-  if (chips.length === 0) return <OrderBadge status={order.status} size={size} />;
+  if (chips.length === 0) return <OrderBadge status={order.status} source={order.source} size={size} />;
 
   return (
     <View style={[styles.badgesRow, align === 'start' && styles.badgesRowStart]}>

@@ -1,3 +1,4 @@
+import { isOffsite } from './orderRules';
 import { ScrollView, View } from '@/components/themed';
 import React from 'react';
 import { StyleSheet, useWindowDimensions } from 'react-native';
@@ -14,7 +15,7 @@ import { useNotifications } from '@/store/notifications';
 import type { TableItem } from '@/types';
 
 /** Смена стола на экране меню — список столов по залам (как в PWA TableSelectModal). */
-export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+export function TablePickerSheet({ visible, onClose, newOrderOnly = false }: { visible: boolean; onClose: () => void; newOrderOnly?: boolean }) {
   const halls = useHalls();
   const orders = useActiveOrders();
   const user = useAuth((s) => s.user);
@@ -32,7 +33,7 @@ export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClo
   const ordersByTable = React.useMemo(() => {
     const m = new Map<string, string>();
     for (const order of orders.data ?? []) {
-      if (order.source !== 'delivery' && !m.has(order.table.id)) m.set(order.table.id, order.id);
+      if (!isOffsite(order.source) && !m.has(order.table.id)) m.set(order.table.id, order.id);
     }
     return m;
   }, [orders.data]);
@@ -61,6 +62,14 @@ export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClo
         type: 'error',
         at: new Date().toISOString(),
       });
+      return;
+    }
+    if (newOrderOnly) {
+      if (tbl.status !== 'free' || ordersByTable.has(tbl.id) || useCart.getState().carts[tbl.id]?.lines.length) {
+        push({ message: 'Выберите свободный стол без другого черновика', type: 'error', at: new Date().toISOString() });
+        return;
+      }
+      apply(tbl, hallName, true);
       return;
     }
     if (lines.length > 0) {

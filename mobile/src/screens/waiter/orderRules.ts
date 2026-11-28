@@ -2,6 +2,16 @@ import { waiterOrderPermission, type WaiterOrderPermissions } from '@/lib/order-
 import type { Order, OrderStatus } from '@/types';
 import { hallSuffix } from '@/utils/format';
 
+export const ORDER_TYPES = [
+  { value: 'dine_in', label: 'В зале' },
+  { value: 'delivery', label: 'Доставка' },
+  { value: 'pickup', label: 'Самовывоз' },
+] as const;
+export type OrderType = typeof ORDER_TYPES[number]['value'];
+export const orderTypeLabel = (type: OrderType) => ORDER_TYPES.find(({ value }) => value === type)!.label;
+export const isOffsite = (source?: string): source is 'delivery' | 'pickup' => source === 'delivery' || source === 'pickup';
+export const orderType = (source?: string): OrderType => isOffsite(source) ? source : 'dine_in';
+
 const PRELIMINARY: OrderStatus[] = [
   'sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready',
   'picked_up', 'served', 'partially_rejected', 'waiting_payment',
@@ -17,13 +27,13 @@ export function canRequestPreliminaryBill(order: Order): boolean {
 
 /** Доставка использует общий скрытый стол 0; идентичность заказа задаёт его id. */
 export function orderLocation(order: Order): string {
-  return order.source === 'delivery'
-    ? `Доставка${order.externalOrderId ? ` · ${order.externalOrderId}` : ''}`
+  return isOffsite(order.source)
+    ? `${orderTypeLabel(orderType(order.source))}${order.externalOrderId ? ` · ${order.externalOrderId}` : ''}`
     : `Стол ${order.table.number}${hallSuffix(order.table)}`;
 }
 
 export function deliveryDetails(order: Order): string | null {
-  if (order.source !== 'delivery') return null;
-  return [order.deliveryCustomerName, order.deliveryCustomerPhone, order.deliveryAddress]
+  if (!isOffsite(order.source)) return null;
+  return [order.deliveryCustomerName, order.deliveryCustomerPhone, order.deliveryAddress, order.pickupTime]
     .filter(Boolean).join(' · ') || null;
 }

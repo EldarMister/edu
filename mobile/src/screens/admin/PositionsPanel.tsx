@@ -21,7 +21,7 @@ const SECTION_ACTIONS: Partial<Record<SectionKey, ActionKey[]>> = {
   warehouse: ['warehouseReceive', 'warehouseTransfer', 'warehouseWriteoff', 'warehouseCount', 'warehouseApprove',
     'warehouseRecipes', 'warehouseProduce', 'warehouseCosts', 'warehouseReports', 'warehouseSettings'],
 };
-const TERMINAL_ACTIONS: ActionKey[] = ['acceptOrderPayments', 'printReceipts', 'requestReceiptPrints', 'createDeliveryOrders', 'financeCashShifts'];
+const TERMINAL_ACTIONS: ActionKey[] = ['acceptOrderPayments', 'printReceipts', 'requestReceiptPrints', 'createDeliveryOrders', 'viewAllOrders', 'financeCashShifts'];
 const RATES = [
   ['hourly', 'За час, с'], ['perShift', 'За смену, с'], ['monthly', 'За месяц, с'],
   ['personalPercent', 'Процент от личных продаж'], ['shiftPercent', 'Процент от продаж за смену'],
@@ -73,6 +73,7 @@ function accessSummary(position: StaffPosition) {
     if (permissions.actions.acceptOrderPayments) parts.push('Приём оплаты');
     if (permissions.actions.printReceipts) parts.push('Печать чеков');
     if (permissions.actions.createDeliveryOrders) parts.push('Оформление доставки');
+    if (permissions.actions.viewAllOrders) parts.push('Просмотр всех заказов');
   }
   if (position.role === 'KITCHEN') parts.push('Экран кухни');
   if (position.role === 'BAR') parts.push('Экран бара');

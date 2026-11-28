@@ -168,8 +168,8 @@ export function KitchenBoardScreen({ defaultStation }: { defaultStation: 'kitche
       if (!text) return;
       if (backgroundRuntimeHandlesAudio()) return;
       const settings = getKitchenVoiceSettings();
-      const message = order.source === 'delivery'
-        ? `Новый заказ доставки ${order.orderNumber}`
+      const message = order.source === 'delivery' || order.source === 'pickup'
+        ? `${orderLocation(order)} · ${order.orderNumber}`
         : `Новый заказ ${order.orderNumber} · Стол ${order.table?.number}`;
       const notification = {
         notificationId: order.updatedAt ? `kitchen:${order.id}:${order.updatedAt}` : undefined,

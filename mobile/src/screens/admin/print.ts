@@ -35,7 +35,7 @@ export async function printNativeReceipt(r: Receipt, preliminary = false, result
   const dateStr = escape(`${date.toLocaleDateString(receiptLanguage === 'ky' ? 'ky-KG' : 'ru-RU')} ${timeHM(r.date)}`);
   const orderNumber = displayOrderNumber(r.orderNumber);
   const receiptKind = t(preliminary ? 'Счёт' : fiscal?.simulated ? 'Тестовый чек' : fiscal ? 'Фискальный чек' : 'Товарный чек');
-  const orderPlace = r.source === 'delivery' ? translate('Доставка', receiptLanguage) : `${translate('Стол', receiptLanguage)} ${r.tableNumber}`;
+  const orderPlace = (r.source === 'delivery' || r.source === 'pickup') ? translate(r.source === 'pickup' ? 'Самовывоз' : 'Доставка', receiptLanguage) : `${translate('Стол', receiptLanguage)} ${r.tableNumber}`;
   const waiter = r.source === 'delivery' && r.waiter === 'Онлайн-заказ' ? translate(r.waiter, receiptLanguage) : r.waiter;
   const rows = r.items.map((item) => (
     `<tr><td class="item-name">${escape(orderItemDisplayName(item))}</td><td class="c">${item.quantity}</td>
@@ -90,6 +90,7 @@ export async function printNativeReceipt(r: Receipt, preliminary = false, result
     <table><colgroup><col style="width:48%"><col style="width:14%"><col style="width:18%"><col style="width:20%"></colgroup><thead><tr><th>${t('Наименование')}</th><th class="c">${t('Кол-во')}</th><th class="r">${t('Цена')}</th><th class="r">${t('Сумма')}</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="solid"></div>
     ${Number(r.discountAmount) > 0 ? `<div class="pair"><span>${t('Сумма')}</span><span>${money(r.totalAmount)}</span></div><div class="pair"><span>${t('Скидка')}</span><span>−${money(r.discountAmount)}</span></div>` : ''}
+    ${Number(r.deliveryFee) > 0 ? `<div class="pair"><span>${t('Доставка')}</span><span>${money(r.deliveryFee ?? 0)}</span></div>` : ''}
     ${Number(r.roundingAmount) > 0 ? `<div class="pair"><span>${t('Округление')}</span><span>−${money(r.roundingAmount ?? 0)}</span></div>` : ''}
     <div class="total"><span>${t('Итого')}</span><span>${money(r.finalAmount)}</span></div>
     ${preliminary || fiscal ? '' : (r.taxes ?? []).map((tax) =>

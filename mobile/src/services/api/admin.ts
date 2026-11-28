@@ -124,6 +124,7 @@ export interface OrdersFilter {
   dateFrom?: string;
   dateTo?: string;
   paymentMethod?: string;
+  orderType?: string;
   waiterId?: string;
   sort?: 'default' | 'date' | 'amount';
   sortDirection?: 'asc' | 'desc';
@@ -158,12 +159,19 @@ export interface FiscalResult {
   error?: string;
 }
 
+const orderRegisters = {
+  admin: { path: '/admin/orders', key: ['admin', 'orders'] },
+  terminal: { path: '/terminal/orders', key: ['orders', 'register'] },
+} as const;
+type OrderRegisterScope = keyof typeof orderRegisters;
+
 function ordersQuery(params: Partial<OrdersFilter>): string {
   const parts: string[] = [];
   if (params.tab && params.tab !== 'all') parts.push(`tab=${encodeURIComponent(params.tab)}`);
   if (params.search) parts.push(`search=${encodeURIComponent(params.search)}`);
   if (params.dateFrom) parts.push(`dateFrom=${params.dateFrom}`);
   if (params.dateTo) parts.push(`dateTo=${params.dateTo}`);
+  if (params.orderType) parts.push(`orderType=${encodeURIComponent(params.orderType)}`);
   if (params.paymentMethod) parts.push(`paymentMethod=${params.paymentMethod}`);
   if (params.waiterId) parts.push(`waiterId=${params.waiterId}`);
   if (params.sort) parts.push(`sort=${params.sort}`);
@@ -172,33 +180,46 @@ function ordersQuery(params: Partial<OrdersFilter>): string {
 }
 
 /** Бесконечная подгрузка заказов (длинный список). */
-export function useAdminOrdersInfinite(filters: OrdersFilter) {
+export function useAdminOrdersInfinite(filters: OrdersFilter, scope: OrderRegisterScope = 'admin') {
   const PAGE_SIZE = 30;
+  const register = orderRegisters[scope];
   return useInfiniteQuery({
-    queryKey: ['admin', 'orders', 'infinite', filters],
+    queryKey: [...register.key, 'infinite', filters],
+    refetchInterval: scope === 'terminal' ? 10_000 : false,
     initialPageParam: 1,
     queryFn: ({ pageParam }) => {
       const base = ordersQuery(filters);
       const q = `${base ? `${base}&` : ''}page=${pageParam}&pageSize=${PAGE_SIZE}`;
-      return get<AdminOrdersPage>(`/admin/orders?${q}`);
+      return get<AdminOrdersPage>(register.path + '?' + q);
     },
     getNextPageParam: (last) => (last.page < last.pages ? last.page + 1 : undefined),
   });
 }
 
 /** Сводка по фильтрам — для строки итогов (статус-фильтр игнорируется). */
-export function useOrdersSummary(params: Omit<OrdersFilter, 'tab'>) {
+export function useOrdersSummary(params: Omit<OrdersFilter, 'tab'>, scope: OrderRegisterScope = 'admin') {
   const q = ordersQuery(params);
+  const register = orderRegisters[scope];
   return useQuery({
-    queryKey: ['admin', 'orders', 'summary', params],
-    queryFn: () => get<OrdersSummary>(`/admin/orders/summary${q ? `?${q}` : ''}`),
+    queryKey: [...register.key, 'summary', params],
+    refetchInterval: scope === 'terminal' ? 10_000 : false,
+    queryFn: () => get<OrdersSummary>(register.path + '/summary' + (q ? '?' + q : '')),
   });
 }
 
-export function useAdminOrderDetails(id: string | null) {
+export function useOrderWaiters(scope: OrderRegisterScope = 'admin') {
+  const register = orderRegisters[scope];
   return useQuery({
-    queryKey: ['admin', 'orders', 'detail', id],
-    queryFn: () => get<Order>(`/orders/${id}`),
+    queryKey: [...register.key, 'waiters'],
+    queryFn: () => get<{ id: string; name: string }[]>(register.path + '/waiters'),
+  });
+}
+
+export function useAdminOrderDetails(id: string | null, scope: OrderRegisterScope = 'admin') {
+  const register = orderRegisters[scope];
+  return useQuery({
+    queryKey: [...register.key, 'detail', id],
+    queryFn: () => get<Order>((scope === 'terminal' ? register.path : '/orders') + '/' + id),
     enabled: !!id,
   });
 }

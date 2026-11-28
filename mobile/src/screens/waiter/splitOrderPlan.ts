@@ -13,7 +13,7 @@ export function splitItemCanChangeQuantity(item: Line) {
 
 export function canSplitOrder(order: Order) {
   const items = splitOrderItems(order);
-  return Boolean(order.updatedAt && order.source !== 'delivery' && (order.source !== 'qr' || order.waiter)
+  return Boolean(order.updatedAt && order.source !== 'delivery' && order.source !== 'pickup' && (order.source !== 'qr' || order.waiter)
     && (order.status === 'served' || order.status === 'waiting_payment')
     && !order.requiresWaiterDecision && (!order.paymentStatus || order.paymentStatus === 'pending')
     && items.every((item) => item.status === 'served')

@@ -1,3 +1,5 @@
+import { OrdersScreen as OrdersRegister } from '@/screens/admin/OrdersScreen';
+import { ORDER_TYPES, orderType, type OrderType } from './orderRules';
 import { FlatList, RefreshControl, View, SafeAreaView } from '@/components/themed';
 import { gridLayout } from '@/lib/layout';
 import React, { memo } from 'react';
@@ -56,6 +58,7 @@ export function OrdersScreen() {
   const selectTable = useCart((s) => s.selectTable);
   const { canAction, canOwnerOperation } = usePermissions();
   const canCreateDelivery = canAction('createDeliveryOrders');
+  const canViewAllOrders = canAction('viewAllOrders');
   const canCancelOrder = canOwnerOperation('cancelOrders');
   const connected = useConnectionStatus();
   const deliveryPending = useCart((s) => !!s.pendingTables[NEW_DELIVERY_CART.id]);
@@ -65,6 +68,9 @@ export function OrdersScreen() {
   const claimQr = useClaimQrOrder();
   const administratorCall = useCallAdministrator();
   const [archiveOpen, setArchiveOpen] = React.useState(false);
+  const [showAllOrders, setShowAllOrders] = React.useState(false);
+  const showRegister = canViewAllOrders && showAllOrders;
+  const [typeFilter, setTypeFilter] = React.useState<OrderType | 'all'>('all');
   const [menuFor, setMenuFor] = React.useState<{ order: Order; top: number; left: number } | null>(null);
   const [menuRender, setMenuRender] = React.useState<{ order: Order; top: number; left: number } | null>(null);
   const menuProgress = useSharedValue(0);
@@ -79,12 +85,12 @@ export function OrdersScreen() {
   const sorted = React.useMemo(() => {
     const attention = (o: Order) =>
       o.requiresWaiterDecision || ['ready', 'rejected'].includes(o.status) ? 1 : 0;
-    return [...(orders.data ?? [])].sort((a, b) => {
+    return (orders.data ?? []).filter((order) => typeFilter === 'all' || orderType(order.source) === typeFilter).sort((a, b) => {
       const d = attention(b) - attention(a);
       if (d !== 0) return d;
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
-  }, [orders.data]);
+  }, [orders.data, typeFilter]);
 
   const closeMenu = React.useCallback(() => {
     setMenuFor(null);
@@ -259,7 +265,9 @@ export function OrdersScreen() {
     <SafeAreaView ref={rootRef} style={styles.safe} edges={[]}>
       <View style={styles.panel}>
         <View style={styles.panelHeader}>
-          <Text style={styles.panelTitle} translate>Активные заказы</Text>
+          <Text style={styles.panelTitle} translate>{showRegister ? 'Все заказы' : 'Активные заказы'}</Text>
+          {canViewAllOrders && <Button title={showRegister ? 'Мои активные' : 'Все заказы'} size="md" variant="secondary"
+            onPress={() => setShowAllOrders(!showRegister)} />}
           <Button title="Архив заказов" size="md" variant="secondary" onPress={() => setArchiveOpen(true)} />
           {canCreateDelivery ? (
             <Button
@@ -273,28 +281,39 @@ export function OrdersScreen() {
             />
           ) : null}
         </View>
-        {orders.isLoading ? (
-          <Loading />
-        ) : sorted.length === 0 ? (
-          <EmptyState text="Активных заказов нет" />
+        {showRegister ? (
+          <OrdersRegister scope="terminal" />
         ) : (
-          <FlatList
-            key={`orders-${orderGrid.columns}`}
-            numColumns={orderGrid.columns}
-            columnWrapperStyle={orderGrid.columns > 1 ? { gap: 12 } : undefined}
-            data={sorted}
-            renderItem={renderOrder}
-            keyExtractor={keyOrder}
-            contentContainerStyle={styles.list}
-            showsVerticalScrollIndicator={false}
-            refreshControl={
-              <RefreshControl refreshing={orders.isFetching} onRefresh={() => orders.refetch()} />
-            }
-            removeClippedSubviews
-            initialNumToRender={8}
-            maxToRenderPerBatch={6}
-            windowSize={5}
-          />
+          <>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs }}>
+              {[{ value: 'all', label: 'Все' } as const, ...ORDER_TYPES].map(({ value, label }) =>
+                <Button key={value} title={label} size="md" variant={typeFilter === value ? 'primary' : 'secondary'}
+                  onPress={() => setTypeFilter(value)} />)}
+            </View>
+            {orders.isLoading ? (
+              <Loading />
+            ) : sorted.length === 0 ? (
+              <EmptyState text="Активных заказов нет" />
+            ) : (
+              <FlatList
+                key={`orders-${orderGrid.columns}`}
+                numColumns={orderGrid.columns}
+                columnWrapperStyle={orderGrid.columns > 1 ? { gap: 12 } : undefined}
+                data={sorted}
+                renderItem={renderOrder}
+                keyExtractor={keyOrder}
+                contentContainerStyle={styles.list}
+                showsVerticalScrollIndicator={false}
+                refreshControl={
+                  <RefreshControl refreshing={orders.isFetching} onRefresh={() => orders.refetch()} />
+                }
+                removeClippedSubviews
+                initialNumToRender={8}
+                maxToRenderPerBatch={6}
+                windowSize={5}
+              />
+            )}
+          </>
         )}
       </View>
       <WaiterOrderArchive visible={archiveOpen} title="Архив заказов" onClose={() => setArchiveOpen(false)}
@@ -499,7 +518,7 @@ const OrderCard = memo(function OrderCard({
         </View>
 
         <View style={styles.headRight}>
-          <OrderBadge status={order.status} />
+          <OrderBadge status={order.status} source={order.source} />
           {unclaimedQr ? (
             <FastPressable
               disabled={claimPending}

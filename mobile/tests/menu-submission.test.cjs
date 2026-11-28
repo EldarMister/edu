@@ -43,6 +43,13 @@ function harness({ deliveryAllowed = false, roundOrderTotal = false } = {}) {
   const mutations = { create: mutation('create'), add: mutation('add'), edit: mutation('edit'), replace: mutation('replace') };
   const native = { useWindowDimensions: () => ({ width: 390, height: 844 }), FlatList: 'FlatList', ScrollView: 'ScrollView', View: 'View', StyleSheet: { create: x => x } };
   const safeArea = { SafeAreaView: 'SafeAreaView' };
+  const orderRules = load('src/screens/waiter/orderRules.ts', { '@/lib/order-permissions': {}, '@/utils/format': {} });
+  const fields = load('src/screens/waiter/OrderFulfillmentFields.tsx', {
+    react: hooks, 'react-native': native, ...nativeThemeModules(native, safeArea),
+    '@/components/typography': { Text: 'Text', TextInput: 'TextInput' }, '@/components/FastPressable': { FastPressable: 'FastPressable' },
+    '@/components/PwaIcon': {}, '@/components/ui': {}, '@/components/Select': {}, '@/lib/api': {},
+    '@/services/api/waiter': {}, './orderRules': orderRules,
+  });
   const { MenuScreen } = load('src/screens/waiter/MenuScreen.tsx', {
     react: hooks,
     '@/lib/layout': load('src/lib/layout.ts'),
@@ -69,18 +76,18 @@ function harness({ deliveryAllowed = false, roundOrderTotal = false } = {}) {
     '@/utils/prepStation': { cartStations: () => ({ hasPrep: true, kitchen: true }) },
     '@/lib/api': { apiError: error => error.message }, '@/services/socket': { useConnectionStatus: () => true },
     './CartSheet': { CartSheet: 'CartSheet' },
-    './DeliveryDetailsSheet': { DeliveryDetailsSheet: 'DeliveryDetailsSheet' },
+    './OrderFulfillmentFields': fields,
     './ModifierPickerSheet': { ModifierPickerSheet: 'ModifierPickerSheet' },
     './TablePickerSheet': { TablePickerSheet: 'TablePickerSheet' },
     './WeightPickerSheet': { WeightPickerSheet: 'WeightPickerSheet' },
-    './orderRules': {},
+    './orderRules': orderRules,
   });
   const all = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(all) : [node, ...all(node.props?.children)];
   cart.getState().selectTable(first); cart.getState().add(dish);
   return { cart, auth, replacement, requests, navigations, notices, cartModule,
     render() { cursor = 0; effects = []; tree = MenuScreen(); effects.forEach(fn => fn()); return tree; },
     submit() { all(tree).find(x => x.type === 'CartSheet').props.onSubmit(); },
-    deliveryForm() { return all(tree).find(x => x.type === 'DeliveryDetailsSheet')?.props; },
+    deliveryForm() { return this.cartSheet()?.customerFields?.props; },
     cartSheet() { return all(tree).find(x => x.type === 'CartSheet')?.props; },
     modifierPicker() { return all(tree).find(x => x.type === 'ModifierPickerSheet')?.props; },
     replace(item = dish) { const grid = all(tree).find(x => x.type === 'FlatList'); grid.props.renderItem({ item }).props.onAdd(item); },
@@ -150,27 +157,30 @@ test('manual delivery validates customer details and isolates its checkout from 
   const tableLines = h.cart.getState().lines;
   h.cart.getState().selectTable(NEW_DELIVERY_CART); h.cart.getState().add(dish);
   h.render(); h.submit(); h.render();
-  assert.equal(h.deliveryForm().visible, true);
+  assert.equal(h.cartSheet().visible, true);
   assert.equal(h.cartSheet().delivery, true);
   assert.equal(h.cartSheet().roundTotal, true);
-  h.deliveryForm().onSubmit({ customerName: '', customerPhone: '998', deliveryAddress: 'Улица 1' });
+  h.deliveryForm().onChange({ ...h.deliveryForm().value, customerPhone: '998', deliveryAddress: 'Улица 1' });
+  h.render(); h.submit();
   h.render();
   assert.equal(h.deliveryForm().error, 'Укажите корректный телефон клиента');
   assert.equal(h.requests.length, 0);
 
   const details = { customerName: '', customerPhone: '+996 550-111-222', deliveryAddress: 'Улица 1' };
-  h.deliveryForm().onSubmit(details);
-  assert.equal(h.requests[0].payload.delivery, details);
+  h.deliveryForm().onChange({ ...h.deliveryForm().value, ...details, deliveryFee: '35,50' });
+  h.render(); h.submit();
+  assert.equal(h.requests[0].payload.delivery.deliveryFee, 35.5);
+  assert.equal(h.requests[0].payload.delivery.customerPhone, details.customerPhone);
   assert.equal(h.requests[0].payload.tableId, undefined);
   h.requests[0].reject(new Error('Таймаут')); await flush(); h.render();
   assert.equal(h.deliveryForm().error, 'Таймаут');
-  h.deliveryForm().onSubmit(details);
+  h.submit();
   assert.equal(h.requests[1].payload.idempotencyKey, h.requests[0].payload.idempotencyKey);
   h.requests[1].resolve({ id: 'delivery-order' }); await flush();
   assert.equal(h.cart.getState().tableId, null);
   h.cart.getState().selectTable(first);
   assert.equal(h.cart.getState().lines, tableLines);
-  assert.ok(h.notices.some(notice => notice.message === 'Заказ доставки оформлен'));
+  assert.ok(h.notices.some(notice => notice.message === 'Заказ создан'));
 
   const serviceTable = { id: 'service-table', number: 0 };
   const firstDelivery = orderCartDestination({ id: 'delivery-a', source: 'delivery', table: serviceTable });
@@ -211,4 +221,26 @@ test('replacement suppresses duplicate press and does not clear a newer replacem
   h.requests[0].resolve({ id: 'order-a' }); await flush();
   assert.equal(h.replacement.target, next);
   assert.equal(h.navigations.length, 0);
+});
+
+test('switching a table draft to pickup retains the dishes and sends only pickup fields', async () => {
+  const h = harness({ deliveryAllowed: true });
+  const lines = h.cart.getState().lines;
+  h.render();
+  h.cartSheet().typeControl.props.onChange('delivery');
+  h.render();
+  h.deliveryForm().onChange({ ...h.deliveryForm().value, customerPhone: '+996 550-111-222',
+    customerName: 'Азиз', deliveryAddress: 'Улица 1', deliveryFee: '45', pickupTime: '19:30' });
+  h.cartSheet().typeControl.props.onChange('pickup');
+  h.render();
+  h.submit();
+  const { delivery, tableId } = h.requests[0].payload;
+  assert.equal(tableId, undefined);
+  assert.equal(delivery.type, 'pickup');
+  assert.equal(delivery.pickupTime, '19:30');
+  assert.equal(delivery.deliveryAddress, undefined);
+  assert.equal(delivery.deliveryFee, undefined);
+  assert.equal(h.cart.getState().lines, lines);
+  h.requests[0].resolve({ id: 'pickup-order' });
+  await flush();
 });

@@ -142,7 +142,9 @@ function screenHarness(options = {}) {
     './SplitOrderSheet': { SplitOrderSheet: 'SplitOrderSheet' },
     './splitOrderPlan': loadSource('src/screens/waiter/splitOrderPlan.ts', {}),
     '@/lib/i18n': { useT: () => value => value },
+    './OrderFulfillmentFields': { EditOrderFulfillment: 'EditOrderFulfillment' },
     './orderRules': {
+      isOffsite: source => source === 'delivery' || source === 'pickup',
       canRequestPreliminaryBill: () => false, deliveryDetails: () => null, orderLocation: () => 'Стол 2',
     },
   });

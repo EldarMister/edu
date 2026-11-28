@@ -37,6 +37,7 @@ export type ActionKey =
   | 'printReceipts'
   | 'requestReceiptPrints'
   | 'createDeliveryOrders'
+  | 'viewAllOrders'
   | 'manageStaff'
   | 'editPermissions'
   | 'warehouseReceive'
@@ -281,6 +282,7 @@ export interface Order {
   totalAmount: string;
   discountAmount: string;
   serviceChargeAmount: string;
+  deliveryFee?: string;
   roundOrderTotal?: boolean;
   finalAmount: string;
   paymentMethod: PaymentMethod | null;
@@ -300,11 +302,12 @@ export interface Order {
     hall?: { name: string };
   };
   waiter: { id: string; name: string } | null;
-  source?: 'pos' | 'qr' | 'delivery';
+  source?: 'pos' | 'qr' | 'delivery' | 'pickup';
   externalOrderId?: string | null;
   deliveryCustomerName?: string | null;
   deliveryCustomerPhone?: string | null;
   deliveryAddress?: string | null;
+  pickupTime?: string | null;
   items: OrderItem[];
   payments?: { method: PaymentMethod; amount: string; source?: PaymentSource }[];
   fiscalReceiptNumber?: string | null;
@@ -360,6 +363,7 @@ export interface Receipt extends Partial<ReceiptPrintSettings> {
   totalAmount: string;
   discountAmount: string;
   serviceChargeAmount: string;
+  deliveryFee?: string;
   finalAmount: string;
   paymentMethod: PaymentMethod | null;
   payments?: { method: PaymentMethod; amount: string; source?: PaymentSource }[];

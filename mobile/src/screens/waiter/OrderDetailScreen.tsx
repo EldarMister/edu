@@ -50,7 +50,8 @@ import { PaymentSheet } from './PaymentSheet';
 import { SplitOrderSheet } from './SplitOrderSheet';
 import { canSplitOrder, orderCheckFamily } from './splitOrderPlan';
 import type { OrdersStackParamList } from '@/navigation/types';
-import { canRequestPreliminaryBill, deliveryDetails, orderLocation } from './orderRules';
+import { EditOrderFulfillment } from './OrderFulfillmentFields';
+import { canRequestPreliminaryBill, deliveryDetails, isOffsite, orderLocation } from './orderRules';
 import type { Order, OrderItem, OrderItemStatus, OrderSetComponent } from '@/types';
 
 type R = RouteProp<OrdersStackParamList, 'OrderDetail'>;
@@ -353,7 +354,7 @@ export function OrderDetailScreen() {
       );
     }
     if (
-      hasReadyStationItem &&
+      !isOffsite(order.source) && hasReadyStationItem &&
       !['paid', 'cancelled', 'rejected', 'waiting_payment', 'picked_up', 'served', 'ready'].includes(order.status)
     ) {
       return (
@@ -369,16 +370,17 @@ export function OrderDetailScreen() {
       case 'ready':
         return (
           <Button
-            title={cooldownActive ? String(actionCooldown) : 'Вынес гостям'}
+            title={cooldownActive ? String(actionCooldown) : order.source === 'delivery' ? 'Передать курьеру'
+              : order.source === 'pickup' ? 'Выдать заказ' : 'Вынес гостям'}
             loading={busy && !cooldownActive}
             disabled={cooldownActive}
-            onPress={() => runProtectedAction(() => served.mutate(order.id, { onError }))}
+            onPress={() => runProtectedAction(() => (order.source === 'delivery' ? pickedUp : served).mutate(order.id, { onError }))}
           />
         );
       case 'picked_up':
         return (
           <Button
-            title={cooldownActive ? String(actionCooldown) : 'Вынес гостям'}
+            title={cooldownActive ? String(actionCooldown) : order.source === 'delivery' ? 'Отметить доставленным' : 'Вынес гостям'}
             loading={busy && !cooldownActive}
             disabled={cooldownActive}
             onPress={() => runProtectedAction(() => served.mutate(order.id, { onError }))}
@@ -501,6 +503,10 @@ export function OrderDetailScreen() {
       </View>
 
       <SheetScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+        {canAction('createDeliveryOrders') && order.updatedAt && order.source !== 'qr' && !order.externalOrderId
+          && !order.splitFromOrderId && family.length <= 1 && ['sent_to_kitchen', 'ready'].includes(order.status)
+          && order.items.every((item) => ['new', 'cancelled', 'rejected'].includes(item.status) || item.prepStation === 'none')
+          && waiterOrderPermission(order, 'edit', policies).allowed ? <EditOrderFulfillment order={order} /> : null}
         {order.items.map((it) => (
           <ItemCard
             key={it.id}
@@ -528,6 +534,14 @@ export function OrderDetailScreen() {
         {order.comment ? (
           <Text style={styles.orderComment}>{order.comment}</Text>
         ) : null}
+        {Number(order.deliveryFee) > 0 && <View style={styles.totalRow}>
+          <Text style={styles.totalLabel} translate>Доставка</Text><Text style={styles.totalLabel}>{money(order.deliveryFee ?? 0)}</Text>
+        </View>}
+        {order.status === 'paid' && (canPrint || canRequestPrint) && <Button title="Повторить печать чека" variant="secondary"
+          loading={print.isPending} onPress={() => {
+            if (canPrint) void printReceipt(order.id).catch(onError);
+            else print.mutate({ orderId: order.id, type: 'receipt' }, { onError });
+          }} />}
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel} translate>Итого</Text>
           <NumberTicker value={Number(order.finalAmount)} style={styles.totalValue} digitHeight={26} />

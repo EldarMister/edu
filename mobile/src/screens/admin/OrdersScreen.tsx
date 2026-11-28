@@ -1,3 +1,4 @@
+import { isOffsite, ORDER_TYPES, orderType, orderTypeLabel } from '@/screens/waiter/orderRules';
 import { AdminLoadingSkeleton } from './AdminLoadingSkeleton';
 import { ActivityIndicator, ScrollView, View } from '@/components/themed';
 import React, { useState } from 'react';
@@ -22,7 +23,7 @@ import {
   useAdminOrdersInfinite,
   useCancelOrder,
   useOrdersSummary,
-  useStaff,
+  useOrderWaiters,
   useUpdateOrderStatus,
   useAdminOrderDetails,
 } from '@/services/api/admin';
@@ -100,16 +101,19 @@ function periodRange(period: string): { dateFrom?: string; dateTo?: string } {
 }
 
 /** Заказы (владелец/админ) — порт PWA OrdersPage. */
-export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {}) {
+export function OrdersScreen({ initialOrderId, scope = 'admin' }: { initialOrderId?: string; scope?: 'admin' | 'terminal' } = {}) {
+  const readOnly = scope === 'terminal';
   const [tab, setTab] = useState('all');
   const [paymentMethod, setPaymentMethod] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
   const [waiterId, setWaiterId] = useState('');
   const [period, setPeriod] = useState('all');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('default');
-  const [visibleColumns, saveColumns] = useColumnPreference<OrderColumn>('orders', orderColumns.map(({ key }) => key));
-  const chosenColumns = orderColumns.filter(({ key }) => visibleColumns.includes(key));
-  const columns: ReadonlyArray<typeof orderColumns[number]> = chosenColumns.length ? chosenColumns : orderColumns;
+  const columnOptions = readOnly ? orderColumns.filter(({ key }) => key !== 'act') : orderColumns;
+  const [visibleColumns, saveColumns] = useColumnPreference<OrderColumn>(readOnly ? 'terminal-orders' : 'orders', columnOptions.map(({ key }) => key));
+  const chosenColumns = columnOptions.filter(({ key }) => visibleColumns.includes(key));
+  const columns: ReadonlyArray<typeof orderColumns[number]> = chosenColumns.length ? chosenColumns : columnOptions;
   const tableWidth = columns.reduce((width, column) => width + column.width, 0);
   const [customDate, setCustomDate] = useState('');
   const [calendarRequest, setCalendarRequest] = useState(0);
@@ -118,28 +122,28 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
   const [detailsOrder, setDetailsOrder] = useState<Order | null>(null);
   const [detailId, setDetailId] = useState<string | null>(initialOrderId ?? null);
   React.useEffect(() => { if (initialOrderId) setDetailId(initialOrderId); }, [initialOrderId]);
-  const details = useAdminOrderDetails(detailId ?? detailsOrder?.id ?? null);
+  const details = useAdminOrderDetails(detailId ?? detailsOrder?.id ?? null, scope);
   const [statusTarget, setStatusTarget] = useState<Order | null>(null);
   const [manualStatus, setManualStatus] = useState<OrderStatus>('served');
   const [manualReason, setManualReason] = useState('');
 
   const push = useNotifications((s) => s.push);
   const { canEditSection, canOwnerOperation } = usePermissions();
-  const canEditOrders = canEditSection('orders');
+  const canEditOrders = !readOnly && canEditSection('orders');
   const canCancelOrders = canEditOrders && canOwnerOperation('cancelOrders');
   const canManageRefunds = useCanManageOrderRefunds();
   const cancelOrder = useCancelOrder();
   const updateStatus = useUpdateOrderStatus();
 
-  const waiters = useStaff('WAITER', '');
+  const waiters = useOrderWaiters(scope);
   const waiterOptions = [
     { value: '', label: 'Все официанты' },
     ...(waiters.data ?? []).map((w) => ({ value: w.id, label: w.name })),
   ];
 
-  const filters = { search, paymentMethod, waiterId, ...(period === 'custom' ? customDate ? { dateFrom: customDate, dateTo: customDate } : {} : periodRange(period)) };
-  const ordersQ = useAdminOrdersInfinite({ tab, ...filters, sort: sort.startsWith('date') ? 'date' : sort.startsWith('amount') ? 'amount' : 'default', sortDirection: sort.endsWith('_asc') ? 'asc' : 'desc' });
-  const summaryQ = useOrdersSummary(filters);
+  const filters = { search, paymentMethod, waiterId, orderType: typeFilter, ...(period === 'custom' ? customDate ? { dateFrom: customDate, dateTo: customDate } : {} : periodRange(period)) };
+  const ordersQ = useAdminOrdersInfinite({ tab, ...filters, sort: sort.startsWith('date') ? 'date' : sort.startsWith('amount') ? 'amount' : 'default', sortDirection: sort.endsWith('_asc') ? 'asc' : 'desc' }, scope);
+  const summaryQ = useOrdersSummary(filters, scope);
   const items = ordersQ.data?.pages.flatMap((p) => p.items) ?? [];
   const ordersError = ordersQ.isError ? apiError(ordersQ.error) : null;
   const s = summaryQ.data;
@@ -209,13 +213,15 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
         {/* Фильтры */}
         <View style={styles.filters}>
           <Select style={styles.filterControl} value={tab} onChange={setTab} options={STATUS_OPTIONS} title="Статус" />
+          <Select style={styles.filterControl} value={typeFilter} onChange={setTypeFilter}
+            options={[{ value: '', label: 'Все типы заказов' }, ...ORDER_TYPES]} title="Тип заказа" />
           <Select style={styles.filterControl} value={paymentMethod} onChange={setPaymentMethod} options={PAYMENT_OPTIONS} title="Способ оплаты" />
           <Select style={styles.filterControl} value={waiterId} onChange={setWaiterId} options={waiterOptions} title="Официант" />
           <Select style={styles.filterControl} value={period} onChange={(next) => { setPeriod(next); if (next === 'custom') setCalendarRequest(request => request + 1); }} options={PERIOD_OPTIONS} title="Период" />
           {period === 'custom' ? <DateField key={calendarRequest} accessibilityLabel="Дата заказов" value={customDate} onChangeText={setCustomDate} openOnMount /> : null}
           <Select style={styles.filterControl} value={sort} onChange={setSort} options={SORT_OPTIONS} title="Сортировка" />
           <WarehouseMultiSelect label="Столбцы" value={visibleColumns} onChange={(keys) => { if (keys.length) saveColumns(keys); }}
-            options={orderColumns.map(({ key, label }) => ({ value: key, label }))} />
+            options={columnOptions.map(({ key, label }) => ({ value: key, label }))} />
           <View style={styles.searchWrap}><PwaIcon name="search" size={21} color="#64799E" /><TextInput
             style={styles.search}
             placeholder="Поиск по заказам"
@@ -295,7 +301,7 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
         onConfirm={confirmStatusChange}
       />
       <OrderDetailsModal order={details.data ?? detailsOrder} onOrderChange={setDetailsOrder} allowItemCancellation={canEditOrders && canOwnerOperation('cancelItems')}
-        allowRefunds={canManageRefunds && !!details.data} onClose={() => { setDetailsOrder(null); setDetailId(null); }} />
+        readOnly={readOnly} allowRefunds={!readOnly && canManageRefunds && !!details.data} onClose={() => { setDetailsOrder(null); setDetailId(null); }} />
     </>
   );
 }
@@ -330,7 +336,7 @@ function OrderTableRow({
   const values = {
     num: displayOrderNumber(order.orderNumber),
     date: new Date(order.createdAt).toLocaleDateString('ru-RU') + ' ' + timeHM(order.createdAt),
-    table: order.source === 'delivery' ? '—' : `Стол ${order.table.number}${hallSuffix(order.table)}`,
+    table: isOffsite(order.source) ? orderTypeLabel(orderType(order.source)) : `Стол ${order.table.number}${hallSuffix(order.table)}`,
     waiter: order.source === 'delivery' ? 'Доставка' : order.waiter?.name ?? 'QR menu',
     amount: money(order.finalAmount),
     pay: paymentCell(order),
