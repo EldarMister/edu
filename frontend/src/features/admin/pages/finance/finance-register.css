@@ -1,6 +1,11 @@
 .finance-register { background: rgb(var(--edu-card)); }
 .finance-register-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 24px; padding: 4px 10px 16px; }
 .finance-register-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.finance-register-filters:has(> .finance-transaction-search) { width: 100%; }
+.finance-transaction-search { margin-inline-start: auto; }
+@media (max-width: 480px) {
+  .finance-register-filters > .finance-transaction-search { flex: 1 0 100%; }
+}
 .finance-tool { display: inline-flex; gap: 7px; align-items: center; min-height: 36px; font-size: 14px; color: rgb(var(--edu-link)); }
 .finance-tool svg { width: 19px; height: 19px; }
 .finance-tool:hover { text-decoration: underline; }
