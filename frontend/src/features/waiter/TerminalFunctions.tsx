@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Modal } from '@/components/Modal';
-import { IconCash, IconCart, IconJournal, IconLogout, IconPrinter, IconStaff, IconWarehouse } from '@/features/admin/components/icons';
+import { IconCash, IconCart, IconJournal, IconLogout, IconOrders, IconPrinter, IconStaff, IconWarehouse } from '@/features/admin/components/icons';
 import { WAREHOUSE_NAV, warehouseViewAllowed } from '@/features/admin/pages/warehouse/navigation';
 import { useCashShiftAccess, useCashShiftState, type CashShiftEditor } from '@/features/settings/CashShiftControls';
 import { useT } from '@/lib/i18n';
@@ -35,9 +35,10 @@ type FunctionAction = {
   disabled?: boolean;
 } & ({ onClick: () => void } | { href: string });
 
-export function TerminalFunctions({ onClose, onArchive, onPrintQueue, canWork, onCashShift, onDelivery, onProfile }: {
+export function TerminalFunctions({ onClose, onArchive, onAllOrders, onPrintQueue, canWork, onCashShift, onDelivery, onProfile }: {
   onClose: () => void;
   onArchive?: () => void;
+  onAllOrders?: () => void;
   onPrintQueue?: () => void;
   canWork: boolean;
   onCashShift: (editor: CashShiftEditor) => void;
@@ -59,6 +60,7 @@ export function TerminalFunctions({ onClose, onArchive, onPrintQueue, canWork, o
   }, []);
 
   const receipts: FunctionAction[] = [];
+  if (onAllOrders) receipts.push({ label: 'Все заказы', icon: IconOrders, onClick: onAllOrders });
   if (onArchive) receipts.push({ label: 'Архив заказов', icon: IconJournal, onClick: onArchive });
   if (onPrintQueue) receipts.push({ label: 'Печать чека', icon: IconPrinter, onClick: onPrintQueue, disabled: !canWork });
 

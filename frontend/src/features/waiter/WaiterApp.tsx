@@ -1133,9 +1133,6 @@ export function WaiterApp() {
         </div>
         <DesktopNav current={desktopView} onChange={(next) => changeTab(next)} />
         <div className="flex items-center gap-3">
-          <button type="button" aria-label={t('Архив заказов')} className="btn-secondary btn-md" onClick={() => setOrderArchiveOpen(true)}>
-            {t('Архив')}
-          </button>
           <TerminalFunctionsButton open={functionsOpen} onOpen={() => setFunctionsOpen(true)} />
           <ConnectionStatus />
           <span className="hidden text-sm text-text-secondary sm:inline">{user?.name}</span>
@@ -1319,6 +1316,11 @@ export function WaiterApp() {
       {functionsOpen && <TerminalFunctions
         onClose={() => setFunctionsOpen(false)}
         onArchive={orderArchiveOpen ? undefined : () => setOrderArchiveOpen(true)}
+        onAllOrders={canViewAllOrders ? () => {
+          setOrderArchiveOpen(false);
+          changeTab('orders');
+          setShowAllOrders(true);
+        } : undefined}
         onPrintQueue={canHandlePrintQueue ? () => setPrintQueueOpen(true) : undefined}
         canWork={canWork}
         onCashShift={(editor) => {
