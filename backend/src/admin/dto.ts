@@ -451,6 +451,9 @@ export class OrderQueryDto {
   @IsOptional() @IsString()
   tab?: 'all' | 'active' | 'paid' | 'cancelled';
 
+  @IsOptional() @IsIn(['dine_in', 'delivery', 'pickup'])
+  orderType?: 'dine_in' | 'delivery' | 'pickup';
+
   @IsOptional() @IsString()
   search?: string;
 

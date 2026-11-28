@@ -6,6 +6,7 @@ import type { Order } from '@/types';
 import { OrderBadge } from '@/components/StatusBadge';
 import { displayOrderNumber, money, orderPlaceLabel, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
+import { ORDER_TYPES, orderType, type OrderType } from './OrderFulfillmentFields';
 
 export function OrdersList({
   orders,
@@ -24,11 +25,9 @@ export function OrdersList({
 }) {
   const t = useT();
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [type, setType] = useState<OrderType | 'all'>('all');
 
-  if (orders.length === 0) {
-    return <p className="py-12 text-center text-sm text-text-muted">{t('Активных заказов нет')}</p>;
-  }
-  const sortedOrders = [...orders].sort((a, b) => {
+  const sortedOrders = orders.filter((order) => type === 'all' || orderType(order.source) === type).sort((a, b) => {
     const aAttention = isAttentionOrder(a) ? 1 : 0;
     const bAttention = isAttentionOrder(b) ? 1 : 0;
     if (aAttention !== bAttention) return bAttention - aAttention;
@@ -37,6 +36,12 @@ export function OrdersList({
 
   return (
     <div className="space-y-3 px-1.5">
+      <div className="flex flex-wrap gap-2" role="group" aria-label={t('Тип заказа')}>
+        {[{ value: 'all', label: 'Все' } as const, ...ORDER_TYPES].map(({ value, label }) =>
+          <button type="button" key={value} aria-pressed={type === value}
+            className={type === value ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'} onClick={() => setType(value)}>{t(label)}</button>)}
+      </div>
+      {!sortedOrders.length && <p className="py-12 text-center text-sm text-text-muted">{t('Активных заказов нет')}</p>}
       {sortedOrders.map((o) => {
         const attention = isAttentionOrder(o);
         const unclaimedQr = isUnclaimedQrOrder(o);

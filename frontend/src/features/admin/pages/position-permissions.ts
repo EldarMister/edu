@@ -29,6 +29,7 @@ export function positionAccessSummary(role: Role, stored?: unknown) {
   if (permissions.terminalAccess && permissions.actions.acceptOrderPayments) parts.push('Приём оплаты');
   if (permissions.terminalAccess && permissions.actions.printReceipts) parts.push('Печать чеков');
   if (permissions.terminalAccess && permissions.actions.createDeliveryOrders) parts.push('Оформление доставки');
+  if (permissions.terminalAccess && permissions.actions.viewAllOrders) parts.push('Просмотр всех заказов');
   if (role === 'KITCHEN' || role === 'BAR') parts.push(role === 'KITCHEN' ? 'Экран кухни' : 'Экран бара');
   if (permissions.adminAccess) parts.push(...SECTION_KEYS.filter((key) => permissions.sections[key]).map((key) => SECTION_LABELS[key]
     + (permissions.readOnlySections?.includes(key) ? ' (просмотр)' : '')));

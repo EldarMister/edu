@@ -5,6 +5,7 @@ import { StaffController } from './staff.controller';
 import { StaffService } from './staff.service';
 import { EmployeeSalaryController } from './employee-salary.controller';
 import { PositionsController } from './positions.controller';
+import { TerminalOrdersController } from './terminal-orders.controller';
 import { AdminOrdersController } from './admin-orders.controller';
 import { AdminOrdersService } from './admin-orders.service';
 import { StatisticsController } from './statistics.controller';
@@ -24,6 +25,7 @@ import { MenuEntryService } from './menu-entry.service';
     EmployeeSalaryController,
     PositionsController,
     AdminOrdersController,
+    TerminalOrdersController,
     StatisticsController,
     AdminWarehouseController,
   ],

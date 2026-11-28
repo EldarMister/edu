@@ -25,6 +25,7 @@ interface CartState {
   selectTable: (tableId: string) => void;
   // Переносит текущий черновик корзины на другой стол (смена стола на экране меню).
   moveDraftTo: (targetTableId: string) => void;
+  moveNewOrderDraft: (target: CartTarget) => boolean;
   add: (dish: Dish, variant?: DishVariant, weightGrams?: number, modifiers?: CartModifiers) => void;
   /** Добавляет сет отдельной линией (сеты не сливаются — у каждого свой состав). */
   addSet: (dish: Dish, components: CartSetComponent[], modifiers?: CartModifiers) => void;
@@ -130,6 +131,21 @@ export const useCart = create<CartState>((set, get) => ({
         carts,
       };
     }),
+
+  moveNewOrderDraft: (target) => {
+    const { target: current, carts } = get();
+    const from = current && draftKey(current);
+    const to = draftKey(target);
+    if (from === to) return true;
+    const draft = from ? carts[from] : undefined;
+    const destination = carts[to];
+    if (destination?.lines.length && (draft?.lines.length || draft?.comment)) return false;
+    const next = draft?.lines.length || draft?.comment ? draft : destination ?? EMPTY;
+    const nextCarts = { ...carts, [to]: next };
+    if (from) delete nextCarts[from];
+    set({ target, ...next, carts: nextCarts });
+    return true;
+  },
 
   add: (dish, variant, weightGrams, modifiers) =>
     set((s) =>

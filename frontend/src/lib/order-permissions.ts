@@ -37,7 +37,7 @@ export function waiterItemPermission(order: Order, item: OrderItem, action: 'can
 }
 
 export function waiterOrderPermission(order: Order, action: 'cancel' | 'edit', policies?: WaiterOrderPermissions) {
-  if (action === 'edit' && order.source === 'delivery' && ['picked_up', 'served', 'waiting_payment'].includes(order.status)) {
+  if (action === 'edit' && (order.source === 'delivery' || order.source === 'pickup') && ['picked_up', 'served', 'waiting_payment'].includes(order.status)) {
     return { allowed: false, reason: 'Состав доставки уже передан курьеру' };
   }
   const items = order.items.filter((item) => !['cancelled', 'rejected'].includes(item.status));

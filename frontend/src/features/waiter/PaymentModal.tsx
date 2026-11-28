@@ -298,7 +298,7 @@ export function PaymentModal({
           {header.address && <p className="text-center text-xs text-text-muted">{header.address}</p>}
           {header.phones && <p className="text-center text-xs text-text-muted">{header.phones}</p>}
           <p className="mb-3 text-center text-xs text-text-muted">
-            {displayOrderNumber(receipt.orderNumber)} · {receipt.source === 'delivery' ? receiptLabel('Доставка') : `${receiptLabel('Стол')} ${receipt.tableNumber}`}
+            {displayOrderNumber(receipt.orderNumber)} · {receipt.source === 'delivery' || receipt.source === 'pickup' ? receiptLabel(receipt.source === 'pickup' ? 'Самовывоз' : 'Доставка') : `${receiptLabel('Стол')} ${receipt.tableNumber}`}
           </p>
           <div className="space-y-1">
             {receipt.items.map((it, i) => (
@@ -316,6 +316,7 @@ export function PaymentModal({
               <span>{money(receipt.serviceChargeAmount)}</span>
             </div>
           )}
+          {Number(receipt.deliveryFee) > 0 && <div className="flex justify-between"><span>{receiptLabel('Доставка')}</span><span>{money(receipt.deliveryFee ?? 0)}</span></div>}
           {Number(receipt.roundingAmount) > 0 && (
             <div className="mt-2 flex justify-between text-sm text-text-secondary">
               <span>{receiptLabel('Округление')}</span>

@@ -37,6 +37,7 @@ export function projectWorkspaceUser(user: AuthUser, requested?: unknown): AuthU
     permissions.actions.requestReceiptPrints = user.permissions.actions.requestReceiptPrints && user.permissions.ownerOperations?.printRequests !== false;
     permissions.ownerOperations = user.permissions.ownerOperations;
     permissions.actions.createDeliveryOrders = user.permissions.actions.createDeliveryOrders;
+    permissions.actions.viewAllOrders = user.permissions.actions.viewAllOrders;
     permissions.actions.closeShift = user.permissions.actions.closeShift;
   } else if (workspace === 'admin') {
     role = identityRole === Role.OWNER ? Role.OWNER : Role.ADMIN;

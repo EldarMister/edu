@@ -190,7 +190,10 @@ function linesToItems(lines: CartLine[]) {
 export interface DeliveryDetails {
   customerName: string;
   customerPhone: string;
-  deliveryAddress: string;
+  deliveryAddress?: string;
+  type?: 'delivery' | 'pickup';
+  deliveryFee?: number;
+  pickupTime?: string;
 }
 
 type OrderDestination = { tableId: string; delivery?: never } | { tableId?: never; delivery: DeliveryDetails };
@@ -217,6 +220,21 @@ export function useCreateOrder() {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
       qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
+    },
+  });
+}
+
+export function useUpdateOrderFulfillment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId, ...payload }: OrderDestination & {
+      orderId: string; expectedUpdatedAt: string; comment?: string;
+    }) => (await api.patch<Order>(`/orders/${orderId}/fulfillment`, payload)).data,
+    onSuccess: (updated) => qc.setQueryData<Order[]>(['orders', 'active'], (orders) =>
+      orders?.map((order) => order.id === updated.id ? updated : order)),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['orders'] });
+      void qc.invalidateQueries({ queryKey: ['halls'] });
     },
   });
 }

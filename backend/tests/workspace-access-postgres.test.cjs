@@ -45,6 +45,7 @@ const { IngredientStockService } = require('../src/warehouse/ingredient-stock.se
 const { getDefaultPermissionsByRole } = require('../src/common/permissions.ts');
 const { tenantPrismaMiddleware, runWithTenant } = require('../src/tenant/tenant-context.ts');
 const { AdminOrdersController } = require('../src/admin/admin-orders.controller.ts');
+const { TerminalOrdersController } = require('../src/admin/terminal-orders.controller.ts');
 const { AdminOrdersService } = require('../src/admin/admin-orders.service.ts');
 const XLSX = require('xlsx');
 
@@ -78,7 +79,7 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
   ].map(([provide, useValue]) => ({ provide, useValue }));
   class HttpFixtureModule {}
   Module({ imports: [PassportModule.register({ defaultStrategy: 'jwt' })],
-    controllers: [AuthController, OrdersController, AdminOrdersController, OrderRefundsController, PaymentsController, FiscalController, WaiterShiftsController, StaffShiftsController, StaffController, PositionsController, TablesController, SettingsController, ReceiptPrintsController, CatalogController, HallsController], providers })(HttpFixtureModule);
+    controllers: [AuthController, OrdersController, AdminOrdersController, TerminalOrdersController, OrderRefundsController, PaymentsController, FiscalController, WaiterShiftsController, StaffShiftsController, StaffController, PositionsController, TablesController, SettingsController, ReceiptPrintsController, CatalogController, HallsController], providers })(HttpFixtureModule);
   const app = await NestFactory.create(HttpFixtureModule, { logger: false });
   app.setGlobalPrefix('api');
   app.use((_req, _res, next) => runWithTenant({}, next));
@@ -414,6 +415,43 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
       assert.equal(account.access.admin, true);
       await request('/admin/staff', { token: sessions.mixed, workspace: 'admin' });
     });
+    await t.test('cashier can read the venue order register without management access', async () => {
+      const owner = { token: sessions.owner, workspace: 'admin' };
+      const cashier = { token: sessions.cashier, workspace: 'terminal' };
+      const waiter = { token: sessions.legacy, workspace: 'terminal', status: 403 };
+      const register = '/terminal/orders';
+      const position = (await request('/admin/positions', owner)).find(({ id }) => id === fixture.cashierPosition.id);
+      assert.equal(position.permissions.actions.viewAllOrders, true);
+      const filters = '?tab=paid&orderType=dine_in';
+      const list = await request(register + filters, cashier);
+      assert.ok(list.items.some(({ id }) => id === mixedOrder.id));
+      assert.deepEqual(list, await request('/admin/orders' + filters, owner));
+      assert.deepEqual(await request(register + '/summary', cashier), await request('/admin/orders/summary', owner));
+      const staff = await request(register + '/waiters', cashier);
+      assert.ok(staff.some(({ id }) => id === fixture.mixed.id));
+      const detailPath = register + '/' + mixedOrder.id;
+      assert.equal((await request(detailPath, cashier)).id, mixedOrder.id);
+      for (const path of [register, register + '/summary', register + '/waiters', detailPath]) {
+        await request(path, waiter);
+      }
+      await request('/admin/orders', { ...cashier, workspace: 'admin', status: 403 });
+      await request('/orders/' + mixedOrder.id, { ...cashier, status: 403 });
+      await request(register + '/' + randomUUID(), { ...cashier, status: 404 });
+
+      const setRegister = (allowed) => request('/admin/positions/' + position.id, {
+        ...owner, method: 'PATCH', body: { name: position.name, permissions: {
+          ...position.permissions, actions: { ...position.permissions.actions, viewAllOrders: allowed },
+        } },
+      });
+      try {
+        await setRegister(false);
+        await request(detailPath, { ...cashier, status: 403 });
+        await request('/orders/active', cashier);
+      } finally {
+        await setRegister(true);
+      }
+      await request(detailPath, cashier);
+    });
     await t.test('position disables work tracking and keeps order creation and payment available', async () => {
       const token = sessions.mixed;
       const owner = { token: sessions.owner, workspace: 'admin' };
@@ -624,6 +662,64 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
       const ticket = await request('/receipt-prints', { ...terminal, method: 'POST', status: 201,
         body: { orderId: first.id, type: 'receipt' } });
       assert.equal(ticket.orderSource, 'delivery');
+
+      const pickup = await createDelivery(terminal, {
+        type: 'pickup', customerName: 'Клиент', customerPhone: body.customerPhone, pickupTime: '19:30',
+        comment: 'Упаковать отдельно', items: body.items, idempotencyKey: randomUUID(),
+      });
+      assert.equal(pickup.source, 'pickup');
+      assert.equal(pickup.pickupTime, '19:30');
+      assert.equal(pickup.deliveryAddress, null);
+      assert.equal(pickup.deliveryFee, '0');
+      assert.equal(pickup.tableId, first.tableId);
+      assert.ok(pickup.items.every(({ takeaway }) => takeaway));
+      assert.equal((await request('/admin/orders?orderType=pickup', owner)).items.some(({ id }) => id === pickup.id), true);
+      assert.equal((await request('/admin/orders?orderType=dine_in', owner)).items.some(({ id }) => id === pickup.id), false);
+
+      const fulfillment = (id, version, destination, status = 200) => request(`/orders/${id}/fulfillment`, {
+        ...terminal, method: 'PATCH', status, body: { expectedUpdatedAt: version, ...destination },
+      });
+      const converted = await fulfillment(pickup.id, pickup.updatedAt, { delivery: {
+        customerPhone: body.customerPhone, deliveryAddress: 'Новый адрес', deliveryFee: 35.5,
+      } });
+      assert.equal(converted.source, 'delivery');
+      assert.equal(converted.pickupTime, null);
+      assert.equal(converted.deliveryFee, '35.5');
+      assert.equal(Number(converted.finalAmount), Number(pickup.finalAmount) + 35.5);
+      assert.equal(converted.items[0].id, pickup.items[0].id);
+      await fulfillment(pickup.id, pickup.updatedAt, { delivery: { type: 'pickup', customerPhone: body.customerPhone } }, 409);
+      await fulfillment(pickup.id, converted.updatedAt, { tableId: tableOrder.tableId }, 409);
+      const added = await request(`/orders/${pickup.id}/items`, { ...terminal, method: 'POST', status: 201,
+        body: { items: [{ dishId: fixture.dish.id, quantity: 1 }] } });
+      assert.equal(Number(added.finalAmount), Number(converted.finalAmount) + Number(fixture.dish.price));
+      await runWithTenant({ cafeId: cafe.id }, () => orders.kitchenReadyStation(pickup.id, fixture.kitchen.id, 'kitchen'));
+      const prepared = await request(`/orders/${pickup.id}`, terminal);
+      await fulfillment(pickup.id, prepared.updatedAt, { delivery: { type: 'pickup', customerPhone: body.customerPhone } }, 400);
+      for (const step of ['picked-up', 'served', 'to-payment']) {
+        await request('/orders/' + pickup.id + '/' + step, { ...terminal, method: 'POST', status: 201 });
+      }
+      await request('/payments', { ...terminal, method: 'POST', status: 201, body: { orderId: pickup.id, method: 'cash' } });
+      const deliveryReceipt = await request('/payments/' + pickup.id + '/receipt', terminal);
+      assert.equal(deliveryReceipt.deliveryFee, '35.5');
+      assert.equal(deliveryReceipt.finalAmount, added.finalAmount);
+      const cashier = { token: sessions.cashier, workspace: 'terminal' };
+      const register = await request('/terminal/orders?orderType=delivery', cashier);
+      assert.ok(register.items.some(({ id }) => id === first.id));
+      assert.ok(register.items.every(({ source }) => source === 'delivery'));
+
+      const takeaway = await createDelivery(terminal, {
+        type: 'pickup', customerPhone: body.customerPhone, items: body.items, idempotencyKey: randomUUID(),
+      });
+      const takeawayAction = (name, status = 201) => request(`/orders/${takeaway.id}/${name}`, { ...terminal, method: 'POST', status });
+      await takeawayAction('served', 400);
+      await runWithTenant({ cafeId: cafe.id }, () => orders.kitchenReadyStation(takeaway.id, fixture.kitchen.id, 'kitchen'));
+      assert.equal((await takeawayAction('served')).status, 'served');
+      await takeawayAction('to-payment');
+      await request('/payments', { ...terminal, method: 'POST', status: 201, body: { orderId: takeaway.id, method: 'cash' } });
+      assert.equal((await request(`/payments/${takeaway.id}/receipt`, terminal)).source, 'pickup');
+      const repeat = await request('/receipt-prints', { ...terminal, method: 'POST', status: 201,
+        body: { orderId: takeaway.id, type: 'receipt' } });
+      assert.equal(repeat.orderSource, 'pickup');
       await request(`/admin/positions/${fixture.mixedPosition.id}`, { ...owner, method: 'PATCH', body: {
         name: fixture.mixedPosition.name, permissions,
       } });

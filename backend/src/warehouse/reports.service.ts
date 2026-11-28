@@ -77,7 +77,7 @@ export class WarehouseReportsService {
     const orders = await db.order.findMany({ where: { cafeId,
       OR: [{ status: 'paid' }, { paymentStatus: 'refunded' }],
       ...(period ? { closedAt: period } : {}), ...(query.employeeId ? { waiterId: query.employeeId } : {}),
-    }, select: { id: true, paymentStatus: true, finalAmount: true, refundedAmount: true, serviceChargeAmount: true,
+    }, select: { id: true, paymentStatus: true, finalAmount: true, refundedAmount: true, serviceChargeAmount: true, deliveryFee: true,
       payments: { select: { amount: true, status: true, refundedAmount: true } },
       items: { where: { status: { notIn: ['cancelled', 'rejected'] } }, select: { id: true, stockSourceLineId: true, stockAccountingSnapshot: true } },
     } });
@@ -88,7 +88,7 @@ export class WarehouseReportsService {
     for (const order of orders) {
       const paid = order.payments.length ? order.payments.filter((payment) => payment.status === 'paid').reduce((sum, payment) => sum.add(netPaymentAmount(payment)), zero)
         : order.paymentStatus === 'refunded' ? zero : netOrderAmount(order);
-      const merchandise = Prisma.Decimal.max(order.finalAmount.sub(order.serviceChargeAmount), 0);
+      const merchandise = Prisma.Decimal.max(order.finalAmount.sub(order.serviceChargeAmount).sub(order.deliveryFee), 0);
       const retained = order.finalAmount.gt(0) ? Prisma.Decimal.min(paid.div(order.finalAmount), 1) : zero;
       revenue = revenue.add(merchandise.mul(retained));
     }

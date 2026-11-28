@@ -17,6 +17,7 @@ import { OrderDetailsModal } from '../components/OrderDetailsModal';
 import { useCanManageOrderRefunds } from '@/features/refunds/api';
 import { useAdminOrderDetails, useAdminOrdersInfinite, useOrdersSummary, useCancelOrder, useOrderWaiters, useUpdateOrderStatus, type OrderListFilters } from '../api';
 import { WorkspaceHeaderActions } from './WorkspaceHeader';
+import { ORDER_TYPES } from '@/features/waiter/OrderFulfillmentFields';
 import { useListPeriod } from './warehouse/ListPeriodFilter';
 import { visibleWarehouseColumns, WarehouseColumnSettings } from './warehouse/WarehouseColumnSettings';
 import { usePageFilters } from './warehouse/workspace-route';
@@ -39,10 +40,11 @@ function sortRequest(sort: OrderSort): { sort: 'default' | 'date' | 'amount'; so
   return { sort: 'default' };
 }
 
-export function OrdersPage() {
+export function OrdersPage({ scope = 'admin' }: { scope?: 'admin' | 'terminal' } = {}) {
+  const readOnly = scope === 'terminal';
   const tr = useT();
-  const [{ ordersTab: tab, ordersPaymentMethod, ordersComments }, updateView] = usePageFilters({
-    ordersTab: 'all', ordersPaymentMethod: '', ordersComments: '',
+  const [{ ordersTab: tab, ordersPaymentMethod, ordersComments, ordersType }, updateView] = usePageFilters({
+    ordersTab: 'all', ordersPaymentMethod: '', ordersComments: '', ordersType: '',
   });
   const byClose = tab === 'paid';
   const paymentMethod = normalizeOrderPaymentMethod(ordersPaymentMethod);
@@ -53,12 +55,14 @@ export function OrdersPage() {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<OrderSort>('default');
   const [columnsOpen, setColumnsOpen] = useState(false);
-  const [savedColumns, saveColumns] = useColumnPreference('admin-orders');
-  const columns = visibleWarehouseColumns(savedColumns, defaultOrderColumns, availableOrderColumns);
+  const [savedColumns, saveColumns] = useColumnPreference(scope + '-orders');
+  const columnOptions = readOnly ? availableOrderColumns.filter((key) => key !== 'actions') : availableOrderColumns;
+  const defaultColumns = readOnly ? defaultOrderColumns.filter((key) => key !== 'actions') : defaultOrderColumns;
+  const columns = visibleWarehouseColumns(savedColumns, defaultColumns, columnOptions);
 
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [detailsOrder, setDetailsOrder] = useState<Order | null>(null);
-  const detail = useAdminOrderDetails(detailsOrder?.id ?? null);
+  const detail = useAdminOrderDetails(detailsOrder?.id ?? null, scope);
   const canManageRefunds = useCanManageOrderRefunds();
   const { canAction, canEditSection, canOwnerOperation } = usePermissions();
   const [statusTarget, setStatusTarget] = useState<Order | null>(null);
@@ -70,16 +74,16 @@ export function OrdersPage() {
   const cancelOrder = useCancelOrder();
   const updateStatus = useUpdateOrderStatus();
 
-  const waiters = useOrderWaiters();
+  const waiters = useOrderWaiters(scope);
   const waiterOptions = [
     { value: '', label: tr('Все официанты') },
     ...(waiters.data ?? []).map((w) => ({ value: w.id, label: w.name })),
   ];
 
-  const filters: OrderListFilters = { tab, search, paymentMethod, waiterId, comments, ...period.range, ...(byClose && { dateField: 'closed' }) };
+  const filters: OrderListFilters = { tab, search, paymentMethod, waiterId, comments, orderType: ORDER_TYPES.find(({ value }) => value === ordersType)?.value, ...period.range, ...(byClose && { dateField: 'closed' }) };
   const listFilters = { ...filters, ...sortRequest(sort) };
-  const ordersQ = useAdminOrdersInfinite(listFilters);
-  const summaryQ = useOrdersSummary(filters);
+  const ordersQ = useAdminOrdersInfinite(listFilters, scope);
+  const summaryQ = useOrdersSummary(filters, scope);
   const items = ordersQ.data?.pages.flatMap((p) => p.items) ?? [];
   const ordersError = ordersQ.isError ? apiError(ordersQ.error) : null;
   const s = summaryQ.data;
@@ -96,7 +100,7 @@ export function OrdersPage() {
       (entries) => {
         if (entries[0].isIntersecting && !isFetchingNextPage) fetchNextPage();
       },
-      { root: el.closest('main'), rootMargin: '200px' },
+      { root: el.closest('[data-orders-scroll], main'), rootMargin: '200px' },
     );
     io.observe(el);
     return () => io.disconnect();
@@ -140,7 +144,7 @@ export function OrdersPage() {
       : undefined}>
       <WorkspaceHeaderActions>
         <ColumnButton label={tr('Столбцы')} onClick={() => setColumnsOpen(true)} />
-        {canAction('exportReports') && <OrdersExportButton filters={listFilters} disabled={!items.length || !!ordersError} />}
+        {!readOnly && canAction('exportReports') && <OrdersExportButton filters={listFilters} disabled={!items.length || !!ordersError} />}
       </WorkspaceHeaderActions>
       <div className="orders-controls">
         <div className="orders-summary workspace-enter" aria-busy={summaryQ.isPending}>
@@ -161,6 +165,8 @@ export function OrdersPage() {
 
         <OrdersFilters
           periodFilter={period.filter}
+          orderType={ordersType}
+          onOrderTypeChange={(ordersType) => updateView({ ordersType })}
           tab={tab}
           paymentMethod={paymentMethod}
           waiterId={waiterId}
@@ -187,14 +193,14 @@ export function OrdersPage() {
         isFetchingNextPage={isFetchingNextPage}
         hasNextPage={hasNextPage}
         onOpen={setDetailsOrder}
-        onEdit={openStatusEditor}
-        onCancel={setCancelTarget}
+        onEdit={readOnly ? undefined : openStatusEditor}
+        onCancel={readOnly ? undefined : setCancelTarget}
       />
-      {columnsOpen && <WarehouseColumnSettings columns={columns} defaults={availableOrderColumns} resetColumns={defaultOrderColumns}
+      {columnsOpen && <WarehouseColumnSettings columns={columns} defaults={columnOptions} resetColumns={defaultColumns}
         label={(key) => tr(orderColumnLabel(key))} onClose={() => setColumnsOpen(false)}
         onApply={(selected) => {
           const value = selected.join(',');
-          saveColumns(value === defaultOrderColumns.join(',') ? '' : value);
+          saveColumns(value === defaultColumns.join(',') ? '' : value);
           setColumnsOpen(false);
         }} />}
       <CancelOrderModal
@@ -221,10 +227,11 @@ export function OrdersPage() {
       />
       <OrderDetailsModal
         order={detail.data ?? detailsOrder}
-        refundMode={canManageRefunds ? 'manage' : undefined}
+        refundMode={!readOnly && canManageRefunds ? 'manage' : undefined}
+        readOnly={readOnly}
         onClose={() => setDetailsOrder(null)}
         onOrderChange={setDetailsOrder}
-        allowItemCancellation={canEditSection('orders') && canOwnerOperation('cancelItems')}
+        allowItemCancellation={!readOnly && canEditSection('orders') && canOwnerOperation('cancelItems')}
       />
     </div>
   );

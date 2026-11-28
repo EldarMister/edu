@@ -8,6 +8,7 @@ import { OrderStatus, Prisma, ReceiptPrintStatus, ReceiptPrintType, Role } from 
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
+import { isOffsiteOrder, offsiteLabel } from '../orders/order-fulfillment';
 import { FiscalService } from '../fiscal/fiscal.service';
 import type { AuditActor } from '../audit/audit.service';
 import { PushService } from '../push/push.service';
@@ -106,12 +107,12 @@ export class ReceiptPrintsService {
 
   private withRequestVoice(dto: ReturnType<ReceiptPrintsService['serialize']>) {
     const documentName = dto.type === ReceiptPrintType.preliminary ? 'счёта' : 'чека';
-    const delivery = dto.orderSource === 'delivery';
-    const place = delivery ? 'Доставка' : `Стол номер ${tableNumberVoice(dto.tableNumber)}`;
+    const offsite = isOffsiteOrder(dto.orderSource);
+    const place = offsite ? offsiteLabel(dto.orderSource) : `Стол номер ${tableNumberVoice(dto.tableNumber)}`;
     return {
       ...dto,
       voice: {
-        text: `${delivery ? '' : 'Официант '}${dto.waiterName} отправил заявку на печать ${documentName}. ${place}.`,
+        text: `${offsite ? '' : 'Официант '}${dto.waiterName} отправил заявку на печать ${documentName}. ${place}.`,
       },
     };
   }
@@ -197,7 +198,7 @@ export class ReceiptPrintsService {
     const dto = this.withRequestVoice(this.serialize(request));
     // Заявка сразу появляется только у администраторов.
     this.events.emitToReceiptPrinters(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_CREATED, dto);
-    const place = dto.orderSource === 'delivery' ? 'Доставка' : `Стол ${dto.tableNumber}`;
+    const place = isOffsiteOrder(dto.orderSource) ? offsiteLabel(dto.orderSource) : `Стол ${dto.tableNumber}`;
     void this.push.notifyRole(Role.ADMIN, {
       title: 'Печать чека', body: `Заявка от ${dto.waiterName} · ${place}`,
       orderId: dto.orderId, orderNumber: dto.orderNumber, channel: 'payments',

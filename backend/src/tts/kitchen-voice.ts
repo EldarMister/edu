@@ -29,6 +29,7 @@ type VoiceItem = {
 };
 
 type VoiceOrder = {
+  source?: string;
   orderNumber: string;
   comment?: string | null;
   items: VoiceItem[];
@@ -284,7 +285,8 @@ export function buildNewOrderText(order: VoiceOrder, station: VoiceStation = 'ki
     .map((s) => s.trim())
     .filter(Boolean);
   const num = orderNumberWords(order.orderNumber);
-  const head = `Новый заказ. Номер ${num}.`;
+  const head = `Новый заказ. Номер ${num}.` +
+    (order.source === 'pickup' ? ' Самовывоз.' : order.source === 'delivery' ? ' Доставка.' : '');
   const takeawayHead = allTakeaway ? ' Весь заказ с собой.' : '';
   const orderComment = voiceComment(order.comment);
   const commentTail = orderComment ? ` Комментарий к заказу: ${orderComment}.` : '';

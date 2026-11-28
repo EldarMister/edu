@@ -29,7 +29,7 @@ const statusLabels: Record<OrderStatus, string> = {
   paid: 'Оплачен', rejected: 'Отклонён', partially_rejected: 'Частично отклонён', cancelled: 'Отменён',
 };
 const paymentLabels: Record<PaymentMethod, string> = { cash: 'Наличные', card: 'Карта', qr: 'QR', mixed: 'Смешанная' };
-const sourceLabels: Record<string, string> = { pos: 'В заведении', qr: 'QR-меню', delivery: 'Доставка' };
+const sourceLabels: Record<string, string> = { pos: 'В заведении', qr: 'QR-меню', delivery: 'Доставка', pickup: 'Самовывоз' };
 
 const text = (label: string, width = 19): Column => ({ label, width });
 const amount = (label: string): Column => ({ label, width: Math.max(15, label.length + 3), format: '#,##0.00 "с"' });
@@ -83,8 +83,8 @@ export function writeReceiptWorkbook(orders: ExportReceipt[], includeDetails: bo
   const book = XLSX.utils.book_new();
   appendSheet(book, 'Чеки', receiptColumns, orders.map((order) => [
     order.orderNumber, excelBishkekDate(order.createdAt), excelBishkekDate(order.closedAt), order.waiter?.name,
-    order.source === 'delivery' ? null : order.table.hall.name,
-    order.source === 'delivery' ? null : order.table.name || `Стол ${order.table.number}`,
+    (order.source === 'delivery' || order.source === 'pickup') ? null : order.table.hall.name,
+    (order.source === 'delivery' || order.source === 'pickup') ? null : order.table.name || `Стол ${order.table.number}`,
     sourceLabels[order.source] ?? order.source, statusLabels[order.status], order.paymentMethod ? paymentLabels[order.paymentMethod] : null,
     Number(order.finalAmount), Number(order.discountAmount), Number(order.serviceChargeAmount), Number(order.refundedAmount),
     order.status === OrderStatus.paid ? netOrderAmount(order).toNumber() : null, ...tenderAmounts(order), order.id, order.comment,

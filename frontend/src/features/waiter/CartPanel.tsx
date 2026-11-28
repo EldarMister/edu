@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { TableItem } from '@/types';
 import { useCart, cartTotals } from './cart';
 import { displayOrderNumber, hallSuffix, money, tableLabel } from '@/lib/format';
@@ -9,6 +10,10 @@ import { CartLinesList, TakeawaySwitch } from './CartItems';
 export function CartPanel({
   table,
   delivery,
+  typeLabel,
+  typeControl,
+  customerFields,
+  deliveryFee,
   roundTotal,
   hallName,
   mode,
@@ -22,6 +27,10 @@ export function CartPanel({
 }: {
   table: TableItem | null;
   delivery?: boolean;
+  typeLabel?: string;
+  typeControl?: ReactNode;
+  customerFields?: ReactNode;
+  deliveryFee?: number;
   roundTotal?: boolean;
   hallName?: string;
   mode: 'create' | 'add' | 'edit';
@@ -55,10 +64,11 @@ export function CartPanel({
                 : t('Новый заказ')}
           </h2>
           <p className="mt-0.5 text-sm text-text-muted">
-            {delivery ? t('Доставка') : table && `${tableLabel(table, t('Стол'))}${hallSuffix({ hall: hallName ? { name: hallName } : null })}`}
+            {delivery ? typeLabel : table && `${tableLabel(table, t('Стол'))}${hallSuffix({ hall: hallName ? { name: hallName } : null })}`}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-4">
+        <div className="flex max-w-[60%] shrink-0 flex-wrap items-center justify-end gap-2">
+          {typeControl}
           {hasLines && !delivery && <TakeawaySwitch on={allTakeaway} onChange={setAllTakeaway} />}
           {mode === 'edit' && onCancelEdit && (
             <button
@@ -72,19 +82,20 @@ export function CartPanel({
       </div>
 
       {/* Позиции — компактный список как в мобильной корзине */}
-      <div className="no-scrollbar flex-1 overflow-y-auto py-3">
+      <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto py-3">
+        {customerFields}
         {hasLines ? (
           <CartLinesList lines={lines} inc={inc} dec={dec} onToggleTakeaway={delivery ? undefined : setLineTakeaway} priceWidth="w-[88px]" />
         ) : (
           <p className="py-10 text-center text-sm text-text-muted">
-            {t('Выберите блюда из меню, чтобы добавить в заказ')}
+            {t(table || delivery ? 'Выберите блюда из меню, чтобы добавить в заказ' : 'Выберите стол, чтобы открыть заказ')}
           </p>
         )}
       </div>
 
       {/* Низ: общий комментарий (по кнопке) + итоги + кнопки */}
       <div className="border-t border-border pt-3">
-        {commentOpen && (
+        {commentOpen && !customerFields && (
           <input
             className="input mb-3 h-10 text-sm"
             placeholder={t('Комментарий к заказу')}
@@ -95,16 +106,20 @@ export function CartPanel({
         )}
 
         <div className="space-y-1 text-sm">
-          {totals.discount > 0 && (
+          {deliveryFee !== undefined && <>
+            <Row label={t('Стоимость блюд')} value={money(totals.final)} />
+            <Row label={t('Доставка')} value={money(deliveryFee)} />
+          </>}
+          {deliveryFee === undefined && totals.discount > 0 && (
             <Row label={t('Сумма')} value={money(totals.total)} />
           )}
-          {totals.discount > 0 && (
+          {deliveryFee === undefined && totals.discount > 0 && (
             <Row label={t('Скидка')} value={`−${money(totals.discount)}`} valueClass="text-success" />
           )}
-          {totals.roundingAmount > 0 && <Row label={t('Округление')} value={`−${money(totals.roundingAmount)}`} />}
+          {deliveryFee === undefined && totals.roundingAmount > 0 && <Row label={t('Округление')} value={`−${money(totals.roundingAmount)}`} />}
           <div className="flex items-center justify-between pt-1">
             <span className="text-[15px] font-medium text-text-secondary">{t('Итого')}</span>
-            <NumberTicker value={totals.final} className="text-xl font-semibold text-text-primary" />
+            <NumberTicker value={totals.final + (deliveryFee ?? 0)} className="text-xl font-semibold text-text-primary" />
           </div>
         </div>
 
@@ -145,6 +160,7 @@ export function CartPanel({
               className={`h-9 text-sm font-medium hover:underline ${
                 commentOpen ? 'text-text-secondary' : 'text-primary'
               }`}
+              hidden={!!customerFields}
               onClick={() => setCommentOpen(!commentOpen)}
             >
               {commentOpen ? t('Скрыть комментарий') : t('Комментарий')}

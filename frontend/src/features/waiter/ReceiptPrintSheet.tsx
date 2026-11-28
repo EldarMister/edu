@@ -180,7 +180,7 @@ export function ReceiptPrintSheet() {
         <div className="flex items-center justify-between font-medium text-text-primary">
           <span>{displayOrderNumber(receipt.orderNumber)}</span>
           <span className="text-text-muted">
-            {receipt.source === 'delivery' ? t('Доставка') : `${t('Стол')} ${receipt.tableNumber}`}
+            {receipt.source === 'delivery' || receipt.source === 'pickup' ? t(receipt.source === 'pickup' ? 'Самовывоз' : 'Доставка') : `${t('Стол')} ${receipt.tableNumber}`}
           </span>
         </div>
         <div className="mt-2 space-y-1">
@@ -199,7 +199,8 @@ export function ReceiptPrintSheet() {
             <span>{money(receipt.serviceChargeAmount)}</span>
           </div>
         )}
-        {Number(receipt.roundingAmount) > 0 && (
+        {Number(receipt.deliveryFee) > 0 && <div className="flex justify-between"><span>{t('Доставка')}</span><span>{money(receipt.deliveryFee ?? 0)}</span></div>}
+          {Number(receipt.roundingAmount) > 0 && (
           <div className="mt-2 flex justify-between text-sm text-text-secondary">
             <span>{t('Округление')}</span>
             <span>−{money(receipt.roundingAmount ?? 0)}</span>

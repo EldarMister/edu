@@ -44,7 +44,7 @@ export function useKitchenRealtime(station: PrepStation = 'kitchen') {
 
       const orderNumber = displayOrderNumber(order.orderNumber);
       push({
-        message: order.source === 'delivery'
+        message: order.source === 'pickup' ? 'Новый заказ на самовывоз' : order.source === 'delivery'
           ? `Новый заказ доставки ${orderNumber}`
           : `Новый заказ ${orderNumber} · Стол ${order.table?.number}`,
         orderId: order.id,

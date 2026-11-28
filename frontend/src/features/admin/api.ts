@@ -277,6 +277,7 @@ export interface OrdersFilter {
   page: number;
   sort?: 'default' | 'date' | 'amount';
   sortDirection?: 'asc' | 'desc';
+  orderType?: 'dine_in' | 'delivery' | 'pickup';
   dateFrom?: string;
   dateTo?: string;
   dateField?: 'closed';
@@ -287,12 +288,19 @@ export interface OrdersFilter {
 
 export type OrderListFilters = Omit<OrdersFilter, 'page'>;
 
+const orderRegisters = {
+  admin: { path: '/admin/orders', key: ['admin', 'orders'] },
+  terminal: { path: '/terminal/orders', key: ['orders', 'register'] },
+} as const;
+type OrderRegisterScope = keyof typeof orderRegisters;
+
 function ordersQueryString(params: Partial<OrdersFilter>) {
   const q = new URLSearchParams();
   if (params.tab && params.tab !== 'all') q.set('tab', params.tab);
   if (params.search) q.set('search', params.search);
   if (params.sort && params.sort !== 'default') q.set('sort', params.sort);
   if (params.sortDirection) q.set('sortDirection', params.sortDirection);
+  if (params.orderType) q.set('orderType', params.orderType);
   if (params.dateFrom) q.set('dateFrom', params.dateFrom);
   if (params.dateTo) q.set('dateTo', params.dateTo);
   if (params.dateField) q.set('dateField', params.dateField);
@@ -314,10 +322,11 @@ export async function downloadOrdersWorkbook(filters: OrderListFilters, includeD
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function useOrderWaiters() {
+export function useOrderWaiters(scope: OrderRegisterScope = 'admin') {
+  const register = orderRegisters[scope];
   return useQuery({
-    queryKey: ['admin', 'orders', 'waiters'],
-    queryFn: () => get<{ id: string; name: string }[]>('/admin/orders/waiters'),
+    queryKey: [...register.key, 'waiters'],
+    queryFn: () => get<{ id: string; name: string }[]>(register.path + '/waiters'),
   });
 }
 
@@ -332,25 +341,28 @@ export function useAdminOrders(params: OrdersFilter) {
 }
 
 /** Бесконечная подгрузка заказов (длинный список вместо страниц). */
-export function useAdminOrdersInfinite(filters: OrderListFilters) {
+export function useAdminOrdersInfinite(filters: OrderListFilters, scope: OrderRegisterScope = 'admin') {
   const PAGE_SIZE = 30;
+  const register = orderRegisters[scope];
   return useInfiniteQuery({
-    queryKey: ['admin', 'orders', 'infinite', filters],
+    queryKey: [...register.key, 'infinite', filters],
+    refetchInterval: scope === 'terminal' ? 10_000 : false,
     initialPageParam: 1,
     queryFn: ({ pageParam }) => {
       const q = ordersQueryString(filters);
       q.set('page', String(pageParam));
       q.set('pageSize', String(PAGE_SIZE));
-      return get<OrdersPage>(`/admin/orders?${q.toString()}`);
+      return get<OrdersPage>(register.path + '?' + q.toString());
     },
     getNextPageParam: (last) => (last.page < last.pages ? last.page + 1 : undefined),
   });
 }
 
-export function useAdminOrderDetails(id: string | null) {
+export function useAdminOrderDetails(id: string | null, scope: OrderRegisterScope = 'admin') {
+  const register = orderRegisters[scope];
   return useQuery({
-    queryKey: ['admin', 'orders', 'detail', id],
-    queryFn: () => get<Order>(`/orders/${id}`),
+    queryKey: [...register.key, 'detail', id],
+    queryFn: () => get<Order>((scope === 'terminal' ? register.path : '/orders') + '/' + id),
     enabled: !!id,
   });
 }
@@ -400,11 +412,13 @@ export interface OrdersSummary {
 }
 
 /** Сводка по фильтрам журнала без сортировки и пагинации. */
-export function useOrdersSummary(params: Omit<OrderListFilters, 'sort' | 'sortDirection'>) {
+export function useOrdersSummary(params: Omit<OrderListFilters, 'sort' | 'sortDirection'>, scope: OrderRegisterScope = 'admin') {
   const q = ordersQueryString(params);
+  const register = orderRegisters[scope];
   return useQuery({
-    queryKey: ['admin', 'orders', 'summary', params],
-    queryFn: () => get<OrdersSummary>(`/admin/orders/summary?${q.toString()}`),
+    queryKey: [...register.key, 'summary', params],
+    refetchInterval: scope === 'terminal' ? 10_000 : false,
+    queryFn: () => get<OrdersSummary>(register.path + '/summary?' + q.toString()),
   });
 }
 

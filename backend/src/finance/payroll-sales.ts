@@ -1,11 +1,11 @@
 import { OrderItemStatus, OrderRefundStatus, Prisma } from '@prisma/client';
-import { allocateCents, allocateOrderItemCents, netOrderAmount } from '../orders/order-net';
+import { allocateCents, allocateOrderItemCents, amountWithoutDelivery, netOrderAmount } from '../orders/order-net';
 
 export type CategoryCommission = { categoryId: string; personalPercent?: number; shiftPercent?: number };
 export type CommissionKind = 'personalPercent' | 'shiftPercent';
 
 export const payrollOrderSelect = {
-  id: true, orderNumber: true, closedAt: true, waiterId: true, payrollOpenedById: true, finalAmount: true, refundedAmount: true,
+  id: true, orderNumber: true, closedAt: true, waiterId: true, payrollOpenedById: true, finalAmount: true, refundedAmount: true, deliveryFee: true,
   items: {
     where: { status: { notIn: [OrderItemStatus.cancelled, OrderItemStatus.rejected] } },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -39,7 +39,7 @@ export function payrollSale(order: Prisma.OrderGetPayload<{ select: typeof payro
   const items = order.items ?? [];
   if (amount.gt(0) && items.length && items.some((item) => item.payrollCategoryId)) {
     const netCents = amount.mul(100).toNumber();
-    const originalCents = allocateOrderItemCents(order.finalAmount, items);
+    const originalCents = allocateOrderItemCents(amountWithoutDelivery(order), items);
     const itemRefunds = new Map<string, number>();
     for (const refund of order.refunds ?? []) {
       if (!Array.isArray(refund.items)) continue;

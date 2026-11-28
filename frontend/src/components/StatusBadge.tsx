@@ -6,7 +6,7 @@ import { usePreparationStations } from '@/features/kitchen/stations';
 export function OrderBadge({ status, source, size = 'md' }: { status: OrderStatus; source?: Order['source']; size?: 'sm' | 'md' }) {
   const t = useT();
   const meta = ORDER_STATUS[status];
-  const deliveryStatus = source === 'delivery' && (status === 'ready' ? 'Готов к выдаче'
+  const deliveryStatus = source === 'delivery' && (['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'].includes(status) ? 'Готовится' : status === 'ready' ? 'Готов'
     : status === 'picked_up' ? 'В пути' : status === 'served' ? 'Доставлен' : null);
   const sizeCls = size === 'sm' ? 'rounded-md px-2 py-0.5 text-[11px]' : 'rounded-lg px-2.5 py-1 text-xs';
   return (

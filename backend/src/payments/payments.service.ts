@@ -116,6 +116,7 @@ export class PaymentsService {
       totalAmount: order.totalAmount,
       discountAmount: order.discountAmount,
       serviceChargeAmount: order.serviceChargeAmount,
+      deliveryFee: order.deliveryFee,
       roundingAmount: order.roundingAmount,
       finalAmount: order.finalAmount,
       paymentMethod: order.paymentMethod,

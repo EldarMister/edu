@@ -105,7 +105,7 @@ export function hallSuffix(table: { hall?: { name?: string } | null } | null | u
 }
 
 export function orderPlaceLabel(order: Pick<Order, 'source' | 'table'>, t: (text: string) => string) {
-  return order.source === 'delivery' ? t('Доставка') : `${tableLabel(order.table, t('Стол'))}${hallSuffix(order.table)}`;
+  return order.source === 'delivery' || order.source === 'pickup' ? t(order.source === 'pickup' ? 'Самовывоз' : 'Доставка') : `${tableLabel(order.table, t('Стол'))}${hallSuffix(order.table)}`;
 }
 
 export function tableLabel(table: { name?: string | null; number: number }, prefix = 'Стол') {

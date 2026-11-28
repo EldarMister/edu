@@ -31,7 +31,7 @@ export async function printReceipt(
   const dateStr = receiptDateTime(r.date);
   const orderNumber = displayOrderNumber(r.orderNumber);
   const receiptKind = t(preliminary ? 'Счёт' : fiscal?.simulated ? 'Тестовый чек' : fiscal ? 'Фискальный чек' : 'Товарный чек');
-  const orderPlace = r.source === 'delivery' ? t('Доставка') : `${t('Стол')} ${r.tableNumber}`;
+  const orderPlace = r.source === 'delivery' || r.source === 'pickup' ? t(r.source === 'pickup' ? 'Самовывоз' : 'Доставка') : `${t('Стол')} ${r.tableNumber}`;
   const waiter = r.source === 'delivery' && r.waiter === 'Онлайн-заказ' ? t(r.waiter) : r.waiter;
   const rows = r.items
     .map(
@@ -87,6 +87,7 @@ export async function printReceipt(
     <div class="solid"></div>
     ${Number(r.discountAmount) > 0 ? `<div class="pair"><span>${t('Сумма')}</span><span>${money(r.totalAmount)}</span></div><div class="pair"><span>${t('Скидка')}</span><span>−${money(r.discountAmount)}</span></div>` : ''}
     ${Number(r.serviceChargeAmount) > 0 ? `<div class="pair"><span>${t('Обслуживание')}</span><span>${money(r.serviceChargeAmount)}</span></div>` : ''}
+    ${Number(r.deliveryFee) > 0 ? `<div class="pair"><span>${t('Доставка')}</span><span>${money(r.deliveryFee ?? 0)}</span></div>` : ''}
     ${Number(r.roundingAmount) > 0 ? `<div class="pair"><span>${t('Округление')}</span><span>−${money(r.roundingAmount ?? 0)}</span></div>` : ''}
     <div class="total"><span>${t('Итого')}</span><span>${money(r.finalAmount)}</span></div>
     ${preliminary || fiscal ? '' : (r.taxes ?? []).map((tax) =>

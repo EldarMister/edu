@@ -3,6 +3,7 @@ import { OrderItemStatus, OrderStatus, PaymentMethod, PaymentStatus, Prisma, Rol
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { hasPermission, resolvePermissions } from '../common/permissions';
 import { PrismaService } from '../prisma/prisma.service';
+import { receiptTaxes } from '../settings/order-taxes';
 import { orderInclude } from '../orders/order.helpers';
 import { netOrderAmount, netPaymentAmount } from '../orders/order-net';
 import { preparedLossQuantity } from '../warehouse/movement-cost';
@@ -88,6 +89,7 @@ export class AdminOrdersService {
   private buildWhere(query: OrderQueryDto): Prisma.OrderWhereInput {
     const where: Prisma.OrderWhereInput = {};
     const filters: Prisma.OrderWhereInput[] = [];
+    if (query.orderType) where.source = query.orderType === 'dine_in' ? { in: ['pos', 'qr'] } : query.orderType;
 
     if (query.tab === 'active') where.status = { in: ACTIVE_STATUSES };
     else if (query.tab === 'paid') where.status = OrderStatus.paid;
@@ -223,7 +225,7 @@ export class AdminOrdersService {
   }
 
   async findOne(id: string) {
-    const order = await this.prisma.order.findUnique({ where: { id }, include: receiptInclude });
+    const order = await this.prisma.order.findUnique({ where: { id }, include: { ...receiptInclude, taxes: receiptTaxes } });
     if (!order) throw new NotFoundException('Заказ не найден');
     return order;
   }

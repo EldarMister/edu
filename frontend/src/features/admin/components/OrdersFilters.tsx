@@ -2,6 +2,7 @@ import { useRef, type ReactNode } from 'react';
 import { Select, type SelectOption } from '@/components/Select';
 import { useT } from '@/lib/i18n';
 import { IconX } from './icons';
+import { ORDER_TYPES } from '@/features/waiter/OrderFulfillmentFields';
 
 export type OrderSort = 'default' | 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc';
 
@@ -40,6 +41,8 @@ const SORT_OPTIONS: { value: OrderSort; label: string }[] = [
 
 type Props = {
   periodFilter: ReactNode;
+  orderType: string;
+  onOrderTypeChange: (value: string) => void;
   tab: string;
   paymentMethod: string;
   waiterId: string;
@@ -61,6 +64,8 @@ export function OrdersFilters(props: Props) {
   return (
     <div className="orders-filters">
       <div className="orders-period-filter">{props.periodFilter}</div>
+      <Select className={ctrl} ariaLabel={tr('Тип заказа')} value={props.orderType} onChange={props.onOrderTypeChange}
+        options={[{ value: '', label: tr('Все типы заказов') }, ...ORDER_TYPES.map(({ value, label }) => ({ value, label: tr(label) }))]} />
       <Select className={`${ctrl} orders-status-select`} ariaLabel={tr('Статус заказа')} value={props.tab} onChange={props.onTabChange} options={STATUS_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />
       <Select className={`${ctrl} orders-payment-select`} ariaLabel={tr('Способ оплаты')} value={props.paymentMethod} onChange={props.onPaymentMethodChange} options={PAYMENT_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />
       <Select className={`${ctrl} orders-waiter-select`} ariaLabel={tr('Официант')} value={props.waiterId} onChange={props.onWaiterChange} options={props.waiterOptions} />

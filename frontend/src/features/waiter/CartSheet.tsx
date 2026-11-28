@@ -1,5 +1,5 @@
 import { SheetHandle } from '@/components/SheetHandle';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useT } from '@/lib/i18n';
 import { money } from '@/lib/format';
 import { Spinner } from '@/components/Spinner';
@@ -24,6 +24,9 @@ export function CartSheet({
   canSubmit,
   submitLabel,
   delivery,
+  typeControl,
+  customerFields,
+  deliveryFee,
   roundTotal,
 }: {
   open: boolean;
@@ -36,6 +39,9 @@ export function CartSheet({
   /** Текст основной кнопки (зависит от режима и направления позиций). */
   submitLabel: string;
   delivery?: boolean;
+  typeControl?: ReactNode;
+  customerFields?: ReactNode;
+  deliveryFee?: number;
   roundTotal?: boolean;
 }) {
   const t = useT();
@@ -115,7 +121,8 @@ export function CartSheet({
         <SheetHandle panel={panel} onClose={onClose} enabled={open && visible} />
         <div className="shrink-0 px-4 pb-2">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-lg font-semibold text-text-primary">{t('Корзина')}</h2>
+            <h2 className="text-lg font-semibold text-text-primary">{t(typeControl ? 'Новый заказ' : 'Корзина')}</h2>
+            {typeControl}
             {hasLines && !delivery && (
               <span onPointerDown={(e) => e.stopPropagation()}>
                 <TakeawaySwitch on={allTakeaway} onChange={setAllTakeaway} />
@@ -126,6 +133,7 @@ export function CartSheet({
 
         {/* Список блюд */}
         <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-4">
+          {customerFields}
           {!hasLines ? (
             <p className="py-12 text-center text-sm text-text-muted">{t('Корзина пуста')}</p>
           ) : (
@@ -135,7 +143,7 @@ export function CartSheet({
 
         {/* Итог + действия */}
         <div className="shrink-0 px-4 pt-3">
-          {commentOpen && (
+          {commentOpen && !customerFields && (
             <input
               className="input mb-3 h-10 text-sm"
               placeholder={t('Комментарий к заказу')}
@@ -146,13 +154,17 @@ export function CartSheet({
           )}
 
           <div className="space-y-1 border-t border-border pt-3">
-            {totals.roundingAmount > 0 && <div className="flex justify-between text-sm text-text-muted">
+            {deliveryFee !== undefined && <>
+              <div className="flex justify-between text-sm text-text-muted"><span>{t('Стоимость блюд')}</span><span>{money(totals.final)}</span></div>
+              <div className="flex justify-between text-sm text-text-muted"><span>{t('Доставка')}</span><span>{money(deliveryFee)}</span></div>
+            </>}
+            {deliveryFee === undefined && totals.roundingAmount > 0 && <div className="flex justify-between text-sm text-text-muted">
               <span>{t('Округление')}</span>
               <span>−{money(totals.roundingAmount)}</span>
             </div>}
             <div className="flex items-center justify-between">
               <span className="text-[15px] font-medium text-text-secondary">{t('Итого')}</span>
-              <NumberTicker value={totals.final} className="text-lg font-semibold text-text-primary" />
+              <NumberTicker value={totals.final + (deliveryFee ?? 0)} className="text-lg font-semibold text-text-primary" />
             </div>
           </div>
 
@@ -180,6 +192,7 @@ export function CartSheet({
                 className={`h-9 text-sm font-medium hover:underline ${
                   commentOpen ? 'text-text-secondary' : 'text-primary'
                 }`}
+                hidden={!!customerFields}
                 onClick={() => setCommentOpen(!commentOpen)}
               >
                 {commentOpen ? t('Скрыть комментарий') : t('Комментарий')}

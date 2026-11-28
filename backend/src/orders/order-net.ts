@@ -2,6 +2,10 @@ import { Prisma } from '@prisma/client';
 
 type Money = Prisma.Decimal | number | string;
 
+export function amountWithoutDelivery(order: { finalAmount: Money; deliveryFee?: Money | null }) {
+  return new Prisma.Decimal(order.finalAmount).sub(order.deliveryFee ?? 0);
+}
+
 /** Split cents by weight, assigning any remainder in a stable order. */
 export function allocateCents(amount: number, weights: number[]) {
   const denominator = weights.reduce((sum, weight) => sum + BigInt(weight), 0n);

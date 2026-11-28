@@ -109,6 +109,7 @@ export function OrderPanel({
   onCancelOrder,
   onEdit,
   onSplitOrder,
+  fulfillmentEditor,
   relatedChecks,
   onSelectCheck,
 }: {
@@ -131,6 +132,7 @@ export function OrderPanel({
   /** Открыть редактирование заказа (переиспользует логику корзины/сетов). */
   onEdit?: () => void;
   onSplitOrder?: () => void;
+  fulfillmentEditor?: React.ReactNode;
   relatedChecks: Pick<Order, 'id' | 'orderNumber'>[];
   onSelectCheck: (id: string) => void;
 }) {
@@ -212,15 +214,16 @@ export function OrderPanel({
 
       {/* Позиции — компактный список */}
       <div className="no-scrollbar flex-1 space-y-1.5 overflow-y-auto py-2">
-        {order.source === 'delivery' && order.deliveryAddress && (
+        {(order.source === 'delivery' || order.source === 'pickup') && (
           <div className="mb-2 space-y-1 rounded-lg border border-border px-3 py-2 text-sm">
-            <p className="break-words font-medium text-text-primary">{order.deliveryAddress}</p>
+            <p className="break-words font-medium text-text-primary">{order.deliveryAddress || order.pickupTime}</p>
             <p className="flex flex-wrap gap-x-3 text-text-secondary">
               {order.deliveryCustomerName && <span>{order.deliveryCustomerName}</span>}
               {order.deliveryCustomerPhone && <a className="text-primary" href={`tel:${order.deliveryCustomerPhone}`}>{order.deliveryCustomerPhone}</a>}
             </p>
           </div>
         )}
+        {fulfillmentEditor}
         {order.items.map((it) => {
           const rejected = it.status === 'rejected';
           const cancelled = it.status === 'cancelled';
@@ -352,6 +355,9 @@ export function OrderPanel({
             {order.comment}
           </p>
         )}
+        {Number(order.deliveryFee) > 0 && <div className="mb-1 flex items-center justify-between text-sm text-text-secondary">
+          <span>{t('Доставка')}</span><span>{money(order.deliveryFee ?? 0)}</span>
+        </div>}
         <div className="flex items-center justify-between">
           <span className="text-[15px] font-medium text-text-secondary">{t('Итого')}</span>
           <span className="text-xl font-semibold text-text-primary">{money(order.finalAmount)}</span>
@@ -670,7 +676,7 @@ function ActionButton({
 
   // «Забрал с кухни» — только если есть готовая позиция, реально отправленная на станцию.
   if (
-    !delivery && hasReadyStationItem &&
+    !delivery && order.source !== 'pickup' && hasReadyStationItem &&
     !['paid', 'cancelled', 'rejected', 'waiting_payment', 'picked_up', 'served', 'ready'].includes(s)
   ) {
     return (
@@ -685,7 +691,7 @@ function ActionButton({
     return (
       <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting || cooldownActive}
         onClick={() => runProtectedAction(delivery ? onPickedUp : onServed)}>
-        {cooldownActive ? actionCooldown : spin ?? t(delivery ? 'Передать курьеру' : 'Вынес гостям')}
+        {cooldownActive ? actionCooldown : spin ?? t(delivery ? 'Передать курьеру' : order.source === 'pickup' ? 'Выдать заказ' : 'Вынес гостям')}
       </button>
     );
   }

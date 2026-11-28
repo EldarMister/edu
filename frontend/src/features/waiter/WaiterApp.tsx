@@ -51,9 +51,8 @@ import {
   useCreateReceiptPrintRequest,
   fetchReceipt,
   type AvailableWaiter,
-  type DeliveryDetails,
 } from './api';
-import { DeliveryDetailsModal } from './DeliveryDetailsModal';
+import { customerOrderError, customerOrderPayload, EditOrderFulfillment, EMPTY_CUSTOMER, moneyInput, orderType, orderTypeLabel, OrderFulfillmentFields, OrderTypeSelect, type OrderType } from './OrderFulfillmentFields';
 import { useReceiptPrint } from './receiptPrint';
 import { TablesGrid } from './TablesGrid';
 import { DishMenu } from './DishMenu';
@@ -62,6 +61,7 @@ import { CartSheet } from './CartSheet';
 import { cartStations } from '@/lib/prep-station';
 import { OrderPanel } from './OrderPanel';
 import { OrdersList } from './OrdersList';
+import { OrdersPage } from '@/features/admin/pages/OrdersPage';
 import { WaiterProfile } from './WaiterProfile';
 import { WaiterCabinet, WaiterOrderArchive } from './WaiterCabinet';
 import { useRefundUpdates } from '@/features/refunds/api';
@@ -95,7 +95,6 @@ const CANCEL_UNDO_SECONDS = 6;
 type PendingCancel = { order: Order; reason: string; deadline: number };
 type ReplacementTarget = { order: Order; item: Order['items'][number] };
 const checkFamily = (order: Order) => order.splitFromOrderId ?? order.id;
-const EMPTY_DELIVERY_DETAILS: DeliveryDetails = { customerName: '', customerPhone: '', deliveryAddress: '' };
 const WIDE_TERMINAL = '(min-width: 768px)';
 
 function subscribeToTerminalSize(onChange: () => void) {
@@ -176,6 +175,7 @@ export function WaiterApp() {
   const [now, setNow] = useState(() => Date.now());
   const [cabinetOpen, setCabinetOpen] = useState(false);
   const [orderArchiveOpen, setOrderArchiveOpen] = useState(false);
+  const [showAllOrders, setShowAllOrders] = useState(false);
   const [shiftSummary, setShiftSummary] = useState<WaiterShift | null>(null);
   const [tableModal, setTableModal] = useState<'close' | 'move' | 'transfer' | null>(null);
   const [tablePickerOpen, setTablePickerOpen] = useState(false);
@@ -185,8 +185,10 @@ export function WaiterApp() {
   const [replacementTarget, setReplacementTarget] = useState<ReplacementTarget | null>(null);
   const [idemKey, setIdemKey] = useState(() => clientId());
   const [deliveryIdemKey, setDeliveryIdemKey] = useState(() => clientId());
-  const [deliveryDetails, setDeliveryDetails] = useState(EMPTY_DELIVERY_DETAILS);
-  const [deliveryDetailsOpen, setDeliveryDetailsOpen] = useState(false);
+  const [deliveryDetails, setDeliveryDetails] = useState(EMPTY_CUSTOMER);
+  const [offsiteType, setOffsiteType] = useState<'delivery' | 'pickup'>('delivery');
+  const returnTable = useRef<string | null>(null);
+  const [choosingDineInTable, setChoosingDineInTable] = useState(false);
   const [deliveryError, setDeliveryError] = useState('');
   const [addItemsIdemKey, setAddItemsIdemKey] = useState(() => clientId());
   // Пока идёт запуск смены, оверлей «Смена не начата» удерживается до конца анимации.
@@ -206,7 +208,7 @@ export function WaiterApp() {
   // Самый свежий активный заказ по каждому столу (бэкенд отдаёт по убыванию даты).
   const ordersByTable = useMemo(() => {
     const m = new Map<string, Order>();
-    for (const o of orders) if (o.source !== 'delivery' && !m.has(o.table.id)) m.set(o.table.id, o);
+    for (const o of orders) if (orderType(o.source) === 'dine_in' && !m.has(o.table.id)) m.set(o.table.id, o);
     return m;
   }, [orders]);
 
@@ -251,7 +253,7 @@ export function WaiterApp() {
   const roundCart = activeOrder ? editing && activeOrder.roundOrderTotal : settings.data?.roundOrderTotal;
   const viewingOrder = viewingOrderId ? orders.find((o) => o.id === viewingOrderId) : undefined;
   const displayedOrder = viewingOrder ?? activeOrder;
-  const relatedChecks = displayedOrder?.source === 'delivery' || !displayedOrder ? []
+  const relatedChecks = !displayedOrder || orderType(displayedOrder.source) !== 'dine_in' ? []
     : orders.filter((order) => checkFamily(order) === checkFamily(displayedOrder));
   const showCart = !viewingOrder && (cart.lines.length > 0 || !activeOrder);
   const activeNavTab: Tab = viewingOrder && tab === 'cart' ? 'orders' : tab;
@@ -262,7 +264,7 @@ export function WaiterApp() {
   // Подпись отправки нового заказа: есть кухня (в т.ч. смешанно) → «на кухню»,
   // только бар → «в бар», только без отправки → «Добавить в заказ».
   const cartSendLabel = newDelivery
-    ? t('Данные доставки')
+    ? t('Отправить заказ')
     : cartOnlyNone
     ? t('Добавить в заказ')
     : cartStationInfo.kitchen
@@ -357,6 +359,13 @@ export function WaiterApp() {
 
   // Смена стола прямо на экране меню (кнопка рядом с поиском).
   function pickMenuTable(tableId: string) {
+    if (choosingDineInTable) {
+      if (returnDraftToTable(tableId)) {
+        setChoosingDineInTable(false);
+        setTablePickerOpen(false);
+      }
+      return;
+    }
     setTablePickerOpen(false);
     if (tableId === selectedTableId) return;
     const otherWaiter = blockedByOther(tableId);
@@ -387,13 +396,46 @@ export function WaiterApp() {
     setEditingOrderId(null);
     setReplacementTarget(null);
     setDeliveryError('');
+    setOffsiteType('delivery');
     cart.select({ kind: 'delivery' });
+    setTab('menu');
+  }
+
+  function returnDraftToTable(tableId: string) {
+    if (!ordersByTable.has(tableId) && !blockedByOther(tableId) && cart.moveNewOrderDraft({ kind: 'table', tableId })) {
+      setViewingOrderId(null);
+      setSelectedCheckId(null);
+      setTab('menu');
+      return true;
+    }
+    push({ message: t('Выберите свободный стол без другого черновика'), type: 'error', at: new Date().toISOString() });
+    return false;
+  }
+
+  function switchOrderType(next: OrderType) {
+    if (!canCreateDelivery || !canWork || editing || activeOrder || create.isPending) return;
+    setDeliveryError('');
+    if (next === 'dine_in') {
+      if (!deliveryCart) return;
+      const previous = returnTable.current;
+      if (previous && halls.some((hall) => hall.tables.some(({ id }) => id === previous)) && returnDraftToTable(previous)) return;
+      setChoosingDineInTable(true);
+      setTablePickerOpen(true);
+      return;
+    }
+    if (!deliveryCart && !cart.moveNewOrderDraft({ kind: 'delivery' })) {
+      push({ message: t('Сначала оформите текущий заказ вне зала'), type: 'error', at: new Date().toISOString() });
+      return;
+    }
+    if (selectedTableId) returnTable.current = selectedTableId;
+    setOffsiteType(next);
+    setViewingOrderId(null);
     setTab('menu');
   }
 
   function selectOrderCart(order: Order) {
     setSelectedCheckId(order.id);
-    if (order.source === 'delivery') cart.select({ kind: 'delivery', orderId: order.id });
+    if (orderType(order.source) !== 'dine_in') cart.select({ kind: 'delivery', orderId: order.id });
     else cart.selectTable(order.table.id);
   }
 
@@ -816,18 +858,22 @@ export function WaiterApp() {
     }
   }
 
-  async function submitCart(delivery?: DeliveryDetails) {
+  async function submitCart() {
     if (!canUseMenu || !cart.lines.length || create.isPending || addItems.isPending) return;
     if (!canWork) {
       push({ message: t('Сначала начните смену в профиле.'), type: 'error', at: new Date().toISOString() });
       return;
     }
-    if (newDelivery && !delivery) {
-      setDeliveryError('');
-      setDeliveryDetailsOpen(true);
-      return;
+    if (newDelivery) {
+      const error = customerOrderError(offsiteType, deliveryDetails);
+      setDeliveryError(error);
+      if (error) {
+        setCartSheetOpen(true);
+        return;
+      }
     }
-    const destination = newDelivery && delivery ? { delivery } : selectedTable ? { tableId: selectedTable.id } : null;
+    const destination = newDelivery ? { delivery: customerOrderPayload(offsiteType, deliveryDetails) }
+      : selectedTable ? { tableId: selectedTable.id } : null;
     try {
       if (activeOrder) {
         await addItems.mutateAsync({
@@ -847,21 +893,20 @@ export function WaiterApp() {
         setDeliveryError('');
         await create.mutateAsync({
           ...destination,
-          comment: cart.commentOpen ? cart.comment : '',
+          comment: newDelivery || cart.commentOpen ? cart.comment : '',
           idempotencyKey: newDelivery ? deliveryIdemKey : idemKey,
           lines: cart.lines,
         });
         cart.clear();
         if (newDelivery) {
           cart.select(null);
-          setDeliveryDetailsOpen(false);
-          setDeliveryDetails(EMPTY_DELIVERY_DETAILS);
+          setDeliveryDetails(EMPTY_CUSTOMER);
           setDeliveryIdemKey(clientId());
         } else {
           setIdemKey(clientId());
         }
         push({
-          message: newDelivery ? t('Заказ доставки оформлен') : cartOnlyNone ? t('Заказ создан') : t('Заказ отправлен на кухню'),
+          message: newDelivery ? t('Заказ создан') : cartOnlyNone ? t('Заказ создан') : t('Заказ отправлен на кухню'),
           type: 'success',
           at: new Date().toISOString(),
         });
@@ -934,8 +979,15 @@ export function WaiterApp() {
     </Panel>
   );
 
+  const currentOrderType = deliveryCart ? (activeOrder ? orderType(activeOrder.source) : offsiteType) : 'dine_in';
+  const typeControl = canCreateDelivery && !activeOrder && !editing
+    ? <OrderTypeSelect value={currentOrderType} disabled={!canWork || create.isPending} onChange={switchOrderType} />
+    : undefined;
+  const customerFields = newDelivery && canCreateDelivery ? <OrderFulfillmentFields type={offsiteType} value={deliveryDetails}
+    onChange={setDeliveryDetails} error={deliveryError} disabled={create.isPending} comment={cart.comment} onComment={cart.setComment} /> : undefined;
+  const deliveryFee = newDelivery && offsiteType === 'delivery' ? Math.max(0, moneyInput(deliveryDetails.deliveryFee) || 0) : undefined;
   const deliveryChip = deliveryCart && (
-    <span className="shrink-0 rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">{t('Доставка')}</span>
+    <span className="shrink-0 rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">{t(orderTypeLabel(currentOrderType))}</span>
   );
 
   const menuPanel = (
@@ -976,8 +1028,10 @@ export function WaiterApp() {
 
   const rightPanel = (
     <Panel title={null}>
-      {!canUseMenu && !displayedOrder ? (
-        <EmptyHint text={t('Выберите стол, чтобы открыть заказ')} />
+      {!canUseMenu && !displayedOrder && !canCreateDelivery ? (
+        <div className="flex h-full items-center justify-center px-6 text-center text-sm text-text-muted">
+          {t('Выберите стол, чтобы открыть заказ')}
+        </div>
       ) : displayedOrder && !showCart ? (
         <OrderPanel
           key={displayedOrder.id}
@@ -999,6 +1053,16 @@ export function WaiterApp() {
           onCancelOrder={() => cancelAfterPartialRejection(displayedOrder)}
           onEdit={() => startEditOrder(displayedOrder)}
           onSplitOrder={canTakePayment && canWork && canSplitOrder(displayedOrder) ? () => showSplitOrder(displayedOrder) : undefined}
+          fulfillmentEditor={canCreateDelivery && canWork && displayedOrder.updatedAt && displayedOrder.source !== 'qr' &&
+            !displayedOrder.externalOrderId && !displayedOrder.splitFromOrderId && relatedChecks.length <= 1 &&
+            ['sent_to_kitchen', 'ready'].includes(displayedOrder.status) &&
+            displayedOrder.items.every((item) => ['new', 'cancelled', 'rejected'].includes(item.status) || item.prepStation === 'none') &&
+            waiterOrderPermission(displayedOrder, 'edit', settings.data?.waiterOrderPermissions).allowed ? (
+              <EditOrderFulfillment order={displayedOrder} tables={halls.flatMap((hall) => hall.tables
+                .filter((table) => table.id === displayedOrder.table.id || table.status === 'free')
+                .map((table) => ({ value: table.id, label: `${tableLabel(table)} · ${hall.name}` })))}
+                onUpdated={(updated) => { selectOrderCart(updated); setViewingOrderId(updated.id); }} />
+            ) : undefined}
           relatedChecks={relatedChecks}
           onSelectCheck={(id) => { setSelectedCheckId(id); setViewingOrderId(id); }}
         />
@@ -1006,6 +1070,10 @@ export function WaiterApp() {
         <CartPanel
           table={selectedTable}
           delivery={!!deliveryCart}
+          typeLabel={t(orderTypeLabel(currentOrderType))}
+          typeControl={typeControl}
+          customerFields={customerFields}
+          deliveryFee={deliveryFee}
           roundTotal={roundCart}
           hallName={selectedHallName}
           mode={editing ? 'edit' : activeOrder ? 'add' : 'create'}
@@ -1029,8 +1097,17 @@ export function WaiterApp() {
     </button>
   );
 
+  const canViewAllOrders = canAction('viewAllOrders');
+  const showRegister = canViewAllOrders && showAllOrders;
+  const ordersHeading = t(showRegister ? 'Все заказы' : 'Активные заказы');
+  const registerPanel = <div data-orders-scroll className="orders-workspace min-h-0 flex-1 overflow-auto">
+    <OrdersPage scope="terminal" />
+  </div>;
+
   const ordersActions = (
     <div className="flex flex-wrap items-center gap-2">
+      {canViewAllOrders && <button type="button" className="btn-secondary btn-md"
+        onClick={() => setShowAllOrders(!showRegister)}>{t(showRegister ? 'Мои активные' : 'Все заказы')}</button>}
       <button type="button" aria-label={t('Архив заказов')} className="btn-secondary btn-md" onClick={() => setOrderArchiveOpen(true)}>
         {t('Архив')}
       </button>
@@ -1106,16 +1183,16 @@ export function WaiterApp() {
             <div className="min-w-0 w-[26%] max-w-[380px] shrink-0">{rightPanel}</div>
           </>
         ) : desktopView === 'orders' ? (
-          <div className="mx-auto flex h-full w-full max-w-3xl flex-col overflow-hidden">
+          <div className={`mx-auto flex h-full w-full flex-col overflow-hidden ${showRegister ? '' : 'max-w-3xl'}`}>
             {viewingOrder ? (
               <div className="mx-auto h-full w-full max-w-xl">{rightPanel}</div>
             ) : (
               <>
                 <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
-                  <h2 className="text-lg font-semibold text-text-primary">{t('Активные заказы')}</h2>
+                  <h2 className="text-lg font-semibold text-text-primary">{ordersHeading}</h2>
                   {ordersActions}
                 </div>
-                <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
+                {showRegister ? (wideLayout ? registerPanel : null) : <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
                   <OrdersList
                     orders={orders}
                     onOpen={openExistingOrder}
@@ -1124,7 +1201,7 @@ export function WaiterApp() {
                     onEdit={startEditOrder}
                     onCancel={requestOrderCancellation}
                   />
-                </div>
+                </div>}
               </>
             )}
           </div>
@@ -1144,8 +1221,8 @@ export function WaiterApp() {
           viewingOrder ? (
             rightPanel
           ) : (
-            <Panel title={t('Активные заказы')} action={ordersActions}>
-              <div className="no-scrollbar overflow-y-auto">
+            <Panel title={ordersHeading} action={ordersActions}>
+              {showRegister ? (!wideLayout ? registerPanel : null) : <div className="no-scrollbar overflow-y-auto">
                 <OrdersList
                   orders={orders}
                   onOpen={openExistingOrder}
@@ -1154,7 +1231,7 @@ export function WaiterApp() {
                   onEdit={startEditOrder}
                   onCancel={requestOrderCancellation}
                 />
-              </div>
+              </div>}
             </Panel>
           )
         )}
@@ -1184,7 +1261,8 @@ export function WaiterApp() {
       {tab === 'menu' && !replacementTarget && !showShiftGate && (
         <MenuCartBar
           count={cart.lines.length}
-          total={cartTotals(cart.lines, roundCart).final}
+          canOpenEmpty={newDelivery}
+          total={cartTotals(cart.lines, roundCart).final + (deliveryFee ?? 0)}
           submitting={create.isPending || addItems.isPending || editOrder.isPending}
           submitLabel={cartSubmitLabel}
           onOpenCart={() => setCartSheetOpen(true)}
@@ -1204,19 +1282,16 @@ export function WaiterApp() {
         submitting={create.isPending || addItems.isPending || editOrder.isPending}
         canSubmit={canWork}
         delivery={!!deliveryCart}
+        typeControl={typeControl}
+        customerFields={customerFields}
+        deliveryFee={deliveryFee}
         roundTotal={roundCart}
         submitLabel={cartSubmitLabel}
         onSubmit={async () => {
           await (editing ? saveEditOrder() : submitCart());
-          setCartSheetOpen(false);
+          if (!newDelivery || !useCart.getState().target) setCartSheetOpen(false);
         }}
       />
-
-      {deliveryDetailsOpen && newDelivery && canCreateDelivery && (
-        <DeliveryDetailsModal details={deliveryDetails} error={deliveryError} pending={create.isPending}
-          onChange={setDeliveryDetails} onClose={() => setDeliveryDetailsOpen(false)}
-          onSubmit={(details) => void submitCart(details)} />
-      )}
 
       {/* Блок отмены действия с таймером — пока отмена заказа не ушла на сервер */}
       {pendingCancel && (
@@ -1305,7 +1380,7 @@ export function WaiterApp() {
           halls={halls}
           currentTableId={selectedTableId}
           onPick={pickMenuTable}
-          onClose={() => setTablePickerOpen(false)}
+          onClose={() => { setTablePickerOpen(false); setChoosingDineInTable(false); }}
           useMap={settings.data?.useFloorPlan}
         />
       )}
@@ -1393,14 +1468,6 @@ function Panel({
       )}
       <div className="flex min-h-0 flex-1 flex-col">{children}</div>
     </section>
-  );
-}
-
-function EmptyHint({ text }: { text: string }) {
-  return (
-    <div className="flex h-full items-center justify-center px-6 text-center text-sm text-text-muted">
-      {text}
-    </div>
   );
 }
 
@@ -1516,6 +1583,7 @@ function pozLabel(n: number): string {
 
 function MenuCartBar({
   count,
+  canOpenEmpty,
   total,
   submitting,
   submitLabel,
@@ -1523,6 +1591,7 @@ function MenuCartBar({
   onSubmit,
 }: {
   count: number;
+  canOpenEmpty: boolean;
   total: number;
   submitting: boolean;
   submitLabel: string;
@@ -1536,7 +1605,7 @@ function MenuCartBar({
         <button
           type="button"
           onClick={onOpenCart}
-          disabled={!hasItems}
+          disabled={!hasItems && !canOpenEmpty}
           className="flex min-w-0 shrink-0 items-center gap-2 rounded-xl border border-border bg-background px-3 py-1.5 text-left transition-colors enabled:hover:border-primary/40 disabled:opacity-60"
         >
           <span className="text-text-secondary">

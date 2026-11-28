@@ -20,7 +20,7 @@ function indivisible(item: Line) {
 
 export function canSplitOrder(order: Order) {
   const items = activeLines(order);
-  return !!order.updatedAt && order.source !== 'delivery' && (order.source !== 'qr' || !!order.waiter)
+  return !!order.updatedAt && order.source !== 'delivery' && order.source !== 'pickup' && (order.source !== 'qr' || !!order.waiter)
     && ['served', 'waiting_payment'].includes(order.status)
     && !order.requiresWaiterDecision && (!order.paymentStatus || order.paymentStatus === 'pending')
     && items.every(({ status }) => status === 'served')

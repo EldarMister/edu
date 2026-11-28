@@ -22,7 +22,7 @@ const commissions = [
   { key: 'shiftPercent', label: 'Процент за смену' },
 ] as const;
 const terminalActions: ActionKey[] = [
-  'acceptOrderPayments', 'printReceipts', 'requestReceiptPrints', 'createDeliveryOrders', 'financeCashShifts',
+  'acceptOrderPayments', 'printReceipts', 'requestReceiptPrints', 'createDeliveryOrders', 'viewAllOrders', 'financeCashShifts',
 ];
 const editorTabs = [
   { key: 'general', label: 'Общие данные' },

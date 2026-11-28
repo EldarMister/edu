@@ -745,13 +745,15 @@ model Order {
   // nullable: заказ из QR-меню создаётся без официанта (source=qr).
   waiterId               String?        @map("waiter_id")
   payrollOpenedById      String?        @map("payroll_opened_by_id")
-  // Источник заказа: pos — в зале, qr — QR-меню, delivery — доставка с кассы или из интеграции.
+  // Источник заказа: pos — в зале, qr — QR-меню, delivery — доставка, pickup — самовывоз.
   source                 String         @default("pos")
   // Внешний идентификатор есть только у заказов из интеграции.
   externalOrderId        String?        @map("external_order_id")
   deliveryCustomerName   String?        @map("delivery_customer_name")
   deliveryCustomerPhone  String?        @map("delivery_customer_phone")
   deliveryAddress        String?        @map("delivery_address")
+  deliveryFee            Decimal        @default(0) @map("delivery_fee") @db.Decimal(10, 2)
+  pickupTime             String?        @map("pickup_time")
   waiterShiftId          String?        @map("waiter_shift_id")
   status                 OrderStatus    @default(draft)
   totalAmount            Decimal        @default(0) @map("total_amount") @db.Decimal(10, 2)

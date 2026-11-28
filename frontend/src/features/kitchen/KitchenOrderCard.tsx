@@ -75,7 +75,7 @@ export function KitchenOrderCard({
   const badgeStatus = kitchenCardBadgeStatus(order, tab);
   const historyAt = order.stationHistoryAt ?? order.createdAt;
   const qrOrder = isQrOrder(order);
-  const deliveryOrder = order.source === 'delivery';
+  const deliveryOrder = order.source === 'delivery' || order.source === 'pickup';
   const visibleOrderComment = kitchenOrderComment(order.comment, qrOrder);
   // Частичный отказ/ожидание решения — только если отказ есть среди позиций ЭТОЙ станции.
   // Станции независимы: отказ на баре не блокирует кухню и наоборот.
@@ -319,7 +319,7 @@ export function KitchenOrderCard({
           <p className="text-lg font-bold leading-tight text-text-primary">{displayOrderNumber(order.orderNumber)}</p>
           {deliveryOrder ? (
             <p className="mt-1 text-[13px] text-text-muted">
-              {order.externalOrderId ? `Внешний заказ ${order.externalOrderId}` : 'Онлайн-заказ'}
+              {order.externalOrderId ? `Внешний заказ ${order.externalOrderId}` : order.pickupTime ? `К ${order.pickupTime}` : null}
             </p>
           ) : (
             <p className="mt-1 text-[13px] text-text-muted">{tableLabel(order.table)}{hallSuffix(order.table)}</p>
@@ -343,7 +343,7 @@ export function KitchenOrderCard({
             </p>
           ) : (
             <div className="mt-0.5">
-              <OrderBadge status={badgeStatus} />
+              <OrderBadge status={badgeStatus} source={order.source} />
             </div>
           )}
         </div>
@@ -360,7 +360,7 @@ export function KitchenOrderCard({
           )}
           {deliveryOrder && (
             <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-semibold text-warning">
-              <DeliveryIcon /> Доставка
+              <DeliveryIcon /> {order.source === 'pickup' ? 'Самовывоз' : 'Доставка'}
             </span>
           )}
         </div>

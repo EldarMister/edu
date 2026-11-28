@@ -47,8 +47,8 @@ type Props = {
   isFetchingNextPage: boolean;
   hasNextPage: boolean | undefined;
   onOpen: (order: Order) => void;
-  onEdit: (order: Order) => void;
-  onCancel: (order: Order) => void;
+  onEdit?: (order: Order) => void;
+  onCancel?: (order: Order) => void;
 };
 
 export function OrdersTable({ items, byClose = false, isLoading, error, columns, loadMoreRef, isFetchingNextPage, hasNextPage, onOpen, onEdit, onCancel }: Props) {
@@ -64,8 +64,8 @@ export function OrdersTable({ items, byClose = false, isLoading, error, columns,
         {displayOrderNumber(order.orderNumber)}
       </button>,
       date: date ? businessDateTime.format(new Date(date)) : '—',
-      table: order.source === 'delivery'
-        ? <span className="inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">{tr('Доставка')}</span>
+      table: order.source === 'delivery' || order.source === 'pickup'
+        ? <span className="inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">{tr(order.source === 'pickup' ? 'Самовывоз' : 'Доставка')}</span>
         : orderPlaceLabel(order, tr),
       waiter: order.waiter?.name ?? (order.source === 'delivery' ? tr('Онлайн-заказ') : 'QR menu'),
       amount: money(order.finalAmount),
@@ -73,8 +73,8 @@ export function OrdersTable({ items, byClose = false, isLoading, error, columns,
       payment: paymentCell(order, tr),
       comment: order.comment ? <span className="block truncate" title={order.comment}>{order.comment}</span> : '—',
       actions: <div className="flex items-center justify-center gap-1">
-        {editable && order.status !== 'paid' && <OrderRowAction label={tr('Изменить статус')} onClick={() => onEdit(order)}><IconEdit className="h-4 w-4" /></OrderRowAction>}
-        {editable && canOwnerOperation('cancelOrders') && CANCELLABLE.has(order.status) && <OrderRowAction label={tr('Отменить')} danger onClick={() => onCancel(order)}><IconX className="h-4 w-4" /></OrderRowAction>}
+        {editable && onEdit && order.status !== 'paid' && <OrderRowAction label={tr('Изменить статус')} onClick={() => onEdit(order)}><IconEdit className="h-4 w-4" /></OrderRowAction>}
+        {editable && onCancel && canOwnerOperation('cancelOrders') && CANCELLABLE.has(order.status) && <OrderRowAction label={tr('Отменить')} danger onClick={() => onCancel(order)}><IconX className="h-4 w-4" /></OrderRowAction>}
       </div>,
     };
     return (

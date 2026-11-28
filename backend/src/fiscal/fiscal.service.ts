@@ -106,14 +106,15 @@ export class FiscalService {
     const data: FiscalReceiptData = {
       orderId: order.id,
       orderNumber: order.orderNumber,
-      items: order.items.filter((item) => item.status !== 'cancelled' && item.status !== 'rejected').map((i) => ({
+      items: [...order.items.filter((item) => item.status !== 'cancelled' && item.status !== 'rejected').map((i) => ({
         // Снимки из заказа — не из текущего блюда.
         name: i.dishVariantNameSnapshot
           ? `${i.dishNameSnapshot} (${i.dishVariantNameSnapshot})`
           : i.dishNameSnapshot,
         price: Number(i.priceSnapshot),
         quantity: i.quantity,
-      })),
+      })), ...(Number(order.deliveryFee ?? 0) > 0
+        ? [{ name: 'Доставка', price: Number(order.deliveryFee), quantity: 1 }] : [])],
       totalAmount: Number(order.finalAmount),
       paymentType,
       cashAmount: cashAmount > 0 ? cashAmount : undefined,

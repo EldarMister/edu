@@ -1,12 +1,12 @@
 import { Prisma } from '@prisma/client';
-import { allocateOrderItemCents, netItemAmount, netItemQuantity, netOrderAmount, netPaymentAmount } from '../orders/order-net';
+import { allocateOrderItemCents, amountWithoutDelivery, netItemAmount, netItemQuantity, netOrderAmount, netPaymentAmount } from '../orders/order-net';
 import type { RefundTaxReversal } from '../orders/order-refund-plan';
 import { preparedLossQuantity } from '../warehouse/movement-cost';
 import { warehouseDay } from '../warehouse/report-range';
 
 export const statisticsOrderSelect = {
   id: true, createdAt: true, closedAt: true, waiterId: true, finalAmount: true,
-  paymentMethod: true, discountAmount: true, refundedAmount: true, serviceChargeAmount: true,
+  paymentMethod: true, discountAmount: true, refundedAmount: true, serviceChargeAmount: true, deliveryFee: true,
   waiter: { select: { name: true } },
   payments: { select: { method: true, amount: true, status: true, refundedAmount: true } },
   taxes: { where: { reversedAt: null }, select: { taxId: true, salesAmount: true, amount: true, itemAmounts: true } },
@@ -178,7 +178,7 @@ export function orderProductSales<ItemType extends Item>(order: Omit<Order, 'ite
   const taxes = taxesForOrder(order);
   const itemCosts = costsForOrder(order.items, costs, showCosts);
   // Product sales exclude the service charge retained on legacy receipts.
-  const productPayable = Prisma.Decimal.max(0, new Prisma.Decimal(order.finalAmount).sub(order.serviceChargeAmount ?? 0));
+  const productPayable = Prisma.Decimal.max(0, amountWithoutDelivery(order).sub(order.serviceChargeAmount ?? 0));
   const itemPayables = allocateOrderItemCents(productPayable, order.items);
   return {
     totalTax: taxes.total,

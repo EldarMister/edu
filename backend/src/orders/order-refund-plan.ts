@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { MenuTaxType, OrderItemStatus, OrderStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import type { OrderRefundSelectionDto } from './dto/order-refund.dto';
-import { allocateCents, allocateOrderItemCents } from './order-net';
+import { allocateCents, allocateOrderItemCents, amountWithoutDelivery } from './order-net';
 
 export const refundOrderInclude = {
   table: { select: { number: true } },
@@ -152,7 +152,7 @@ export function buildRefundPlan(order: RefundOrder, selected: OrderRefundSelecti
   if (remaining < 0 || (!selectedLines.length && remaining === 0)) {
     throw new ConflictException('В заказе не осталось позиций для возврата');
   }
-  const allocations = allocateOrderItemCents(order.finalAmount, order.items);
+  const allocations = allocateOrderItemCents(amountWithoutDelivery(order), order.items);
   const allocationById = new Map(order.items.map((item, index) => [item.id, allocations[index]]));
   const items: RefundLine[] = selectedLines.map(({ item, quantity }) => {
     const allocation = allocationById.get(item.id) ?? 0;

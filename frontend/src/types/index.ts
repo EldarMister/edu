@@ -22,6 +22,7 @@ export type ActionKey =
   | 'closeShift'
   | 'financeCashShifts'
   | 'createDeliveryOrders'
+  | 'viewAllOrders'
   | 'acceptOrderPayments'
   | 'printReceipts'
   | 'requestReceiptPrints'
@@ -275,6 +276,7 @@ export interface Order {
   totalAmount: string;
   discountAmount: string;
   serviceChargeAmount: string;
+  deliveryFee?: string;
   roundOrderTotal?: boolean;
   roundingAmount?: string;
   finalAmount: string;
@@ -288,11 +290,12 @@ export interface Order {
   updatedAt?: string;
   table: TableItem & { hall?: { name: string } };
   waiter: { id: string; name: string } | null;
-  source?: 'pos' | 'qr' | 'delivery';
+  source?: 'pos' | 'qr' | 'delivery' | 'pickup';
   externalOrderId?: string | null;
   deliveryCustomerName?: string | null;
   deliveryCustomerPhone?: string | null;
   deliveryAddress?: string | null;
+  pickupTime?: string | null;
   items: OrderItem[];
   /** Разбивка по способам оплаты. Приходит в списке заказов админки. */
   payments?: { method: PaymentMethod; amount: string; source?: PaymentSource }[];
@@ -351,6 +354,7 @@ export interface Receipt extends Partial<ReceiptPrintSettings> {
   totalAmount: string;
   discountAmount: string;
   serviceChargeAmount: string;
+  deliveryFee?: string;
   roundingAmount?: string;
   finalAmount: string;
   paymentMethod: PaymentMethod | null;

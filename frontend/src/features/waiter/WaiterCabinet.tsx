@@ -13,7 +13,12 @@ import { WaiterVoiceSettings } from '@/features/kitchen/KitchenVoiceSettings';
 import { Select } from '@/components/Select';
 import { Modal } from '@/components/Modal';
 import { useState } from 'react';
-import { useWaiterCabinet, useWaiterOrderHistory, useOrderDetails, type CabinetRecentOrder } from './api';
+import { apiError } from '@/lib/api';
+import { useNotifications } from '@/store/notifications';
+import { IconPrinter } from '@/features/admin/components/icons';
+import { useOrderReceiptPrinter } from './useOrderReceiptPrinter';
+import { useReceiptPrint } from './receiptPrint';
+import { fetchReceipt, useCreateReceiptPrintRequest, useWaiterCabinet, useWaiterOrderHistory, useOrderDetails, type CabinetRecentOrder } from './api';
 
 export function WaiterCabinet({ onBack, onOpenHistory }: { onBack: () => void; onOpenHistory: () => void }) {
   const logout = useAuth((s) => s.logout);
@@ -172,10 +177,41 @@ export function WaiterOrderArchive({ onClose }: { onClose: () => void }) {
 
 function WaiterOrderDetails({ id, onClose }: { id: string; onClose: () => void }) {
   const t = useT();
-  const { canOwnerOperation } = usePermissions();
+  const { canAction, canOwnerOperation } = usePermissions();
   const detail = useOrderDetails(id);
+  const print = useOrderReceiptPrinter();
+  const request = useCreateReceiptPrintRequest();
+  const beginPrint = useReceiptPrint((state) => state.begin);
+  const push = useNotifications((state) => state.push);
+  const [busy, setBusy] = useState(false);
+
+  async function repeatPrint() {
+    if (busy) return;
+    setBusy(true);
+    let popup: Window | null = null;
+    try {
+      if (canAction('printReceipts')) {
+        popup = window.open('', '_blank', 'width=380,height=640');
+        if (!popup) throw new Error(t('Разрешите всплывающие окна и повторите печать.'));
+        await print(id, popup);
+      } else {
+        const receipt = await fetchReceipt(id);
+        const ticket = await request.mutateAsync({ orderId: id, type: 'receipt' });
+        beginPrint(ticket, receipt);
+      }
+    } catch (reason) {
+      popup?.close();
+      push({ message: apiError(reason), type: 'error', at: new Date().toISOString() });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (detail.data) return <OrderDetailsModal order={detail.data} onClose={onClose} waiterLayout
-    refundMode={canOwnerOperation('refunds') ? 'request' : undefined} />;
+    refundMode={canOwnerOperation('refunds') ? 'request' : undefined}
+    repeatPrint={detail.data.status === 'paid' && (canAction('printReceipts') || canAction('requestReceiptPrints')) &&
+      <button type="button" className="btn-secondary btn-md inline-flex items-center gap-2" disabled={busy}
+        onClick={() => void repeatPrint()}><IconPrinter />{t('Повторить печать чека')}</button>} />;
   return <Modal open onClose={onClose} title={t('Заказ')}>
     {detail.isError ? <p>{t('Не удалось загрузить заказ')}</p> : <Spinner className="mx-auto h-5 w-5" />}
   </Modal>;
@@ -237,7 +273,7 @@ function OrderRow({
       className="-mx-1 flex w-[calc(100%+0.5rem)] flex-wrap items-center gap-2 rounded-lg px-1 py-2.5 text-left text-sm transition-colors hover:bg-background"
     >
       <span className="w-11 shrink-0 font-medium text-text-primary sm:w-14">{displayOrderNumber(order.orderNumber)}</span>
-      <span className="shrink-0 text-text-muted">{order.source === 'delivery' ? t('Доставка') : `${tableLabel} ${order.tableNumber}`}</span>
+      <span className="shrink-0 text-text-muted">{order.source === 'delivery' || order.source === 'pickup' ? t(order.source === 'pickup' ? 'Самовывоз' : 'Доставка') : `${tableLabel} ${order.tableNumber}`}</span>
       <span className="shrink-0 text-text-light">{timeHM(order.createdAt)}</span>
       <span className="ml-auto shrink-0 font-medium text-text-primary">{money(order.finalAmount)}</span>
       <span className={`shrink-0 whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-medium ${s.cls}`}>{t(s.label)}</span>

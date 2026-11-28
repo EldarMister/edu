@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { OrdersService } from './orders.service';
-import { CreateOrderDto, CreateTerminalDeliveryDto } from './dto/create-order.dto';
+import { CreateOrderDto, CreateTerminalDeliveryDto, UpdateOrderFulfillmentDto } from './dto/create-order.dto';
 import { AddItemsDto } from './dto/add-items.dto';
 import { EditOrderDto } from './dto/edit-order.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
@@ -76,6 +76,13 @@ export class OrdersController {
   @Roles(Role.WAITER)
   addItems(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: AddItemsDto) {
     return this.orders.addItems(id, user, dto.items, dto.idempotencyKey);
+  }
+
+  @Patch(':id/fulfillment')
+  @Roles(Role.WAITER)
+  @RequirePermission('actions.createDeliveryOrders')
+  updateFulfillment(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: UpdateOrderFulfillmentDto) {
+    return this.orders.updateFulfillment(id, user, dto);
   }
 
   @Patch(':id')

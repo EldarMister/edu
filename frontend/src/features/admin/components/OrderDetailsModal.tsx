@@ -30,7 +30,9 @@ export function OrderDetailsModal({
   onOrderChange,
   allowItemCancellation = false,
   waiterLayout = false,
+  readOnly = false,
   refundMode,
+  repeatPrint,
   presentation = 'modal',
 }: {
   order: Order | null;
@@ -38,7 +40,9 @@ export function OrderDetailsModal({
   onOrderChange?: (order: Order) => void;
   allowItemCancellation?: boolean;
   waiterLayout?: boolean;
+  readOnly?: boolean;
   refundMode?: 'request' | 'manage';
+  repeatPrint?: React.ReactNode;
   presentation?: 'modal' | 'page';
 }) {
   const t = useT();
@@ -55,7 +59,7 @@ export function OrderDetailsModal({
   const date = new Date(order.createdAt);
   const itemCancellationAllowed = order.paymentStatus !== 'paid' && order.paymentStatus !== 'refunded'
     && !['paid', 'cancelled', 'rejected'].includes(order.status);
-  const isDelivery = order.source === 'delivery';
+  const isDelivery = order.source === 'delivery' || order.source === 'pickup';
   const refunded = Number(order.refundedAmount ?? 0);
 
   async function confirmItemCancellation(reason: string) {
@@ -86,7 +90,7 @@ export function OrderDetailsModal({
     [
       {
         label: isDelivery ? (order.externalOrderId ? 'Внешний заказ' : 'Тип заказа') : 'Стол',
-        value: isDelivery ? order.externalOrderId ?? 'Доставка' : `${tableLabel(order.table)}${hallSuffix(order.table)}`,
+        value: isDelivery ? order.externalOrderId ?? (order.source === 'pickup' ? 'Самовывоз' : 'Доставка') : `${tableLabel(order.table)}${hallSuffix(order.table)}`,
       },
       { label: 'Оплата', value: order.paymentMethod ? paymentDisplayLabel(order) : '—' },
     ],
@@ -110,7 +114,7 @@ export function OrderDetailsModal({
         { label: 'Телефон', value: order.deliveryCustomerPhone ?? '—' },
       ],
       [
-        { label: 'Адрес доставки', value: order.deliveryAddress ?? '—' },
+        { label: order.source === 'pickup' ? 'Время самовывоза' : 'Адрес доставки', value: (order.source === 'pickup' ? order.pickupTime : order.deliveryAddress) ?? '—' },
       ],
     );
   }
@@ -226,6 +230,7 @@ export function OrderDetailsModal({
           {Number(order.serviceChargeAmount) > 0 && (
             <Total label="Обслуживание" value={money(order.serviceChargeAmount)} />
           )}
+          {Number(order.deliveryFee) > 0 && <Total label="Доставка" value={money(order.deliveryFee ?? 0)} />}
           {Number(order.roundingAmount) > 0 && <Total label="Округление" value={`−${money(order.roundingAmount ?? 0)}`} />}
           {order.taxes?.map((tax) => <Total key={tax.id}
             label={`В т. ч. ${tax.name} (${taxRateLabel(tax.rate)})`} value={money(tax.amount)} />)}
@@ -236,9 +241,10 @@ export function OrderDetailsModal({
           </>}
         </div>
 
+        {repeatPrint}
         {showStockMovements && <OrderStockMovements key={`stock-${order.id}`} orderId={order.id} />}
         {refundMode && order.status === 'paid' && <OrderRefunds key={order.id} order={order} mode={refundMode} />}
-        <FiscalBlock order={order} />
+        <FiscalBlock order={order} readOnly={readOnly} />
       </div>
       <CancelOrderModal
         open={!!cancelItem}
@@ -259,7 +265,7 @@ export function OrderDetailsModal({
 
 /** ККМ / фискальный чек. Ничего не показывает, пока чек не пробит и нет ошибки
  *  (т.е. при выключенной ККМ). При ошибке — бейдж и кнопка «Повторить». */
-function FiscalBlock({ order }: { order: Order }) {
+function FiscalBlock({ order, readOnly }: { order: Order; readOnly: boolean }) {
   const retry = useRetryFiscal();
   const push = useNotifications((s) => s.push);
 
@@ -325,14 +331,14 @@ function FiscalBlock({ order }: { order: Order }) {
         <span className="inline-block rounded-full bg-danger/15 px-2.5 py-0.5 text-xs font-medium text-danger">
           Ошибка ККМ
         </span>
-        <button
+        {!readOnly && <button
           type="button"
           onClick={onRetry}
           disabled={retry.isPending}
           className="rounded-lg border border-danger/40 px-3 py-1.5 text-xs font-medium text-danger transition-colors hover:bg-danger/10 disabled:opacity-50"
         >
           {retry.isPending ? 'Повтор…' : 'Повторить'}
-        </button>
+        </button>}
       </div>
       <p className="mt-1.5 text-xs text-danger">{order.fiscalError}</p>
     </div>

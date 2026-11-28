@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { OrderStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { allocateOrderItemCents, netItemAmount, netItemQuantity, netOrderAmount, netPaymentAmount } from '../orders/order-net';
+import { allocateOrderItemCents, amountWithoutDelivery, netItemAmount, netItemQuantity, netOrderAmount, netPaymentAmount } from '../orders/order-net';
 import { StatsQueryDto } from './dto';
 import { SettingsService } from '../settings/settings.service';
 import { warehouseDay } from '../warehouse/report-range';
@@ -87,6 +87,7 @@ export class StatisticsService {
           finalAmount: true,
           refundedAmount: true,
           serviceChargeAmount: true,
+          deliveryFee: true,
           paymentMethod: true,
           closedAt: true,
           waiterId: true,
@@ -163,7 +164,7 @@ export class StatisticsService {
     // Проданные напитки: позиции из категории «Напитки» (по названию категории блюда).
     const drinksMap = new Map<string, number>();
     for (const order of currentOrders) {
-      const productPayable = new Prisma.Decimal(order.finalAmount).sub(order.serviceChargeAmount ?? 0);
+      const productPayable = amountWithoutDelivery(order).sub(order.serviceChargeAmount ?? 0);
       const itemPayables = allocateOrderItemCents(Prisma.Decimal.max(0, productPayable), order.items);
       const day = order.closedAt ? warehouseDay(order.closedAt) : null;
       for (const [index, item] of order.items.entries()) {

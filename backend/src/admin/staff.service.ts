@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { OrderItemStatus, OrderStatus, PaymentMethod, PaymentStatus, Prisma, Role, WaiterShiftStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
-import { allocateOrderItemCents, netItemAmount, netItemQuantity, netOrderAmount, netPaymentAmount } from '../orders/order-net';
+import { allocateOrderItemCents, amountWithoutDelivery, netItemAmount, netItemQuantity, netOrderAmount, netPaymentAmount } from '../orders/order-net';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { lockStationRouting, staffStation } from '../kitchen/preparation-stations';
@@ -462,6 +462,7 @@ export class StaffService {
       select: {
         waiterId: true,
         finalAmount: true,
+        deliveryFee: true,
         refundedAmount: true,
         paymentMethod: true,
         payments: { select: { method: true, status: true, amount: true, refundedAmount: true } },
@@ -602,7 +603,7 @@ export class StaffService {
       for (const p of o.payments) {
         if (p.status === PaymentStatus.paid && p.method === PaymentMethod.cash) a.cashDue += Number(netPaymentAmount(p));
       }
-      const itemPayables = allocateOrderItemCents(o.finalAmount, o.items);
+      const itemPayables = allocateOrderItemCents(amountWithoutDelivery(o), o.items);
       for (const [index, it] of o.items.entries()) {
         const quantity = netItemQuantity(it);
         if (quantity <= 0) continue;
@@ -914,6 +915,7 @@ export class StaffService {
         createdAt: true,
         closedAt: true,
         finalAmount: true,
+        deliveryFee: true,
         waiter: { select: { name: true } },
         table: { select: { number: true } },
         items: {
@@ -943,7 +945,7 @@ export class StaffService {
       totalServingSeconds += Math.max(0, Math.round((servedAt.getTime() - order.createdAt.getTime()) / 1000));
       totalPaymentSeconds += Math.max(0, (paidAt.getTime() - order.createdAt.getTime()) / 1000);
 
-      const allocations = allocateOrderItemCents(order.finalAmount, order.items);
+      const allocations = allocateOrderItemCents(amountWithoutDelivery(order), order.items);
       return order.items.flatMap((item, index) => {
         const quantity = netItemQuantity(item);
         if (quantity <= 0) return [];
