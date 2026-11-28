@@ -6,7 +6,7 @@ import type { Order } from '@/types';
 import { OrderBadge } from '@/components/StatusBadge';
 import { displayOrderNumber, money, orderPlaceLabel, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
-import { ORDER_TYPES, orderType, type OrderType } from './OrderFulfillmentFields';
+import { TERMINAL_ORDER_TYPES, orderType, type TerminalOrderType } from './OrderFulfillmentFields';
 
 export function OrdersList({
   orders,
@@ -25,7 +25,7 @@ export function OrdersList({
 }) {
   const t = useT();
   const [menuFor, setMenuFor] = useState<string | null>(null);
-  const [type, setType] = useState<OrderType | 'all'>('all');
+  const [type, setType] = useState<TerminalOrderType | 'all'>('all');
 
   const sortedOrders = orders.filter((order) => type === 'all' || orderType(order.source) === type).sort((a, b) => {
     const aAttention = isAttentionOrder(a) ? 1 : 0;
@@ -37,7 +37,7 @@ export function OrdersList({
   return (
     <div className="space-y-3 px-1.5">
       <div className="flex flex-wrap gap-2" role="group" aria-label={t('Тип заказа')}>
-        {[{ value: 'all', label: 'Все' } as const, ...ORDER_TYPES].map(({ value, label }) =>
+        {[{ value: 'all', label: 'Все' } as const, ...TERMINAL_ORDER_TYPES].map(({ value, label }) =>
           <button type="button" key={value} aria-pressed={type === value}
             className={type === value ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'} onClick={() => setType(value)}>{t(label)}</button>)}
       </div>

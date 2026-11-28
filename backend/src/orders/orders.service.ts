@@ -46,7 +46,7 @@ import { moveSplitCheckItems } from './split-check-items';
 import { orderInclude, unitPricing, round2 } from './order.helpers';
 import { resolveMenuSelections, selectionIdentity } from '../warehouse/menu-modifiers';
 import { lockOrder } from './order-lock';
-import { isOffsiteOrder, offsiteLabel, OFFSITE_SOURCES, type OffsiteSource } from './order-fulfillment';
+import { isOffsiteOrder, offsiteLabel, OFFSITE_SOURCES } from './order-fulfillment';
 import { amountWithoutDelivery } from './order-net';
 import { aggregateOrderStatus, assertWaiterItemOperation, normalizeWaiterOrderPermissions } from './order-policy';
 import { buildNewOrderText, buildCancelText, buildEditVoiceText, buildReplacementText, numberToWordsRu, orderNumberWords, withVariantVoice } from '../tts/kitchen-voice';
@@ -67,7 +67,7 @@ const WAITER_HISTORY_PAGE_SIZE = 30;
 type OrderForCancellation = Prisma.OrderGetPayload<{ include: typeof orderInclude }>;
 type TerminalOrderTarget = { tableId: string; delivery?: never } | {
   tableId?: never;
-  delivery: Pick<CreateTerminalDeliveryDto, 'customerName' | 'customerPhone' | 'deliveryAddress' | 'deliveryFee' | 'pickupTime'> & { type: OffsiteSource };
+  delivery: Pick<CreateTerminalDeliveryDto, 'customerName' | 'customerPhone' | 'deliveryAddress' | 'deliveryFee'> & { type: 'delivery' };
 };
 const cabinetOrderSelect = {
   id: true,
@@ -302,18 +302,15 @@ export class OrdersService {
   }
 
   createTerminalDelivery(actor: AuditActor, dto: CreateTerminalDeliveryDto) {
-    const { type = 'delivery', customerName, customerPhone, deliveryAddress, deliveryFee, pickupTime } = dto;
+    const { customerName, customerPhone, deliveryAddress, deliveryFee } = dto;
     return this.createTerminalOrder(actor, dto, { delivery: {
-      type, customerName, customerPhone,
-      deliveryAddress: type === 'delivery' ? deliveryAddress : undefined,
-      deliveryFee: type === 'delivery' ? deliveryFee : undefined,
-      pickupTime: type === 'pickup' ? pickupTime : undefined,
+      type: 'delivery', customerName, customerPhone, deliveryAddress, deliveryFee,
     } });
   }
 
   async updateFulfillment(orderId: string, actor: AuditActor, dto: UpdateOrderFulfillmentDto) {
     if (!!dto.tableId === !!dto.delivery) throw new BadRequestException('Выберите стол или данные заказа вне зала');
-    const source = dto.delivery?.type ?? (dto.delivery ? 'delivery' : 'pos');
+    const source = dto.delivery ? 'delivery' : 'pos';
     await this.shifts.shiftForTerminalOrder(actor.id);
     const offsiteTable = dto.delivery && await this.terminalDeliveryTable();
     const tableId = offsiteTable ? offsiteTable.id : dto.tableId!;
@@ -355,15 +352,16 @@ export class OrdersService {
       if (wasOffsite !== offsite) await tx.orderItem.updateMany({
         where: { id: { in: active.map(({ id }) => id) } }, data: { takeaway: offsite },
       });
-      const fee = source === 'delivery' ? dto.delivery?.deliveryFee ?? 0 : 0;
+      const previousDelivery = order.source === 'delivery' ? order : null;
+      const fee = source === 'delivery' ? dto.delivery?.deliveryFee ?? previousDelivery?.deliveryFee ?? 0 : 0;
       const updated = await tx.order.update({
         where: { id: orderId },
         data: {
           tableId, source, deliveryFee: fee, finalAmount: amountWithoutDelivery(order).add(fee),
-          deliveryCustomerName: dto.delivery?.customerName || null,
-          deliveryCustomerPhone: dto.delivery?.customerPhone ?? null,
-          deliveryAddress: source === 'delivery' ? dto.delivery?.deliveryAddress : null,
-          pickupTime: source === 'pickup' ? dto.delivery?.pickupTime ?? null : null,
+          deliveryCustomerName: source === 'delivery' ? (dto.delivery?.customerName ?? previousDelivery?.deliveryCustomerName) || null : null,
+          deliveryCustomerPhone: source === 'delivery' ? dto.delivery?.customerPhone ?? previousDelivery?.deliveryCustomerPhone ?? null : null,
+          deliveryAddress: source === 'delivery' ? dto.delivery?.deliveryAddress ?? previousDelivery?.deliveryAddress ?? null : null,
+          pickupTime: null,
           comment: dto.comment === undefined ? order.comment : dto.comment.trim() || null,
         },
         include: orderInclude,
@@ -465,7 +463,6 @@ export class OrdersService {
             waiterShiftId: activeShift?.id ?? null,
             source: delivery?.type ?? 'pos',
             deliveryFee: delivery?.deliveryFee,
-            pickupTime: delivery?.pickupTime,
             deliveryCustomerName: delivery?.customerName || undefined,
             deliveryCustomerPhone: delivery?.customerPhone,
             deliveryAddress: delivery?.deliveryAddress,
@@ -2403,7 +2400,8 @@ export class OrdersService {
       if (order.requiresWaiterDecision) throw new BadRequestException(PARTIAL_REJECTION_PENDING_MESSAGE);
       const delivery = order.source === 'delivery';
       if (delivery && order.status === OrderStatus.served) return order;
-      if (delivery && order.status !== OrderStatus.picked_up) {
+      const needsCourier = delivery && Boolean(order.externalOrderId || order.deliveryAddress);
+      if (needsCourier && order.status !== OrderStatus.picked_up) {
         throw new BadRequestException('Сначала передайте заказ курьеру');
       }
       if (order.source === 'pickup' && order.status === OrderStatus.served) return order;

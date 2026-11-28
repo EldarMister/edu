@@ -663,63 +663,52 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
         body: { orderId: first.id, type: 'receipt' } });
       assert.equal(ticket.orderSource, 'delivery');
 
-      const pickup = await createDelivery(terminal, {
-        type: 'pickup', customerName: 'Клиент', customerPhone: body.customerPhone, pickupTime: '19:30',
-        comment: 'Упаковать отдельно', items: body.items, idempotencyKey: randomUUID(),
-      });
-      assert.equal(pickup.source, 'pickup');
-      assert.equal(pickup.pickupTime, '19:30');
-      assert.equal(pickup.deliveryAddress, null);
-      assert.equal(pickup.deliveryFee, '0');
-      assert.equal(pickup.tableId, first.tableId);
-      assert.ok(pickup.items.every(({ takeaway }) => takeaway));
-      assert.equal((await request('/admin/orders?orderType=pickup', owner)).items.some(({ id }) => id === pickup.id), true);
-      assert.equal((await request('/admin/orders?orderType=dine_in', owner)).items.some(({ id }) => id === pickup.id), false);
+      const deliveryDraft = { items: body.items, idempotencyKey: randomUUID() };
+      await createDelivery(terminal, { ...deliveryDraft, type: 'pickup' }, 400);
+      const simpleDelivery = await createDelivery(terminal, { ...deliveryDraft, type: 'delivery' });
+      assert.equal(simpleDelivery.source, 'delivery');
+      assert.equal(simpleDelivery.deliveryCustomerName, null);
+      assert.equal(simpleDelivery.deliveryCustomerPhone, null);
+      assert.equal(simpleDelivery.deliveryAddress, null);
+      assert.equal(simpleDelivery.deliveryFee, '0');
+      assert.equal(simpleDelivery.tableId, first.tableId);
+      assert.ok(simpleDelivery.items.every(({ takeaway }) => takeaway));
 
       const fulfillment = (id, version, destination, status = 200) => request(`/orders/${id}/fulfillment`, {
         ...terminal, method: 'PATCH', status, body: { expectedUpdatedAt: version, ...destination },
       });
-      const converted = await fulfillment(pickup.id, pickup.updatedAt, { delivery: {
-        customerPhone: body.customerPhone, deliveryAddress: 'Новый адрес', deliveryFee: 35.5,
+      const conversionTable = await newTable();
+      const beforeConversion = await request('/orders', { ...terminal, method: 'POST', status: 201, body: {
+        tableId: conversionTable.id, items: [{ dishId: cookedDish.id, quantity: 1 }],
       } });
+      await fulfillment(beforeConversion.id, beforeConversion.updatedAt, { delivery: { type: 'pickup' } }, 400);
+      const converted = await fulfillment(beforeConversion.id, beforeConversion.updatedAt, { delivery: { type: 'delivery' } });
       assert.equal(converted.source, 'delivery');
-      assert.equal(converted.pickupTime, null);
-      assert.equal(converted.deliveryFee, '35.5');
-      assert.equal(Number(converted.finalAmount), Number(pickup.finalAmount) + 35.5);
-      assert.equal(converted.items[0].id, pickup.items[0].id);
-      await fulfillment(pickup.id, pickup.updatedAt, { delivery: { type: 'pickup', customerPhone: body.customerPhone } }, 409);
-      await fulfillment(pickup.id, converted.updatedAt, { tableId: tableOrder.tableId }, 409);
-      const added = await request(`/orders/${pickup.id}/items`, { ...terminal, method: 'POST', status: 201,
-        body: { items: [{ dishId: fixture.dish.id, quantity: 1 }] } });
-      assert.equal(Number(added.finalAmount), Number(converted.finalAmount) + Number(fixture.dish.price));
-      await runWithTenant({ cafeId: cafe.id }, () => orders.kitchenReadyStation(pickup.id, fixture.kitchen.id, 'kitchen'));
-      const prepared = await request(`/orders/${pickup.id}`, terminal);
-      await fulfillment(pickup.id, prepared.updatedAt, { delivery: { type: 'pickup', customerPhone: body.customerPhone } }, 400);
-      for (const step of ['picked-up', 'served', 'to-payment']) {
-        await request('/orders/' + pickup.id + '/' + step, { ...terminal, method: 'POST', status: 201 });
+      assert.equal(converted.deliveryAddress, null);
+      assert.equal(converted.finalAmount, beforeConversion.finalAmount);
+      assert.equal(converted.items[0].id, beforeConversion.items[0].id);
+      await fulfillment(beforeConversion.id, beforeConversion.updatedAt, { tableId: conversionTable.id }, 409);
+      const priorData = await fulfillment(second.id, second.updatedAt, { delivery: { type: 'delivery' } });
+      assert.equal(priorData.deliveryAddress, second.deliveryAddress);
+      assert.equal(priorData.deliveryFee, second.deliveryFee);
+
+      await runWithTenant({ cafeId: cafe.id }, () => orders.kitchenReadyStation(simpleDelivery.id, fixture.kitchen.id, 'kitchen'));
+      for (const step of ['served', 'to-payment']) {
+        await request('/orders/' + simpleDelivery.id + '/' + step, { ...terminal, method: 'POST', status: 201 });
       }
-      await request('/payments', { ...terminal, method: 'POST', status: 201, body: { orderId: pickup.id, method: 'cash' } });
-      const deliveryReceipt = await request('/payments/' + pickup.id + '/receipt', terminal);
-      assert.equal(deliveryReceipt.deliveryFee, '35.5');
-      assert.equal(deliveryReceipt.finalAmount, added.finalAmount);
+      await request('/payments', { ...terminal, method: 'POST', status: 201, body: { orderId: simpleDelivery.id, method: 'cash' } });
+      const deliveryReceipt = await request('/payments/' + simpleDelivery.id + '/receipt', terminal);
+      assert.equal(deliveryReceipt.source, 'delivery');
+      assert.equal(deliveryReceipt.deliveryFee, '0');
+      assert.equal(deliveryReceipt.finalAmount, simpleDelivery.finalAmount);
       const cashier = { token: sessions.cashier, workspace: 'terminal' };
       const register = await request('/terminal/orders?orderType=delivery', cashier);
       assert.ok(register.items.some(({ id }) => id === first.id));
       assert.ok(register.items.every(({ source }) => source === 'delivery'));
 
-      const takeaway = await createDelivery(terminal, {
-        type: 'pickup', customerPhone: body.customerPhone, items: body.items, idempotencyKey: randomUUID(),
-      });
-      const takeawayAction = (name, status = 201) => request(`/orders/${takeaway.id}/${name}`, { ...terminal, method: 'POST', status });
-      await takeawayAction('served', 400);
-      await runWithTenant({ cafeId: cafe.id }, () => orders.kitchenReadyStation(takeaway.id, fixture.kitchen.id, 'kitchen'));
-      assert.equal((await takeawayAction('served')).status, 'served');
-      await takeawayAction('to-payment');
-      await request('/payments', { ...terminal, method: 'POST', status: 201, body: { orderId: takeaway.id, method: 'cash' } });
-      assert.equal((await request(`/payments/${takeaway.id}/receipt`, terminal)).source, 'pickup');
       const repeat = await request('/receipt-prints', { ...terminal, method: 'POST', status: 201,
-        body: { orderId: takeaway.id, type: 'receipt' } });
-      assert.equal(repeat.orderSource, 'pickup');
+        body: { orderId: simpleDelivery.id, type: 'receipt' } });
+      assert.equal(repeat.orderSource, 'delivery');
       await request(`/admin/positions/${fixture.mixedPosition.id}`, { ...owner, method: 'PATCH', body: {
         name: fixture.mixedPosition.name, permissions,
       } });

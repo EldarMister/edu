@@ -188,12 +188,7 @@ function linesToItems(lines: CartLine[]) {
 }
 
 export interface DeliveryDetails {
-  customerName: string;
-  customerPhone: string;
-  deliveryAddress?: string;
-  type?: 'delivery' | 'pickup';
-  deliveryFee?: number;
-  pickupTime?: string;
+  type: 'delivery';
 }
 
 type OrderDestination = { tableId: string; delivery?: never } | { tableId?: never; delivery: DeliveryDetails };

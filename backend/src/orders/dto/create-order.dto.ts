@@ -17,10 +17,8 @@ import {
   Max,
   MaxLength,
   ValidateNested,
-  ValidateIf,
 } from 'class-validator';
 import { SetComponentAction } from '@prisma/client';
-import { OFFSITE_SOURCES, type OffsiteSource } from '../order-fulfillment';
 
 export class SetComponentInputDto {
   @IsString()
@@ -122,8 +120,8 @@ export class CreateOrderDto extends OrderCompositionDto {
 
 export class TerminalCustomerDto {
   @IsOptional()
-  @IsIn(OFFSITE_SOURCES)
-  type?: OffsiteSource;
+  @IsIn(['delivery'])
+  type?: 'delivery';
 
   @IsOptional()
   @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
@@ -131,13 +129,14 @@ export class TerminalCustomerDto {
   @MaxLength(120)
   customerName?: string;
 
+  @IsOptional()
   @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
   @IsString()
   @MaxLength(40)
   @Matches(/^\+?(?:[ ()-]*\d){6,15}[ ()-]*$/, { message: 'Укажите корректный телефон клиента' })
-  customerPhone: string;
+  customerPhone?: string;
 
-  @ValidateIf((payload) => payload.type !== 'pickup')
+  @IsOptional()
   @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
   @IsString()
   @IsNotEmpty({ message: 'Укажите адрес доставки' })
@@ -150,9 +149,6 @@ export class TerminalCustomerDto {
   @Max(9_999_999)
   deliveryFee?: number;
 
-  @IsOptional()
-  @Matches(/^(?:[01]\d|2[0-3]):[0-5]\d$/, { message: 'Укажите время самовывоза в формате ЧЧ:ММ' })
-  pickupTime?: string;
 }
 
 export class CreateTerminalDeliveryDto extends TerminalCustomerDto implements OrderCompositionDto {

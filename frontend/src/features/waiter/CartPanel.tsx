@@ -12,8 +12,6 @@ export function CartPanel({
   delivery,
   typeLabel,
   typeControl,
-  customerFields,
-  deliveryFee,
   roundTotal,
   hallName,
   mode,
@@ -29,8 +27,6 @@ export function CartPanel({
   delivery?: boolean;
   typeLabel?: string;
   typeControl?: ReactNode;
-  customerFields?: ReactNode;
-  deliveryFee?: number;
   roundTotal?: boolean;
   hallName?: string;
   mode: 'create' | 'add' | 'edit';
@@ -83,7 +79,6 @@ export function CartPanel({
 
       {/* Позиции — компактный список как в мобильной корзине */}
       <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto py-3">
-        {customerFields}
         {hasLines ? (
           <CartLinesList lines={lines} inc={inc} dec={dec} onToggleTakeaway={delivery ? undefined : setLineTakeaway} priceWidth="w-[88px]" />
         ) : (
@@ -95,7 +90,7 @@ export function CartPanel({
 
       {/* Низ: общий комментарий (по кнопке) + итоги + кнопки */}
       <div className="border-t border-border pt-3">
-        {commentOpen && !customerFields && (
+        {commentOpen && (
           <input
             className="input mb-3 h-10 text-sm"
             placeholder={t('Комментарий к заказу')}
@@ -106,20 +101,16 @@ export function CartPanel({
         )}
 
         <div className="space-y-1 text-sm">
-          {deliveryFee !== undefined && <>
-            <Row label={t('Стоимость блюд')} value={money(totals.final)} />
-            <Row label={t('Доставка')} value={money(deliveryFee)} />
-          </>}
-          {deliveryFee === undefined && totals.discount > 0 && (
+          {totals.discount > 0 && (
             <Row label={t('Сумма')} value={money(totals.total)} />
           )}
-          {deliveryFee === undefined && totals.discount > 0 && (
+          {totals.discount > 0 && (
             <Row label={t('Скидка')} value={`−${money(totals.discount)}`} valueClass="text-success" />
           )}
-          {deliveryFee === undefined && totals.roundingAmount > 0 && <Row label={t('Округление')} value={`−${money(totals.roundingAmount)}`} />}
+          {totals.roundingAmount > 0 && <Row label={t('Округление')} value={`−${money(totals.roundingAmount)}`} />}
           <div className="flex items-center justify-between pt-1">
             <span className="text-[15px] font-medium text-text-secondary">{t('Итого')}</span>
-            <NumberTicker value={totals.final + (deliveryFee ?? 0)} className="text-xl font-semibold text-text-primary" />
+            <NumberTicker value={totals.final} className="text-xl font-semibold text-text-primary" />
           </div>
         </div>
 
@@ -160,7 +151,6 @@ export function CartPanel({
               className={`h-9 text-sm font-medium hover:underline ${
                 commentOpen ? 'text-text-secondary' : 'text-primary'
               }`}
-              hidden={!!customerFields}
               onClick={() => setCommentOpen(!commentOpen)}
             >
               {commentOpen ? t('Скрыть комментарий') : t('Комментарий')}

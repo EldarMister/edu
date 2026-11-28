@@ -624,6 +624,7 @@ function ActionButton({
   const [actionCooldown, setActionCooldown] = useState(0);
   const s = order.status;
   const delivery = order.source === 'delivery';
+  const needsCourier = delivery && Boolean(order.externalOrderId || order.deliveryAddress);
   const spin = submitting ? <Spinner /> : null;
   const unclaimedQr = order.source === 'qr' && !order.waiter;
   const waitingDecision = s === 'partially_rejected' && order.requiresWaiterDecision;
@@ -690,8 +691,8 @@ function ActionButton({
   if (s === 'ready') {
     return (
       <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting || cooldownActive}
-        onClick={() => runProtectedAction(delivery ? onPickedUp : onServed)}>
-        {cooldownActive ? actionCooldown : spin ?? t(delivery ? 'Передать курьеру' : order.source === 'pickup' ? 'Выдать заказ' : 'Вынес гостям')}
+        onClick={() => runProtectedAction(needsCourier ? onPickedUp : onServed)}>
+        {cooldownActive ? actionCooldown : spin ?? t(needsCourier ? 'Передать курьеру' : delivery || order.source === 'pickup' ? 'Выдать заказ' : 'Вынес гостям')}
       </button>
     );
   }

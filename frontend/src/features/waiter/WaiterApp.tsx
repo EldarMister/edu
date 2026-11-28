@@ -52,7 +52,7 @@ import {
   fetchReceipt,
   type AvailableWaiter,
 } from './api';
-import { customerOrderError, customerOrderPayload, EditOrderFulfillment, EMPTY_CUSTOMER, moneyInput, orderType, orderTypeLabel, OrderFulfillmentFields, OrderTypeSelect, type OrderType } from './OrderFulfillmentFields';
+import { EditOrderFulfillment, orderType, orderTypeLabel, OrderTypeSelect, type TerminalOrderType } from './OrderFulfillmentFields';
 import { useReceiptPrint } from './receiptPrint';
 import { TablesGrid } from './TablesGrid';
 import { DishMenu } from './DishMenu';
@@ -185,11 +185,8 @@ export function WaiterApp() {
   const [replacementTarget, setReplacementTarget] = useState<ReplacementTarget | null>(null);
   const [idemKey, setIdemKey] = useState(() => clientId());
   const [deliveryIdemKey, setDeliveryIdemKey] = useState(() => clientId());
-  const [deliveryDetails, setDeliveryDetails] = useState(EMPTY_CUSTOMER);
-  const [offsiteType, setOffsiteType] = useState<'delivery' | 'pickup'>('delivery');
   const returnTable = useRef<string | null>(null);
   const [choosingDineInTable, setChoosingDineInTable] = useState(false);
-  const [deliveryError, setDeliveryError] = useState('');
   const [addItemsIdemKey, setAddItemsIdemKey] = useState(() => clientId());
   // Пока идёт запуск смены, оверлей «Смена не начата» удерживается до конца анимации.
   const [shiftBusy, setShiftBusy] = useState(false);
@@ -395,8 +392,6 @@ export function WaiterApp() {
     setViewingOrderId(null);
     setEditingOrderId(null);
     setReplacementTarget(null);
-    setDeliveryError('');
-    setOffsiteType('delivery');
     cart.select({ kind: 'delivery' });
     setTab('menu');
   }
@@ -412,9 +407,8 @@ export function WaiterApp() {
     return false;
   }
 
-  function switchOrderType(next: OrderType) {
+  function switchOrderType(next: TerminalOrderType) {
     if (!canCreateDelivery || !canWork || editing || activeOrder || create.isPending) return;
-    setDeliveryError('');
     if (next === 'dine_in') {
       if (!deliveryCart) return;
       const previous = returnTable.current;
@@ -428,7 +422,6 @@ export function WaiterApp() {
       return;
     }
     if (selectedTableId) returnTable.current = selectedTableId;
-    setOffsiteType(next);
     setViewingOrderId(null);
     setTab('menu');
   }
@@ -864,15 +857,7 @@ export function WaiterApp() {
       push({ message: t('Сначала начните смену в профиле.'), type: 'error', at: new Date().toISOString() });
       return;
     }
-    if (newDelivery) {
-      const error = customerOrderError(offsiteType, deliveryDetails);
-      setDeliveryError(error);
-      if (error) {
-        setCartSheetOpen(true);
-        return;
-      }
-    }
-    const destination = newDelivery ? { delivery: customerOrderPayload(offsiteType, deliveryDetails) }
+    const destination = newDelivery ? { delivery: { type: 'delivery' as const } }
       : selectedTable ? { tableId: selectedTable.id } : null;
     try {
       if (activeOrder) {
@@ -890,7 +875,6 @@ export function WaiterApp() {
         });
         setTab('cart');
       } else if (destination) {
-        setDeliveryError('');
         await create.mutateAsync({
           ...destination,
           comment: newDelivery || cart.commentOpen ? cart.comment : '',
@@ -900,7 +884,6 @@ export function WaiterApp() {
         cart.clear();
         if (newDelivery) {
           cart.select(null);
-          setDeliveryDetails(EMPTY_CUSTOMER);
           setDeliveryIdemKey(clientId());
         } else {
           setIdemKey(clientId());
@@ -913,8 +896,7 @@ export function WaiterApp() {
         setTab('orders');
       }
     } catch (err) {
-      if (newDelivery) setDeliveryError(apiError(err));
-      else push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
   }
 
@@ -979,13 +961,10 @@ export function WaiterApp() {
     </Panel>
   );
 
-  const currentOrderType = deliveryCart ? (activeOrder ? orderType(activeOrder.source) : offsiteType) : 'dine_in';
+  const currentOrderType = deliveryCart ? (activeOrder ? orderType(activeOrder.source) : 'delivery') : 'dine_in';
   const typeControl = canCreateDelivery && !activeOrder && !editing
-    ? <OrderTypeSelect value={currentOrderType} disabled={!canWork || create.isPending} onChange={switchOrderType} />
+    ? <OrderTypeSelect value={newDelivery ? 'delivery' : 'dine_in'} disabled={!canWork || create.isPending} onChange={switchOrderType} />
     : undefined;
-  const customerFields = newDelivery && canCreateDelivery ? <OrderFulfillmentFields type={offsiteType} value={deliveryDetails}
-    onChange={setDeliveryDetails} error={deliveryError} disabled={create.isPending} comment={cart.comment} onComment={cart.setComment} /> : undefined;
-  const deliveryFee = newDelivery && offsiteType === 'delivery' ? Math.max(0, moneyInput(deliveryDetails.deliveryFee) || 0) : undefined;
   const deliveryChip = deliveryCart && (
     <span className="shrink-0 rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">{t(orderTypeLabel(currentOrderType))}</span>
   );
@@ -1053,7 +1032,7 @@ export function WaiterApp() {
           onCancelOrder={() => cancelAfterPartialRejection(displayedOrder)}
           onEdit={() => startEditOrder(displayedOrder)}
           onSplitOrder={canTakePayment && canWork && canSplitOrder(displayedOrder) ? () => showSplitOrder(displayedOrder) : undefined}
-          fulfillmentEditor={canCreateDelivery && canWork && displayedOrder.updatedAt && displayedOrder.source !== 'qr' &&
+          fulfillmentEditor={canCreateDelivery && canWork && displayedOrder.updatedAt && displayedOrder.source !== 'qr' && displayedOrder.source !== 'pickup' &&
             !displayedOrder.externalOrderId && !displayedOrder.splitFromOrderId && relatedChecks.length <= 1 &&
             ['sent_to_kitchen', 'ready'].includes(displayedOrder.status) &&
             displayedOrder.items.every((item) => ['new', 'cancelled', 'rejected'].includes(item.status) || item.prepStation === 'none') &&
@@ -1072,8 +1051,6 @@ export function WaiterApp() {
           delivery={!!deliveryCart}
           typeLabel={t(orderTypeLabel(currentOrderType))}
           typeControl={typeControl}
-          customerFields={customerFields}
-          deliveryFee={deliveryFee}
           roundTotal={roundCart}
           hallName={selectedHallName}
           mode={editing ? 'edit' : activeOrder ? 'add' : 'create'}
@@ -1262,7 +1239,7 @@ export function WaiterApp() {
         <MenuCartBar
           count={cart.lines.length}
           canOpenEmpty={newDelivery}
-          total={cartTotals(cart.lines, roundCart).final + (deliveryFee ?? 0)}
+          total={cartTotals(cart.lines, roundCart).final}
           submitting={create.isPending || addItems.isPending || editOrder.isPending}
           submitLabel={cartSubmitLabel}
           onOpenCart={() => setCartSheetOpen(true)}
@@ -1283,8 +1260,6 @@ export function WaiterApp() {
         canSubmit={canWork}
         delivery={!!deliveryCart}
         typeControl={typeControl}
-        customerFields={customerFields}
-        deliveryFee={deliveryFee}
         roundTotal={roundCart}
         submitLabel={cartSubmitLabel}
         onSubmit={async () => {
